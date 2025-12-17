@@ -698,6 +698,69 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+JdbcConfig:
+  fields:
+  - name: jdbc.url
+    field_type: String
+    comments: The JDBC URL for the target database.
+    required: true
+  - name: user
+    field_type: String
+    comments: Database user name.
+    required: false
+  - name: password
+    field_type: String
+    comments: Database password.
+    required: false
+  - name: table.name
+    field_type: String
+    comments: Target table name.
+    required: true
+  - name: r#type
+    field_type: String
+    comments: The type of sink. Only "append-only" and "upsert" are supported.
+    required: true
+  - name: schema.name
+    field_type: String
+    comments: Database schema name (optional, for databases that support schemas).
+    required: false
+  - name: database.name
+    field_type: String
+    comments: Database name (optional).
+    required: false
+  - name: jdbc.query.timeout
+    field_type: i32
+    comments: JDBC query timeout in seconds.
+    required: false
+  - name: jdbc.auto.commit
+    field_type: bool
+    comments: Whether to enable auto-commit mode.
+    required: false
+  - name: batch.insert.rows
+    field_type: i32
+    comments: Number of rows to batch for insert operations (RedShift specific).
+    required: false
+  - name: jdbc.tcp.keep.alive
+    field_type: bool
+    comments: |-
+      Enable TCP keepalive for MySQL connections.
+      Default: true
+    required: false
+  - name: jdbc.tcp.keep.alive.time.ms
+    field_type: i32
+    comments: |-
+      Time in milliseconds before sending the first keepalive probe (MySQL specific).
+      This should be set to a value less than your network's idle timeout.
+      For AWS RDS, consider setting this to 300000 (5 minutes) or less.
+    required: false
+  - name: jdbc.tcp.keep.alive.interval.ms
+    field_type: i32
+    comments: Interval in milliseconds between keepalive probes (MySQL specific).
+    required: false
+  - name: jdbc.tcp.keep.alive.count
+    field_type: i32
+    comments: Number of unacknowledged keepalive probes before closing the connection (MySQL specific).
+    required: false
 KafkaConfig:
   fields:
   - name: topic

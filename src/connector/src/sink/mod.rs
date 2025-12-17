@@ -29,6 +29,7 @@ pub mod file_sink;
 pub mod formatter;
 feature_gated_sink_mod!(google_pubsub, GooglePubSub, "google_pubsub");
 pub mod iceberg;
+pub mod jdbc;
 pub mod kafka;
 pub mod kinesis;
 use risingwave_common::bail;
@@ -129,7 +130,7 @@ macro_rules! for_all_sinks {
                 { Mqtt, $crate::sink::mqtt::MqttSink, $crate::sink::mqtt::MqttConfig },
                 { GooglePubSub, $crate::sink::google_pubsub::GooglePubSubSink, $crate::sink::google_pubsub::GooglePubSubConfig },
                 { Nats, $crate::sink::nats::NatsSink, $crate::sink::nats::NatsConfig },
-                { Jdbc, $crate::sink::remote::JdbcSink, () },
+                { Jdbc, $crate::sink::remote::JdbcSink, $crate::sink::jdbc::JdbcConfig },
                 { ElasticSearch, $crate::sink::elasticsearch_opensearch::elasticsearch::ElasticSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::ElasticSearchConfig },
                 { Opensearch, $crate::sink::elasticsearch_opensearch::opensearch::OpenSearchSink, $crate::sink::elasticsearch_opensearch::elasticsearch_opensearch_config::OpenSearchConfig },
                 { Cassandra, $crate::sink::remote::CassandraSink, () },

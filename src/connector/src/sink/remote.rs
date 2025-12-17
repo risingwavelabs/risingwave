@@ -81,7 +81,7 @@ macro_rules! def_remote_sink {
             // { ElasticSearchJava, ElasticSearchJavaSink, "elasticsearch_v1" }
             // { OpensearchJava, OpenSearchJavaSink, "opensearch_v1"}
             { Cassandra, CassandraSink, "cassandra", [ "cassandra.url" ] }
-            { Jdbc, JdbcSink, "jdbc", [ "jdbc.url" ] }
+            { Jdbc, JdbcSink, "jdbc", [ "password" ] }
         }
     };
     ({ $variant_name:ident, $sink_type_name:ident, $sink_name:expr, [ $($enforce_secret_prop:expr),* ] }) => {

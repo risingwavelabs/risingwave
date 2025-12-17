@@ -51,6 +51,19 @@ public class JDBCSinkConfig extends CommonSinkConfig {
     @JsonProperty(value = "batch.insert.rows")
     private int batchInsertRows = 0;
 
+    // TCP keepalive configurations (MySQL specific)
+    @JsonProperty(value = "jdbc.tcp.keep.alive")
+    private Boolean tcpKeepAlive;
+
+    @JsonProperty(value = "jdbc.tcp.keep.alive.time.ms")
+    private Integer tcpKeepAliveTimeMs;
+
+    @JsonProperty(value = "jdbc.tcp.keep.alive.interval.ms")
+    private Integer tcpKeepAliveIntervalMs;
+
+    @JsonProperty(value = "jdbc.tcp.keep.alive.count")
+    private Integer tcpKeepAliveCount;
+
     @JsonCreator
     public JDBCSinkConfig(
             @JsonProperty(value = "jdbc.url") String jdbcUrl,
@@ -104,6 +117,22 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public int getBatchInsertRows() {
         return batchInsertRows;
+    }
+
+    public Boolean getTcpKeepAlive() {
+        return tcpKeepAlive;
+    }
+
+    public Integer getTcpKeepAliveTimeMs() {
+        return tcpKeepAliveTimeMs;
+    }
+
+    public Integer getTcpKeepAliveIntervalMs() {
+        return tcpKeepAliveIntervalMs;
+    }
+
+    public Integer getTcpKeepAliveCount() {
+        return tcpKeepAliveCount;
     }
 
     /**

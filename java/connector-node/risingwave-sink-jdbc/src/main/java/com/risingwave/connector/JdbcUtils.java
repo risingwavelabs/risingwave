@@ -56,13 +56,31 @@ public abstract class JdbcUtils {
      *
      * @param jdbcUrl JDBC URL to determine database-specific settings
      * @param user Username for authentication
+     * @param config JDBC sink configuration for additional settings
      * @return Properties object with base connection settings
      */
-    static Properties createBaseProperties(String jdbcUrl, String user) {
+    static Properties createBaseProperties(String jdbcUrl, String user, JDBCSinkConfig config) {
         var props = new Properties();
 
-        // enable TCP keep alive to avoid connection closed by server
-        props.setProperty("tcpKeepAlive", "true");
+        // Enable TCP keep alive by default (can be overridden by config)
+        boolean tcpKeepAlive = config.getTcpKeepAlive() != null ? config.getTcpKeepAlive() : true;
+        props.setProperty("tcpKeepAlive", String.valueOf(tcpKeepAlive));
+
+        // Apply MySQL-specific TCP keepalive tuning if provided
+        // These properties are only supported by MySQL Connector/J
+        if (jdbcUrl.startsWith("jdbc:mysql") || jdbcUrl.startsWith("jdbc:mariadb")) {
+            if (config.getTcpKeepAliveTimeMs() != null) {
+                // tcpKeepAliveTime is in milliseconds for MySQL
+                props.setProperty("tcpKeepAliveTime", String.valueOf(config.getTcpKeepAliveTimeMs()));
+            }
+            if (config.getTcpKeepAliveIntervalMs() != null) {
+                // tcpKeepAliveInterval is in milliseconds for MySQL
+                props.setProperty("tcpKeepAliveInterval", String.valueOf(config.getTcpKeepAliveIntervalMs()));
+            }
+            if (config.getTcpKeepAliveCount() != null) {
+                props.setProperty("tcpKeepAliveCount", String.valueOf(config.getTcpKeepAliveCount()));
+            }
+        }
 
         // default timeout in seconds
         boolean isPg = jdbcUrl.startsWith("jdbc:postgresql");
@@ -90,7 +108,7 @@ public abstract class JdbcUtils {
      */
     static Connection getConnectionDefault(JDBCSinkConfig config) throws SQLException {
         String jdbcUrl = config.getJdbcUrl();
-        var props = createBaseProperties(jdbcUrl, config.getUser());
+        var props = createBaseProperties(jdbcUrl, config.getUser(), config);
 
         // Default password authentication
         if (config.getPassword() != null) {
