@@ -13,9 +13,11 @@
 // limitations under the License.
 
 mod graph;
+use anyhow::Context;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod parallelism;
 mod rewrite;
@@ -37,6 +39,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::rewrite::build_delta_join_without_arrange;
+use crate::catalog::FragmentId;
 use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -50,7 +53,7 @@ pub struct BuildFragmentGraphState {
     /// fragment graph field, transformed from input streaming plan.
     fragment_graph: StreamFragmentGraph,
     /// local fragment id
-    next_local_fragment_id: u32,
+    next_local_fragment_id: FragmentId,
 
     /// Next local table id to be allocated. It equals to total table ids cnt when finish stream
     /// node traversing.
@@ -71,6 +74,7 @@ pub struct BuildFragmentGraphState {
     has_source_backfill: bool,
     has_snapshot_backfill: bool,
     has_cross_db_snapshot_backfill: bool,
+    tables: HashMap<TableId, Table>,
 }
 
 impl BuildFragmentGraphState {
@@ -118,7 +122,7 @@ impl BuildFragmentGraphState {
 
             // Take input's properties.
             stream_key: input.stream_key.clone(),
-            append_only: input.append_only,
+            stream_kind: input.stream_kind,
             fields: input.fields.clone(),
 
             input: vec![input],
@@ -186,11 +190,7 @@ pub fn build_graph_with_strategy(
     let mut fragment_graph = state.fragment_graph.to_protobuf();
 
     // Set table ids.
-    fragment_graph.dependent_table_ids = state
-        .dependent_table_ids
-        .into_iter()
-        .map(|id| id.table_id)
-        .collect();
+    fragment_graph.dependent_table_ids = state.dependent_table_ids.into_iter().collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
 
     // Set parallelism and vnode count.
@@ -203,9 +203,15 @@ pub fn build_graph_with_strategy(
         fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
     }
 
-    // Set timezone.
+    // Set context for this streaming job.
+    let config_override = ctx
+        .session_ctx()
+        .config()
+        .to_initial_streaming_config_override()
+        .context("invalid initial streaming config override")?;
     fragment_graph.ctx = Some(StreamContext {
         timezone: ctx.get_session_timezone(),
+        config_override,
     });
 
     fragment_graph.backfill_order = backfill_order;
@@ -376,6 +382,18 @@ fn build_fragment(
 
             NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
+            NodeBody::EowcGapFill(node) => {
+                let table = node.buffer_table.as_ref().unwrap().clone();
+                state.tables.insert(table.id, table);
+                let table = node.prev_row_table.as_ref().unwrap().clone();
+                state.tables.insert(table.id, table);
+            }
+
+            NodeBody::GapFill(node) => {
+                let table = node.state_table.as_ref().unwrap().clone();
+                state.tables.insert(table.id, table);
+            }
+
             NodeBody::StreamScan(node) => {
                 current_fragment
                     .fragment_type_mask
@@ -402,10 +420,13 @@ fn build_fragment(
                 }
                 // memorize table id for later use
                 // The table id could be a upstream CDC source
-                state
-                    .dependent_table_ids
-                    .insert(TableId::new(node.table_id));
-                current_fragment.upstream_table_ids.push(node.table_id);
+                state.dependent_table_ids.insert(node.table_id);
+
+                // Add state table if present
+                if let Some(state_table) = &node.state_table {
+                    let table = state_table.clone();
+                    state.tables.insert(table.id, table);
+                }
             }
 
             NodeBody::StreamCdcScan(node) => {
@@ -433,10 +454,7 @@ fn build_fragment(
                 // memorize upstream source id for later use
                 state
                     .dependent_table_ids
-                    .insert(node.upstream_source_id.into());
-                current_fragment
-                    .upstream_table_ids
-                    .push(node.upstream_source_id);
+                    .insert(node.upstream_source_id.as_cdc_table_id());
             }
             NodeBody::SourceBackfill(node) => {
                 current_fragment
@@ -444,8 +462,9 @@ fn build_fragment(
                     .add(FragmentTypeFlag::SourceScan);
                 // memorize upstream source id for later use
                 let source_id = node.upstream_source_id;
-                state.dependent_table_ids.insert(source_id.into());
-                current_fragment.upstream_table_ids.push(source_id);
+                state
+                    .dependent_table_ids
+                    .insert(source_id.as_cdc_table_id());
                 state.has_source_backfill = true;
             }
 
@@ -468,6 +487,24 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::FsFetch);
+            }
+
+            NodeBody::VectorIndexWrite(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::VectorIndexWrite);
+            }
+
+            NodeBody::UpstreamSinkUnion(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::UpstreamSinkUnion);
+            }
+
+            NodeBody::LocalityProvider(_) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::LocalityProvider);
             }
 
             _ => {}
@@ -553,7 +590,7 @@ fn build_fragment(
 
                                     // Take reference's properties.
                                     stream_key: ref_fragment_node.stream_key.clone(),
-                                    append_only: ref_fragment_node.append_only,
+                                    stream_kind: ref_fragment_node.stream_kind,
                                     fields: ref_fragment_node.fields.clone(),
                                 });
 

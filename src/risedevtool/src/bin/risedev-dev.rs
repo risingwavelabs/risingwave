@@ -30,10 +30,10 @@ use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
     EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
-    MetaNodeService, MinioService, MySqlService, PostgresService, PrometheusService, PubsubService,
-    PulsarService, RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig,
-    SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env,
-    preflight_check,
+    LakekeeperService, MetaNodeService, MinioService, MoatService, MySqlService, PostgresService,
+    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
+    SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
+    TempoService, generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -142,7 +142,7 @@ fn task_main(
                     let mut service = MinioService::new(c.clone())?;
                     service.execute(&mut ctx)?;
 
-                    let mut task = risedev::ConfigureMinioTask::new(c.clone())?;
+                    let mut task = risedev::ConfigureMinioTask::new(c)?;
                     task.execute(&mut ctx)?;
                 }
                 ServiceConfig::Sqlite(c) => {
@@ -165,7 +165,7 @@ fn task_main(
                     std::fs::create_dir_all(&file_dir)?;
                     let file_path = file_dir.join(&c.file);
 
-                    ctx.service(&SqliteService(c.clone()));
+                    ctx.service(&SqliteService(c));
                     ctx.complete_spin();
                     ctx.pb
                         .set_message(format!("using local sqlite: {:?}", file_path));
@@ -346,6 +346,34 @@ fn task_main(
                     }
                     ctx.pb
                         .set_message(format!("sqlserver {}:{}", c.address, c.port));
+                }
+                ServiceConfig::Lakekeeper(c) => {
+                    let mut service = LakekeeperService::new(c.clone())?;
+                    service.execute(&mut ctx)?;
+                    if c.user_managed {
+                        let mut task = risedev::TcpReadyCheckTask::new(
+                            c.address.clone(),
+                            c.port,
+                            c.user_managed,
+                        )?;
+                        task.execute(&mut ctx)?;
+                    } else {
+                        let mut task =
+                            risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
+                        task.execute(&mut ctx)?;
+                    }
+                    ctx.pb
+                        .set_message(format!("lakekeeper http://{}:{}/", c.address, c.port));
+                }
+                ServiceConfig::Moat(c) => {
+                    let mut service = MoatService::new(c.clone())?;
+                    service.execute(&mut ctx)?;
+
+                    let mut task =
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, false)?;
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("moat http://{}:{}/", c.address, c.port));
                 }
             }
 

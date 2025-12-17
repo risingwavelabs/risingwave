@@ -120,7 +120,7 @@ where
     T: WithDataType,
 {
     fn default_data_type() -> DataType {
-        DataType::List(Box::new(T::default_data_type()))
+        DataType::list(T::default_data_type())
     }
 }
 
@@ -129,7 +129,7 @@ where
     T: WithDataType,
 {
     fn default_data_type() -> DataType {
-        DataType::List(Box::new(T::default_data_type()))
+        DataType::list(T::default_data_type())
     }
 }
 

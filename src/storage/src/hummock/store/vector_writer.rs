@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
+use risingwave_common::array::VectorRef;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::HummockEpoch;
@@ -26,6 +27,7 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::utils::wait_for_epoch;
 use crate::hummock::vector::writer::VectorWriterImpl;
 use crate::hummock::{HummockError, HummockResult, ObjectIdManagerRef, SstableStoreRef};
+use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 use crate::store::*;
 
@@ -75,6 +77,7 @@ pub struct HummockVectorWriter {
     sstable_store: SstableStoreRef,
     object_id_manager: ObjectIdManagerRef,
     hummock_event_sender: HummockEventSender,
+    stats: Arc<HummockStateStoreMetrics>,
     storage_opts: Arc<StorageOpts>,
 
     state: Option<VectorWriterState>,
@@ -87,6 +90,7 @@ impl HummockVectorWriter {
         sstable_store: SstableStoreRef,
         object_id_manager: ObjectIdManagerRef,
         hummock_event_sender: HummockEventSender,
+        stats: Arc<HummockStateStoreMetrics>,
         storage_opts: Arc<StorageOpts>,
     ) -> Self {
         Self {
@@ -95,6 +99,7 @@ impl HummockVectorWriter {
             sstable_store,
             object_id_manager,
             hummock_event_sender,
+            stats,
             storage_opts,
             state: None,
         }
@@ -109,17 +114,22 @@ impl StateStoreWriteEpochControl for HummockVectorWriter {
             self.table_id,
         )
         .await?;
-        let index = &version.vector_indexes[&self.table_id];
+        let index = &version.vector_indexes.get(&self.table_id).ok_or_else(|| {
+            HummockError::other(format!("vector index not found: {}", self.table_id))
+        })?;
         assert!(
             self.state
                 .replace(VectorWriterState {
                     epoch: opts.epoch,
                     writer_impl: VectorWriterImpl::new(
+                        self.table_id,
                         index,
                         self.sstable_store.clone(),
                         self.object_id_manager.clone(),
+                        self.stats.clone(),
                         &self.storage_opts,
-                    ),
+                    )
+                    .await?,
                     _guard: VectorWriterInitGuard::new(
                         self.table_id,
                         opts.epoch.curr,
@@ -168,7 +178,7 @@ impl StateStoreWriteEpochControl for HummockVectorWriter {
 }
 
 impl StateStoreWriteVector for HummockVectorWriter {
-    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
         Ok(self
             .state
             .as_mut()

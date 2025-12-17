@@ -195,6 +195,7 @@ impl MetaNodeService {
         let provide_minio = config.provide_minio.as_ref().unwrap();
         let provide_opendal = config.provide_opendal.as_ref().unwrap();
         let provide_aws_s3 = config.provide_aws_s3.as_ref().unwrap();
+        let provide_moat = config.provide_moat.as_ref().unwrap();
 
         let provide_compute_node = config.provide_compute_node.as_ref().unwrap();
         let provide_compactor = config.provide_compactor.as_ref().unwrap();
@@ -204,6 +205,7 @@ impl MetaNodeService {
             provide_opendal,
             provide_minio,
             provide_aws_s3,
+            provide_moat,
             hummock_in_memory_strategy,
             cmd,
         )?;

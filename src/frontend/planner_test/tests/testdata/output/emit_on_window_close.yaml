@@ -242,3 +242,45 @@
             │   └─StreamTableScan { table: s1, columns: [s1.id, s1.value, s1.ts, s1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s1._row_id], pk: [_row_id], dist: UpstreamHashShard(s1._row_id) }
             └─StreamExchange { dist: HashShard(s2.id) }
               └─StreamTableScan { table: s2, columns: [s2.id, s2.value, s2.ts, s2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s2._row_id], pk: [_row_id], dist: UpstreamHashShard(s2._row_id) }
+- sql: |
+    CREATE table s1 (
+    id VARCHAR,
+    timestamp TIMESTAMP,
+    WATERMARK FOR timestamp AS timestamp - INTERVAL '5' SECOND
+    ) append only;
+    SELECT
+        id,
+        window_start,
+        window_end,
+        MAX(timestamp) as ts
+    FROM HOP(s1, timestamp, INTERVAL '30 SECONDS', INTERVAL '2 MINUTES')
+    WHERE timestamp > NOW() - INTERVAL '7 hours'
+    GROUP BY id, window_start, window_end;
+  stream_plan: |-
+    StreamMaterialize { columns: [id, window_start, window_end, ts], stream_key: [id, window_start, window_end], pk_columns: [id, window_start, window_end], pk_conflict: NoCheck, watermark_columns: [window_start, window_end] }
+    └─StreamProject { exprs: [s1.id, window_start, window_end, max(s1.timestamp)], output_watermarks: [[window_start, window_end]] }
+      └─StreamHashAgg { group_key: [s1.id, window_start, window_end], aggs: [max(s1.timestamp), count], output_watermarks: [[window_start, window_end]] }
+        └─StreamExchange { dist: HashShard(s1.id, window_start, window_end) }
+          └─StreamHopWindow { time_col: s1.timestamp, slide: 00:00:30, size: 00:02:00, output: [s1.id, s1.timestamp, window_start, window_end, s1._row_id], output_watermarks: [[s1.timestamp, window_start, window_end]] }
+            └─StreamProject { exprs: [s1.id, s1.timestamp, s1._row_id], output_watermarks: [[s1.timestamp]] }
+              └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [[$expr1], [s1.timestamp]], output: [s1.id, s1.timestamp, $expr1, s1._row_id], cleaned_by_watermark: true }
+                ├─StreamProject { exprs: [s1.id, s1.timestamp, AtTimeZone(s1.timestamp, 'UTC':Varchar) as $expr1, s1._row_id], output_watermarks: [[s1.timestamp, $expr1]] }
+                │ └─StreamFilter { predicate: IsNotNull(s1.timestamp) }
+                │   └─StreamTableScan { table: s1, columns: [s1.id, s1.timestamp, s1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s1._row_id], pk: [_row_id], dist: UpstreamHashShard(s1._row_id) }
+                └─StreamExchange { dist: Broadcast }
+                  └─StreamProject { exprs: [SubtractWithTimeZone(now, '07:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
+                    └─StreamNow { output: [now] }
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [id, window_start, window_end, ts], stream_key: [id, window_start, window_end], pk_columns: [id, window_start, window_end], pk_conflict: NoCheck, watermark_columns: [window_start] }
+    └─StreamProject { exprs: [s1.id, window_start, window_end, max(s1.timestamp)], output_watermarks: [[window_start]] }
+      └─StreamHashAgg [eowc] { group_key: [s1.id, window_start, window_end], aggs: [max(s1.timestamp), count], output_watermarks: [[window_start]] }
+        └─StreamExchange { dist: HashShard(s1.id, window_start, window_end) }
+          └─StreamHopWindow { time_col: s1.timestamp, slide: 00:00:30, size: 00:02:00, output: [s1.id, s1.timestamp, window_start, window_end, s1._row_id], output_watermarks: [[s1.timestamp, window_start, window_end]] }
+            └─StreamProject { exprs: [s1.id, s1.timestamp, s1._row_id], output_watermarks: [[s1.timestamp]] }
+              └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [[$expr1], [s1.timestamp]], output: [s1.id, s1.timestamp, $expr1, s1._row_id], cleaned_by_watermark: true }
+                ├─StreamProject { exprs: [s1.id, s1.timestamp, AtTimeZone(s1.timestamp, 'UTC':Varchar) as $expr1, s1._row_id], output_watermarks: [[s1.timestamp, $expr1]] }
+                │ └─StreamFilter { predicate: IsNotNull(s1.timestamp) }
+                │   └─StreamTableScan { table: s1, columns: [s1.id, s1.timestamp, s1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [s1._row_id], pk: [_row_id], dist: UpstreamHashShard(s1._row_id) }
+                └─StreamExchange { dist: Broadcast }
+                  └─StreamProject { exprs: [SubtractWithTimeZone(now, '07:00:00':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
+                    └─StreamNow { output: [now] }

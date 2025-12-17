@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
-
 //! Specify the `amplification_size,workload,join_type`
 //! ```sh
 //! ARGS=40000,NotInCache,Inner cargo bench --features dhat-heap --bench stream_hash_join_mem

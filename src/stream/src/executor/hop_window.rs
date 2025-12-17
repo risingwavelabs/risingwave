@@ -118,10 +118,10 @@ impl HopWindowExecutor {
                     }
 
                     // TODO: compact may be not necessary here.
-                    let chunk = chunk.compact();
+                    let chunk = chunk.compact_vis();
                     let (data_chunk, ops) = chunk.into_parts();
                     // SAFETY: Already compacted.
-                    assert!(data_chunk.is_compacted());
+                    assert!(data_chunk.is_vis_compacted());
                     let len = data_chunk.cardinality();
 
                     // Collect each window's data into a chunk.
@@ -241,7 +241,7 @@ mod tests {
         let field2 = Field::unnamed(DataType::Int64);
         let field3 = Field::with_name(DataType::Timestamp, "created_at");
         let schema = Schema::new(vec![field1, field2, field3]);
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
 
         let chunk = StreamChunk::from_pretty(
             &"I I TS
@@ -255,8 +255,7 @@ mod tests {
             + 8 3 ^11:02:00"
                 .replace('^', "2022-02-02T"),
         );
-        let input =
-            MockSource::with_chunks(vec![chunk]).into_executor(schema.clone(), pk_indices.clone());
+        let input = MockSource::with_chunks(vec![chunk]).into_executor(schema, stream_key);
         let window_slide = Interval::from_minutes(15);
         let window_size = Interval::from_minutes(30);
         let window_offset = Interval::from_minutes(0);

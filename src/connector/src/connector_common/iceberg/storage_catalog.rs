@@ -24,8 +24,8 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use iceberg::io::{
     AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, FileIO, GCS_CREDENTIALS_JSON,
-    GCS_DISABLE_CONFIG_LOAD, S3_ACCESS_KEY_ID, S3_DISABLE_CONFIG_LOAD, S3_ENDPOINT, S3_REGION,
-    S3_SECRET_ACCESS_KEY,
+    GCS_DISABLE_CONFIG_LOAD, S3_ACCESS_KEY_ID, S3_DISABLE_CONFIG_LOAD, S3_ENDPOINT,
+    S3_PATH_STYLE_ACCESS, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
 use iceberg::spec::{TableMetadata, TableMetadataBuilder};
 use iceberg::table::Table;
@@ -50,6 +50,7 @@ pub struct StorageCatalogS3Config {
     secret_key: Option<String>,
     endpoint: Option<String>,
     region: Option<String>,
+    path_style_access: Option<bool>,
     enable_config_load: Option<bool>,
 }
 
@@ -92,10 +93,14 @@ impl StorageCatalog {
                 if let Some(region) = &config.region {
                     file_io_builder = file_io_builder.with_prop(S3_REGION, region)
                 }
+                if let Some(path_style_access) = &config.path_style_access {
+                    file_io_builder =
+                        file_io_builder.with_prop(S3_PATH_STYLE_ACCESS, path_style_access);
+                }
                 let enable_config_load = config.enable_config_load.unwrap_or(false);
                 file_io_builder = file_io_builder
                     .with_prop(S3_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string());
-                (config.warehouse.clone(), file_io_builder.build()?)
+                (config.warehouse, file_io_builder.build()?)
             }
             StorageCatalogConfig::Gcs(config) => {
                 let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
@@ -105,7 +110,7 @@ impl StorageCatalog {
                 let enable_config_load = config.enable_config_load.unwrap_or(false);
                 file_io_builder = file_io_builder
                     .with_prop(GCS_DISABLE_CONFIG_LOAD, (!enable_config_load).to_string());
-                (config.warehouse.clone(), file_io_builder.build()?)
+                (config.warehouse, file_io_builder.build()?)
             }
             StorageCatalogConfig::Azblob(config) => {
                 let mut file_io_builder = FileIO::from_path(&config.warehouse)?;
@@ -118,7 +123,7 @@ impl StorageCatalog {
                 if let Some(endpoint) = &config.endpoint {
                     file_io_builder = file_io_builder.with_prop(AZBLOB_ENDPOINT, endpoint)
                 };
-                (config.warehouse.clone(), file_io_builder.build()?)
+                (config.warehouse, file_io_builder.build()?)
             }
         };
 
@@ -330,7 +335,7 @@ impl Catalog for StorageCatalog {
         let table = self.load_table(table).await?;
         table
             .file_io()
-            .remove_all(table.metadata().location())
+            .remove_dir_all(table.metadata().location())
             .await
     }
 
@@ -374,5 +379,16 @@ impl Catalog for StorageCatalog {
         .await?;
 
         self.load_table(commit.identifier()).await
+    }
+
+    async fn register_table(
+        &self,
+        _table_ident: &TableIdent,
+        _metadata_location: String,
+    ) -> iceberg::Result<Table> {
+        Err(Error::new(
+            ErrorKind::Unexpected,
+            "register_table is not supported in storage catalog",
+        ))
     }
 }

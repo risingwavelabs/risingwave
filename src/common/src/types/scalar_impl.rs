@@ -82,15 +82,6 @@ impl Scalar for StructValue {
     }
 }
 
-/// Implement `Scalar` for `ListValue`.
-impl Scalar for ListValue {
-    type ScalarRefType<'a> = ListRef<'a>;
-
-    fn as_scalar_ref(&self) -> ListRef<'_> {
-        self.into()
-    }
-}
-
 /// Implement `ScalarRef` for `Box<str>`.
 /// `Box<str>` could be converted to `&str`.
 impl<'a> ScalarRef<'a> for &'a str {
@@ -296,19 +287,6 @@ impl<'a> ScalarRef<'a> for StructRef<'a> {
     fn to_owned_scalar(&self) -> StructValue {
         let fields = self.iter_fields_ref().map(|f| f.to_owned_datum()).collect();
         StructValue::new(fields)
-    }
-
-    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash_scalar_inner(state)
-    }
-}
-
-/// Implement `Scalar` for `ListValue`.
-impl<'a> ScalarRef<'a> for ListRef<'a> {
-    type ScalarType = ListValue;
-
-    fn to_owned_scalar(&self) -> ListValue {
-        (*self).into()
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {

@@ -63,6 +63,8 @@ impl UserDefinedFunction {
             always_retry_on_network_error: udf.always_retry_on_network_error,
             is_batched: udf.is_batched,
             is_async: udf.is_async,
+            created_at_epoch: None,
+            created_at_cluster_version: None,
         };
 
         Ok(Self {

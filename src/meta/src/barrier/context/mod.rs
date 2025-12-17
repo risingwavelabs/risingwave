@@ -20,8 +20,12 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::JobId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::stream_service::barrier_complete_response::{
+    PbListFinishedSource, PbLoadFinishedSource,
+};
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
@@ -34,8 +38,9 @@ use crate::barrier::{
     DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
-use crate::stream::{ScaleControllerRef, SourceManagerRef};
+use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn commit_epoch(
@@ -63,11 +68,16 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         job: TrackingJob,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
-    async fn new_control_stream(
+    fn finish_cdc_table_backfill(
         &self,
-        node: &WorkerNode,
-        init_request: &PbInitRequest,
-    ) -> MetaResult<StreamingControlHandle>;
+        job_id: JobId,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
+    fn new_control_stream<'a>(
+        &'a self,
+        node: &'a WorkerNode,
+        init_request: &'a PbInitRequest,
+    ) -> impl Future<Output = MetaResult<StreamingControlHandle>> + Send + 'a;
 
     async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot>;
 
@@ -76,9 +86,19 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         database_id: DatabaseId,
     ) -> MetaResult<Option<DatabaseRuntimeInfoSnapshot>>;
 
+    fn handle_list_finished_source_ids(
+        &self,
+        list_finished_source_ids: Vec<PbListFinishedSource>,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
     fn handle_load_finished_source_ids(
         &self,
-        load_finished_source_ids: Vec<u32>,
+        load_finished_source_ids: Vec<PbLoadFinishedSource>,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
+    fn handle_refresh_finished_table_ids(
+        &self,
+        refresh_finished_table_job_ids: Vec<JobId>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 }
 
@@ -93,12 +113,16 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     source_manager: SourceManagerRef,
 
-    scale_controller: ScaleControllerRef,
+    _scale_controller: ScaleControllerRef,
 
     pub(super) env: MetaSrvEnv,
 
     /// Barrier scheduler for scheduling load finish commands
     barrier_scheduler: BarrierScheduler,
+
+    pub(super) refresh_manager: GlobalRefreshManagerRef,
+
+    sink_manager: SinkCoordinatorManager,
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -111,6 +135,8 @@ impl GlobalBarrierWorkerContextImpl {
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
+        refresh_manager: GlobalRefreshManagerRef,
+        sink_manager: SinkCoordinatorManager,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -118,9 +144,11 @@ impl GlobalBarrierWorkerContextImpl {
             metadata_manager,
             hummock_manager,
             source_manager,
-            scale_controller,
+            _scale_controller: scale_controller,
             env,
             barrier_scheduler,
+            refresh_manager,
+            sink_manager,
         }
     }
 

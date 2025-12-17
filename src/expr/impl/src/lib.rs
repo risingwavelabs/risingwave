@@ -21,7 +21,6 @@
 //! ```
 
 #![allow(non_snake_case)] // for `ctor` generated code
-#![feature(let_chains)]
 #![feature(assert_matches)]
 #![feature(iterator_try_collect)]
 #![feature(coroutines)]

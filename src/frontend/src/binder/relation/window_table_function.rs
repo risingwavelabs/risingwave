@@ -55,11 +55,11 @@ pub struct BoundWindowTableFunction {
 impl RewriteExprsRecursive for BoundWindowTableFunction {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         self.input.rewrite_exprs_recursive(rewriter);
-        let new_agrs = std::mem::take(&mut self.args)
+        let new_args = std::mem::take(&mut self.args)
             .into_iter()
             .map(|expr| rewriter.rewrite_expr(expr))
             .collect::<Vec<_>>();
-        self.args = new_agrs;
+        self.args = new_args;
     }
 }
 

@@ -46,6 +46,21 @@ mod m20250603_084830_default_privilege;
 mod m20250702_062029_cdc_table_snapshot_splits;
 mod m20250710_065220_sink_auto_refresh_schema;
 mod m20250722_155040_table_refreshable;
+mod m20250729_174630_add_vector_index_info;
+mod m20250810_000000_add_user_admin_field;
+mod m20250819_014448_add_version_column_indices_to_table;
+mod m20250820_120000_add_cdc_table_type;
+mod m20250821_081110_cdc_table_snapshot_splits_add_column;
+mod m20250905_144810_deprecate_table_incoming_sinks;
+mod m20250916_120000_add_refresh_fields;
+mod m20251005_000000_fragment_splits;
+mod m20251016_220528_fragment_parallelism;
+mod m20251022_294610_source_refresh_mode;
+mod m20251030_120000_refresh_jobs;
+mod m20251112_114514_streaming_job_config_override;
+mod m20251124_195858_pending_sink_state;
+mod m20251126_093529_add_is_iceberg_compactor;
+mod m20251208_134652_clean_watermark_indices;
 mod utils;
 
 pub struct Migrator;
@@ -130,6 +145,21 @@ impl MigratorTrait for Migrator {
             Box::new(m20250702_062029_cdc_table_snapshot_splits::Migration),
             Box::new(m20250710_065220_sink_auto_refresh_schema::Migration),
             Box::new(m20250722_155040_table_refreshable::Migration),
+            Box::new(m20250729_174630_add_vector_index_info::Migration),
+            Box::new(m20250810_000000_add_user_admin_field::Migration),
+            Box::new(m20250819_014448_add_version_column_indices_to_table::Migration),
+            Box::new(m20250820_120000_add_cdc_table_type::Migration),
+            Box::new(m20250821_081110_cdc_table_snapshot_splits_add_column::Migration),
+            Box::new(m20250905_144810_deprecate_table_incoming_sinks::Migration),
+            Box::new(m20250916_120000_add_refresh_fields::Migration),
+            Box::new(m20251005_000000_fragment_splits::Migration),
+            Box::new(m20251016_220528_fragment_parallelism::Migration),
+            Box::new(m20251022_294610_source_refresh_mode::Migration),
+            Box::new(m20251030_120000_refresh_jobs::Migration),
+            Box::new(m20251112_114514_streaming_job_config_override::Migration),
+            Box::new(m20251126_093529_add_is_iceberg_compactor::Migration),
+            Box::new(m20251124_195858_pending_sink_state::Migration),
+            Box::new(m20251208_134652_clean_watermark_indices::Migration),
         ]
     }
 }

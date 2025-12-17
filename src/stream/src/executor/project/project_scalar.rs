@@ -45,7 +45,7 @@ struct Inner {
 
     /// Whether there are likely no-op updates in the output chunks, so that eliminating them with
     /// `StreamChunk::eliminate_adjacent_noop_update` could be beneficial.
-    noop_update_hint: bool,
+    eliminate_noop_updates: bool,
 }
 
 impl ProjectExecutor {
@@ -58,6 +58,8 @@ impl ProjectExecutor {
         noop_update_hint: bool,
     ) -> Self {
         let n_nondecreasing_exprs = nondecreasing_expr_indices.len();
+        let eliminate_noop_updates =
+            noop_update_hint || ctx.config.developer.aggressive_noop_update_elimination;
         Self {
             input,
             inner: Inner {
@@ -67,7 +69,7 @@ impl ProjectExecutor {
                 nondecreasing_expr_indices,
                 last_nondec_expr_values: vec![None; n_nondecreasing_exprs],
                 is_paused: false,
-                noop_update_hint,
+                eliminate_noop_updates,
             },
         }
     }
@@ -111,7 +113,7 @@ impl Inner {
         chunk: StreamChunk,
     ) -> StreamExecutorResult<Option<StreamChunk>> {
         let mut new_chunk = apply_project_exprs(&self.exprs, chunk).await?;
-        if self.noop_update_hint {
+        if self.eliminate_noop_updates {
             new_chunk = new_chunk.eliminate_adjacent_noop_update();
         }
         Ok(Some(new_chunk))
@@ -249,9 +251,9 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema, pk_indices);
+        let source = source.into_executor(schema, stream_key);
 
         let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
 
@@ -331,7 +333,7 @@ mod tests {
             ],
         };
         let (mut tx, source) = MockSource::channel();
-        let source = source.into_executor(schema, PkIndices::new());
+        let source = source.into_executor(schema, StreamKey::new());
 
         let a_expr = build_from_pretty("(add:int8 $0:int8 1:int8)");
         let b_expr = build_from_pretty("(subtract:int8 $0:int8 1:int8)");

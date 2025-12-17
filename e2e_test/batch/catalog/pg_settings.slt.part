@@ -27,6 +27,7 @@ user batch_enable_distributed_dml
 user batch_enable_lookup_join
 user batch_enable_sort_agg
 user batch_expr_strict_mode
+user batch_hnsw_ef_search
 user batch_parallelism
 user bypass_cluster_limits
 user bytea_output
@@ -37,7 +38,10 @@ user create_compaction_group_for_mv
 user datestyle
 user disable_purify_definition
 user dml_rate_limit
+user enable_datafusion_engine
+user enable_index_selection
 user enable_join_ordering
+user enable_locality_backfill
 user enable_share_plan
 user enable_two_phase_agg
 user extra_float_digits
@@ -58,6 +62,7 @@ user server_version
 user server_version_num
 user sink_decouple
 user sink_rate_limit
+user slow_ddl_notification_secs
 user source_rate_limit
 user standard_conforming_strings
 user statement_timeout
@@ -86,6 +91,7 @@ user streaming_use_snapshot_backfill
 user synchronize_seqscans
 user timezone
 user transaction_isolation
+user unsafe_enable_storage_retention_for_non_append_only_tables
 user visibility_mode
 
 query TT

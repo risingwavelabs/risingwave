@@ -52,7 +52,10 @@ pub async fn handle_refresh(
         TableType::Table => {
             // This is valid
         }
-        t @ (TableType::MaterializedView | TableType::Index | TableType::Internal) => {
+        t @ (TableType::MaterializedView
+        | TableType::Index
+        | TableType::VectorIndex
+        | TableType::Internal) => {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "REFRESH is only supported for tables, got {:?}.",
                 t
@@ -65,11 +68,10 @@ pub async fn handle_refresh(
 
     // Create refresh request
     let refresh_request = RefreshRequest {
-        table_id: table_id.table_id(),
+        table_id,
         associated_source_id: table_catalog
             .associated_source_id()
-            .context("Table is not associated with a refreshable source")?
-            .table_id(),
+            .context("Table is not associated with a refreshable source")?,
     };
 
     // Send refresh command to meta service via stream manager

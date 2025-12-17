@@ -14,9 +14,10 @@
 
 use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::FilterNode;
+use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 
 use super::*;
-use crate::executor::FilterExecutor;
+use crate::executor::{FilterExecutor, UpsertFilterExecutor};
 
 pub struct FilterExecutorBuilder;
 
@@ -32,7 +33,11 @@ impl ExecutorBuilder for FilterExecutorBuilder {
         let search_condition =
             build_non_strict_from_prost(node.get_search_condition()?, params.eval_error_report)?;
 
-        let exec = FilterExecutor::new(params.actor_context, input, search_condition);
+        let exec = if let PbStreamKind::Upsert = input.stream_kind() {
+            UpsertFilterExecutor::new(params.actor_context, input, search_condition).boxed()
+        } else {
+            FilterExecutor::new(params.actor_context, input, search_condition).boxed()
+        };
         Ok((params.info, exec).into())
     }
 }

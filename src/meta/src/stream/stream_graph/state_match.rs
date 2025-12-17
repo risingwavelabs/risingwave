@@ -19,7 +19,8 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableDesc;
+use risingwave_common::catalog::{TableDesc, TableId};
+use risingwave_common::id::FragmentId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables_inner;
 use risingwave_pb::catalog::PbTable;
 use risingwave_pb::stream_plan::StreamNode;
@@ -71,10 +72,7 @@ pub(crate) enum Error {
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Fragment id.
-type Id = u32;
-
-/// State table id.
-type TableId = u32;
+type Id = FragmentId;
 
 /// Node for a fragment in the [`Graph`].
 struct Fragment {
@@ -317,7 +315,7 @@ impl Matches {
                 // the "physical" part of the table, best illustrated by `TableDesc`.
                 let table_desc_for_compare = |table: &PbTable| {
                     let mut table = table.clone();
-                    table.id = 0; // ignore id
+                    table.id = 0.into(); // ignore id
                     table.maybe_vnode_count = Some(42); // vnode count is unfilled for new fragment graph, fill it with a dummy value before proceeding
 
                     TableDesc::from_pb_table(&table)
@@ -505,10 +503,11 @@ impl Graph {
             .fragments
             .iter()
             .map(|(&id, f)| {
+                let id = id.as_global_id();
                 (
-                    id.as_global_id(),
+                    id,
                     Fragment {
-                        id: id.as_global_id(),
+                        id,
                         root: f.node.clone().unwrap(),
                     },
                 )

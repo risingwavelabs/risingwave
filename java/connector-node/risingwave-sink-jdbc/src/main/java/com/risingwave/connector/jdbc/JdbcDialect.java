@@ -59,7 +59,7 @@ public interface JdbcDialect {
      * @return The upsert statement if supported, otherwise None.
      */
     Optional<String> getUpsertStatement(
-            SchemaTableName schemaTableName, List<String> fieldNames, List<String> uniqueKeyFields);
+            SchemaTableName schemaTableName, TableSchema tableSchema, List<String> uniqueKeyFields);
 
     /**
      * Generates a string that will be used as a {@link java.sql.PreparedStatement} to insert a row

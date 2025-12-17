@@ -63,7 +63,7 @@ impl LogicalKafkaScan {
         };
 
         if let Some(exprs) = &logical_source.output_exprs {
-            LogicalProject::create(kafka_scan.into(), exprs.to_vec())
+            LogicalProject::create(kafka_scan.into(), exprs.clone())
         } else {
             kafka_scan.into()
         }

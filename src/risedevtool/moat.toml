@@ -1,0 +1,40 @@
+extend = "common.toml"
+
+[tasks.download-moat]
+private = true
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [
+    "ENABLE_MOAT",
+], files_not_exist = [
+    "${PREFIX_BIN}/moat",
+] }
+script = '''
+#!/usr/bin/env bash
+set -e
+if [ -f "${PREFIX_BIN}/moat" ]; then
+    exit 0
+fi
+echo "Moat not found, installing"
+rm -rf "${PREFIX_TMP}/moat"
+git clone https://github.com/mrcroxx/moat.git "${PREFIX_TMP}/moat"
+cd "${PREFIX_TMP}/moat"
+cargo build --release
+mv target/release/moat "${PREFIX_BIN}/moat"
+chmod +x "${PREFIX_BIN}/moat"
+'''
+
+[tasks.remove-moat]
+private = true
+dependencies = ["prepare"]
+condition = { env_set = ["ENABLE_MOAT"], files_exist = ["${PREFIX_BIN}/moat"] }
+script = '''
+#!/usr/bin/env bash
+set -e
+rm -f "${PREFIX_BIN}/moat"
+'''
+
+[tasks.update-moat]
+dependencies = ["prepare", "remove-moat", "download-moat"]
+condition = { env_set = ["ENABLE_MOAT"] }
+# run_task = [{ name = "remove-moat" }, { name = "download-moat" }]

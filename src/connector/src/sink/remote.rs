@@ -24,13 +24,12 @@ use async_trait::async_trait;
 use await_tree::{InstrumentAwait, span};
 use futures::TryStreamExt;
 use futures::future::select;
-use jni::JavaVM;
 use phf::phf_set;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::global_jvm::JVM;
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
@@ -53,7 +52,6 @@ use risingwave_rpc_client::{
     SinkWriterStreamHandle,
 };
 use rw_futures_util::drop_either_future;
-use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, UnboundedSender, unbounded_channel};
@@ -61,7 +59,6 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::SinkCommittedEpochSubscriber;
 use super::elasticsearch_opensearch::elasticsearch_converter::{
     StreamChunkConverter, is_remote_es_sink,
 };
@@ -73,8 +70,8 @@ use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    LogSinker, Result, Sink, SinkCommitCoordinator, SinkError, SinkLogReader, SinkParam,
-    SinkWriterMetrics, SinkWriterParam,
+    LogSinker, Result, SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError,
+    SinkLogReader, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 
 macro_rules! def_remote_sink {
@@ -189,7 +186,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
     //         .map_err(|e| anyhow::anyhow!(e))?;
     // }
     if is_remote_es_sink(sink_name)
-        && param.downstream_pk.len() > 1
+        && param.downstream_pk_or_empty().len() > 1
         && !param.properties.contains_key(ES_OPTION_DELIMITER)
     {
         bail!("Es sink only supports single pk or pk with delimiter option");
@@ -213,7 +210,7 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     | DataType::Jsonb
                     | DataType::Bytea => Ok(()),
             DataType::List(list) => {
-                if is_remote_es_sink(sink_name) || matches!(list.as_ref(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
+                if is_remote_es_sink(sink_name) || matches!(list.elem(), DataType::Int16 | DataType::Int32 | DataType::Int64 | DataType::Float32 | DataType::Float64 | DataType::Varchar){
                     Ok(())
                 } else{
                     Err(SinkError::Remote(anyhow!(
@@ -234,14 +231,14 @@ async fn validate_remote_sink(param: &SinkParam, sink_name: &str) -> ConnectorRe
                     )))
                 }
             },
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) |
             DataType::Serial | DataType::Int256 | DataType::Map(_) => Err(SinkError::Remote(anyhow!(
                             "remote sink supports Int16, Int32, Int64, Float32, Float64, Boolean, Decimal, Time, Date, Interval, Jsonb, Timestamp, Timestamptz, Bytea, List and Varchar, (Es sink support Struct) got {:?}: {:?}",
                             col.name,
                             col.data_type,
                         )))}})?;
 
-    let jvm = JVM.get_or_init()?;
+    let jvm = Jvm::get_or_init()?;
     let sink_param = param.to_proto();
 
     spawn_blocking(move || -> anyhow::Result<()> {
@@ -318,7 +315,7 @@ impl RemoteLogSinker {
             stream_chunk_converter: StreamChunkConverter::new(
                 sink_name,
                 sink_param.schema(),
-                &sink_param.downstream_pk,
+                &sink_param.downstream_pk_or_empty(),
                 &sink_param.properties,
                 sink_param.sink_type.is_append_only(),
             )?,
@@ -544,7 +541,6 @@ impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {
 }
 
 impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
-    type Coordinator = RemoteCoordinator;
     type LogSinker = CoordinatedLogSinker<CoordinatedRemoteSinkWriter>;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
@@ -571,10 +567,10 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
-        RemoteCoordinator::new::<R>(self.param.clone()).await
+    ) -> Result<SinkCommitCoordinator> {
+        let coordinator = RemoteCoordinator::new::<R>(self.param.clone()).await?;
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -692,25 +688,35 @@ impl RemoteCoordinator {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for RemoteCoordinator {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        Ok(None)
+impl SinglePhaseCommitCoordinator for RemoteCoordinator {
+    async fn init(&mut self) -> Result<()> {
+        Ok(())
     }
 
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<()> {
+        if let Some(add_columns) = add_columns {
+            return Err(anyhow!(
+                "remote coordinator not support add columns, but got: {:?}",
+                add_columns
+            )
+            .into());
+        }
         Ok(self.stream_handle.commit(epoch, metadata).await?)
     }
 }
 
 struct EmbeddedConnectorClient {
-    jvm: &'static JavaVM,
+    jvm: Jvm,
 }
 
 impl EmbeddedConnectorClient {
     fn new() -> Result<Self> {
-        let jvm = JVM
-            .get_or_init()
-            .context("failed to create EmbeddedConnectorClient")?;
+        let jvm = Jvm::get_or_init().context("failed to create EmbeddedConnectorClient")?;
         Ok(EmbeddedConnectorClient { jvm })
     }
 
@@ -835,8 +841,8 @@ mod test {
     use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
     use tokio::sync::mpsc;
 
-    use crate::sink::SinkWriter;
     use crate::sink::remote::CoordinatedRemoteSinkWriter;
+    use crate::sink::writer::SinkWriter;
 
     #[tokio::test]
     async fn test_epoch_check() {

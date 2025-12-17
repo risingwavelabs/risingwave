@@ -19,6 +19,8 @@ package com.risingwave.connector;
 import com.fasterxml.jackson.annotation.JsonCreator;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import com.risingwave.connector.api.sink.CommonSinkConfig;
+import java.sql.Connection;
+import java.sql.SQLException;
 
 public class JDBCSinkConfig extends CommonSinkConfig {
     private String jdbcUrl;
@@ -41,6 +43,13 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     @JsonProperty(value = "jdbc.auto.commit")
     private boolean autoCommit = false;
+
+    @JsonProperty(value = "database.name")
+    private String databaseName;
+
+    // Only applicable for redshift BatchAppendOnlyJDBCSink
+    @JsonProperty(value = "batch.insert.rows")
+    private int batchInsertRows = 0;
 
     @JsonCreator
     public JDBCSinkConfig(
@@ -87,5 +96,25 @@ public class JDBCSinkConfig extends CommonSinkConfig {
 
     public boolean isAutoCommit() {
         return autoCommit;
+    }
+
+    public String getDatabaseName() {
+        return databaseName;
+    }
+
+    public int getBatchInsertRows() {
+        return batchInsertRows;
+    }
+
+    /**
+     * Creates a JDBC connection based on this configuration. Subclasses can override this method to
+     * provide specialized connection logic. The connection returned by this method is *not*
+     * autoCommit by default.
+     *
+     * @return JDBC connection
+     * @throws SQLException if connection fails
+     */
+    public Connection getConnection() throws SQLException {
+        return JdbcUtils.getConnectionDefault(this);
     }
 }

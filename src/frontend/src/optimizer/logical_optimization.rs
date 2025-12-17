@@ -109,8 +109,6 @@ impl<C: ConventionMarker> OptimizationStage<C> {
 
 use std::sync::LazyLock;
 
-use risingwave_sqlparser::ast::ExplainFormat;
-
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 
 pub struct LogicalOptimizer {}
@@ -141,6 +139,8 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
             TableFunctionToInternalBackfillProgressRule::create(),
             // Apply internal source backfill progress rule next
             TableFunctionToInternalSourceBackfillProgressRule::create(),
+            // Apply internal get channel delta stats rule next
+            TableFunctionToInternalGetChannelDeltaStatsRule::create(),
             // Apply postgres query rule next
             TableFunctionToPostgresQueryRule::create(),
             // Apply mysql query rule next
@@ -190,6 +190,15 @@ static TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS: LazyLock<Optimizatio
         OptimizationStage::new(
             "Table Function To Internal Source Backfill Progress",
             vec![TableFunctionToInternalSourceBackfillProgressRule::create()],
+            ApplyOrder::TopDown,
+        )
+    });
+
+static TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Table Function To Internal Get Channel Delta Stats",
+            vec![TableFunctionToInternalGetChannelDeltaStatsRule::create()],
             ApplyOrder::TopDown,
         )
     });
@@ -340,7 +349,11 @@ static CONVERT_DISTINCT_AGG_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::n
 static SIMPLIFY_AGG: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simplify Aggregation",
-        vec![AggGroupBySimplifyRule::create(), AggCallMergeRule::create()],
+        vec![
+            AggGroupBySimplifyRule::create(),
+            AggCallMergeRule::create(),
+            UnifyFirstLastValueRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
@@ -503,6 +516,32 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
     )
 });
 
+static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "TopN to Vector Search",
+        vec![TopNToVectorSearchRule::create()],
+        ApplyOrder::BottomUp,
+    )
+});
+
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(true)],
+            ApplyOrder::BottomUp,
+        )
+    });
+
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(false)],
+            ApplyOrder::BottomUp,
+        )
+    });
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: LogicalPlanRef,
@@ -649,6 +688,8 @@ impl LogicalOptimizer {
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM)?;
+
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
         if has_logical_max_one_row(plan.clone()) {
             // `MaxOneRow` is currently only used for the runtime check of
@@ -725,25 +766,7 @@ impl LogicalOptimizer {
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        if ctx.is_explain_logical() {
-            match ctx.explain_format() {
-                ExplainFormat::Text => {
-                    ctx.store_logical(plan.explain_to_string());
-                }
-                ExplainFormat::Json => {
-                    ctx.store_logical(plan.explain_to_json());
-                }
-                ExplainFormat::Xml => {
-                    ctx.store_logical(plan.explain_to_xml());
-                }
-                ExplainFormat::Yaml => {
-                    ctx.store_logical(plan.explain_to_yaml());
-                }
-                ExplainFormat::Dot => {
-                    ctx.store_logical(plan.explain_to_dot());
-                }
-            }
-        }
+        ctx.may_store_explain_logical(&plan);
 
         Ok(plan)
     }
@@ -776,9 +799,12 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS)?;
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
+
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH)?;
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
@@ -828,6 +854,8 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
 
+        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
+
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
@@ -852,25 +880,7 @@ impl LogicalOptimizer {
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());
 
-        if ctx.is_explain_logical() {
-            match ctx.explain_format() {
-                ExplainFormat::Text => {
-                    ctx.store_logical(plan.explain_to_string());
-                }
-                ExplainFormat::Json => {
-                    ctx.store_logical(plan.explain_to_json());
-                }
-                ExplainFormat::Xml => {
-                    ctx.store_logical(plan.explain_to_xml());
-                }
-                ExplainFormat::Yaml => {
-                    ctx.store_logical(plan.explain_to_yaml());
-                }
-                ExplainFormat::Dot => {
-                    ctx.store_logical(plan.explain_to_dot());
-                }
-            }
-        }
+        ctx.may_store_explain_logical(&plan);
 
         Ok(plan)
     }

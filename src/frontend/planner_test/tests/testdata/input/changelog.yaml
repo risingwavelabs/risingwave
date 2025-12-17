@@ -1,0 +1,7 @@
+- name: changlog mv
+  sql: |
+    create table t1 (v1 int);
+    with p as changelog from t1 select _changelog_row_id::bigint as changelog_row_id, * from p
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan

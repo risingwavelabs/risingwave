@@ -39,7 +39,7 @@ pub struct StreamDynamicFilter {
 }
 
 impl StreamDynamicFilter {
-    pub fn new(core: DynamicFilter<PlanRef>) -> Self {
+    pub fn new(core: DynamicFilter<PlanRef>) -> Result<Self> {
         let right_non_decreasing = core.right().columns_monotonicity()[0].is_non_decreasing();
         let condition_always_relax = right_non_decreasing
             && matches!(
@@ -47,11 +47,12 @@ impl StreamDynamicFilter {
                 ExprType::LessThan | ExprType::LessThanOrEqual
             );
 
-        let out_kind = if condition_always_relax && core.left().append_only() {
-            StreamKind::AppendOnly
-        } else {
-            // TODO(kind): check if the impl can handle upsert stream.
-            StreamKind::Retract
+        // TODO(kind): theoretically, the impl can handle upsert stream.
+        let left_kind = reject_upsert_input!(core.left());
+        let out_kind = match left_kind {
+            StreamKind::AppendOnly if condition_always_relax => StreamKind::AppendOnly,
+            StreamKind::AppendOnly | StreamKind::Retract => StreamKind::Retract,
+            StreamKind::Upsert => unreachable!(),
         };
 
         let base = PlanBase::new_stream_with_core(
@@ -63,30 +64,44 @@ impl StreamDynamicFilter {
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
         let cleaned_by_watermark = Self::cleaned_by_watermark(&core);
-        Self {
+
+        Ok(Self {
             base,
             core,
             cleaned_by_watermark,
-        }
+        })
     }
 
     fn derive_watermark_columns(core: &DynamicFilter<PlanRef>) -> WatermarkColumns {
         let mut res = WatermarkColumns::new();
+        let lhs_watermark_columns = core.left().watermark_columns();
         let rhs_watermark_columns = core.right().watermark_columns();
-        if rhs_watermark_columns.contains(0) {
-            match core.comparator() {
-                // We can derive output watermark only if the output is supposed to be always >= rhs.
-                // While we have to keep in mind that, the propagation of watermark messages from
-                // the right input must be delayed until `Update`/`Delete`s are sent to downstream,
-                // otherwise, we will have watermark messages sent before the `Delete` of old rows.
-                ExprType::GreaterThan | ExprType::GreaterThanOrEqual => {
-                    // The watermark is generated for the left column according to the right side, but
-                    // not directly derived from the right side. So, let's assign a new group for it.
-                    res.insert(core.left_index(), core.ctx().next_watermark_group_id());
-                }
-                _ => {}
+
+        // Check if we can derive watermark from the right input
+        let can_derive_from_right = rhs_watermark_columns.contains(0)
+            && matches!(
+                core.comparator(),
+                ExprType::GreaterThan | ExprType::GreaterThanOrEqual
+            );
+
+        if can_derive_from_right {
+            // When right side can derive watermark, merge left side watermark columns first
+            for (col_idx, group_id) in lhs_watermark_columns.iter() {
+                res.insert(col_idx, group_id);
             }
+
+            // Then derive watermark column from the right input (existing logic)
+            // We can derive output watermark only if the output is supposed to be always >= rhs.
+            // While we have to keep in mind that, the propagation of watermark messages from
+            // the right input must be delayed until `Update`/`Delete`s are sent to downstream,
+            // otherwise, we will have watermark messages sent before the `Delete` of old rows.
+            // The watermark is generated for the left column according to the right side, but
+            // not directly derived from the right side. So, let's assign a new group for it.
+            res.insert(core.left_index(), core.ctx().next_watermark_group_id());
         }
+        // When right side cannot derive watermark, no watermark columns can be preserved
+        // because the dynamic filter's output correctness depends on both sides
+
         res
     }
 
@@ -151,7 +166,7 @@ impl PlanTreeNodeBinary<Stream> for StreamDynamicFilter {
     }
 
     fn clone_with_left_right(&self, left: PlanRef, right: PlanRef) -> Self {
-        Self::new(self.core.clone_with_left_right(left, right))
+        Self::new(self.core.clone_with_left_right(left, right)).unwrap()
     }
 }
 

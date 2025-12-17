@@ -32,8 +32,7 @@ import {
   RelationPoint,
   RelationPointPosition,
 } from "../lib/layout"
-import { ChannelStatsDerived } from "../pages/fragment_graph"
-import { RelationStats } from "../proto/gen/monitor_service"
+import { ChannelDeltaStats, RelationStats } from "../proto/gen/monitor_service"
 import { CatalogModal, useCatalogModal } from "./CatalogModal"
 import {
   backPressureColor,
@@ -81,7 +80,7 @@ export default function RelationGraph({
   nodes: RelationPoint[] // rename to RelationNode
   selectedId: string | undefined
   setSelectedId: (id: string) => void
-  channelStats?: Map<string, ChannelStatsDerived>
+  channelStats?: Map<string, ChannelDeltaStats>
   relationStats: { [relationId: number]: RelationStats } | undefined
 }) {
   const [modalData, setModalId] = useCatalogModal(nodes.map((n) => n.relation))
@@ -177,7 +176,7 @@ export default function RelationGraph({
         if (channelStats) {
           let value = channelStats.get(`${d.source}_${d.target}`)
           if (value) {
-            return backPressureColor(value.backPressure)
+            return backPressureColor(value.backpressureRate)
           }
         }
 
@@ -188,7 +187,7 @@ export default function RelationGraph({
         if (channelStats) {
           let value = channelStats.get(`${d.source}_${d.target}`)
           if (value) {
-            return backPressureWidth(value.backPressure, 15)
+            return backPressureWidth(value.backpressureRate, 15)
           }
         }
         return 2
@@ -213,7 +212,9 @@ export default function RelationGraph({
           const tooltipText = `<b>Relation ${d.source} → ${
             d.target
           }</b><br>Backpressure: ${
-            stats != null ? `${(stats.backPressure * 100).toFixed(2)}%` : "N/A"
+            stats != null
+              ? `${(stats.backpressureRate * 100).toFixed(2)}%`
+              : "N/A"
           }<br>Recv Throughput: ${
             stats != null ? `${stats.recvThroughput.toFixed(2)} rows/s` : "N/A"
           }<br>Send Throughput: ${

@@ -28,8 +28,9 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use risingwave_pb::secret::PbSecretRef;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 
 use crate::WithPropertiesExt;
 use crate::connector_common::{PostgresExternalTable, SslMode};
@@ -46,17 +47,18 @@ use crate::source::cdc::external::sql_server::{
     SqlServerExternalTable, SqlServerExternalTableReader, SqlServerOffset,
 };
 
-#[derive(Debug, Clone)]
-pub enum CdcTableType {
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum ExternalCdcTableType {
     Undefined,
     Mock,
     MySql,
     Postgres,
     SqlServer,
     Citus,
+    Mongo,
 }
 
-impl CdcTableType {
+impl ExternalCdcTableType {
     pub fn from_properties(with_properties: &impl WithPropertiesExt) -> Self {
         let connector = with_properties.get_connector().unwrap_or_default();
         match connector.as_str() {
@@ -64,6 +66,7 @@ impl CdcTableType {
             "postgres-cdc" => Self::Postgres,
             "citus-cdc" => Self::Citus,
             "sqlserver-cdc" => Self::SqlServer,
+            "mongodb-cdc" => Self::Mongo,
             _ => Self::Undefined,
         }
     }
@@ -92,7 +95,7 @@ impl CdcTableType {
     ) -> ConnectorResult<ExternalTableReaderImpl> {
         match self {
             Self::MySql => Ok(ExternalTableReaderImpl::MySql(
-                MySqlExternalTableReader::new(config, schema)?,
+                MySqlExternalTableReader::new(config, schema).await?,
             )),
             Self::Postgres => Ok(ExternalTableReaderImpl::Postgres(
                 PostgresExternalTableReader::new(config, schema, pk_indices, schema_table_name)
@@ -104,6 +107,33 @@ impl CdcTableType {
             // citus is never supported for cdc backfill (create source + create table).
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             _ => bail!("invalid external table type: {:?}", *self),
+        }
+    }
+}
+
+impl From<ExternalCdcTableType> for PbCdcTableType {
+    fn from(cdc_table_type: ExternalCdcTableType) -> Self {
+        match cdc_table_type {
+            ExternalCdcTableType::Postgres => Self::Postgres,
+            ExternalCdcTableType::MySql => Self::Mysql,
+            ExternalCdcTableType::SqlServer => Self::Sqlserver,
+
+            ExternalCdcTableType::Citus => Self::Citus,
+            ExternalCdcTableType::Mongo => Self::Mongo,
+            ExternalCdcTableType::Undefined | ExternalCdcTableType::Mock => Self::Unspecified,
+        }
+    }
+}
+
+impl From<PbCdcTableType> for ExternalCdcTableType {
+    fn from(cdc_table_type: PbCdcTableType) -> Self {
+        match cdc_table_type {
+            PbCdcTableType::Postgres => Self::Postgres,
+            PbCdcTableType::Mysql => Self::MySql,
+            PbCdcTableType::Sqlserver => Self::SqlServer,
+            PbCdcTableType::Mongo => Self::Mongo,
+            PbCdcTableType::Citus => Self::Citus,
+            PbCdcTableType::Unspecified => Self::Undefined,
         }
     }
 }
@@ -121,18 +151,20 @@ pub const DATABASE_NAME_KEY: &str = "database.name";
 
 impl SchemaTableName {
     pub fn from_properties(properties: &BTreeMap<String, String>) -> Self {
-        let table_type = CdcTableType::from_properties(properties);
+        let table_type = ExternalCdcTableType::from_properties(properties);
         let table_name = properties.get(TABLE_NAME_KEY).cloned().unwrap_or_default();
 
         let schema_name = match table_type {
-            CdcTableType::MySql => properties
+            ExternalCdcTableType::MySql => properties
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
-            CdcTableType::Postgres | CdcTableType::Citus => {
+            ExternalCdcTableType::Postgres | ExternalCdcTableType::Citus => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
-            CdcTableType::SqlServer => properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default(),
+            ExternalCdcTableType::SqlServer => {
+                properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
+            }
             _ => {
                 unreachable!("invalid external table type: {:?}", table_type);
             }
@@ -193,6 +225,8 @@ pub struct DebeziumSourceOffset {
     #[serde(rename = "txId")]
     pub txid: Option<i64>,
     pub tx_usec: Option<u64>,
+    pub lsn_commit: Option<u64>,
+    pub lsn_proc: Option<u64>,
 
     // sql server offset
     pub commit_lsn: Option<String>,
@@ -477,3 +511,5 @@ impl ExternalTableImpl {
         }
     }
 }
+
+pub const CDC_TABLE_SPLIT_ID_START: i64 = 1;

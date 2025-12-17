@@ -24,8 +24,7 @@ use mysql_async::prelude::Queryable;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
-use serde::Deserialize;
-use serde_derive::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
@@ -44,14 +43,15 @@ use super::{
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
-use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, Sink, SinkWriterParam};
 
 pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
 const STARROCK_MYSQL_MAX_ALLOWED_PACKET: usize = 1024;
 const STARROCK_MYSQL_WAIT_TIMEOUT: usize = 28800;
 
-const fn _default_stream_load_http_timeout_ms() -> u64 {
+pub const fn _default_stream_load_http_timeout_ms() -> u64 {
     30 * 1000
 }
 
@@ -109,6 +109,7 @@ pub struct StarrocksConfig {
         default = "_default_stream_load_http_timeout_ms"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub stream_load_http_timeout_ms: u64,
 
     /// Set this option to a positive integer n, RisingWave will try to commit data
@@ -181,7 +182,7 @@ impl EnforceSecret for StarrocksSink {
 
 impl StarrocksSink {
     pub fn new(param: SinkParam, config: StarrocksConfig, schema: Schema) -> Result<Self> {
-        let pk_indices = param.downstream_pk.clone();
+        let pk_indices = param.downstream_pk_or_empty();
         let is_append_only = param.sink_type.is_append_only();
         Ok(Self {
             config,
@@ -265,7 +266,7 @@ impl StarrocksSink {
                 if starrocks_data_type.contains("unknown") {
                     return Ok(true);
                 }
-                let check_result = Self::check_and_correct_column_type(list.as_ref(), starrocks_data_type)?;
+                let check_result = Self::check_and_correct_column_type(list.elem(), starrocks_data_type)?;
                 Ok(check_result && starrocks_data_type.contains("array"))
             }
             risingwave_common::types::DataType::Bytea => Err(SinkError::Starrocks(
@@ -281,7 +282,9 @@ impl StarrocksSink {
             risingwave_common::types::DataType::Map(_) => Err(SinkError::Starrocks(
                 "MAP is not supported for Starrocks sink.".to_owned(),
             )),
-            DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+            DataType::Vector(_) => Err(SinkError::Starrocks(
+                "VECTOR is not supported for Starrocks sink.".to_owned(),
+            )),
         }
     }
 }

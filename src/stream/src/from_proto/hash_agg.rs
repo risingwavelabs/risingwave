@@ -25,7 +25,7 @@ use super::agg_common::{
     build_agg_state_storages_from_proto, build_distinct_dedup_table_from_proto,
 };
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::aggregate::{AggExecutorArgs, HashAggExecutor, HashAggExecutorExtraArgs};
 
 pub struct HashAggExecutorDispatcherArgs<S: StateStore> {
@@ -79,18 +79,25 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
             node.get_agg_call_states(),
             store.clone(),
             vnodes.clone(),
+            &params.config,
         )
         .await;
         // disable sanity check so that old value is not required when updating states
-        let intermediate_state_table = StateTable::from_table_catalog(
+        let intermediate_state_table = StateTableBuilder::new(
             node.get_intermediate_state_table().unwrap(),
             store.clone(),
             vnodes.clone(),
         )
+        .enable_preload_all_rows_by_config(&params.config)
+        .build()
         .await;
-        let distinct_dedup_tables =
-            build_distinct_dedup_table_from_proto(node.get_distinct_dedup_tables(), store, vnodes)
-                .await;
+        let distinct_dedup_tables = build_distinct_dedup_table_from_proto(
+            node.get_distinct_dedup_tables(),
+            store,
+            vnodes,
+            &params.config,
+        )
+        .await;
 
         let exec = HashAggExecutorDispatcherArgs {
             args: AggExecutorArgs {
@@ -100,7 +107,7 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 actor_ctx: params.actor_context,
                 info: params.info.clone(),
 
-                extreme_cache_size: params.env.config().developer.unsafe_extreme_cache_size,
+                extreme_cache_size: params.config.developer.unsafe_extreme_cache_size,
 
                 agg_calls,
                 row_count_index: node.get_row_count_index() as usize,
@@ -110,11 +117,8 @@ impl ExecutorBuilder for HashAggExecutorBuilder {
                 watermark_epoch: params.watermark_epoch,
                 extra: HashAggExecutorExtraArgs {
                     group_key_indices,
-                    chunk_size: params.env.config().developer.chunk_size,
-                    max_dirty_groups_heap_size: params
-                        .env
-                        .config()
-                        .developer
+                    chunk_size: params.config.developer.chunk_size,
+                    max_dirty_groups_heap_size: (params.config.developer)
                         .hash_agg_max_dirty_groups_heap_size,
                     emit_on_window_close: node.get_emit_on_window_close(),
                 },

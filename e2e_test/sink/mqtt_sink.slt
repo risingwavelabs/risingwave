@@ -124,9 +124,8 @@ VALUES( ROW('13', null), 24.0 );
 statement ok
 FLUSH;
 
-sleep 15s
 
-query IT rowsort
+query IT rowsort retry 16 backoff 1s
 SELECT device_id, temperature FROM mqtt ORDER BY device_id, temperature;
 ----
 fixed/12 59
@@ -144,7 +143,7 @@ fixed/13 22 /device/fixed/13
 fixed/13 24 /device/fixed/13
 wildcard/14 31 /device/wildcard/14
 
-query IT rowsort
+query IT rowsort retry 16 backoff 1s
 SELECT (info).device_id device_id, temperature from mqtt_nested_source ORDER BY device_id, temperature ;
 ----
 13 24

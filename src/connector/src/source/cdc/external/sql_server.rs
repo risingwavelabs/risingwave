@@ -23,7 +23,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use tiberius::{Config, Query, QueryItem};
 
 use crate::error::{ConnectorError, ConnectorResult};

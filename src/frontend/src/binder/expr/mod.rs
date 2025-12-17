@@ -278,22 +278,36 @@ impl Binder {
                 false => non_const_exprs.push(expr),
             }
         }
-        let mut ret = FunctionCall::new(ExprType::In, bound_expr_list)?.into();
+
+        let mut ret = if bound_expr_list.len() == 1 {
+            None
+        } else {
+            Some(FunctionCall::new(ExprType::In, bound_expr_list)?.into())
+        };
         // Non-const exprs are not part of IN-expr in backend and rewritten into OR-Equal-exprs.
         for expr in non_const_exprs {
-            ret = FunctionCall::new(
-                ExprType::Or,
-                vec![
-                    ret,
-                    FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into(),
-                ],
-            )?
-            .into();
+            if let Some(inner_ret) = ret {
+                ret = Some(
+                    FunctionCall::new(
+                        ExprType::Or,
+                        vec![
+                            inner_ret,
+                            FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into(),
+                        ],
+                    )?
+                    .into(),
+                );
+            } else {
+                ret = Some(FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into());
+            }
         }
         if negated {
-            Ok(FunctionCall::new_unchecked(ExprType::Not, vec![ret], DataType::Boolean).into())
+            Ok(
+                FunctionCall::new_unchecked(ExprType::Not, vec![ret.unwrap()], DataType::Boolean)
+                    .into(),
+            )
         } else {
-            Ok(ret)
+            Ok(ret.unwrap())
         }
     }
 
@@ -1013,8 +1027,8 @@ impl Binder {
 
     pub fn bind_cast_inner(&mut self, expr: &Expr, data_type: &DataType) -> Result<ExprImpl> {
         match (expr, data_type) {
-            (Expr::Array(Array { elem: expr, .. }), DataType::List(element_type)) => {
-                self.bind_array_cast(expr, element_type)
+            (Expr::Array(Array { elem: expr, .. }), DataType::List(list_type)) => {
+                self.bind_array_cast(expr, list_type.elem())
             }
             (Expr::Map { entries }, DataType::Map(m)) => self.bind_map_cast(entries, m),
             (expr, data_type) => {
@@ -1065,7 +1079,7 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp(false) => DataType::Timestamp,
         AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
+        AstDataType::Array(datatype) => DataType::list(bind_data_type(datatype)?),
         AstDataType::Char(..) => {
             bail_not_implemented!("CHAR is not supported, please use VARCHAR instead")
         }

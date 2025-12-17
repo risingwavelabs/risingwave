@@ -152,8 +152,6 @@ mod ensure_tests {
     use anyhow::anyhow;
     use thiserror::Error;
 
-    use super::*;
-
     #[derive(Error, Debug)]
     #[error(transparent)]
     struct MyError(#[from] anyhow::Error);

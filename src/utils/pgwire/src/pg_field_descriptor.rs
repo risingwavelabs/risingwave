@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::types::Format;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PgFieldDescriptor {
     name: String,
@@ -25,13 +27,12 @@ pub struct PgFieldDescriptor {
 
     type_len: i16,
     type_modifier: i32,
-    format_code: i16,
+    format: Format,
 }
 
 impl PgFieldDescriptor {
     pub fn new(name: String, type_oid: i32, type_len: i16) -> Self {
         let type_modifier = -1;
-        let format_code = 0;
         let table_oid = 0;
         let col_attr_num = 0;
 
@@ -42,14 +43,14 @@ impl PgFieldDescriptor {
             type_oid,
             type_len,
             type_modifier,
-            format_code,
+            format: Format::Text,
         }
     }
 
     /// Set the format code as binary format.
     /// NOTE: Format code is text format by default.
     pub fn set_to_binary(&mut self) {
-        self.format_code = 1;
+        self.format = Format::Binary;
     }
 
     pub fn get_name(&self) -> &str {
@@ -77,6 +78,6 @@ impl PgFieldDescriptor {
     }
 
     pub fn get_format_code(&self) -> i16 {
-        self.format_code
+        self.format.to_i8() as _
     }
 }

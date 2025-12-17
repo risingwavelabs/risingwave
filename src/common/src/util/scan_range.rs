@@ -737,7 +737,7 @@ mod tests {
             &order_types
         ));
 
-        // (Included, Included) vs (Excluded, Encluded)
+        // (Included, Included) vs (Excluded, Included)
         assert!(!ScanRange::range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),
@@ -750,7 +750,7 @@ mod tests {
             &order_types
         ));
 
-        // (Included, Included) vs (Included, Encluded)
+        // (Included, Included) vs (Included, Included)
         assert!(ScanRange::range_overlap_check(
             (
                 Bound::Included(vec![Some(ScalarImpl::Int32(1))]),

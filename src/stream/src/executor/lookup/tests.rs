@@ -32,7 +32,7 @@ use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::test_utils::*;
 use crate::executor::{
     ActorContext, Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo,
-    MaterializeExecutor, Message, PkIndices,
+    MaterializeExecutor, Message, StreamKey,
 };
 
 fn arrangement_col_descs() -> Vec<ColumnDesc> {
@@ -109,9 +109,9 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
     .into_executor(schema, vec![0]);
 
     Executor::new(
-        ExecutorInfo::new(
+        ExecutorInfo::for_test(
             source.schema().clone(),
-            source.pk_indices().to_vec(),
+            source.stream_key().to_vec(),
             "MaterializeExecutor".to_owned(),
             0,
         ),
@@ -141,7 +141,7 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
 /// | -  | 6     | 1    | 3       |
 /// | b  |       |      | 3 -> 4  |
 fn create_source() -> Executor {
-    let columns = vec![
+    let columns = [
         ColumnDesc::named("join_column", 1.into(), DataType::Int64),
         ColumnDesc::named("rowid_column", 2.into(), DataType::Int64),
     ];
@@ -171,7 +171,7 @@ fn create_source() -> Executor {
         Message::Chunk(chunk2),
         Message::Barrier(Barrier::new_test_barrier(test_epoch(4))),
     ])
-    .into_executor(schema, PkIndices::new())
+    .into_executor(schema, StreamKey::new())
 }
 
 async fn next_msg(buffer: &mut Vec<Message>, executor: &mut BoxedMessageStream) {
@@ -190,7 +190,7 @@ async fn test_lookup_this_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
-    let info = ExecutorInfo::new(
+    let info = ExecutorInfo::for_test(
         Schema::new(vec![
             Field::with_name(DataType::Int64, "join_column"),
             Field::with_name(DataType::Int64, "rowid_column"),
@@ -265,7 +265,7 @@ async fn test_lookup_last_epoch() {
     let table_id = TableId::new(1);
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
-    let info = ExecutorInfo::new(
+    let info = ExecutorInfo::for_test(
         Schema::new(vec![
             Field::with_name(DataType::Int64, "rowid_column"),
             Field::with_name(DataType::Int64, "join_column"),

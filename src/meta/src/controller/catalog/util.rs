@@ -12,16 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::FragmentTypeMask;
+
 use super::*;
+use crate::controller::fragment::FragmentTypeMaskExt;
 
 pub(crate) async fn update_internal_tables(
     txn: &DatabaseTransaction,
-    object_id: i32,
+    object_id: ObjectId,
     column: object::Column,
     new_value: Value,
     objects_to_notify: &mut Vec<PbObjectInfo>,
 ) -> MetaResult<()> {
-    let internal_tables = get_internal_tables_by_id(object_id, txn).await?;
+    let internal_tables = get_internal_tables_by_id(object_id.as_job_id(), txn).await?;
 
     if !internal_tables.is_empty() {
         Object::update_many()
@@ -89,15 +92,15 @@ impl CatalogController {
             match extract_external_table_name_from_definition(&definition) {
                 None => {
                     tracing::warn!(
-                        table_id = table_id,
-                        definition = definition,
+                        %table_id,
+                        definition,
                         "failed to extract cdc table name from table definition.",
                     )
                 }
                 Some(external_table_name) => {
                     cdc_table_ids.insert(
                         table_id,
-                        build_cdc_table_id(source_id as u32, &external_table_name),
+                        build_cdc_table_id(source_id, &external_table_name),
                     );
                 }
             }
@@ -147,8 +150,8 @@ impl CatalogController {
         let mut obj_dependencies = dependencies
             .into_iter()
             .map(|(oid, used_by)| PbObjectDependencies {
-                object_id: used_by as _,
-                referenced_object_id: oid as _,
+                object_id: used_by,
+                referenced_object_id: oid,
             })
             .collect_vec();
 
@@ -169,8 +172,8 @@ impl CatalogController {
 
         obj_dependencies.extend(view_dependencies.into_iter().map(|(view_id, table_id)| {
             PbObjectDependencies {
-                object_id: table_id as _,
-                referenced_object_id: view_id as _,
+                object_id: table_id,
+                referenced_object_id: view_id,
             }
         }));
 
@@ -194,8 +197,8 @@ impl CatalogController {
         };
         obj_dependencies.extend(sink_dependencies.into_iter().map(|(sink_id, table_id)| {
             PbObjectDependencies {
-                object_id: table_id as _,
-                referenced_object_id: sink_id as _,
+                object_id: table_id.into(),
+                referenced_object_id: sink_id.into(),
             }
         }));
 
@@ -221,8 +224,8 @@ impl CatalogController {
         };
         obj_dependencies.extend(subscription_dependencies.into_iter().map(
             |(subscription_id, table_id)| PbObjectDependencies {
-                object_id: subscription_id as _,
-                referenced_object_id: table_id as _,
+                object_id: subscription_id.into(),
+                referenced_object_id: table_id.into(),
             },
         ));
 
@@ -264,7 +267,7 @@ impl CatalogController {
                 .await?;
             for (table_id, name, definition) in table_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: table_id as _,
+                    id: table_id.as_job_id(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),
@@ -288,7 +291,7 @@ impl CatalogController {
                 .await?;
             for (source_id, name, definition) in source_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: source_id as _,
+                    id: source_id.as_share_source_job_id(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),
@@ -312,7 +315,7 @@ impl CatalogController {
                 .await?;
             for (sink_id, name, definition) in sink_info {
                 let event = risingwave_pb::meta::event_log::EventDirtyStreamJobClear {
-                    id: sink_id as _,
+                    id: sink_id.as_job_id(),
                     name,
                     definition,
                     error: "clear during recovery".to_owned(),
@@ -326,14 +329,16 @@ impl CatalogController {
         Ok(())
     }
 
-    /// Returns the IDs of tables whose catalogs have been updated.
-    pub(crate) async fn clean_dirty_sink_downstreams(
-        txn: &DatabaseTransaction,
-    ) -> MetaResult<Vec<TableId>> {
+    pub(crate) async fn clean_dirty_sink_downstreams(txn: &DatabaseTransaction) -> MetaResult<()> {
         // clean incoming sink from (table)
         // clean upstream fragment ids from (fragment)
         // clean stream node from (fragment)
         // clean upstream actor ids from (actor)
+
+        // The cleanup of fragment and StreamNode is to maintain compatibility with old versions of data. For the
+        // current sink-into-table implementation, there is no need to restore the contents of StreamNode, because the
+        // `UpstreamSinkUnion` operator does not persist any data, but relies on refill during recovery.
+
         let all_fragment_ids: Vec<FragmentId> = Fragment::find()
             .select_only()
             .column(fragment::Column::FragmentId)
@@ -343,79 +348,43 @@ impl CatalogController {
 
         let all_fragment_ids: HashSet<_> = all_fragment_ids.into_iter().collect();
 
-        let table_sink_ids: Vec<ObjectId> = Sink::find()
+        let all_sink_into_tables: Vec<Option<TableId>> = Sink::find()
             .select_only()
-            .column(sink::Column::SinkId)
+            .column(sink::Column::TargetTable)
             .filter(sink::Column::TargetTable.is_not_null())
             .into_tuple()
             .all(txn)
             .await?;
 
-        let all_table_with_incoming_sinks: Vec<(ObjectId, I32Array)> = Table::find()
-            .select_only()
-            .columns(vec![table::Column::TableId, table::Column::IncomingSinks])
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        let table_incoming_sinks_to_update = all_table_with_incoming_sinks
-            .into_iter()
-            .filter(|(_, incoming_sinks)| {
-                let inner_ref = incoming_sinks.inner_ref();
-                !inner_ref.is_empty()
-                    && inner_ref
-                        .iter()
-                        .any(|sink_id| !table_sink_ids.contains(sink_id))
-            })
-            .collect_vec();
-
-        let new_table_incoming_sinks = table_incoming_sinks_to_update
-            .into_iter()
-            .map(|(table_id, incoming_sinks)| {
-                let new_incoming_sinks = incoming_sinks
-                    .into_inner()
-                    .extract_if(.., |id| table_sink_ids.contains(id))
-                    .collect_vec();
-                (table_id, I32Array::from(new_incoming_sinks))
-            })
-            .collect_vec();
-
-        // no need to update, returning
-        if new_table_incoming_sinks.is_empty() {
-            return Ok(vec![]);
+        let mut table_with_incoming_sinks: HashSet<TableId> = HashSet::new();
+        for target_table_id in all_sink_into_tables {
+            table_with_incoming_sinks.insert(target_table_id.expect("filter by non null"));
         }
 
-        let mut updated_table_ids = vec![];
-        for (table_id, new_incoming_sinks) in new_table_incoming_sinks {
-            tracing::info!("cleaning dirty table sink downstream table {}", table_id);
-            Table::update(table::ActiveModel {
-                table_id: Set(table_id as _),
-                incoming_sinks: Set(new_incoming_sinks),
-                ..Default::default()
-            })
-            .exec(txn)
-            .await?;
-            updated_table_ids.push(table_id);
+        // no need to update, returning
+        if table_with_incoming_sinks.is_empty() {
+            return Ok(());
+        }
 
-            let fragments: Vec<(FragmentId, StreamNode, i32)> = Fragment::find()
+        for table_id in table_with_incoming_sinks {
+            tracing::info!("cleaning dirty table sink downstream table {}", table_id);
+
+            let fragments: Vec<(FragmentId, StreamNode)> = Fragment::find()
                 .select_only()
                 .columns(vec![
                     fragment::Column::FragmentId,
                     fragment::Column::StreamNode,
-                    fragment::Column::FragmentTypeMask,
                 ])
-                .filter(fragment::Column::JobId.eq(table_id))
+                .filter(fragment::Column::JobId.eq(table_id).and(
+                    // dirty downstream should be materialize fragment of table
+                    FragmentTypeMask::intersects(FragmentTypeFlag::Mview),
+                ))
                 .into_tuple()
                 .all(txn)
                 .await?;
 
-            for (fragment_id, stream_node, fragment_mask) in fragments {
+            for (fragment_id, stream_node) in fragments {
                 {
-                    // dirty downstream should be materialize fragment of table
-                    if fragment_mask & FragmentTypeFlag::Mview as i32 == 0 {
-                        continue;
-                    }
-
                     let mut dirty_upstream_fragment_ids = HashSet::new();
 
                     let mut pb_stream_node = stream_node.to_protobuf();
@@ -428,8 +397,7 @@ impl CatalogController {
                                     let Some(NodeBody::Merge(merge_node)) = &body.node_body else {
                                         unreachable!("expect merge node");
                                     };
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
+                                    if all_fragment_ids.contains(&(merge_node.upstream_fragment_id))
                                     {
                                         true
                                     } else {
@@ -439,8 +407,7 @@ impl CatalogController {
                                     }
                                 }
                                 Some(NodeBody::Merge(merge_node)) => {
-                                    if all_fragment_ids
-                                        .contains(&(merge_node.upstream_fragment_id as i32))
+                                    if all_fragment_ids.contains(&(merge_node.upstream_fragment_id))
                                     {
                                         true
                                     } else {
@@ -479,7 +446,7 @@ impl CatalogController {
             }
         }
 
-        Ok(updated_table_ids)
+        Ok(())
     }
 
     pub async fn has_any_streaming_jobs(&self) -> MetaResult<bool> {
@@ -541,13 +508,7 @@ impl CatalogController {
 
         Ok(infos
             .into_iter()
-            .flat_map(|info| {
-                job_mapping.remove(&(
-                    info.database_id as _,
-                    info.schema_id as _,
-                    info.name.clone(),
-                ))
-            })
+            .flat_map(|info| job_mapping.remove(&(info.database_id, info.schema_id, info.name)))
             .collect())
     }
 }

@@ -1,0 +1,31 @@
+[package]
+name = "openai_embedding_service"
+version.workspace = true
+edition.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+async-openai = { workspace = true }
+axum = { workspace = true }
+serde = { workspace = true }
+serde_json = "1"
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+] }
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+[lints]
+workspace = true
+
+[[bin]]
+name = "test_client"

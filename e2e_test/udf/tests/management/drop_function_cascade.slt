@@ -1,0 +1,87 @@
+# Test DROP FUNCTION CASCADE functionality
+# This test verifies that DROP FUNCTION CASCADE properly drops both the function
+# and any dependent objects like materialized views.
+
+statement ok
+create table t (a int, b int);
+
+statement ok
+create function add_udf(a int, b int) returns int language python as $$
+def add_udf(a, b):
+  return a + b
+$$;
+
+statement ok
+create materialized view mv_with_udf as select add_udf(a, b) as c from t;
+
+# Verify the function is being used by the materialized view
+statement error function used by 1 other objects
+drop function add_udf;
+
+# Test DROP FUNCTION CASCADE - should succeed and drop both the MV and the function
+statement ok
+drop function add_udf cascade;
+
+# Verify the materialized view was also dropped
+statement error
+describe mv_with_udf;
+
+# Verify the function was dropped
+statement error function not found
+drop function add_udf;
+
+# Test with multiple dependent objects
+statement ok
+create function multiply_udf(a int, b int) returns int language python as $$
+def multiply_udf(a, b):
+  return a * b
+$$;
+
+statement ok
+create materialized view mv1 as select multiply_udf(a, b) as result1 from t;
+
+statement ok
+create materialized view mv2 as select multiply_udf(a, 5) as result2 from t;
+
+# Both MVs should prevent the function from being dropped normally
+statement error function used by 2 other objects
+drop function multiply_udf;
+
+# CASCADE should drop the function and both dependent MVs
+statement ok
+drop function multiply_udf cascade;
+
+# Verify both MVs were dropped
+statement error
+describe mv1;
+
+statement error
+describe mv2;
+
+# Verify the function was dropped
+statement error function not found
+drop function multiply_udf;
+
+# Test RESTRICT behavior (should be the same as default)
+statement ok
+create function subtract_udf(a int, b int) returns int language python as $$
+def subtract_udf(a, b):
+  return a - b
+$$;
+
+statement ok
+create materialized view mv_subtract as select subtract_udf(a, b) as result from t;
+
+# RESTRICT should fail when dependencies exist
+statement error function used by 1 other objects
+drop function subtract_udf restrict;
+
+# Clean up
+statement ok
+drop materialized view mv_subtract;
+
+statement ok
+drop function subtract_udf;
+
+statement ok
+drop table t;

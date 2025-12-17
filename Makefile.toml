@@ -2,11 +2,14 @@ extend = [
     { path = "src/risedevtool/grafana.toml" },
     { path = "src/risedevtool/prometheus.toml" },
     { path = "src/risedevtool/minio.toml" },
+    { path = "src/risedevtool/lakekeeper.toml" },
     { path = "src/risedevtool/tempo.toml" },
     { path = "src/risedevtool/gcloud-pubsub.toml" },
     { path = "src/risedevtool/redis.toml" },
     { path = "src/risedevtool/connector.toml" },
     { path = "src/risedevtool/risedev-components.toml" },
+    { path = "src/risedevtool/moat.toml" },
+    { path = "src/risedevtool/adbc.toml" },
     { path = "src/sqlparser/sqlparser_test.toml" },
     { path = "src/frontend/planner_test/planner_test.toml" },
     { path = "src/tests/compaction_test/Makefile.toml" },
@@ -37,6 +40,7 @@ env_scripts = [
   is_dynamic_linking = get_env ENABLE_DYNAMIC_LINKING
   is_hummock_trace = get_env ENABLE_HUMMOCK_TRACE
   is_udf_enabled = get_env ENABLE_UDF
+  is_datafusion_enabled = get_env ENABLE_DATAFUSION
   is_default_features_disabled = get_env DISABLE_DEFAULT_FEATURES
 
   if ${is_sanitizer_enabled}
@@ -75,6 +79,35 @@ env_scripts = [
     set_env BUILD_HUMMOCK_TRACE_CMD "-p risingwave_storage --features hm-trace"
   else
     set_env BUILD_HUMMOCK_TRACE_CMD ""
+  end
+
+  if ${is_datafusion_enabled}
+    flags = get_env RISINGWAVE_FEATURE_FLAGS
+    set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features datafusion"
+  end
+
+  is_adbc_enabled = get_env ENABLE_ADBC
+  if ${is_adbc_enabled}
+    # Set the ADBC driver manager path for runtime loading
+    set_env ADBC_DRIVER_PATH "${PREFIX_BIN}/adbc"
+    # Add ADBC library path to LD_LIBRARY_PATH (Linux) or DYLD_LIBRARY_PATH (macOS)
+    os_name = os_family
+    if eq ${os_name} "linux"
+      existing_ld_path = get_env LD_LIBRARY_PATH
+      if ${existing_ld_path}
+        set_env LD_LIBRARY_PATH "${PREFIX_BIN}/adbc:${existing_ld_path}"
+      else
+        set_env LD_LIBRARY_PATH "${PREFIX_BIN}/adbc"
+      end
+    else
+      # macOS
+      existing_dyld_path = get_env DYLD_LIBRARY_PATH
+      if ${existing_dyld_path}
+        set_env DYLD_LIBRARY_PATH "${PREFIX_BIN}/adbc:${existing_dyld_path}"
+      else
+        set_env DYLD_LIBRARY_PATH "${PREFIX_BIN}/adbc"
+      end
+    end
   end
 
   is_ci = get_env RISINGWAVE_CI
@@ -254,21 +287,65 @@ script = '''
 #!/usr/bin/env bash
 set -e
 
+LOG_SIZE_LIMIT=8192
+LOG_LINE_DUPLICATE_LIMIT=1000
+TMP_FILE=$(mktemp)
+
+bye() {
+  local status=$?
+  if [[ $status -eq 2 ]]; then
+    echo "Please disable unnecessary logs by doing following:"
+    echo "- Use DEBUG or TRACE level for logs that are debugging-oriented."
+    echo "- Use LogSuppressor to apply rate limit to verbose logs."
+  fi
+  if [[ $status -ne 0 ]]; then
+    echo "You may download the log files from the \"Artifacts\" tab."
+  fi
+  rm -f "${TMP_FILE}"
+  exit $status
+}
+trap bye EXIT
+
 echo "~~~ Check logs"
+echo "Log file sizes:"
 du -ah ${PREFIX_LOG}
 
+# Check if there is any panic in log.
 for out_file in ${PREFIX_LOG}/*.log
 do
   if grep "panicked at" "$out_file" -C 100; then
-    echo "$(tput setaf 1)\"panicked at\" found in $out_file$(tput sgr0), please check if there's any bugs in this PR."
-    echo "You may find \"risedev-logs\" artifacts and download logs after all workflows finish."
+    echo "$(tput setaf 1)ERROR: \"panicked at\" found in $out_file$(tput sgr0). Please check if there's any bugs in this PR."
     exit 1
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 8192 )) ; then
-    echo "$(tput setaf 1)ERROR: log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
-    exit 1
+# Check if there are too many duplicated lines in log.
+log_files=( "${PREFIX_LOG}"/*.log )
+if [ -e "${log_files[0]}" ]; then
+  # Extract timestamped lines, drop empties, and normalize strings/numbers to spot repeated patterns.
+  sed -En 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?[[:space:]]+//p' "${log_files[@]}" \
+    | awk 'NF { print }' \
+    | perl -pe 'BEGIN { $ph = "<...>"; } s/"([^"\\]|\\.)*"/$ph/g; s/(?<![[:alnum:]_])-?[0-9]+(\.[0-9]+)?(?![[:alnum:]_])/$ph/g' \
+    > "${TMP_FILE}"
+
+  total_lines=$(wc -l < "${TMP_FILE}")
+  if [ "$total_lines" -gt 0 ]; then
+    top_duplicates=$(sort "${TMP_FILE}" | uniq -c | sort -nr | head -30)
+    echo "Top duplicated lines:"
+    echo "(Note: DEBUG/TRACE logs are shown here but won't fail the check.)"
+    echo "$top_duplicates"
+    max_count=$(echo "$top_duplicates" | awk '{count=$1; $1=""; sub(/^ /,""); if ($1 !~ /^DEBUG/) { print count; exit }}')
+    if [ "${max_count:-0}" -gt ${LOG_LINE_DUPLICATE_LIMIT} ]; then
+      echo "$(tput setaf 1)ERROR: non-DEBUG/TRACE log line repeated too many times (up to ${max_count}).$(tput sgr0)"
+      exit 2
+    fi
+  fi
+fi
+
+# Check if the total log size is too large.
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > ${LOG_SIZE_LIMIT} )) ; then
+  echo "$(tput setaf 1)ERROR: total log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0)"
+  exit 2
 fi
 '''
 
@@ -485,7 +562,7 @@ private = true
 category = "RiseDev - Build"
 description = "Build Rust docs"
 condition = { env_set = ["ENABLE_BUILD_RUST"] }
-env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rustdoc/rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options" }
+env = { RUSTDOCFLAGS = "--markdown-css ../../docs/rustdoc/rust.css --markdown-no-toc --index-page docs/rustdoc/index.md -Zunstable-options -Zhigher-ranked-assumptions" }
 script = '''
 #!/usr/bin/env bash
 
@@ -519,9 +596,11 @@ dependencies = [
     "download-tempo",
     "download-mcli",
     "download-minio",
+    "download-lakekeeper",
     "download-prometheus",
     "download-pubsub",
     "download-redis",
+    "download-moat"
 ]
 
 [tasks.create-user-profiles-file]
@@ -1135,7 +1214,9 @@ script = """
 #!/usr/bin/env bash
 
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
+set -x
 cargo clippy $@ ${RISINGWAVE_FEATURE_FLAGS}
+set +x
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
 """
@@ -1164,7 +1245,7 @@ fi
 private = true
 category = "RiseDev - Check"
 description = "Run cargo typos-cli check"
-install_crate = { min_version = "1.30.2", crate_name = "typos-cli", binary = "typos", test_arg = [
+install_crate = { min_version = "1.39.0", crate_name = "typos-cli", binary = "typos", test_arg = [
     "--help",
 ], install_command = "binstall" }
 script = """
@@ -1306,6 +1387,14 @@ env = { RISEDEV_CLEAN_START = true }
 args = ["${@}"]
 description = "Clean data and start a full RisingWave dev cluster using risedev-dev"
 
+[tasks.ci-resume]
+category = "RiseDev - CI"
+dependencies = ["pre-start-dev"]
+command = "target/debug/risedev-dev" # `risedev-dev` is always built in dev profile
+env = { RISEDEV_CLEAN_START = false }
+args = ["${@}"]
+description = "Resume a full RisingWave dev cluster without cleaning data (useful for offline schema change tests)"
+
 [tasks.ci-kill]
 category = "RiseDev - CI"
 dependencies = ["k", "check-logs", "wait-processes-exit"]
@@ -1333,7 +1422,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.28.1", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.28.4", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]
@@ -1480,3 +1569,61 @@ echo "Node ${NODE_NAME} restarted."
 category = "RiseDev - Benchmark"
 description = "Run a local or remote sql benchmark on a RisingWave instance"
 script = "./develop/sql_bench/main.py $@"
+
+[tasks.build-sqlsmith-reducer]
+category = "RiseDev - Build"
+description = "Build Sqlsmith Reducer"
+condition = { env_true = ["ENABLE_BUILD_RUST"] }
+script = '''
+#!/usr/bin/env bash
+
+set -e
+
+[[ -z "${RISEDEV_RUSTFLAGS}" ]] || export RUSTFLAGS="${RISEDEV_RUSTFLAGS}"
+echo + RUSTFLAGS="${RUSTFLAGS:-<not set>}"
+echo + cargo build -p risedev
+cargo build -p risedev
+
+set -xe
+cargo build --bin sqlsmith-reducer \
+  --profile "${RISINGWAVE_BUILD_PROFILE}" \
+  ${RISINGWAVE_FEATURE_FLAGS} \
+  ${RISEDEV_CARGO_BUILD_EXTRA_ARGS}
+'''
+
+[tasks.sr]
+alias = "sql-reduce-short"
+
+[tasks.sql-reduce-short]
+category = "RiseDev - Reduce"
+description = "Reduce a failing SQL query while preserving error"
+dependencies = ["pre-start-dev", "build-sqlsmith-reducer"]
+script = '''
+#!/usr/bin/env bash
+INPUT_FILE="$1"
+OUTPUT_FILE=".sqlsmith/reduced.sql"
+LOG_FILE=".sqlsmith/sqlsmith.log"
+
+if [[ -z "${INPUT_FILE:-}" ]]; then
+  echo "Please pass in the query file path for shrinking."
+  exit 1
+fi
+
+mkdir -p '.sqlsmith'
+echo "Shrinking: $INPUT_FILE"
+
+RUST_LOG=info target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/sqlsmith-reducer --input-file "$INPUT_FILE" --output-file "$OUTPUT_FILE" --run-rw-cmd "./risedev k && ./risedev d" 1>"$LOG_FILE" 2>&1
+
+echo "Shrunk file: $OUTPUT_FILE"
+echo "Log file: $LOG_FILE"
+'''
+
+[tasks.sql-reduce-full]
+category = "RiseDev - Reduce"
+description = "Reduce a failing SQL query while preserving error"
+dependencies = ["pre-start-dev", "build-sqlsmith-reducer"]
+script = '''
+#!/usr/bin/env bash
+
+target/${RISEDEV_BUILD_TARGET_DIR}${BUILD_MODE_DIR}/sqlsmith-reducer "$@"
+'''

@@ -93,11 +93,11 @@ impl DataType {
                     $oid => Ok(DataType::$enum),
                     )*
                     $(
-                    $oid_array => Ok(DataType::List(Box::new(DataType::$enum))),
+                    $oid_array => Ok(DataType::list(DataType::$enum)),
                     )*
                     // workaround to support text in extended mode.
                     25 => Ok(DataType::Varchar),
-                    1009 => Ok(DataType::List(Box::new(DataType::Varchar))),
+                    1009 => Ok(DataType::Varchar.list()),
                     _ => Err(UnsupportedOid(oid)),
                 }
             }
@@ -113,9 +113,9 @@ impl DataType {
                     $(
                     DataType::$enum => $oid,
                     )*
-                    DataType::List(inner) => match inner.unnest_list() {
+                    DataType::List(list) => match list.elem().unnest_list() {
                         $(
-                        DataType::$enum => $oid_array,
+                            DataType::$enum => $oid_array,
                         )*
                         DataType::Int256 => 1302,
                         DataType::Serial => 1016,

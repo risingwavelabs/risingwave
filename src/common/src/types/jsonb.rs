@@ -24,7 +24,10 @@ use thiserror_ext::AsReport;
 use super::{
     Datum, F64, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum,
 };
-use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
+use crate::types::{
+    DEBEZIUM_UNAVAILABLE_JSON, DEBEZIUM_UNAVAILABLE_VALUE, DataType, ListType, Scalar, ScalarRef,
+    StructType, StructValue,
+};
 use crate::util::iter_util::ZipEqDebug;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -148,6 +151,18 @@ impl std::str::FromStr for JsonbVal {
 }
 
 impl JsonbVal {
+    /// Create a `JsonbVal` from a string, with special handling for Debezium's unavailable value placeholder.
+    /// Returns a Result to handle parsing errors properly.
+    pub fn from_debezium_unavailable_value(s: &str) -> Result<Self, serde_json::Error> {
+        // Special handling for Debezium's unavailable value placeholder
+        if s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len() && s == DEBEZIUM_UNAVAILABLE_VALUE {
+            return Ok(DEBEZIUM_UNAVAILABLE_JSON.clone());
+        }
+        Ok(Self(s.parse()?))
+    }
+}
+
+impl JsonbVal {
     /// Returns a jsonb `null`.
     pub fn null() -> Self {
         Self(Value::null())
@@ -246,11 +261,6 @@ impl<'a> JsonbRef<'a> {
         Self(ValueRef::Null)
     }
 
-    /// Returns a value for empty string.
-    pub const fn empty_string() -> Self {
-        Self(ValueRef::String(""))
-    }
-
     /// Returns true if this is a jsonb `null`.
     pub fn is_jsonb_null(&self) -> bool {
         self.0.is_null()
@@ -343,7 +353,7 @@ impl<'a> JsonbRef<'a> {
     ///   * Jsonb string is displayed with quotes but treated as its inner value here.
     pub fn force_str<W: std::fmt::Write>(&self, writer: &mut W) -> std::fmt::Result {
         match self.0 {
-            ValueRef::String(v) => writer.write_str(v),
+            ValueRef::String(v) => writer.write_str(v.as_str()),
             ValueRef::Null => Ok(()),
             ValueRef::Bool(_) | ValueRef::Number(_) | ValueRef::Array(_) | ValueRef::Object(_) => {
                 use crate::types::to_text::ToText as _;
@@ -414,7 +424,7 @@ impl<'a> JsonbRef<'a> {
         }
         let datum = match ty {
             DataType::Jsonb => ScalarImpl::Jsonb(self.into()),
-            DataType::List(t) => ScalarImpl::List(self.to_list(t)?),
+            DataType::List(l) => ScalarImpl::List(self.to_list(l)?),
             DataType::Struct(s) => ScalarImpl::Struct(self.to_struct(s)?),
             _ => {
                 let s = self.force_string();
@@ -425,7 +435,8 @@ impl<'a> JsonbRef<'a> {
     }
 
     /// Convert the jsonb value to a list value.
-    pub fn to_list(self, elem_type: &DataType) -> Result<ListValue, String> {
+    pub fn to_list(self, ty: &ListType) -> Result<ListValue, String> {
+        let elem_type = ty.elem();
         let array = self
             .0
             .as_array()

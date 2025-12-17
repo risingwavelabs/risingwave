@@ -461,15 +461,15 @@ pub mod tests {
             let level_table_info = &mut levels.levels[0].table_infos;
             let table_info_1 = &mut level_table_info[1];
             let mut t_inner = table_info_1.get_inner();
-            t_inner.table_ids.resize(2, 0);
-            t_inner.table_ids[0] = 1;
-            t_inner.table_ids[1] = 2;
+            t_inner.table_ids.resize(2, 0.into());
+            t_inner.table_ids[0] = 1.into();
+            t_inner.table_ids[1] = 2.into();
             *table_info_1 = t_inner.into();
 
             // test internal_table_id
             let option = ManualCompactionOption {
                 level: 1,
-                internal_table_id: HashSet::from([2]),
+                internal_table_id: HashSet::from([2.into()]),
                 ..Default::default()
             };
 
@@ -497,9 +497,9 @@ pub mod tests {
             let level_table_info = &mut levels.levels[0].table_infos;
             for table_info in level_table_info {
                 let mut t_inner = table_info.get_inner();
-                t_inner.table_ids.resize(2, 0);
-                t_inner.table_ids[0] = 1;
-                t_inner.table_ids[1] = 2;
+                t_inner.table_ids.resize(2, 0.into());
+                t_inner.table_ids[0] = 1.into();
+                t_inner.table_ids[1] = 2.into();
                 *table_info = t_inner.into();
             }
 
@@ -512,7 +512,7 @@ pub mod tests {
                     right: Bytes::from(iterator_test_key_of_epoch(1, 199, 1)),
                     right_exclusive: false,
                 },
-                internal_table_id: HashSet::from([2]),
+                internal_table_id: HashSet::from([2.into()]),
             };
 
             let target_level = option.level + 1;
@@ -577,9 +577,11 @@ pub mod tests {
                     let mut t_inner = t.get_inner();
                     t_inner.table_ids.clear();
                     if idx == 0 {
-                        t_inner.table_ids.push(((t.sst_id.inner() % 2) + 1) as _);
+                        t_inner
+                            .table_ids
+                            .push((((t.sst_id.inner() % 2) + 1) as u32).into());
                     } else {
-                        t_inner.table_ids.push(3);
+                        t_inner.table_ids.push(3.into());
                     }
                     *t = t_inner.into();
                 }
@@ -818,7 +820,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 // No matching internal table id.
-                internal_table_id: HashSet::from([100]),
+                internal_table_id: HashSet::from([100.into()]),
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -842,7 +844,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 // Include all sub level's table ids
-                internal_table_id: HashSet::from([1, 2, 3]),
+                internal_table_id: HashSet::from([1.into(), 2.into(), 3.into()]),
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -886,7 +888,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 // Only include bottom sub level's table id
-                internal_table_id: HashSet::from([3]),
+                internal_table_id: HashSet::from([3.into()]),
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -930,7 +932,7 @@ pub mod tests {
                 },
                 // Only include partial top sub level's table id, but the whole top sub level is
                 // picked.
-                internal_table_id: HashSet::from([1]),
+                internal_table_id: HashSet::from([1.into()]),
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -973,7 +975,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 // Only include bottom sub level's table id
-                internal_table_id: HashSet::from([3]),
+                internal_table_id: HashSet::from([3.into()]),
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1008,7 +1010,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 // No matching internal table id.
-                internal_table_id: HashSet::from([100]),
+                internal_table_id: HashSet::from([100.into()]),
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),
@@ -1033,7 +1035,7 @@ pub mod tests {
                     right_exclusive: false,
                 },
                 // Only include partial input level's table id
-                internal_table_id: HashSet::from([1]),
+                internal_table_id: HashSet::from([1.into()]),
             };
             let mut picker = ManualCompactionPicker::new(
                 Arc::new(RangeOverlapStrategy::default()),

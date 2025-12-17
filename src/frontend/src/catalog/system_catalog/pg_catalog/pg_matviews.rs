@@ -17,7 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The view `pg_matviews` provides access to useful information about each materialized view in the
 /// database.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-matviews.html`]
+/// Ref: `https://www.postgresql.org/docs/current/view-pg-matviews.html`
 #[system_catalog(
     view,
     "pg_catalog.pg_matviews",

@@ -15,14 +15,15 @@
 use std::sync::LazyLock;
 
 use mysql_async::Row as MysqlRow;
+use mysql_common::constants::ColumnFlags;
 use risingwave_common::catalog::Schema;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use thiserror_ext::AsReport;
 
 use crate::parser::utils::log_error;
 
-static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 use anyhow::anyhow;
 use chrono::NaiveDate;
 use risingwave_common::bail;
@@ -62,6 +63,44 @@ macro_rules! handle_data_type {
     }};
 }
 
+macro_rules! handle_data_type_with_signed {
+    (
+        $mysql_row:expr,
+        $mysql_datum_index:expr,
+        $column_name:expr,
+        $signed_type:ty,
+        $unsigned_type:ty
+    ) => {{
+        let column_flags = $mysql_row.columns()[$mysql_datum_index].flags();
+
+        if column_flags.contains(ColumnFlags::UNSIGNED_FLAG) {
+            // UNSIGNED type: use unsigned type conversion, then convert to signed
+            match $mysql_row.take_opt::<Option<$unsigned_type>, _>($mysql_datum_index) {
+                // Note: We are intentionally converting unsigned to signed here.
+                // For example, 18446251075179777772u64 will be converted to -492998529773844i64.
+                Some(Ok(Some(val))) => Ok(Some(ScalarImpl::from(val as $signed_type))),
+                Some(Ok(None)) => Ok(None),
+                Some(Err(e)) => Err(anyhow::Error::new(e.clone())
+                    .context("failed to deserialize MySQL value into rust value")
+                    .context(format!(
+                        "column: {}, index: {}, rust_type: {}",
+                        $column_name,
+                        $mysql_datum_index,
+                        stringify!($unsigned_type),
+                    ))),
+                None => bail!(
+                    "no value found at column: {}, index: {}",
+                    $column_name,
+                    $mysql_datum_index
+                ),
+            }
+        } else {
+            // SIGNED type: use default signed type conversion
+            handle_data_type!($mysql_row, $mysql_datum_index, $column_name, $signed_type)
+        }
+    }};
+}
+
 /// The decoding result can be interpreted as follows:
 /// Ok(value) => The value was found and successfully decoded.
 /// Err(error) => The value was found but could not be decoded,
@@ -80,7 +119,6 @@ pub fn mysql_datum_to_rw_datum(
             // before https://github.com/risingwavelabs/risingwave/pull/19071
             // we permit boolean and tinyint(1) to be equivalent to boolean in RW.
             if let Some(Ok(val)) = mysql_row.get_opt::<Option<bool>, _>(mysql_datum_index) {
-                let _ = mysql_row.take::<bool, _>(mysql_datum_index);
                 return Ok(val.map(ScalarImpl::from));
             }
             // Bit(1)
@@ -98,7 +136,7 @@ pub fn mysql_datum_to_rw_datum(
                         _ => Err(anyhow!("invalid value for boolean: {:?}", val)),
                     },
                 },
-                Some(Err(e)) => Err(anyhow::Error::new(e.clone())
+                Some(Err(e)) => Err(anyhow::Error::new(e)
                     .context("failed to deserialize MySQL value into rust value")
                     .context(format!(
                         "column: {}, index: {}, rust_type: Vec<u8>",
@@ -113,7 +151,7 @@ pub fn mysql_datum_to_rw_datum(
             handle_data_type!(mysql_row, mysql_datum_index, column_name, i32)
         }
         DataType::Int64 => {
-            handle_data_type!(mysql_row, mysql_datum_index, column_name, i64)
+            handle_data_type_with_signed!(mysql_row, mysql_datum_index, column_name, i64, u64)
         }
         DataType::Float32 => {
             handle_data_type!(mysql_row, mysql_datum_index, column_name, f32)
@@ -164,7 +202,7 @@ pub fn mysql_datum_to_rw_datum(
                 Some(Ok(val)) => Ok(val.map(|v| {
                     ScalarImpl::from(Timestamptz::from_micros(v.and_utc().timestamp_micros()))
                 })),
-                Some(Err(err)) => Err(anyhow::Error::new(err.clone())
+                Some(Err(err)) => Err(anyhow::Error::new(err)
                     .context("failed to deserialize MySQL value into rust value")
                     .context(format!(
                         "column: {}, index: {}, rust_type: chrono::NaiveDateTime",
@@ -179,7 +217,7 @@ pub fn mysql_datum_to_rw_datum(
                 mysql_datum_index
             ),
             Some(Ok(val)) => Ok(val.map(ScalarImpl::from)),
-            Some(Err(err)) => Err(anyhow::Error::new(err.clone())
+            Some(Err(err)) => Err(anyhow::Error::new(err)
                 .context("failed to deserialize MySQL value into rust value")
                 .context(format!(
                     "column: {}, index: {}, rust_type: Vec<u8>",
@@ -195,8 +233,8 @@ pub fn mysql_datum_to_rw_datum(
                 JsonbVal
             )
         }
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
-        DataType::Interval
+        DataType::Vector(_)
+        | DataType::Interval
         | DataType::Struct(_)
         | DataType::List(_)
         | DataType::Int256

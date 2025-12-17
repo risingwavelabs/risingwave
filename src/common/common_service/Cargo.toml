@@ -17,7 +17,7 @@ prometheus = { version = "0.14" }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = ["rt", "rt-multi-thread", "sync", "macros", "time", "signal"] }

@@ -38,6 +38,10 @@ mod tests {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
+                timestamp_handling: None,
+                time_handling: None,
+                bigint_unsigned_handling: None,
+                handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Maxwell,
         };

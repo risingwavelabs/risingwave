@@ -168,7 +168,7 @@ impl HopWindowExecutor {
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
-            assert!(data_chunk.is_compacted());
+            assert!(data_chunk.is_vis_compacted());
             let len = data_chunk.cardinality();
             for i in 0..units {
                 let window_start_col = if output_indices.contains(&window_start_col_index) {

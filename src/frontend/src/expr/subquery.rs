@@ -148,7 +148,7 @@ impl Expr for Subquery {
             SubqueryKind::Array => {
                 let types = self.query.data_types();
                 assert_eq!(types.len(), 1, "Subquery with more than one column");
-                DataType::List(types[0].clone().into())
+                DataType::list(types[0].clone())
             }
             _ => DataType::Boolean,
         }

@@ -15,6 +15,5 @@
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(error_generic_member_access)]
-#![feature(let_chains)]
 
 pub mod object;

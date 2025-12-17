@@ -160,7 +160,7 @@ impl StreamSourceScan {
             stream_key,
             operator_id: self.base.id().0 as u64,
             identity: self.distill_to_string(),
-            append_only: self.append_only(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
         })
     }
 }

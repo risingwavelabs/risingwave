@@ -161,6 +161,7 @@ impl HummockManager {
             match HummockObjectId::Sstable(0.into()) {
                 HummockObjectId::Sstable(_) => {}
                 HummockObjectId::VectorFile(_) => {}
+                HummockObjectId::HnswGraphFile(_) => {}
             };
             for (object_id, file_size) in version_delta
                 .newly_added_sst_infos(false)
@@ -200,6 +201,12 @@ impl HummockManager {
                             id: vector_file_id.inner(),
                             object_type: PbVectorIndexObjectType::VectorIndexObjectVector as _,
                         })
+                    }
+                    HummockObjectId::HnswGraphFile(graph_file_id) => {
+                        vector_files.push(PbVectorIndexObject {
+                            id: graph_file_id.inner(),
+                            object_type: PbVectorIndexObjectType::VectorIndexObjectHnswGraph as _,
+                        });
                     }
                 }
             }

@@ -33,7 +33,7 @@ create sink sink_non_exist_broker from t_kafka with (
 
 # Connection test clean-up finished
 
-statement error sink cannot be append-only
+statement error cannot be append-only
 create sink si_kafka_append_only from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
@@ -292,9 +292,8 @@ create sink si_kafka_without_snapshot from t_kafka with (
     snapshot = 'false',
 );
 
-sleep 2s
 
-query T
+query T retry 4 backoff 1s
 select rw_key from t_sink_text_id order by rw_key
 ----
 \x31

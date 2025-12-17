@@ -14,11 +14,12 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::session_config::join_encoding_type::JoinEncodingType;
 use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{DeltaExpression, HashJoinNode, PbInequalityPair};
+use risingwave_pb::stream_plan::{
+    DeltaExpression, HashJoinNode, PbInequalityPair, PbJoinEncodingType,
+};
 
 use super::generic::{GenericPlanNode, Join};
 use super::stream::prelude::*;
@@ -63,16 +64,13 @@ pub struct StreamHashJoin {
     /// `HashJoinExecutor`. If any equal condition is able to clean state table, this field
     /// will always be `None`.
     clean_right_state_conjunction_idx: Option<usize>,
-
-    /// Determine which encoding will be used to encode join rows in operator cache.
-    join_encoding_type: JoinEncodingType,
 }
 
 impl StreamHashJoin {
-    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Result<Self> {
         let ctx = core.ctx();
 
-        let stream_kind = core.stream_kind();
+        let stream_kind = core.stream_kind()?;
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),
@@ -213,7 +211,7 @@ impl StreamHashJoin {
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
             eq_join_predicate,
@@ -221,8 +219,7 @@ impl StreamHashJoin {
             is_append_only: stream_kind.is_append_only(),
             clean_left_state_conjunction_idx,
             clean_right_state_conjunction_idx,
-            join_encoding_type: ctx.session_ctx().config().streaming_join_encoding(),
-        }
+        })
     }
 
     /// Get join type
@@ -237,7 +234,7 @@ impl StreamHashJoin {
 
     /// Convert this hash join to a delta join plan
     pub fn into_delta_join(self) -> StreamDeltaJoin {
-        StreamDeltaJoin::new(self.core, self.eq_join_predicate)
+        StreamDeltaJoin::new(self.core, self.eq_join_predicate).unwrap()
     }
 
     pub fn derive_dist_key_in_join_key(&self) -> Vec<usize> {
@@ -321,7 +318,7 @@ impl PlanTreeNodeBinary<Stream> for StreamHashJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone())
+        Self::new(core, self.eq_join_predicate.clone()).unwrap()
     }
 }
 
@@ -414,7 +411,9 @@ impl StreamNode for StreamHashJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             is_append_only: self.is_append_only,
-            join_encoding_type: self.join_encoding_type as i32,
+            // Join encoding type should now be read from per-job config override.
+            #[allow(deprecated)]
+            join_encoding_type: PbJoinEncodingType::Unspecified as _,
         }))
     }
 }
@@ -427,7 +426,9 @@ impl ExprRewritable<Stream> for StreamHashJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+        Self::new(core, self.eq_join_predicate.rewrite_exprs(r))
+            .unwrap()
+            .into()
     }
 }
 

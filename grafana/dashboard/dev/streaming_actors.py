@@ -254,8 +254,8 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_percentage(
-                    "Join Actor Match Duration Per Second",
+                panels.timeseries_actor_latency(
+                    "Join Actor Match Duration Per Chunk/Barrier",
                     "",
                     [
                         panels.target(

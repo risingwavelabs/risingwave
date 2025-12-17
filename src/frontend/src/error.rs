@@ -91,6 +91,13 @@ pub enum ErrorCode {
         #[backtrace]
         ArrayError,
     ),
+    #[cfg(feature = "datafusion")]
+    #[error("DataFusion error: {0}")]
+    DataFusionError(
+        #[from]
+        #[backtrace]
+        datafusion_common::DataFusionError,
+    ),
     #[error("Stream error: {0}")]
     StreamError(
         #[backtrace]
@@ -145,7 +152,7 @@ pub enum ErrorCode {
     #[error("Item not found: {0}")]
     ItemNotFound(String),
     #[error("Invalid input syntax: {0}")]
-    InvalidInputSyntax(String),
+    InvalidInputSyntax(#[message] String),
     #[error("Can not compare in memory: {0}")]
     MemComparableError(#[from] memcomparable::Error),
     #[error("Error while de/se values: {0}")]

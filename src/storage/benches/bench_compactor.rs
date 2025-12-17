@@ -18,7 +18,7 @@ use std::sync::Arc;
 
 use criterion::async_executor::FuturesExecutor;
 use criterion::{Criterion, criterion_group, criterion_main};
-use foyer::{CacheBuilder, Engine, Hint, HybridCacheBuilder, LargeEngineOptions};
+use foyer::{CacheBuilder, Hint, HybridCacheBuilder};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
 use risingwave_common::hash::VirtualNode;
@@ -44,6 +44,7 @@ use risingwave_storage::hummock::iterator::{
 use risingwave_storage::hummock::multi_builder::{
     CapacitySplitTableBuilder, LocalTableBuilderFactory,
 };
+use risingwave_storage::hummock::none::NoneRecentFilter;
 use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
@@ -65,14 +66,14 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
-        .storage(Engine::Large(LargeEngineOptions::new()))
+        .storage()
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
         .with_shards(2)
-        .storage(Engine::Large(LargeEngineOptions::new()))
+        .storage()
         .build()
         .await
         .unwrap();
@@ -82,9 +83,10 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
-        recent_filter: None,
+        recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
+        skip_bloom_filter_in_serde: false,
 
         meta_cache,
         block_cache,
@@ -372,7 +374,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         b.to_async(&runtime).iter(|| {
             let sub_iters = vec![
                 ConcatSstableIterator::new(
-                    vec![0],
+                    vec![0.into()],
                     level1.clone(),
                     KeyRange::inf(),
                     sstable_store.clone(),
@@ -380,7 +382,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     0,
                 ),
                 ConcatSstableIterator::new(
-                    vec![0],
+                    vec![0.into()],
                     level2.clone(),
                     KeyRange::inf(),
                     sstable_store.clone(),
@@ -463,13 +465,13 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
 
     let mut task_config_schema = task_config_no_schema.clone();
     task_config_schema.table_schemas.insert(
-        10,
+        10.into(),
         PbTableSchema {
             column_ids: (0..column_num as i32).collect(),
         },
     );
     task_config_schema.table_schemas.insert(
-        11,
+        11.into(),
         PbTableSchema {
             column_ids: (0..column_num as i32).collect(),
         },
@@ -477,13 +479,13 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
 
     let mut task_config_schema_cause_drop = task_config_no_schema.clone();
     task_config_schema_cause_drop.table_schemas.insert(
-        10,
+        10.into(),
         PbTableSchema {
             column_ids: (0..column_num as i32 / 2).collect(),
         },
     );
     task_config_schema_cause_drop.table_schemas.insert(
-        11,
+        11.into(),
         PbTableSchema {
             column_ids: (0..column_num as i32 / 2).collect(),
         },
@@ -492,7 +494,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
     let get_iter = || {
         let sub_iters = vec![
             ConcatSstableIterator::new(
-                vec![10, 11],
+                vec![10.into(), 11.into()],
                 level1.clone(),
                 KeyRange::inf(),
                 sstable_store.clone(),
@@ -500,7 +502,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
                 0,
             ),
             ConcatSstableIterator::new(
-                vec![10, 11],
+                vec![10.into(), 11.into()],
                 level2.clone(),
                 KeyRange::inf(),
                 sstable_store.clone(),

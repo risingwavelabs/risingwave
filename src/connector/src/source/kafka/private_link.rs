@@ -22,7 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::connection::PrivateLinkService;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 
 use crate::connector_common::{
     AwsPrivateLinkItem, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,

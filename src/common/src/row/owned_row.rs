@@ -162,12 +162,21 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
         RowDeserializer { data_types }
     }
 
-    /// Deserialize the row from value encoding bytes.
-    pub fn deserialize(&self, mut data: impl bytes::Buf) -> value_encoding::Result<OwnedRow> {
-        let mut values = Vec::with_capacity(self.data_types().len());
+    pub fn deserialize_to(
+        &self,
+        mut data: impl bytes::Buf,
+        values: &mut Vec<Datum>,
+    ) -> value_encoding::Result<()> {
         for typ in self.data_types() {
             values.push(deserialize_datum(&mut data, typ)?);
         }
+        Ok(())
+    }
+
+    /// Deserialize the row from value encoding bytes.
+    pub fn deserialize(&self, data: impl bytes::Buf) -> value_encoding::Result<OwnedRow> {
+        let mut values = Vec::with_capacity(self.data_types().len());
+        self.deserialize_to(data, &mut values)?;
         Ok(OwnedRow(values.into()))
     }
 

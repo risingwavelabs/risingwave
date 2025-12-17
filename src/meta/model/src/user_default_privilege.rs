@@ -13,12 +13,13 @@
 // limitations under the License.
 
 use sea_orm::entity::prelude::*;
+use serde::{Deserialize, Serialize};
 
 use crate::object::ObjectType;
 use crate::user_privilege::Action;
 use crate::{DatabaseId, DefaultPrivilegeId, SchemaId, UserId};
 
-#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq)]
+#[derive(Clone, Debug, PartialEq, DeriveEntityModel, Eq, Serialize, Deserialize)]
 #[sea_orm(table_name = "user_default_privilege")]
 pub struct Model {
     #[sea_orm(primary_key)]

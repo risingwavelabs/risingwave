@@ -12,7 +12,7 @@ anyhow = "1"
 bincode = "1"
 easy-ext = "1"
 iceberg = { workspace = true }
-serde = "1"
+serde = { workspace = true }
 serde-error = "0.1"
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }

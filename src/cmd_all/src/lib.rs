@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
-
 mod common;
 mod standalone;
 
@@ -24,3 +22,4 @@ pub use standalone::*;
 
 risingwave_batch_executors::enable!();
 risingwave_expr_impl::enable!();
+risingwave_jni_core::enable!();

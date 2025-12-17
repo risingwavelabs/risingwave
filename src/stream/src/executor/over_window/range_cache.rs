@@ -15,8 +15,8 @@
 use std::collections::BTreeMap;
 use std::ops::{Bound, RangeInclusive};
 
+use risingwave_common::config::streaming::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::Sentinelled;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
@@ -365,7 +365,6 @@ impl EstimateSize for PartitionCache {
 #[cfg(test)]
 mod tests {
     use risingwave_common::row::OwnedRow;
-    use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
     use risingwave_common::types::{DefaultOrdered, ScalarImpl};
     use risingwave_common::util::memcmp_encoding::encode_value;
     use risingwave_common::util::sort_util::OrderType;

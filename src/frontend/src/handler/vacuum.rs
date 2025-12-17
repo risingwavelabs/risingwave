@@ -25,6 +25,7 @@ use crate::handler::{HandlerArgs, RwPgResponse};
 pub async fn handle_vacuum(
     handler_args: HandlerArgs,
     object_name: ObjectName,
+    full: bool,
 ) -> Result<RwPgResponse> {
     let session = &handler_args.session;
     let db_name = &session.database();
@@ -65,7 +66,7 @@ pub async fn handle_vacuum(
                         ))
                     })?;
 
-                sink.id.sink_id()
+                sink.id
             } else {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "VACUUM can only be used on Iceberg engine tables or Iceberg sinks, but table '{}' uses {:?} engine",
@@ -79,7 +80,7 @@ pub async fn handle_vacuum(
         {
             if let Some(connector_type) = sink.properties.get(CONNECTOR_TYPE_KEY) {
                 if connector_type == "iceberg" {
-                    sink.id.sink_id()
+                    sink.id
                 } else {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "VACUUM can only be used on Iceberg sinks, but sink '{}' is of type '{}'",
@@ -99,10 +100,25 @@ pub async fn handle_vacuum(
         }
     };
 
-    session
-        .env()
-        .meta_client()
-        .compact_iceberg_table(sink_id)
-        .await?;
+    if full {
+        // VACUUM FULL: perform compaction followed by snapshot expiration
+        session
+            .env()
+            .meta_client()
+            .compact_iceberg_table(sink_id)
+            .await?;
+        session
+            .env()
+            .meta_client()
+            .expire_iceberg_table_snapshots(sink_id)
+            .await?;
+    } else {
+        // Regular VACUUM: only expire snapshots
+        session
+            .env()
+            .meta_client()
+            .expire_iceberg_table_snapshots(sink_id)
+            .await?;
+    }
     Ok(PgResponse::builder(StatementType::VACUUM).into())
 }

@@ -30,10 +30,10 @@ use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::{GIT_SHA, RW_VERSION};
 use risingwave_common_heap_profiling::HeapProfiler;
 use risingwave_common_service::{MetricsManager, ObserverManager};
-use risingwave_jni_core::jvm_runtime::register_jvm_builder;
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::compactor::compactor_service_server::CompactorServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_rpc_client::{GrpcCompactorProxyClient, MetaClient};
@@ -57,7 +57,10 @@ use tracing::info;
 use super::compactor_observer::observer_manager::CompactorObserverNode;
 use crate::rpc::{CompactorServiceImpl, MonitorServiceImpl};
 use crate::telemetry::CompactorTelemetryCreator;
-use crate::{CompactorMode, CompactorOpts};
+use crate::{
+    CompactorMode, CompactorOpts, default_rpc_max_decoding_message_size_bytes,
+    default_rpc_max_encoding_message_size_bytes,
+};
 
 pub async fn prepare_start_parameters(
     compactor_opts: &CompactorOpts,
@@ -196,13 +199,31 @@ pub async fn compactor_serve(
         if cfg!(debug_assertions) { "on" } else { "off" }
     );
     info!("> version: {} ({})", RW_VERSION, GIT_SHA);
+
+    let is_iceberg_compactor = matches!(
+        compactor_mode,
+        CompactorMode::DedicatedIceberg | CompactorMode::SharedIceberg
+    );
+
+    let compaction_executor = Arc::new(CompactionExecutor::new(
+        opts.compaction_worker_threads_number,
+    ));
+
+    let max_task_parallelism: u32 = (compaction_executor.worker_num() as f32
+        * config.storage.compactor_max_task_multiplier)
+        .ceil() as u32;
+
     // Register to the cluster.
     let (meta_client, system_params_reader) = MetaClient::register_new(
         opts.meta_address.clone(),
         WorkerType::Compactor,
         &advertise_addr,
-        Default::default(),
-        &config.meta,
+        Property {
+            is_iceberg_compactor,
+            parallelism: max_task_parallelism,
+            ..Default::default()
+        },
+        Arc::new(config.meta.clone()),
     )
     .await;
 
@@ -248,10 +269,6 @@ pub async fn compactor_serve(
         storage_opts.sstable_id_remote_fetch_number,
     ));
 
-    let compaction_executor = Arc::new(CompactionExecutor::new(
-        opts.compaction_worker_threads_number,
-    ));
-
     let compactor_context = CompactorContext {
         storage_opts,
         sstable_store: sstable_store.clone(),
@@ -278,8 +295,6 @@ pub async fn compactor_serve(
             ),
             CompactorMode::Shared => unreachable!(),
             CompactorMode::DedicatedIceberg => {
-                register_jvm_builder();
-
                 risingwave_storage::hummock::compactor::start_iceberg_compactor(
                     compactor_context.clone(),
                     hummock_meta_client.clone(),
@@ -393,8 +408,20 @@ pub async fn shared_compactor_serve(
         compactor_context,
     );
 
+    let rpc_max_encoding_message_size_bytes = opts
+        .rpc_max_encoding_message_size_bytes
+        .unwrap_or(default_rpc_max_encoding_message_size_bytes());
+
+    let rpc_max_decoding_message_size_bytes = opts
+        .rpc_max_decoding_message_size_bytes
+        .unwrap_or(default_rpc_max_decoding_message_size_bytes());
+
     let server = tonic::transport::Server::builder()
-        .add_service(CompactorServiceServer::new(compactor_srv))
+        .add_service(
+            CompactorServiceServer::new(compactor_srv)
+                .max_decoding_message_size(rpc_max_decoding_message_size_bytes)
+                .max_encoding_message_size(rpc_max_encoding_message_size_bytes),
+        )
         .add_service(MonitorServiceServer::new(monitor_srv))
         .monitored_serve_with_shutdown(
             listen_addr,

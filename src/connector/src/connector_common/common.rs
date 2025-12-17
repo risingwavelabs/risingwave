@@ -16,6 +16,7 @@ use std::collections::BTreeMap;
 use std::hash::Hash;
 use std::io::Write;
 use std::path::Path;
+use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
@@ -23,12 +24,14 @@ use async_nats::jetstream::consumer::DeliverPolicy;
 use async_nats::jetstream::{self};
 use aws_sdk_kinesis::Client as KinesisClient;
 use aws_sdk_kinesis::config::{AsyncSleep, SharedAsyncSleep, Sleep};
+use moka::future::Cache as MokaCache;
+use moka::ops::compute::Op;
 use phf::{Set, phf_set};
 use pulsar::authentication::oauth2::{OAuth2Authentication, OAuth2Params};
 use pulsar::{Authentication, Pulsar, TokioExecutor};
 use rdkafka::ClientConfig;
 use risingwave_common::bail;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::json::JsonString;
 use serde_with::{DisplayFromStr, serde_as};
 use tempfile::NamedTempFile;
@@ -812,6 +815,28 @@ impl KinesisCommon {
     }
 }
 
+/// Connection properties for NATS, used as a cache key for shared clients.
+/// This includes all properties that affect the connection itself (not stream/subject specific).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct NatsConnectionProps {
+    pub server_url: String,
+    pub connect_mode: String,
+    pub user: Option<String>,
+    pub password: Option<String>,
+    pub jwt: Option<String>,
+    pub nkey: Option<String>,
+}
+
+/// Shared NATS client cache.
+/// Client connections are cached as `Weak` pointers in the cache.
+/// NATS Connector can access this cache to reuse existing client connections,
+/// and avoid exhausting host machine ports.
+/// When reading from the cache, the connector should `upgrade` the weak pointer to an `Arc` reference.
+/// After all strong (Arc) references are dropped, the client connection will be cleaned up.
+/// Cache eviction naturally takes care of the dangling weak pointers.
+pub static SHARED_NATS_CLIENT: LazyLock<MokaCache<NatsConnectionProps, Weak<async_nats::Client>>> =
+    LazyLock::new(|| MokaCache::builder().build());
+
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct NatsCommon {
@@ -858,7 +883,20 @@ impl EnforceSecret for NatsCommon {
 }
 
 impl NatsCommon {
-    pub(crate) async fn build_client(&self) -> ConnectorResult<async_nats::Client> {
+    /// Extract connection properties that can be used as a cache key.
+    pub fn connection_props(&self) -> NatsConnectionProps {
+        NatsConnectionProps {
+            server_url: self.server_url.clone(),
+            connect_mode: self.connect_mode.clone(),
+            user: self.user.clone(),
+            password: self.password.clone(),
+            jwt: self.jwt.clone(),
+            nkey: self.nkey.clone(),
+        }
+    }
+
+    /// Build a new NATS client without caching.
+    async fn build_client_inner(&self) -> ConnectorResult<async_nats::Client> {
         let mut connect_options = async_nats::ConnectOptions::new();
         match self.connect_mode.as_str() {
             "user_and_password" => {
@@ -901,12 +939,63 @@ impl NatsCommon {
         Ok(client)
     }
 
+    /// Build a NATS client, attempting to reuse an existing cached client if available.
+    /// See `SHARED_NATS_CLIENT` for more details.
+    pub(crate) async fn build_client(&self) -> ConnectorResult<Arc<async_nats::Client>> {
+        let connection_props = self.connection_props();
+        let mut client: Option<Arc<async_nats::Client>> = None;
+
+        SHARED_NATS_CLIENT
+            .entry_by_ref(&connection_props)
+            .and_try_compute_with::<_, _, crate::error::ConnectorError>(|maybe_entry| async {
+                if let Some(entry) = maybe_entry
+                    && let entry_value = entry.into_value()
+                    && let Some(existing_client) = entry_value.upgrade()
+                {
+                    match existing_client.connection_state() {
+                        async_nats::connection::State::Connected => {
+                            tracing::info!("reuse existing nats client for {}", self.server_url);
+                            client = Some(existing_client);
+                            return Ok(Op::Nop);
+                        }
+                        _ => {
+                            tracing::warn!(
+                                server_url = self.server_url,
+                                "existing nats client is not connected",
+                            );
+                        }
+                    }
+                }
+                tracing::info!(
+                    server_url = self.server_url,
+                    "no cached client, or client disconnected, building new nats client"
+                );
+                let new_client = Arc::new(self.build_client_inner().await?);
+                client = Some(new_client.clone());
+                Ok(Op::Put(Arc::downgrade(&new_client)))
+            })
+            .await?;
+
+        Ok(client.expect("client should be set"))
+    }
+
     pub(crate) async fn build_context(&self) -> ConnectorResult<jetstream::Context> {
         let client = self.build_client().await?;
-        let jetstream = async_nats::jetstream::new(client);
+        let jetstream = async_nats::jetstream::new((*client).clone());
         Ok(jetstream)
     }
 
+    /// Build a `JetStream` context using a pre-existing client.
+    pub(crate) fn build_context_from_client(
+        client: &Arc<async_nats::Client>,
+    ) -> jetstream::Context {
+        async_nats::jetstream::new((**client).clone())
+    }
+
+    /// Build a NATS `JetStream` consumer.
+    ///
+    /// If `existing_client` is provided, it will be used instead of creating/fetching a new one.
+    /// This allows callers to reuse a client they already hold.
     pub(crate) async fn build_consumer(
         &self,
         stream: String,
@@ -914,10 +1003,16 @@ impl NatsCommon {
         split_id: String,
         start_sequence: NatsOffset,
         mut config: jetstream::consumer::pull::Config,
-    ) -> ConnectorResult<
+        existing_client: Option<Arc<async_nats::Client>>,
+    ) -> ConnectorResult<(
         async_nats::jetstream::consumer::Consumer<async_nats::jetstream::consumer::pull::Config>,
-    > {
-        let context = self.build_context().await?;
+        Arc<async_nats::Client>,
+    )> {
+        let client = match existing_client {
+            Some(c) => c,
+            None => self.build_client().await?,
+        };
+        let context = Self::build_context_from_client(&client);
         let stream = self.build_or_get_stream(context.clone(), stream).await?;
         let subject_name = self
             .subject
@@ -958,7 +1053,7 @@ impl NatsCommon {
                     .await?
             }
         };
-        Ok(consumer)
+        Ok((consumer, client))
     }
 
     pub(crate) async fn build_or_get_stream(

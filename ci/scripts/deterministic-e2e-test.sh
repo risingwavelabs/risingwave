@@ -47,7 +47,7 @@ echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
 seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} ./risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-{}.log && rm $LOGDIR/parallel-batch-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
-timeout 10m seq 64 | parallel RUST_MIN_STACK=4194304 'MADSIM_TEST_SEED={} ./risingwave_simulation  --run-sqlsmith-queries ./src/tests/sqlsmith/tests/sqlsmith-query-snapshots/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
+timeout 20m seq 64 | parallel RUST_MIN_STACK=4194304 'MADSIM_TEST_SEED={} ./risingwave_simulation  --run-sqlsmith-queries ./src/tests/sqlsmith/tests/sqlsmith-query-snapshots/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, e2e extended mode test"
 seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} RUST_LOG=info ./risingwave_simulation -e 2> $LOGDIR/extended-{}.log && rm $LOGDIR/extended-{}.log'

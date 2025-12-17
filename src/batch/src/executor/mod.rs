@@ -29,7 +29,6 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_pb::batch_plan::PlanNode;
 use risingwave_pb::batch_plan::plan_node::NodeBodyDiscriminants;
-use risingwave_pb::common::BatchQueryEpoch;
 use thiserror_ext::AsReport;
 
 use crate::error::Result;
@@ -78,7 +77,6 @@ pub struct ExecutorBuilder<'a> {
     pub plan_node: &'a PlanNode,
     pub task_id: &'a TaskId,
     context: Arc<dyn BatchTaskContext>,
-    epoch: BatchQueryEpoch,
     shutdown_rx: ShutdownToken,
 }
 
@@ -87,14 +85,12 @@ impl<'a> ExecutorBuilder<'a> {
         plan_node: &'a PlanNode,
         task_id: &'a TaskId,
         context: Arc<dyn BatchTaskContext>,
-        epoch: BatchQueryEpoch,
         shutdown_rx: ShutdownToken,
     ) -> Self {
         Self {
             plan_node,
             task_id,
             context,
-            epoch,
             shutdown_rx,
         }
     }
@@ -105,7 +101,6 @@ impl<'a> ExecutorBuilder<'a> {
             plan_node,
             self.task_id,
             self.context.clone(),
-            self.epoch,
             self.shutdown_rx.clone(),
         )
     }
@@ -116,10 +111,6 @@ impl<'a> ExecutorBuilder<'a> {
 
     pub fn context(&self) -> &Arc<dyn BatchTaskContext> {
         &self.context
-    }
-
-    pub fn epoch(&self) -> BatchQueryEpoch {
-        self.epoch
     }
 
     pub fn shutdown_rx(&self) -> &ShutdownToken {
@@ -208,7 +199,6 @@ impl ExecutorBuilder<'_> {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_hummock_sdk::test_batch_query_epoch;
     use risingwave_pb::batch_plan::PlanNode;
 
     use crate::executor::ExecutorBuilder;
@@ -226,7 +216,6 @@ mod tests {
             &plan_node,
             task_id,
             ComputeNodeContext::for_test(),
-            test_batch_query_epoch(),
             ShutdownToken::empty(),
         );
         let child_plan = &PlanNode::default();

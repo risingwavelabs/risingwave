@@ -16,12 +16,14 @@ use std::collections::HashMap;
 use std::time::Duration;
 
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::id::SourceId;
+use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
-    BoxSourceChunkStream, ConnectorState, CreateSplitReaderResult, SourceContext, SourceCtrlOpts,
-    SplitMetaData, StreamChunkWithState,
+    BoxSourceChunkStream, CdcAutoSchemaChangeFailCallback, ConnectorState, CreateSplitReaderResult,
+    SourceContext, SourceCtrlOpts, SplitMetaData, StreamChunkWithState,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::{mpsc, oneshot};
@@ -30,10 +32,15 @@ use super::{apply_rate_limit, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 
+type AutoSchemaChangeSetup = (
+    Option<mpsc::Sender<(SchemaChangeEnvelope, oneshot::Sender<()>)>>,
+    Option<CdcAutoSchemaChangeFailCallback>,
+);
+
 pub(crate) struct StreamReaderBuilder {
     pub source_desc: SourceDesc,
     pub rate_limit: Option<u32>,
-    pub source_id: TableId,
+    pub source_id: SourceId,
     pub source_name: String,
     pub reader_stream: Option<BoxSourceChunkStream>,
 
@@ -43,17 +50,10 @@ pub(crate) struct StreamReaderBuilder {
 }
 
 impl StreamReaderBuilder {
-    fn prepare_source_stream_build(&self) -> (Vec<ColumnId>, SourceContext) {
-        let column_ids = self
-            .source_desc
-            .columns
-            .iter()
-            .map(|column_desc| column_desc.column_id)
-            .collect_vec();
-
-        let (schema_change_tx, mut schema_change_rx) =
-            mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
-        let schema_change_tx = if self.is_auto_schema_change_enable {
+    fn setup_auto_schema_change(&self) -> AutoSchemaChangeSetup {
+        if self.is_auto_schema_change_enable {
+            let (schema_change_tx, mut schema_change_rx) =
+                mpsc::channel::<(SchemaChangeEnvelope, oneshot::Sender<()>)>(16);
             let meta_client = self.actor_ctx.meta_client.clone();
             // spawn a task to handle schema change event from source parser
             let _join_handle = tokio::task::spawn(async move {
@@ -78,19 +78,69 @@ impl StreamReaderBuilder {
                                 tracing::error!(
                                     target: "auto_schema_change",
                                     error = %e.as_report(), "schema change error");
+
                                 finish_tx.send(()).unwrap();
                             }
                         }
                     }
                 }
             });
-            Some(schema_change_tx)
+
+            // Create callback function for reporting CDC auto schema change fail events
+            let on_cdc_auto_schema_change_failure = if let Some(ref meta_client) =
+                self.actor_ctx.meta_client
+            {
+                let meta_client = meta_client.clone();
+                Some(CdcAutoSchemaChangeFailCallback::new(
+                    move |source_id: SourceId,
+                          table_name: String,
+                          cdc_table_id: String,
+                          upstream_ddl: String,
+                          fail_info: String| {
+                        let meta_client = meta_client.clone();
+                        tokio::spawn(async move {
+                            if let Err(e) = meta_client
+                                .add_cdc_auto_schema_change_fail_event(
+                                    source_id,
+                                    table_name,
+                                    cdc_table_id,
+                                    upstream_ddl,
+                                    fail_info,
+                                )
+                                .await
+                            {
+                                tracing::warn!(
+                                    error = %e.as_report(),
+                                    %source_id,
+                                    "Failed to add CDC auto schema change fail event to event log."
+                                );
+                            }
+                        });
+                    },
+                ))
+            } else {
+                None
+            };
+
+            (Some(schema_change_tx), on_cdc_auto_schema_change_failure)
         } else {
             info!("auto schema change is disabled in config");
-            None
-        };
+            (None, None)
+        }
+    }
 
-        let source_ctx = SourceContext::new(
+    fn prepare_source_stream_build(&self) -> (Vec<ColumnId>, SourceContext) {
+        let column_ids = self
+            .source_desc
+            .columns
+            .iter()
+            .map(|column_desc| column_desc.column_id)
+            .collect_vec();
+        debug_assert!(column_ids.iter().all_unique(), "column_ids must be unique");
+
+        let (schema_change_tx, on_cdc_auto_schema_change_failure) = self.setup_auto_schema_change();
+
+        let source_ctx = SourceContext::new_with_auto_schema_change_callback(
             self.actor_ctx.id,
             self.source_id,
             self.actor_ctx.fragment_id,
@@ -102,6 +152,7 @@ impl StreamReaderBuilder {
             },
             self.source_desc.source.config.clone(),
             schema_change_tx,
+            on_cdc_auto_schema_change_failure,
         );
 
         (column_ids, source_ctx)
@@ -145,7 +196,7 @@ impl StreamReaderBuilder {
             }
         };
 
-        let (Some(split_idx), Some(offset_idx)) =
+        let (Some(split_idx), Some(offset_idx), _) =
             get_split_offset_col_idx(&self.source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
@@ -179,13 +230,19 @@ impl StreamReaderBuilder {
                 if is_initial_build {
                     return Err(StreamExecutorError::connector_error(e));
                 } else {
-                    tracing::warn!(
+                    tracing::error!(
                         error = %e.as_report(),
                         source_name = self.source_name,
-                        source_id = self.source_id.table_id,
-                        actor_id = self.actor_ctx.id,
+                        source_id = %self.source_id,
+                        actor_id = %self.actor_ctx.id,
                         "build stream source reader error, retry in 1s"
                     );
+                    GLOBAL_ERROR_METRICS.user_source_error.report([
+                        e.variant_name().to_owned(),
+                        self.source_id.to_string(),
+                        self.source_name.clone(),
+                        self.actor_ctx.fragment_id.to_string(),
+                    ]);
                     tokio::time::sleep(Duration::from_secs(1)).await;
                     continue 'build_consume_loop;
                 }
@@ -198,7 +255,9 @@ impl StreamReaderBuilder {
             'consume: for msg in stream {
                 match msg {
                     Ok(msg) => {
-                        for (_, row) in msg.rows() {
+                        // All rows (including those visible or invisible) will be used to update the source offset.
+                        for i in 0..msg.capacity() {
+                            let (_, row, _) = msg.row_at(i);
                             let split = row.datum_at(split_idx).unwrap().into_utf8();
                             let offset = row.datum_at(offset_idx).unwrap().into_utf8();
                             latest_splits_info
@@ -208,13 +267,19 @@ impl StreamReaderBuilder {
                         yield (msg, latest_splits_info.clone());
                     }
                     Err(e) => {
-                        tracing::warn!(
+                        tracing::error!(
                             error = %e.as_report(),
                             source_name = self.source_name,
-                            source_id = self.source_id.table_id,
-                            actor_id = self.actor_ctx.id,
+                            source_id = %self.source_id,
+                            actor_id = %self.actor_ctx.id,
                             "stream source reader error"
                         );
+                        GLOBAL_ERROR_METRICS.user_source_error.report([
+                            e.variant_name().to_owned(),
+                            self.source_id.to_string(),
+                            self.source_name.clone(),
+                            self.actor_ctx.fragment_id.to_string(),
+                        ]);
                         is_error = true;
                         break 'consume;
                     }

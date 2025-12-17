@@ -25,7 +25,7 @@ use pgwire::pg_server::SessionId;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::array::DataChunk;
 use risingwave_pb::batch_plan::{TaskId as PbTaskId, TaskOutputId as PbTaskOutputId};
-use risingwave_pb::common::{BatchQueryEpoch, HostAddress};
+use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{Receiver, Sender, channel};
@@ -125,7 +125,6 @@ impl QueryExecution {
         self: Arc<Self>,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
-        batch_query_epoch: BatchQueryEpoch,
         compute_client_pool: ComputeClientPoolRef,
         catalog_reader: CatalogReader,
         query_execution_info: QueryExecutionInfoRef,
@@ -138,7 +137,6 @@ impl QueryExecution {
         // reference of `pinned_snapshot`. Its ownership will be moved into `QueryRunner` so that it
         // can control when to release the snapshot.
         let stage_executions = self.gen_stage_executions(
-            batch_query_epoch,
             context.clone(),
             worker_node_manager,
             compute_client_pool.clone(),
@@ -180,11 +178,8 @@ impl QueryExecution {
                     timeout_abort_task_handle,
                 };
 
-                let span = tracing::info_span!(
-                    "distributed_execute",
-                    query_id = self.query.query_id.id,
-                    epoch = ?batch_query_epoch,
-                );
+                let span =
+                    tracing::info_span!("distributed_execute", query_id = self.query.query_id.id,);
 
                 tracing::trace!("Starting query: {:?}", self.query.query_id);
 
@@ -226,7 +221,6 @@ impl QueryExecution {
 
     fn gen_stage_executions(
         &self,
-        epoch: BatchQueryEpoch,
         context: ExecutionContextRef,
         worker_node_manager: WorkerNodeSelector,
         compute_client_pool: ComputeClientPoolRef,
@@ -245,8 +239,8 @@ impl QueryExecution {
                 .collect::<Vec<Arc<StageExecution>>>();
 
             let stage_exec = Arc::new(StageExecution::new(
-                epoch,
-                self.query.stage_graph.stages[&stage_id].clone(),
+                stage_id,
+                self.query.clone(),
                 worker_node_manager.clone(),
                 self.shutdown_tx.clone(),
                 children_stages,
@@ -392,7 +386,7 @@ impl QueryRunner {
         let root_task_output_id = {
             let root_task_id_prost = PbTaskId {
                 query_id: self.query.query_id.clone().id,
-                stage_id: self.query.root_stage_id(),
+                stage_id: self.query.root_stage_id().into(),
                 task_id: ROOT_TASK_ID,
             };
 
@@ -466,7 +460,7 @@ impl QueryRunner {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use std::collections::{HashMap, HashSet};
+    use std::collections::HashMap;
     use std::sync::{Arc, RwLock};
 
     use fixedbitset::FixedBitSet;
@@ -497,9 +491,7 @@ pub(crate) mod tests {
     use crate::optimizer::property::{Cardinality, Distribution, Order};
     use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
-    use crate::scheduler::{
-        DistributedQueryMetrics, ExecutionContext, QueryExecutionInfo, ReadSnapshot,
-    };
+    use crate::scheduler::{DistributedQueryMetrics, ExecutionContext, QueryExecutionInfo};
     use crate::session::SessionImpl;
     use crate::utils::Condition;
 
@@ -522,9 +514,6 @@ pub(crate) mod tests {
                 .start(
                     ExecutionContext::new(SessionImpl::mock().into(), None).into(),
                     worker_node_selector,
-                    ReadSnapshot::ReadUncommitted
-                        .batch_query_epoch(&HashSet::from_iter([0.into()]))
-                        .unwrap(),
                     compute_client_pool,
                     catalog_reader,
                     query_execution_info,
@@ -549,8 +538,8 @@ pub(crate) mod tests {
 
         let table_catalog: TableCatalog = TableCatalog {
             id: table_id,
-            schema_id: 0,
-            database_id: 0,
+            schema_id: 0.into(),
+            database_id: 0.into(),
             associated_source_id: None,
             name: "test".to_owned(),
             refreshable: false,
@@ -575,14 +564,14 @@ pub(crate) mod tests {
             append_only: false,
             owner: DEFAULT_SUPER_USER_ID,
             retention_seconds: None,
-            fragment_id: 0,        // FIXME
+            fragment_id: 0.into(), // FIXME
             dml_fragment_id: None, // FIXME
             vnode_col_index: None,
             row_id_index: None,
             value_indices: vec![0, 1, 2],
             definition: "".to_owned(),
             conflict_behavior: ConflictBehavior::NoCheck,
-            version_column_index: None,
+            version_column_indices: vec![],
             read_prefix_len_hint: 0,
             version: None,
             watermark_columns: FixedBitSet::with_capacity(3),
@@ -594,7 +583,6 @@ pub(crate) mod tests {
             stream_job_status: StreamJobStatus::Creating,
             create_type: CreateType::Foreground,
             description: None,
-            incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             cdc_table_id: None,
@@ -603,6 +591,9 @@ pub(crate) mod tests {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
+            vector_index_info: None,
+            cdc_table_type: None,
         };
         let batch_plan_node = LogicalScan::create(table_catalog.into(), ctx, None)
             .to_batch()
@@ -668,7 +659,7 @@ pub(crate) mod tests {
         .into();
 
         let worker1 = WorkerNode {
-            id: 0,
+            id: 0.into(),
             r#type: WorkerType::ComputeNode as i32,
             host: Some(HostAddress {
                 host: "127.0.0.1".to_owned(),
@@ -686,7 +677,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let worker2 = WorkerNode {
-            id: 1,
+            id: 1.into(),
             r#type: WorkerType::ComputeNode as i32,
             host: Some(HostAddress {
                 host: "127.0.0.1".to_owned(),
@@ -704,7 +695,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let worker3 = WorkerNode {
-            id: 2,
+            id: 2.into(),
             r#type: WorkerType::ComputeNode as i32,
             host: Some(HostAddress {
                 host: "127.0.0.1".to_owned(),
@@ -724,19 +715,21 @@ pub(crate) mod tests {
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        let mapping =
-            WorkerSlotMapping::new_uniform(std::iter::once(WorkerSlotId::new(0, 0)), vnode_count);
-        worker_node_manager.insert_streaming_fragment_mapping(0, mapping.clone());
-        worker_node_manager.set_serving_fragment_mapping(vec![(0, mapping)].into_iter().collect());
+        let mapping = WorkerSlotMapping::new_uniform(
+            std::iter::once(WorkerSlotId::new(0.into(), 0)),
+            vnode_count,
+        );
+        worker_node_manager.insert_streaming_fragment_mapping(0.into(), mapping.clone());
+        worker_node_manager
+            .set_serving_fragment_mapping(vec![(0.into(), mapping)].into_iter().collect());
         let catalog = Arc::new(parking_lot::RwLock::new(Catalog::default()));
-        catalog.write().insert_table_id_mapping(table_id, 0);
+        catalog.write().insert_table_id_mapping(table_id, 0.into());
         let catalog_reader = CatalogReader::new(catalog);
         // Break the plan node into fragments.
         let fragmenter = BatchPlanFragmenter::new(
             worker_node_selector,
             catalog_reader,
             None,
-            "UTC".to_owned(),
             batch_exchange_node.clone(),
         )
         .unwrap();

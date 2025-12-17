@@ -46,7 +46,7 @@ impl MockExternalTableReader {
             MySqlOffset::new(binlog_file.clone(), 4),
             MySqlOffset::new(binlog_file.clone(), 6),
             MySqlOffset::new(binlog_file.clone(), 8),
-            MySqlOffset::new(binlog_file.clone(), 10),
+            MySqlOffset::new(binlog_file, 10),
         ];
         let parallel_backfill_snapshots = vec![
             OwnedRow::new(vec![

@@ -32,7 +32,7 @@ use risingwave_storage::StateStore;
 use super::agg_state::{AggState, AggStateStorage};
 use crate::common::table::state_table::StateTable;
 use crate::consistency::consistency_panic;
-use crate::executor::PkIndices;
+use crate::executor::StreamKeyRef;
 use crate::executor::error::StreamExecutorResult;
 
 #[derive(Debug)]
@@ -265,12 +265,14 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
         intermediate_state_table: &StateTable<S>,
-        pk_indices: &PkIndices,
+        stream_key: StreamKeyRef<'_>,
         row_count_index: usize,
         emit_on_window_close: bool,
         extreme_cache_size: usize,
         input_schema: &Schema,
-    ) -> StreamExecutorResult<Self> {
+    ) -> StreamExecutorResult<(Self, AggStateCacheStats)> {
+        let mut stats = AggStateCacheStats::default();
+
         let inter_states = intermediate_state_table
             .get_row(group_key.as_ref().map(GroupKey::table_pk))
             .await?;
@@ -286,7 +288,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 agg_func,
                 &storages[idx],
                 inter_states.as_ref().map(|s| &s[idx]),
-                pk_indices,
+                stream_key,
                 extreme_cache_size,
                 input_schema,
             )?;
@@ -304,11 +306,12 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         };
 
         if !this.emit_on_window_close && this.prev_inter_states.is_some() {
-            let (outputs, _stats) = this.get_outputs(storages, agg_funcs).await?;
+            let (outputs, init_stats) = this.get_outputs(storages, agg_funcs).await?;
             this.prev_outputs = Some(outputs);
+            stats.merge(init_stats);
         }
 
-        Ok(this)
+        Ok((this, stats))
     }
 
     /// Create a group from intermediate states for EOWC output.
@@ -321,7 +324,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
         agg_funcs: &[BoxedAggregateFunction],
         storages: &[AggStateStorage<S>],
         inter_states: &OwnedRow,
-        pk_indices: &PkIndices,
+        stream_key: StreamKeyRef<'_>,
         row_count_index: usize,
         emit_on_window_close: bool,
         extreme_cache_size: usize,
@@ -335,7 +338,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
                 agg_func,
                 &storages[idx],
                 Some(&inter_states[idx]),
-                pk_indices,
+                stream_key,
                 extreme_cache_size,
                 input_schema,
             )?;

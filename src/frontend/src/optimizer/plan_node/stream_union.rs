@@ -48,6 +48,7 @@ impl StreamUnion {
             core.all,
             "After UnionToDistinctRule, union should become union all"
         );
+        assert!(!core.inputs.is_empty());
 
         let inputs = &core.inputs;
         let ctx = core.ctx();
@@ -69,15 +70,34 @@ impl StreamUnion {
             watermark_columns.insert(idx, ctx.next_watermark_group_id());
         }
 
+        let kind = if core.source_col.is_some() {
+            // There's no handling on key conflict in executor implementation. However, in most cases
+            // there's a `source_col` as a part of stream key, indicating which input the row comes from,
+            // there won't be actual key conflict and we can safely call `merge`.
+            (inputs.iter().map(|i| i.stream_kind()))
+                .reduce(StreamKind::merge)
+                .unwrap()
+        } else {
+            // No `source_col`, typically used in a `TABLE` plan to merge inputs from external source,
+            // upstream sink-into-table jobs, and DML.
+            if inputs.len() == 1 {
+                // Single input. Follow the input's kind.
+                inputs[0].stream_kind()
+            } else if inputs.iter().all(|x| x.stream_kind().is_append_only()) {
+                // Special case for append-only table. Either there will be a `RowIdGen` following the `Union`,
+                // or there will be a `Materialize` with conflict handling enabled. In both cases there
+                // will be no key conflict, so we can treat the merged stream as append-only here.
+                StreamKind::AppendOnly
+            } else {
+                // Otherwise we must treat it as upsert.
+                StreamKind::Upsert
+            }
+        };
+
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            if inputs.iter().all(|x| x.append_only()) {
-                StreamKind::AppendOnly
-            } else {
-                // TODO(kind): handle `StreamKind::Upsert`
-                StreamKind::Retract
-            },
+            kind,
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
             MonotonicityMap::new(),

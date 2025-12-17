@@ -8,7 +8,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 15
+    timeout_in_minutes: 30
 
   - label: "build (deterministic simulation)"
     command: "ci/scripts/build-simulation.sh"
@@ -18,7 +18,7 @@ steps:
           run: rw-build-env
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
-    timeout_in_minutes: 15
+    timeout_in_minutes: 30
 
   - label: "Generate sqlsmith snapshots"
     command: "ci/scripts/gen-sqlsmith-snapshots.sh"

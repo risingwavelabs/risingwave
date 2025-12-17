@@ -23,6 +23,7 @@ use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema};
+use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_sqlparser::ast::{SetExpr, Statement};
@@ -30,7 +31,8 @@ use risingwave_sqlparser::ast::{SetExpr, Statement};
 use super::extended_handle::{PortalResult, PrepareStatement, PreparedResult};
 use super::{PgResponseStream, RwPgResponse, create_mv, declare_cursor};
 use crate::binder::{Binder, BoundCreateView, BoundStatement};
-use crate::catalog::TableId;
+#[cfg(feature = "datafusion")]
+use crate::datafusion::DfBatchQueryPlanResult;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
 use crate::handler::flush::do_flush;
@@ -38,7 +40,7 @@ use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::optimizer::plan_node::{BatchPlanRef, Explain};
 use crate::optimizer::{
     BatchPlanRoot, ExecutionModeDecider, OptimizerContext, OptimizerContextRef,
-    ReadStorageTableVisitor, RelationCollectorVisitor, SysTableVisitor,
+    RelationCollectorVisitor, SysTableVisitor,
 };
 use crate::planner::Planner;
 use crate::scheduler::plan_fragmenter::Query;
@@ -48,36 +50,101 @@ use crate::scheduler::{
 };
 use crate::session::SessionImpl;
 
+/// Choice between running RisingWave's own batch executor (Rw) or a `DataFusion` (DF) logical plan.
+pub enum BatchPlanChoice {
+    Rw(RwBatchQueryPlanResult),
+    #[cfg(feature = "datafusion")]
+    Df(DfBatchQueryPlanResult),
+}
+
+impl BatchPlanChoice {
+    pub fn unwrap_rw(self) -> Result<RwBatchQueryPlanResult> {
+        match self {
+            BatchPlanChoice::Rw(result) => Ok(result),
+            #[cfg(feature = "datafusion")]
+            BatchPlanChoice::Df { .. } => {
+                risingwave_common::bail!(
+                    "Expected RisingWave plan in BatchPlanChoice, but got DataFusion plan"
+                )
+            }
+        }
+    }
+}
+
 pub async fn handle_query(
     handler_args: HandlerArgs,
     stmt: Statement,
     formats: Vec<Format>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let plan_fragmenter_result = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
-        // Time zone is used by Hummock time travel query.
-        risingwave_expr::expr_context::TIME_ZONE::sync_scope(
-            session.config().timezone().to_owned(),
-            || gen_batch_plan_fragmenter(&session, plan_result),
-        )?
-    };
-    execute(session, plan_fragmenter_result, formats).await
+    let context = OptimizerContext::from_handler_args(handler_args);
+
+    #[cfg(feature = "datafusion")]
+    {
+        // We construct a future manually here to make sure this async function is `Send`.
+        // `BatchPlanChoice` is non-Send, and rust cannot prove it has dropped before await point.
+        // See more details in https://github.com/rust-lang/rust/issues/128095
+        use futures::FutureExt;
+
+        use crate::datafusion::execute_datafusion_plan;
+
+        let future = match gen_batch_plan_by_statement(&session, context.into(), stmt)? {
+            BatchPlanChoice::Rw(plan_result) => {
+                let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+                    session.config().timezone(),
+                    || gen_batch_plan_fragmenter(&session, plan_result),
+                )?;
+                execute_risingwave_plan(session, plan_fragmenter_result, formats).left_future()
+            }
+            BatchPlanChoice::Df(plan_result) => {
+                execute_datafusion_plan(session, plan_result, formats).right_future()
+            }
+        };
+        future.await
+    }
+
+    #[cfg(not(feature = "datafusion"))]
+    {
+        let future = match gen_batch_plan_by_statement(&session, context.into(), stmt)? {
+            BatchPlanChoice::Rw(plan_result) => {
+                let plan_fragmenter_result = risingwave_expr::expr_context::TIME_ZONE::sync_scope(
+                    session.config().timezone(),
+                    || gen_batch_plan_fragmenter(&session, plan_result),
+                )?;
+                execute_risingwave_plan(session, plan_fragmenter_result, formats)
+            }
+        };
+        future.await
+    }
 }
 
-pub fn handle_parse(
-    handler_args: HandlerArgs,
-    statement: Statement,
-    specific_param_types: Vec<Option<DataType>>,
-) -> Result<PrepareStatement> {
-    let session = handler_args.session;
-    let bound_result = gen_bound(&session, statement.clone(), specific_param_types)?;
+fn handle_parse_inner(binder: Binder, statement: Statement) -> Result<PrepareStatement> {
+    let bound_result = gen_bound(binder, statement.clone())?;
 
     Ok(PrepareStatement::Prepared(PreparedResult {
         statement,
         bound_result,
     }))
+}
+
+pub fn handle_parse_for_batch(
+    handler_args: HandlerArgs,
+    statement: Statement,
+    specified_param_types: Vec<Option<DataType>>,
+) -> Result<PrepareStatement> {
+    let binder = Binder::new_for_batch(&handler_args.session)
+        .with_specified_params_types(specified_param_types);
+    handle_parse_inner(binder, statement)
+}
+
+pub fn handle_parse_for_stream(
+    handler_args: HandlerArgs,
+    statement: Statement,
+    specified_param_types: Vec<Option<DataType>>,
+) -> Result<PrepareStatement> {
+    let binder = Binder::new_for_stream(&handler_args.session)
+        .with_specified_params_types(specified_param_types);
+    handle_parse_inner(binder, statement)
 }
 
 /// Execute a "Portal", which is a prepared statement with bound parameters.
@@ -99,14 +166,15 @@ pub async fn handle_execute(
             let session = handler_args.session.clone();
             let plan_fragmenter_result = {
                 let context = OptimizerContext::from_handler_args(handler_args);
-                let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                let plan_result =
+                    gen_batch_query_plan(&session, context.into(), bound_result)?.unwrap_rw()?;
                 // Time zone is used by Hummock time travel query.
                 risingwave_expr::expr_context::TIME_ZONE::sync_scope(
-                    session.config().timezone().to_owned(),
+                    session.config().timezone(),
                     || gen_batch_plan_fragmenter(&session, plan_result),
                 )?
             };
-            execute(session, plan_fragmenter_result, result_formats).await
+            execute_risingwave_plan(session, plan_fragmenter_result, result_formats).await
         }
         Statement::CreateView { materialized, .. } if materialized => {
             // Execute a CREATE MATERIALIZED VIEW
@@ -160,7 +228,8 @@ pub async fn handle_execute(
                 let session = handler_args.session.clone();
                 let plan_fragmenter_result = {
                     let context = OptimizerContext::from_handler_args(handler_args.clone());
-                    let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?;
+                    let plan_result = gen_batch_query_plan(&session, context.into(), bound_result)?
+                        .unwrap_rw()?;
                     gen_batch_plan_fragmenter(&session, plan_result)?
                 };
                 declare_cursor::handle_bound_declare_query_cursor(
@@ -188,8 +257,9 @@ pub fn gen_batch_plan_by_statement(
     session: &SessionImpl,
     context: OptimizerContextRef,
     stmt: Statement,
-) -> Result<BatchQueryPlanResult> {
-    let bound_result = gen_bound(session, stmt, vec![])?;
+) -> Result<BatchPlanChoice> {
+    let binder = Binder::new_for_batch(session);
+    let bound_result = gen_bound(binder, stmt)?;
     gen_batch_query_plan(session, context, bound_result)
 }
 
@@ -200,21 +270,16 @@ pub struct BoundResult {
     pub(crate) bound: BoundStatement,
     pub(crate) param_types: Vec<DataType>,
     pub(crate) parsed_params: Option<Vec<Datum>>,
-    pub(crate) dependent_relations: HashSet<TableId>,
+    pub(crate) dependent_relations: HashSet<ObjectId>,
     /// TODO(rc): merge with `dependent_relations`
     pub(crate) dependent_udfs: HashSet<FunctionId>,
 }
 
-fn gen_bound(
-    session: &SessionImpl,
-    stmt: Statement,
-    specific_param_types: Vec<Option<DataType>>,
-) -> Result<BoundResult> {
+fn gen_bound(mut binder: Binder, stmt: Statement) -> Result<BoundResult> {
     let stmt_type = StatementType::infer_from_statement(&stmt)
         .map_err(|err| RwError::from(ErrorCode::InvalidInputSyntax(err)))?;
     let must_dist = must_run_in_distributed_mode(&stmt)?;
 
-    let mut binder = Binder::new_with_param_types(session, specific_param_types);
     let bound = binder.bind(stmt)?;
 
     Ok(BoundResult {
@@ -228,7 +293,7 @@ fn gen_bound(
     })
 }
 
-pub struct BatchQueryPlanResult {
+pub struct RwBatchQueryPlanResult {
     pub(crate) plan: BatchPlanRef,
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
@@ -236,15 +301,14 @@ pub struct BatchQueryPlanResult {
     // Note that these relations are only resolved in the binding phase, and it may only be a
     // subset of the final one. i.e. the final one may contain more implicit dependencies on
     // indices.
-    pub(crate) dependent_relations: Vec<TableId>,
-    pub(crate) read_storage_tables: HashSet<TableId>,
+    pub(crate) dependent_relations: Vec<ObjectId>,
 }
 
 fn gen_batch_query_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     bind_result: BoundResult,
-) -> Result<BatchQueryPlanResult> {
+) -> Result<BatchPlanChoice> {
     let BoundResult {
         stmt_type,
         must_dist,
@@ -261,12 +325,33 @@ fn gen_batch_query_plan(
 
     let logical = planner.plan(bound)?;
     let schema = logical.schema();
-    let batch_plan = logical.gen_batch_plan()?;
+    let optimized_logical = logical.gen_optimized_logical_plan_for_batch()?;
+
+    #[cfg(feature = "datafusion")]
+    {
+        use crate::optimizer::{LogicalIcebergScanExt, LogicalPlanToDataFusionExt};
+
+        if session.config().enable_datafusion_engine()
+            && optimized_logical.plan.contains_iceberg_scan()
+        {
+            let df_plan = optimized_logical.plan.to_datafusion_logical_plan()?;
+            tracing::debug!(
+                "Converted RisingWave logical plan to DataFusion plan:\nRisingWave Plan: {:?}\nDataFusion Plan: {:?}",
+                optimized_logical,
+                df_plan
+            );
+            return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
+                plan: df_plan,
+                schema,
+                stmt_type,
+            }));
+        }
+    }
+
+    let batch_plan = optimized_logical.gen_batch_plan()?;
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan.clone());
-
-    let read_storage_tables = ReadStorageTableVisitor::collect(&batch_plan);
 
     let must_local = must_run_in_local_mode(&batch_plan);
 
@@ -292,14 +377,14 @@ fn gen_batch_query_plan(
         QueryMode::Distributed => batch_plan.gen_batch_distributed_plan()?,
     };
 
-    Ok(BatchQueryPlanResult {
+    let result = RwBatchQueryPlanResult {
         plan: physical,
         query_mode,
         schema,
         stmt_type,
         dependent_relations: dependent_relations.into_iter().collect_vec(),
-        read_storage_tables,
-    })
+    };
+    Ok(BatchPlanChoice::Rw(result))
 }
 
 fn must_run_in_distributed_mode(stmt: &Statement) -> Result<bool> {
@@ -350,19 +435,17 @@ pub struct BatchPlanFragmenterResult {
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
-    pub(crate) read_storage_tables: HashSet<TableId>,
 }
 
 pub fn gen_batch_plan_fragmenter(
     session: &SessionImpl,
-    plan_result: BatchQueryPlanResult,
+    plan_result: RwBatchQueryPlanResult,
 ) -> Result<BatchPlanFragmenterResult> {
-    let BatchQueryPlanResult {
+    let RwBatchQueryPlanResult {
         plan,
         query_mode,
         schema,
         stmt_type,
-        read_storage_tables,
         ..
     } = plan_result;
 
@@ -379,7 +462,6 @@ pub fn gen_batch_plan_fragmenter(
         worker_node_manager_reader,
         session.env().catalog_reader().clone(),
         session.config().batch_parallelism().0,
-        session.config().timezone().to_owned(),
         plan,
     )?;
 
@@ -388,7 +470,6 @@ pub fn gen_batch_plan_fragmenter(
         query_mode,
         schema,
         stmt_type,
-        read_storage_tables,
     })
 }
 
@@ -402,7 +483,7 @@ pub async fn create_stream(
         query_mode,
         schema,
         stmt_type,
-        read_storage_tables,
+        ..
     } = plan_fragmenter_result;
 
     let mut can_timeout_cancel = true;
@@ -433,13 +514,7 @@ pub async fn create_stream(
     let row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-            local_execute(
-                session.clone(),
-                query,
-                can_timeout_cancel,
-                &read_storage_tables,
-            )
-            .await?,
+            local_execute(session.clone(), query, can_timeout_cancel).await?,
             column_types,
             formats,
             session.clone(),
@@ -447,13 +522,7 @@ pub async fn create_stream(
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
             PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                distribute_execute(
-                    session.clone(),
-                    query,
-                    can_timeout_cancel,
-                    read_storage_tables,
-                )
-                .await?,
+                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
                 column_types,
                 formats,
                 session.clone(),
@@ -464,7 +533,7 @@ pub async fn create_stream(
     Ok((row_stream, pg_descs))
 }
 
-async fn execute(
+async fn execute_risingwave_plan(
     session: Arc<SessionImpl>,
     plan_fragmenter_result: BatchPlanFragmenterResult,
     formats: Vec<Format>,
@@ -533,7 +602,6 @@ pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
-    read_storage_tables: HashSet<TableId>,
 ) -> Result<DistributedQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -547,16 +615,15 @@ pub async fn distribute_execute(
     let query_manager = session.env().query_manager().clone();
 
     query_manager
-        .schedule(execution_context, query, read_storage_tables)
+        .schedule(execution_context, query)
         .await
         .map_err(|err| err.into())
 }
 
 pub async fn local_execute(
     session: Arc<SessionImpl>,
-    query: Query,
+    mut query: Query,
     can_timeout_cancel: bool,
-    read_storage_tables: &HashSet<TableId>,
 ) -> Result<LocalQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -569,11 +636,12 @@ pub async fn local_execute(
 
     let snapshot = session.pinned_snapshot();
 
+    snapshot.fill_batch_query_epoch(&mut query)?;
+
     let execution = LocalQueryExecution::new(
         query,
         front_env.clone(),
         snapshot.support_barrier_read(),
-        snapshot.batch_query_epoch(read_storage_tables)?,
         session,
         timeout,
     );

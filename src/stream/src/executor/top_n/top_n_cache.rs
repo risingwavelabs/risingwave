@@ -13,12 +13,12 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::future::Future;
 
 use itertools::Itertools;
-use risingwave_common::array::{Op, RowRef};
+use risingwave_common::array::RowRef;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common_estimate_size::EstimateSize;
@@ -26,6 +26,7 @@ use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_storage::StateStore;
 
 use super::{GroupKey, ManagedTopNState};
+use crate::common::change_buffer::ChangeBuffer;
 use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
 
@@ -150,7 +151,7 @@ pub trait TopNCacheTrait {
     ///
     /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
     /// used to generate messages to be sent to downstream operators.
-    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging);
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging);
 
     /// Delete input row from the cache.
     ///
@@ -165,14 +166,26 @@ pub trait TopNCacheTrait {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
+        row: impl Row,
         staging: &mut TopNStaging,
     ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     /// `data_types` -- Data types for the full row.
+    /// `min_capacity` -- Minimum capacity for the high cache. When not provided, defaults to `TOPN_CACHE_MIN_CAPACITY`.
     pub fn new(offset: usize, limit: usize, data_types: Vec<DataType>) -> Self {
+        Self::with_min_capacity(offset, limit, data_types, TOPN_CACHE_MIN_CAPACITY)
+    }
+
+    /// `data_types` -- Data types for the full row.
+    /// `min_capacity` -- Minimum capacity for the high cache.
+    pub fn with_min_capacity(
+        offset: usize,
+        limit: usize,
+        data_types: Vec<DataType>,
+        min_capacity: usize,
+    ) -> Self {
         assert!(limit > 0);
         if WITH_TIES {
             // It's trickier to support.
@@ -183,7 +196,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             .checked_add(limit)
             .and_then(|v| v.checked_mul(TOPN_CACHE_HIGH_CAPACITY_FACTOR))
             .unwrap_or(usize::MAX)
-            .max(TOPN_CACHE_MIN_CAPACITY);
+            .max(min_capacity);
         Self {
             low: if offset > 0 { Some(Cache::new()) } else { None },
             middle: Cache::new(),
@@ -278,7 +291,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
 }
 
 impl TopNCacheTrait for TopNCache<false> {
-    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging) {
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging) {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count += 1;
         }
@@ -362,7 +375,7 @@ impl TopNCacheTrait for TopNCache<false> {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
+        row: impl Row,
         staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
         if !enable_strict_consistency() && self.table_row_count == Some(0) {
@@ -470,7 +483,7 @@ impl TopNCacheTrait for TopNCache<false> {
 }
 
 impl TopNCacheTrait for TopNCache<true> {
-    fn insert(&mut self, cache_key: CacheKey, row: impl Row + Send, staging: &mut TopNStaging) {
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging) {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count += 1;
         }
@@ -575,7 +588,7 @@ impl TopNCacheTrait for TopNCache<true> {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
+        row: impl Row,
         staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
         if !enable_strict_consistency() && self.table_row_count == Some(0) {
@@ -812,9 +825,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
 /// It should be maintained when an entry is inserted or deleted from the `middle` cache.
 #[derive(Debug, Default)]
 pub struct TopNStaging {
-    to_delete: BTreeMap<CacheKey, CompactedRow>,
-    to_insert: BTreeMap<CacheKey, CompactedRow>,
-    to_update: BTreeMap<CacheKey, (CompactedRow, CompactedRow)>,
+    inner: ChangeBuffer<CacheKey, CompactedRow>,
 }
 
 impl TopNStaging {
@@ -825,74 +836,90 @@ impl TopNStaging {
     /// Insert a row into the staging changes. This method must be called when a row is
     /// added to the `middle` cache.
     fn insert(&mut self, cache_key: CacheKey, row: CompactedRow) {
-        if let Some(old_row) = self.to_delete.remove(&cache_key) {
-            if old_row != row {
-                self.to_update.insert(cache_key, (old_row, row));
-            }
-        } else {
-            self.to_insert.insert(cache_key, row);
-        }
+        self.inner.insert(cache_key, row);
     }
 
     /// Delete a row from the staging changes. This method must be called when a row is
     /// removed from the `middle` cache.
     fn delete(&mut self, cache_key: CacheKey, row: CompactedRow) {
-        if self.to_insert.remove(&cache_key).is_some() {
-            // do nothing more
-        } else if let Some((old_row, _)) = self.to_update.remove(&cache_key) {
-            self.to_delete.insert(cache_key, old_row);
-        } else {
-            self.to_delete.insert(cache_key, row);
-        }
+        self.inner.delete(cache_key, row);
     }
 
     /// Get the count of effective changes in the staging.
     pub fn len(&self) -> usize {
-        self.to_delete.len() + self.to_insert.len() + self.to_update.len()
+        self.inner.len()
     }
 
     /// Check if the staging is empty.
     pub fn is_empty(&self) -> bool {
-        self.to_delete.is_empty() && self.to_insert.is_empty() && self.to_update.is_empty()
-    }
-
-    /// Iterate over the changes in the staging.
-    pub fn into_changes(self) -> impl Iterator<Item = (Op, CompactedRow)> {
-        #[cfg(debug_assertions)]
-        {
-            let keys = self
-                .to_delete
-                .keys()
-                .chain(self.to_insert.keys())
-                .chain(self.to_update.keys())
-                .unique()
-                .count();
-            assert_eq!(
-                keys,
-                self.to_delete.len() + self.to_insert.len() + self.to_update.len(),
-                "should not have duplicate keys with different operations",
-            );
-        }
-
-        // We expect one `CacheKey` to appear at most once in the staging, and, the order of
-        // the outputs of `TopN` doesn't really matter, so we can simply chain the three maps.
-        // Although the output order is not important, we still ensure that `Delete`s are emitted
-        // before `Insert`s, so that we can avoid temporary violation of the `LIMIT` constraint.
-        self.to_update
-            .into_values()
-            .flat_map(|(old_row, new_row)| {
-                [(Op::UpdateDelete, old_row), (Op::UpdateInsert, new_row)]
-            })
-            .chain(self.to_delete.into_values().map(|row| (Op::Delete, row)))
-            .chain(self.to_insert.into_values().map(|row| (Op::Insert, row)))
+        self.inner.is_empty()
     }
 
     /// Iterate over the changes in the staging, and deserialize the rows.
     pub fn into_deserialized_changes(
         self,
         deserializer: &RowDeserializer,
-    ) -> impl Iterator<Item = StreamExecutorResult<(Op, OwnedRow)>> + '_ {
-        self.into_changes()
-            .map(|(op, row)| Ok((op, deserializer.deserialize(row.row.as_ref())?)))
+    ) -> impl Iterator<Item = StreamExecutorResult<Record<OwnedRow>>> + '_ {
+        self.inner.into_records().map(|record| {
+            record.try_map(|row| {
+                deserializer
+                    .deserialize(row.row.as_ref())
+                    .map_err(Into::into)
+            })
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+
+    use super::*;
+
+    #[test]
+    fn test_topn_cache_new_uses_default_min_capacity() {
+        let cache = TopNCache::<false>::new(0, 5, vec![DataType::Int32]);
+        assert_eq!(cache.high_cache_capacity, TOPN_CACHE_MIN_CAPACITY);
+    }
+
+    #[test]
+    fn test_topn_cache_with_custom_min_capacity() {
+        let custom_min_capacity = 25;
+        let cache =
+            TopNCache::<false>::with_min_capacity(0, 5, vec![DataType::Int32], custom_min_capacity);
+        assert_eq!(cache.high_cache_capacity, custom_min_capacity);
+    }
+
+    #[test]
+    fn test_topn_cache_high_capacity_factor_respected() {
+        let custom_min_capacity = 1;
+        let offset = 2;
+        let limit = 5;
+        let expected_capacity = (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR;
+
+        let cache = TopNCache::<false>::with_min_capacity(
+            offset,
+            limit,
+            vec![DataType::Int32],
+            custom_min_capacity,
+        );
+        assert_eq!(cache.high_cache_capacity, expected_capacity);
+    }
+
+    #[test]
+    fn test_topn_cache_min_capacity_takes_precedence_when_larger() {
+        let large_min_capacity = 100;
+        let offset = 0;
+        let limit = 5;
+        let expected_from_formula = (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR; // Should be 10
+
+        let cache = TopNCache::<false>::with_min_capacity(
+            offset,
+            limit,
+            vec![DataType::Int32],
+            large_min_capacity,
+        );
+        assert_eq!(cache.high_cache_capacity, large_min_capacity);
+        assert!(cache.high_cache_capacity > expected_from_formula);
     }
 }

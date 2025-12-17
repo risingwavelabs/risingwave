@@ -16,6 +16,7 @@ use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::catalog::FunctionId;
 use risingwave_common::types::DataType;
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::expr::{PbUdfExprVersion, PbUserDefinedFunctionMetadata};
@@ -40,6 +41,8 @@ pub struct FunctionCatalog {
     pub always_retry_on_network_error: bool,
     pub is_async: Option<bool>,
     pub is_batched: Option<bool>,
+    pub created_at_epoch: Option<Epoch>,
+    pub created_at_cluster_version: Option<String>,
 }
 
 #[derive(Clone, Display, PartialEq, Eq, Hash, Debug, EnumAsInner)]
@@ -64,7 +67,7 @@ impl From<&PbKind> for FunctionKind {
 impl From<&PbFunction> for FunctionCatalog {
     fn from(prost: &PbFunction) -> Self {
         FunctionCatalog {
-            id: prost.id.into(),
+            id: prost.id,
             name: prost.name.clone(),
             owner: prost.owner,
             kind: prost.kind.as_ref().unwrap().into(),
@@ -80,6 +83,8 @@ impl From<&PbFunction> for FunctionCatalog {
             always_retry_on_network_error: prost.always_retry_on_network_error,
             is_async: prost.is_async,
             is_batched: prost.is_batched,
+            created_at_epoch: prost.created_at_epoch.map(Epoch::from),
+            created_at_cluster_version: prost.created_at_cluster_version.clone(),
         }
     }
 }

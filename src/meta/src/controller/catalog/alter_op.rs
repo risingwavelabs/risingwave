@@ -12,11 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::AlterDatabaseParam;
+use anyhow::Context;
+use risingwave_common::catalog::{AlterDatabaseParam, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
+use risingwave_common::config::mutate::TomlTableMutateExt as _;
+use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
-use sea_orm::DatabaseTransaction;
+use risingwave_meta_model::refresh_job::{self, RefreshState};
+use sea_orm::ActiveValue::{NotSet, Set};
+use sea_orm::prelude::DateTime;
+use sea_orm::sea_query::Expr;
+use sea_orm::{ActiveModelTrait, DatabaseTransaction};
 
 use super::*;
+use crate::error::bail_invalid_parameter;
 
 impl CatalogController {
     async fn alter_database_name(
@@ -85,13 +94,18 @@ impl CatalogController {
     pub async fn alter_name(
         &self,
         object_type: ObjectType,
-        object_id: ObjectId,
+        object_id: impl Into<ObjectId>,
         object_name: &str,
     ) -> MetaResult<NotificationVersion> {
+        let object_id = object_id.into();
         if object_type == ObjectType::Database {
-            return self.alter_database_name(object_id as _, object_name).await;
+            return self
+                .alter_database_name(object_id.as_database_id(), object_name)
+                .await;
         } else if object_type == ObjectType::Schema {
-            return self.alter_schema_name(object_id as _, object_name).await;
+            return self
+                .alter_schema_name(object_id.as_schema_id(), object_name)
+                .await;
         }
 
         let inner = self.inner.write().await;
@@ -141,7 +155,7 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
         let dst_name: String = match object_type {
-            ObjectType::Table => Table::find_by_id(dst_object_id)
+            ObjectType::Table => Table::find_by_id(dst_object_id.as_table_id())
                 .select_only()
                 .column(table::Column::Name)
                 .into_tuple()
@@ -150,7 +164,7 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
                 })?,
-            ObjectType::Source => Source::find_by_id(dst_object_id)
+            ObjectType::Source => Source::find_by_id(dst_object_id.as_source_id())
                 .select_only()
                 .column(source::Column::Name)
                 .into_tuple()
@@ -159,7 +173,7 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
                 })?,
-            ObjectType::Sink => Sink::find_by_id(dst_object_id)
+            ObjectType::Sink => Sink::find_by_id(dst_object_id.as_sink_id())
                 .select_only()
                 .column(sink::Column::Name)
                 .into_tuple()
@@ -168,7 +182,7 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
                 })?,
-            ObjectType::View => View::find_by_id(dst_object_id)
+            ObjectType::View => View::find_by_id(dst_object_id.as_view_id())
                 .select_only()
                 .column(view::Column::Name)
                 .into_tuple()
@@ -177,15 +191,17 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
                 })?,
-            ObjectType::Subscription => Subscription::find_by_id(dst_object_id)
-                .select_only()
-                .column(subscription::Column::Name)
-                .into_tuple()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| {
-                    MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
-                })?,
+            ObjectType::Subscription => {
+                Subscription::find_by_id(dst_object_id.as_subscription_id())
+                    .select_only()
+                    .column(subscription::Column::Name)
+                    .into_tuple()
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| {
+                        MetaError::catalog_id_not_found(object_type.as_str(), dst_object_id)
+                    })?
+            }
             _ => {
                 return Err(MetaError::permission_denied(format!(
                     "swap rename not supported for object type: {:?}",
@@ -226,7 +242,7 @@ impl CatalogController {
         &self,
         pb_source: PbSource,
     ) -> MetaResult<NotificationVersion> {
-        let source_id = pb_source.id as SourceId;
+        let source_id: SourceId = pb_source.id;
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -280,7 +296,7 @@ impl CatalogController {
         let mut objects = vec![];
         match object_type {
             ObjectType::Database => {
-                let db = Database::find_by_id(object_id)
+                let db = Database::find_by_id(object_id.as_database_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("database", object_id))?;
@@ -296,7 +312,7 @@ impl CatalogController {
                 return Ok(version);
             }
             ObjectType::Schema => {
-                let schema = Schema::find_by_id(object_id)
+                let schema = Schema::find_by_id(object_id.as_schema_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("schema", object_id))?;
@@ -312,7 +328,7 @@ impl CatalogController {
                 return Ok(version);
             }
             ObjectType::Table => {
-                let table = Table::find_by_id(object_id)
+                let table = Table::find_by_id(object_id.as_table_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
@@ -320,7 +336,7 @@ impl CatalogController {
                 // associated source.
                 if let Some(associated_source_id) = table.optional_associated_source_id {
                     let src_obj = object::ActiveModel {
-                        oid: Set(associated_source_id as _),
+                        oid: Set(associated_source_id.as_object_id()),
                         owner_id: Set(new_owner),
                         ..Default::default()
                     }
@@ -333,6 +349,69 @@ impl CatalogController {
                             MetaError::catalog_id_not_found("source", associated_source_id)
                         })?;
                     objects.push(PbObjectInfo::Source(ObjectModel(source, src_obj).into()));
+                }
+
+                // associated sink and source for iceberg table.
+                if matches!(table.engine, Some(table::Engine::Iceberg)) {
+                    let iceberg_sink = Sink::find()
+                        .inner_join(Object)
+                        .select_only()
+                        .column(sink::Column::SinkId)
+                        .filter(
+                            object::Column::DatabaseId
+                                .eq(obj.database_id)
+                                .and(object::Column::SchemaId.eq(obj.schema_id))
+                                .and(
+                                    sink::Column::Name
+                                        .eq(format!("{}{}", ICEBERG_SINK_PREFIX, table.name)),
+                                ),
+                        )
+                        .into_tuple::<SinkId>()
+                        .one(&txn)
+                        .await?
+                        .expect("iceberg sink must exist");
+                    let sink_obj = object::ActiveModel {
+                        oid: Set(iceberg_sink.as_object_id()),
+                        owner_id: Set(new_owner),
+                        ..Default::default()
+                    }
+                    .update(&txn)
+                    .await?;
+                    let sink = Sink::find_by_id(iceberg_sink)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("sink", iceberg_sink))?;
+                    objects.push(PbObjectInfo::Sink(ObjectModel(sink, sink_obj).into()));
+
+                    let iceberg_source = Source::find()
+                        .inner_join(Object)
+                        .select_only()
+                        .column(source::Column::SourceId)
+                        .filter(
+                            object::Column::DatabaseId
+                                .eq(obj.database_id)
+                                .and(object::Column::SchemaId.eq(obj.schema_id))
+                                .and(
+                                    source::Column::Name
+                                        .eq(format!("{}{}", ICEBERG_SOURCE_PREFIX, table.name)),
+                                ),
+                        )
+                        .into_tuple::<SourceId>()
+                        .one(&txn)
+                        .await?
+                        .expect("iceberg source must exist");
+                    let source_obj = object::ActiveModel {
+                        oid: Set(iceberg_source.as_object_id()),
+                        owner_id: Set(new_owner),
+                        ..Default::default()
+                    }
+                    .update(&txn)
+                    .await?;
+                    let source = Source::find_by_id(iceberg_source)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("source", iceberg_source))?;
+                    objects.push(PbObjectInfo::Source(ObjectModel(source, source_obj).into()));
                 }
 
                 // indexes.
@@ -352,8 +431,12 @@ impl CatalogController {
                     .select_only()
                     .column(table::Column::TableId)
                     .filter(
-                        table::Column::BelongsToJobId
-                            .is_in(table_ids.iter().cloned().chain(std::iter::once(object_id))),
+                        table::Column::BelongsToJobId.is_in(
+                            table_ids
+                                .iter()
+                                .cloned()
+                                .chain(std::iter::once(object_id.as_table_id())),
+                        ),
                     )
                     .into_tuple()
                     .all(&txn)
@@ -367,8 +450,13 @@ impl CatalogController {
                             SimpleExpr::Value(Value::Int(Some(new_owner))),
                         )
                         .filter(
-                            object::Column::Oid
-                                .is_in(index_ids.iter().cloned().chain(table_ids.iter().cloned())),
+                            object::Column::Oid.is_in::<ObjectId, _>(
+                                index_ids
+                                    .iter()
+                                    .copied()
+                                    .map_into()
+                                    .chain(table_ids.iter().copied().map_into()),
+                            ),
                         )
                         .exec(&txn)
                         .await?;
@@ -401,7 +489,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Source => {
-                let source = Source::find_by_id(object_id)
+                let source = Source::find_by_id(object_id.as_source_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
@@ -422,7 +510,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Sink => {
-                let sink = Sink::find_by_id(object_id)
+                let sink = Sink::find_by_id(object_id.as_sink_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
@@ -438,7 +526,7 @@ impl CatalogController {
                 .await?;
             }
             ObjectType::Subscription => {
-                let subscription = Subscription::find_by_id(object_id)
+                let subscription = Subscription::find_by_id(object_id.as_subscription_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
@@ -447,14 +535,14 @@ impl CatalogController {
                 ));
             }
             ObjectType::View => {
-                let view = View::find_by_id(object_id)
+                let view = View::find_by_id(object_id.as_view_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("view", object_id))?;
                 objects.push(PbObjectInfo::View(ObjectModel(view, obj).into()));
             }
             ObjectType::Connection => {
-                let connection = Connection::find_by_id(object_id)
+                let connection = Connection::find_by_id(object_id.as_connection_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("connection", object_id))?;
@@ -505,7 +593,7 @@ impl CatalogController {
         let mut objects = vec![];
         match object_type {
             ObjectType::Table => {
-                let table = Table::find_by_id(object_id)
+                let table = Table::find_by_id(object_id.as_table_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
@@ -520,7 +608,7 @@ impl CatalogController {
                 // associated source.
                 if let Some(associated_source_id) = associated_src_id {
                     let src_obj = object::ActiveModel {
-                        oid: Set(associated_source_id as _),
+                        oid: Set(associated_source_id.as_object_id()),
                         schema_id: Set(Some(new_schema)),
                         ..Default::default()
                     }
@@ -559,8 +647,12 @@ impl CatalogController {
                     .select_only()
                     .column(table::Column::TableId)
                     .filter(
-                        table::Column::BelongsToJobId
-                            .is_in(table_ids.iter().cloned().chain(std::iter::once(object_id))),
+                        table::Column::BelongsToJobId.is_in(
+                            table_ids
+                                .iter()
+                                .map(|table_id| table_id.as_job_id())
+                                .chain(std::iter::once(object_id.as_job_id())),
+                        ),
                     )
                     .into_tuple()
                     .all(&txn)
@@ -574,13 +666,15 @@ impl CatalogController {
                     }
 
                     Object::update_many()
-                        .col_expr(
-                            object::Column::SchemaId,
-                            SimpleExpr::Value(Value::Int(Some(new_schema))),
-                        )
+                        .col_expr(object::Column::SchemaId, new_schema.into())
                         .filter(
-                            object::Column::Oid
-                                .is_in(index_ids.iter().cloned().chain(table_ids.iter().cloned())),
+                            object::Column::Oid.is_in::<ObjectId, _>(
+                                index_ids
+                                    .iter()
+                                    .copied()
+                                    .map_into()
+                                    .chain(table_ids.iter().copied().map_into()),
+                            ),
                         )
                         .exec(&txn)
                         .await?;
@@ -612,7 +706,7 @@ impl CatalogController {
                 }
             }
             ObjectType::Source => {
-                let source = Source::find_by_id(object_id)
+                let source = Source::find_by_id(object_id.as_source_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", object_id))?;
@@ -631,14 +725,14 @@ impl CatalogController {
                         &txn,
                         object_id,
                         object::Column::SchemaId,
-                        Value::Int(Some(new_schema)),
+                        new_schema.into(),
                         &mut objects,
                     )
                     .await?;
                 }
             }
             ObjectType::Sink => {
-                let sink = Sink::find_by_id(object_id)
+                let sink = Sink::find_by_id(object_id.as_sink_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", object_id))?;
@@ -653,13 +747,13 @@ impl CatalogController {
                     &txn,
                     object_id,
                     object::Column::SchemaId,
-                    Value::Int(Some(new_schema)),
+                    new_schema.into(),
                     &mut objects,
                 )
                 .await?;
             }
             ObjectType::Subscription => {
-                let subscription = Subscription::find_by_id(object_id)
+                let subscription = Subscription::find_by_id(object_id.as_subscription_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("subscription", object_id))?;
@@ -674,7 +768,7 @@ impl CatalogController {
                 ));
             }
             ObjectType::View => {
-                let view = View::find_by_id(object_id)
+                let view = View::find_by_id(object_id.as_view_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("view", object_id))?;
@@ -686,13 +780,13 @@ impl CatalogController {
                 objects.push(PbObjectInfo::View(ObjectModel(view, obj).into()));
             }
             ObjectType::Function => {
-                let function = Function::find_by_id(object_id)
+                let function = Function::find_by_id(object_id.as_function_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("function", object_id))?;
 
                 let mut pb_function: PbFunction = ObjectModel(function, obj).into();
-                pb_function.schema_id = new_schema as _;
+                pb_function.schema_id = new_schema;
                 check_function_signature_duplicate(&pb_function, &txn).await?;
 
                 object::ActiveModel {
@@ -713,13 +807,13 @@ impl CatalogController {
                 return Ok(version);
             }
             ObjectType::Connection => {
-                let connection = Connection::find_by_id(object_id)
+                let connection = Connection::find_by_id(object_id.as_connection_id())
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("connection", object_id))?;
 
                 let mut pb_connection: PbConnection = ObjectModel(connection, obj).into();
-                pb_connection.schema_id = new_schema as _;
+                pb_connection.schema_id = new_schema;
                 check_connection_name_duplicate(&pb_connection, &txn).await?;
 
                 object::ActiveModel {
@@ -768,10 +862,10 @@ impl CatalogController {
         let owner_id = pb_secret.owner as _;
         let txn = inner.db.begin().await?;
         ensure_user_id(owner_id, &txn).await?;
-        ensure_object_id(ObjectType::Database, pb_secret.database_id as _, &txn).await?;
-        ensure_object_id(ObjectType::Schema, pb_secret.schema_id as _, &txn).await?;
+        ensure_object_id(ObjectType::Database, pb_secret.database_id, &txn).await?;
+        ensure_object_id(ObjectType::Schema, pb_secret.schema_id, &txn).await?;
 
-        ensure_object_id(ObjectType::Secret, pb_secret.id as _, &txn).await?;
+        ensure_object_id(ObjectType::Secret, pb_secret.id, &txn).await?;
         let secret: secret::ActiveModel = pb_secret.clone().into();
         Secret::update(secret).exec(&txn).await?;
 
@@ -893,5 +987,158 @@ impl CatalogController {
             )
             .await;
         Ok((version, database))
+    }
+
+    pub async fn alter_streaming_job_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let config_override: Option<String> = StreamingJob::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::ConfigOverride)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+        let config_override = config_override.unwrap_or_default();
+
+        let mut table: toml::Table =
+            toml::from_str(&config_override).context("invalid streaming job config")?;
+
+        // The frontend guarantees that there's no duplicated keys in `to_add` and `to_remove`.
+        for (key, value) in entries_to_add {
+            let value: toml::Value = value
+                .parse()
+                .with_context(|| format!("invalid config value for path {key}"))?;
+            table
+                .upsert(&key, value)
+                .with_context(|| format!("failed to set config path {key}"))?;
+        }
+        for key in keys_to_remove {
+            table
+                .delete(&key)
+                .with_context(|| format!("failed to reset config path {key}"))?;
+        }
+
+        let updated_config_override = table.to_string();
+
+        // Validate the config override by trying to merge it to the default config.
+        {
+            let merged = merge_streaming_config_section(
+                &StreamingConfig::default(),
+                &updated_config_override,
+            )
+            .context("invalid streaming job config override")?;
+
+            // Reject unrecognized entries.
+            // Note: If these unrecognized entries are pre-existing, we also reject them here.
+            // Users are able to fix them by issuing a `RESET` first.
+            if let Some(merged) = merged {
+                let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+                if !unrecognized_keys.is_empty() {
+                    bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
+                }
+            }
+        }
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            config_override: Set(Some(updated_config_override)),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
+        txn.commit().await?;
+
+        Ok(IGNORED_NOTIFICATION_VERSION)
+    }
+
+    pub async fn ensure_refresh_job(&self, table_id: TableId) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let active = refresh_job::ActiveModel {
+            table_id: Set(table_id),
+            last_trigger_time: Set(None),
+            trigger_interval_secs: Set(None),
+            current_status: Set(RefreshState::Idle),
+            last_success_time: Set(None),
+        };
+        match RefreshJob::insert(active)
+            .on_conflict_do_nothing()
+            .exec(&inner.db)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(sea_orm::DbErr::RecordNotInserted) => {
+                // This is expected when the refresh job already exists due to ON CONFLICT DO NOTHING
+                tracing::debug!("refresh job already exists for table_id={}", table_id);
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn update_refresh_job_status(
+        &self,
+        table_id: TableId,
+        status: RefreshState,
+        trigger_time: Option<DateTime>,
+        is_success: bool,
+    ) -> MetaResult<()> {
+        self.ensure_refresh_job(table_id).await?;
+        let inner = self.inner.read().await;
+
+        // expect only update trigger_time when the status changes to Refreshing
+        assert_eq!(trigger_time.is_some(), status == RefreshState::Refreshing);
+        let active = refresh_job::ActiveModel {
+            table_id: Set(table_id),
+            current_status: Set(status),
+            last_trigger_time: if trigger_time.is_some() {
+                Set(trigger_time.map(|t| t.and_utc().timestamp_millis()))
+            } else {
+                NotSet
+            },
+            last_success_time: if is_success {
+                Set(Some(chrono::Utc::now().timestamp_millis()))
+            } else {
+                NotSet
+            },
+            ..Default::default()
+        };
+        active.update(&inner.db).await?;
+        Ok(())
+    }
+
+    pub async fn reset_all_refresh_jobs_to_idle(&self) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        RefreshJob::update_many()
+            .col_expr(
+                refresh_job::Column::CurrentStatus,
+                Expr::value(RefreshState::Idle),
+            )
+            .exec(&inner.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn update_refresh_job_interval(
+        &self,
+        table_id: TableId,
+        trigger_interval_secs: Option<i64>,
+    ) -> MetaResult<()> {
+        self.ensure_refresh_job(table_id).await?;
+        let inner = self.inner.read().await;
+        let active = refresh_job::ActiveModel {
+            table_id: Set(table_id),
+            trigger_interval_secs: Set(trigger_interval_secs),
+            ..Default::default()
+        };
+        active.update(&inner.db).await?;
+        Ok(())
     }
 }

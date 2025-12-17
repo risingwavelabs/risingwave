@@ -945,17 +945,13 @@ impl<K: LruKey + Clone + 'static, T: LruValue + 'static> Drop for CleanCacheGuar
 /// `lookup_with_request_dedup` which will return a `LookupResponse` which contains
 /// `Receiver<CacheableEntry<K, T>>` or `JoinHandle<Result<CacheableEntry<K, T>, E>>` when cache hit
 /// does not happen.
+#[derive(Default)]
 pub enum LookupResponse<K: LruKey + Clone + 'static, T: LruValue + 'static, E> {
+    #[default]
     Invalid,
     Cached(CacheableEntry<K, T>),
     WaitPendingRequest(Receiver<CacheableEntry<K, T>>),
     Miss(JoinHandle<Result<CacheableEntry<K, T>, E>>),
-}
-
-impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E> Default for LookupResponse<K, T, E> {
-    fn default() -> Self {
-        Self::Invalid
-    }
 }
 
 impl<K: LruKey + Clone + 'static, T: LruValue + 'static, E: From<RecvError>> Future

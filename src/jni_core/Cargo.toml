@@ -11,9 +11,11 @@ chrono = { workspace = true }
 fs-err = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 jni = { workspace = true }
+linkme = { workspace = true }
 paste = "1"
 prost = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 thiserror = { workspace = true }
 thiserror-ext = { workspace = true }

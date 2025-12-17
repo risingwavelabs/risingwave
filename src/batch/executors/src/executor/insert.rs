@@ -40,7 +40,6 @@ pub struct InsertExecutor {
     table_version_id: TableVersionId,
     dml_manager: DmlManagerRef,
     child: BoxedExecutor,
-    #[expect(dead_code)]
     chunk_size: usize,
     schema: Schema,
     identity: String,
@@ -106,7 +105,7 @@ impl InsertExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         let data_types = self.child.schema().data_types();
-        let mut builder = DataChunkBuilder::new(data_types, 1024);
+        let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
 
         let table_dml_handle = self
             .dml_manager
@@ -212,7 +211,7 @@ impl BoxedExecutorBuilder for InsertExecutor {
             NodeBody::Insert
         )?;
 
-        let table_id = TableId::new(insert_node.table_id);
+        let table_id = insert_node.table_id;
         let column_indices = insert_node
             .column_indices
             .iter()

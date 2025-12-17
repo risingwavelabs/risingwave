@@ -36,6 +36,7 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                         c.provide_opendal.as_ref().unwrap(),
                         c.provide_minio.as_ref().unwrap(),
                         c.provide_aws_s3.as_ref().unwrap(),
+                        c.provide_moat.as_ref().unwrap(),
                         HummockInMemoryStrategy::Disallowed,
                         &mut cmd,
                     )
@@ -165,6 +166,13 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                     meta_node_config.address, meta_node_config.dashboard_port
                 )
                 .unwrap();
+            }
+            ServiceConfig::Lakekeeper(c) => {
+                let base_url = format!("http://{}:{}", c.address, c.port);
+                let catalog_url = format!("{}/catalog", base_url);
+                writeln!(env, r#"RISEDEV_LAKEKEEPER_URL="{base_url}""#,).unwrap();
+                writeln!(env, r#"LAKEKEEPER_CATALOG_URL="{catalog_url}""#,).unwrap();
+                writeln!(env, r#"RISEDEV_LAKEKEEPER_WITH_OPTIONS_COMMON="connector='iceberg',catalog.type='rest',catalog.uri='{catalog_url}'""#,).unwrap();
             }
             _ => {}
         }

@@ -50,6 +50,11 @@ impl UserInfoManager {
         self.user_by_name.get(user_name)
     }
 
+    pub fn get_user_by_id(&self, id: &UserId) -> Option<&UserCatalog> {
+        let name = self.user_name_by_id.get(id)?;
+        self.user_by_name.get(name)
+    }
+
     pub fn get_user_name_by_id(&self, id: UserId) -> Option<String> {
         self.user_name_by_id.get(&id).cloned()
     }

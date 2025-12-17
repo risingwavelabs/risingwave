@@ -57,6 +57,7 @@ pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
+pub mod utils;
 
 mod util;
 use std::future::IntoFuture;
@@ -70,17 +71,20 @@ pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
+use utils::feature_gated_source_mod;
 mod common;
 pub mod iceberg;
 mod manager;
 pub mod reader;
 pub mod test_source;
+feature_gated_source_mod!(adbc_snowflake, "adbc_snowflake");
 
 use async_nats::jetstream::consumer::AckPolicy as JetStreamAckPolicy;
 use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
 use risingwave_common::row::OwnedRow;
+use risingwave_pb::id::SourceId;
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
@@ -91,6 +95,7 @@ pub use crate::source::filesystem::opendal_source::{
 };
 pub use crate::source::nexmark::NEXMARK_CONNECTOR;
 pub use crate::source::pulsar::PULSAR_CONNECTOR;
+use crate::source::pulsar::source::reader::PULSAR_ACK_CHANNEL;
 
 pub fn should_copy_to_format_encode_options(key: &str, connector: &str) -> bool {
     const PREFIXES: &[&str] = &[
@@ -119,10 +124,21 @@ pub enum WaitCheckpointTask {
     CommitCdcOffset(Option<(SplitId, String)>),
     AckPubsubMessage(Subscription, Vec<ArrayRef>),
     AckNatsJetStream(JetStreamContext, Vec<ArrayRef>, JetStreamAckPolicy),
+    AckPulsarMessage(Vec<(String, ArrayRef)>),
 }
 
 impl WaitCheckpointTask {
     pub async fn run(self) {
+        self.run_with_on_commit_success(|_source_id, _offset| {
+            // Default implementation: no action on commit success
+        })
+        .await;
+    }
+
+    pub async fn run_with_on_commit_success<F>(self, mut on_commit_success: F)
+    where
+        F: FnMut(u64, &str),
+    {
         use std::str::FromStr;
         match self {
             WaitCheckpointTask::CommitCdcOffset(updated_offset) => {
@@ -130,13 +146,30 @@ impl WaitCheckpointTask {
                     let source_id: u64 = u64::from_str(split_id.as_ref()).unwrap();
                     // notify cdc connector to commit offset
                     match cdc::jni_source::commit_cdc_offset(source_id, offset.clone()) {
-                        Ok(()) => {}
+                        Ok(()) => {
+                            // Execute callback after successful commit
+                            on_commit_success(source_id, &offset);
+                        }
                         Err(e) => {
                             tracing::error!(
                                 error = %e.as_report(),
                                 "source#{source_id}: failed to commit cdc offset: {offset}.",
                             )
                         }
+                    }
+                }
+            }
+            WaitCheckpointTask::AckPulsarMessage(ack_array) => {
+                if let Some((ack_channel_id, to_cumulative_ack)) = ack_array.last() {
+                    let encode_message_id_data = to_cumulative_ack
+                        .as_bytea()
+                        .iter()
+                        .last()
+                        .flatten()
+                        .map(|x| x.to_owned())
+                        .unwrap();
+                    if let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await {
+                        let _ = ack_tx.send(encode_message_id_data);
                     }
                 }
             }
@@ -222,3 +255,8 @@ pub struct CdcTableSnapshotSplitCommon<T: Clone> {
 
 pub type CdcTableSnapshotSplit = CdcTableSnapshotSplitCommon<OwnedRow>;
 pub type CdcTableSnapshotSplitRaw = CdcTableSnapshotSplitCommon<Vec<u8>>;
+
+#[inline]
+pub fn build_pulsar_ack_channel_id(source_id: SourceId, split_id: &SplitId) -> String {
+    format!("{}-{}", source_id, split_id)
+}

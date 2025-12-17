@@ -16,9 +16,11 @@
 #![feature(once_cell_try)]
 #![feature(type_alias_impl_trait)]
 #![feature(try_blocks)]
+#![feature(used_with_arg)]
 
 pub mod jvm_runtime;
 mod macros;
+mod opendal_schema_history;
 mod tracing_slf4j;
 
 use std::backtrace::Backtrace;
@@ -60,6 +62,16 @@ use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc::{Receiver, Sender};
 use tracing_slf4j::*;
+
+/// Enable JVM and Java libraries.
+///
+/// This macro forces this crate to be linked, which registers the JVM builder.
+#[macro_export]
+macro_rules! enable {
+    () => {
+        use risingwave_jni_core as _;
+    };
+}
 
 pub static JAVA_BINDING_ASYNC_RUNTIME: LazyLock<Runtime> =
     LazyLock::new(|| tokio::runtime::Runtime::new().unwrap());

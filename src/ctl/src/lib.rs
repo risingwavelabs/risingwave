@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use itertools::Itertools;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
@@ -80,6 +81,9 @@ enum Commands {
     Profile(ProfileCommands),
     #[clap(subcommand)]
     Throttle(ThrottleCommands),
+    /// Commands for Self-testing
+    #[clap(subcommand, hide = true)]
+    Test(TestCommands),
 }
 
 #[derive(Subcommand)]
@@ -209,6 +213,8 @@ enum HummockCommands {
         level0_stop_write_threshold_max_size: Option<u64>,
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
+        #[clap(long)]
+        vnode_aligned_level_size_threshold: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -458,14 +464,6 @@ enum MetaCommands {
         props: String,
     },
 
-    /// Performing graph check for scaling.
-    #[clap(verbatim_doc_comment)]
-    GraphCheck {
-        /// SQL endpoint
-        #[clap(long, required = true)]
-        endpoint: String,
-    },
-
     SetCdcTableBackfillParallelism {
         #[clap(long, required = true)]
         table_id: u32,
@@ -496,6 +494,12 @@ pub enum AwaitTreeCommands {
         #[clap(long = "path")]
         path: String,
     },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+enum TestCommands {
+    /// Test if JVM and Java libraries are working
+    Jvm,
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -558,6 +562,11 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
     result
 }
 
+#[expect(
+    clippy::large_stack_frames,
+    reason = "Pre-opt MIR sums locals across match arms in async dispatch; \
+              post-layout generator stores only one arm at a time (~13–16 KiB)."
+)]
 async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
@@ -610,7 +619,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
                 compaction_group_id,
-                table_id,
+                table_id.into(),
                 level,
                 sst_ids,
             )
@@ -655,6 +664,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
+            vnode_aligned_level_size_threshold,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -694,6 +704,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_stop_write_threshold_max_sst_count,
                     level0_stop_write_threshold_max_size,
                     enable_optimize_l0_interval_selection,
+                    vnode_aligned_level_size_threshold,
                 ),
             )
             .await?
@@ -706,7 +717,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::split_compaction_group(
                 context,
                 compaction_group_id,
-                &table_ids,
+                &table_ids.into_iter().map_into().collect_vec(),
                 partition_vnode_count,
             )
             .await?;
@@ -881,9 +892,6 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }
-        Commands::Meta(MetaCommands::GraphCheck { endpoint }) => {
-            cmd_impl::meta::graph_check(endpoint).await?
-        }
         Commands::AwaitTree(AwaitTreeCommands::Dump {
             actor_traces_format,
         }) => cmd_impl::await_tree::dump(context, actor_traces_format).await?,
@@ -919,6 +927,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }) => {
             set_cdc_table_backfill_parallelism(context, table_id, parallelism).await?;
         }
+        Commands::Test(TestCommands::Jvm) => cmd_impl::test::test_jvm()?,
     }
     Ok(())
 }

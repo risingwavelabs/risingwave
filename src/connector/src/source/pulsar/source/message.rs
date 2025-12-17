@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use prost_011::Message as _;
 use pulsar::consumer::Message;
 
 use crate::source::{SourceMessage, SourceMeta};
@@ -19,11 +20,13 @@ use crate::source::{SourceMessage, SourceMeta};
 #[derive(Debug, Clone)]
 pub struct PulsarMeta {
     pub schema_version: Option<Vec<u8>>,
+    pub ack_message_id: Option<Vec<u8>>,
 }
 
 impl From<Message<Vec<u8>>> for SourceMessage {
     fn from(msg: Message<Vec<u8>>) -> Self {
         let message_id = msg.message_id.id;
+        let ack_data_bytes = message_id.encode_to_vec();
 
         SourceMessage {
             key: msg.payload.metadata.partition_key.clone().map(|k| k.into()),
@@ -37,7 +40,8 @@ impl From<Message<Vec<u8>>> for SourceMessage {
             ),
             split_id: msg.topic.into(),
             meta: SourceMeta::Pulsar(PulsarMeta {
-                schema_version: msg.payload.metadata.schema_version.clone(),
+                schema_version: msg.payload.metadata.schema_version,
+                ack_message_id: Some(ack_data_bytes),
             }),
         }
     }

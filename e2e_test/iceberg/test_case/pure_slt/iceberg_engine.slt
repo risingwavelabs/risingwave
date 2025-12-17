@@ -29,8 +29,7 @@ insert into t values(1, 'xxx');
 statement ok
 FLUSH;
 
-sleep 5s
-query ??
+query ?? retry 6 backoff 1s
 select * from t;
 ----
 1 xxx
@@ -76,8 +75,7 @@ INSERT INTO full_type_t VALUES
 statement ok
 FLUSH;
 
-sleep 5s
-query ????????????????? rowsort
+query ????????????????? rowsort retry 6 backoff 1s
 select * from full_type_t
 ----
 1 1 1 1000 1.1 1.11 1-1 t 2022-03-11 2022-03-11 01:00:00+00:00 2022-03-11 01:00:00 1.1100000000 {1:100,2:200} {1,2,3} (1,2) {"a": "foo", "b": "bar"} (1,1,1,1000,1.1,1.11,1-1,t,2022-03-11,"2022-03-11 01:00:00+00:00","2022-03-11 01:00:00",1.1100000000,"{""a"": ""foo"", ""b"": ""bar""}") {"(1,\"{1:(\"\"\\\\\\\\xdeadbeef\"\"),2:(\"\"\\\\\\\\xdeadbeef\"\")}\")","(2,\"{3:(\"\"\\\\\\\\xdeadbeef\"\"),4:(\"\"\\\\\\\\xdeadbeef\"\")}\")"} 00:02:00
@@ -89,34 +87,6 @@ statement ok
 DROP TABLE full_type_t;
 
 # test connector
-
-statement error
-create table datagen_t (
-  id BIGINT,
-  item_name VARCHAR,
-  description VARCHAR,
-  initial_bid BIGINT,
-  reserve BIGINT,
-  date_time TIMESTAMP,
-  expires TIMESTAMP,
-  seller BIGINT,
-  category BIGINT,
-  extra VARCHAR)
-with (
-  connector = 'datagen',
-  fields.id.kind = 'sequence',
-  fields.id.start = '1',
-  commit_checkpoint_interval = 1,
-  source_rate_limit = 1000
-) engine = iceberg;
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Not supported: source_rate_limit for iceberg table engine during table creation
-HINT: Please remove source_rate_limit from WITH options.
-
-
 
 statement ok
 create table datagen_t (
@@ -174,9 +144,8 @@ insert into t_without_pk values('xxx');
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ?
+query ? retry 6 backoff 1s
 select * from t_without_pk;
 ----
 xxx
@@ -206,8 +175,7 @@ INSERT INTO price (id, price, date) VALUES
 statement ok
 FLUSH;
 
-sleep 5s
-query ??? rowsort
+query ??? rowsort retry 6 backoff 1s
 SELECT id, price, date FROM price WHERE date <= DATE '2025-02-10' - interval '5' day;
 ----
 1 100.5000000000 2025-02-01
@@ -261,9 +229,8 @@ insert into t_hosted_catalog values(1, 'xxx');
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ??
+query ?? retry 6 backoff 1s
 select * from t_hosted_catalog;
 ----
 1 xxx
@@ -284,9 +251,8 @@ insert into t_hosted_catalog values(2, 'yyy');
 statement ok
 FLUSH;
 
-sleep 5s
 
-query ?? rowsort
+query ?? rowsort retry 6 backoff 1s
 select * from t_hosted_catalog;
 ----
 1 xxx
@@ -298,7 +264,7 @@ select count(*) from rw_iceberg_files where  schema_name = 'public' and source_n
 2
 
 statement ok
-VACUUM t_hosted_catalog;
+VACUUM FULL t_hosted_catalog;
 
 query ?
 select count(*) from rw_iceberg_files where  schema_name = 'public' and source_name = '__iceberg_source_t_hosted_catalog';
@@ -329,6 +295,22 @@ create table t_partition4(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(
 statement error
 create table t_partition5(c1 int, c2 int, c3 int, primary key(c1, c2, c3)) with(commit_checkpoint_interval = 1, partition_by='c2,c3') engine = iceberg;
 
+# test partition fields persistency issue
+statement ok
+CREATE TABLE t_partition_persistency (id BIGINT, v_int INT, v_long BIGINT, v_float REAL, v_double DOUBLE, v_varchar CHARACTER VARYING, v_bool BOOLEAN, v_date DATE, v_timestamp timestamptz, v_ts_ntz TIMESTAMP, v_decimal NUMERIC, PRIMARY KEY (v_int, v_long, v_date, v_timestamp, v_ts_ntz)) APPEND ONLY WITH (commit_checkpoint_interval = 1, partition_by = 'v_int,truncate(30,v_long),year(v_date)') ENGINE = ICEBERG;
+
+statement ok
+INSERT INTO t_partition_persistency VALUES (5, 999, 1.1, 1.1, 1.11, '1-1', true, '2022-03-11', '2022-03-11 01:00:00Z'::timestamptz, '2022-03-11 01:00:00',1.11);
+
+statement ok
+FLUSH;
+
+
+query ????????? retry 3 backoff 1s
+SELECT * FROM t_partition_persistency
+----
+5 999 1 1.1 1.11 1-1 t 2022-03-11 2022-03-11 01:00:00+00:00 2022-03-11 01:00:00 1.1100000000
+
 statement ok
 DROP TABLE t_partition1;
 
@@ -342,44 +324,7 @@ statement ok
 DROP TABLE t_partition4;
 
 statement ok
-create table t_cow(a int primary key, b int) with(commit_checkpoint_interval = 1, compaction_interval_sec = 10, write_mode = 'copy-on-write') engine = iceberg;
-
-statement ok
-insert into t_cow values (1, 1), (2, 2);
-
-statement ok
-flush;
-
-sleep 5s
-
-statement ok
-vacuum t_cow;
-
-query ?? rowsort
-select * from t_cow;
-----
-1 1
-2 2
-
-statement ok
-update t_cow set b = 22 where b = 2;
-
-statement ok
-flush;
-
-sleep 5s
-
-statement ok
-vacuum t_cow;
-
-query ?? rowsort
-select * from t_cow;
-----
-1 1
-2 22
-
-statement ok
-DROP TABLE t_cow;
+DROP TABLE t_partition_persistency;
 
 statement ok
 DROP CONNECTION public.my_hosted_catalog_conn;

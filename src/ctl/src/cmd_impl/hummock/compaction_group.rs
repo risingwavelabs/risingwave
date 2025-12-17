@@ -16,11 +16,11 @@ use std::collections::{HashMap, HashSet};
 
 use comfy_table::{Row, Table};
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockContextId};
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::CompressionAlgorithm;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
+use risingwave_pb::id::TableId;
 
 use crate::CtlContext;
 
@@ -75,6 +75,7 @@ pub fn build_compaction_config_vec(
     level0_stop_write_threshold_max_sst_count: Option<u32>,
     level0_stop_write_threshold_max_size: Option<u64>,
     enable_optimize_l0_interval_selection: Option<bool>,
+    vnode_aligned_level_size_threshold: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -155,6 +156,9 @@ pub fn build_compaction_config_vec(
     if let Some(c) = enable_optimize_l0_interval_selection {
         configs.push(MutableConfig::EnableOptimizeL0IntervalSelection(c))
     }
+    if let Some(c) = vnode_aligned_level_size_threshold {
+        configs.push(MutableConfig::VnodeAlignedLevelSizeThreshold(c))
+    }
 
     configs
 }
@@ -162,7 +166,7 @@ pub fn build_compaction_config_vec(
 pub async fn split_compaction_group(
     context: &CtlContext,
     group_id: CompactionGroupId,
-    table_ids_to_new_group: &[StateTableId],
+    table_ids_to_new_group: &[TableId],
     partition_vnode_count: u32,
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;

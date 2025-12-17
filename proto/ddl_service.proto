@@ -88,8 +88,8 @@ message AlterSourceResponse {
 message CreateSinkRequest {
   catalog.Sink sink = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
-  // It is used to provide a replace plan for the downstream table in `create sink into table` requests.
-  optional ReplaceJobPlan affected_table_change = 3;
+  reserved 3;
+  reserved "affected_table_change";
   // The list of object IDs that this sink depends on.
   repeated uint32 dependencies = 4;
   bool if_not_exists = 5;
@@ -103,7 +103,8 @@ message CreateSinkResponse {
 message DropSinkRequest {
   uint32 sink_id = 1;
   bool cascade = 2;
-  optional ReplaceJobPlan affected_table_change = 3;
+  reserved 3;
+  reserved "affected_table_change";
 }
 
 message DropSinkResponse {
@@ -226,6 +227,31 @@ message CreateTableResponse {
   WaitVersion version = 2;
 }
 
+message CreateIcebergTableRequest {
+  message TableJobInfo {
+    catalog.Source source = 1;
+    catalog.Table table = 2;
+    stream_plan.StreamFragmentGraph fragment_graph = 3;
+    TableJobType job_type = 4;
+  }
+
+  message SinkJobInfo {
+    catalog.Sink sink = 1;
+    stream_plan.StreamFragmentGraph fragment_graph = 2;
+  }
+
+  TableJobInfo table_info = 1;
+  SinkJobInfo sink_info = 2;
+  catalog.Source iceberg_source = 3;
+
+  bool if_not_exists = 5;
+}
+
+message CreateIcebergTableResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
 message AlterNameRequest {
   oneof object {
     uint32 table_id = 1;
@@ -286,6 +312,15 @@ message AlterParallelismRequest {
 
 message AlterParallelismResponse {}
 
+message AlterFragmentParallelismRequest {
+  repeated uint32 fragment_ids = 1;
+
+  // When `parallelism` is `None`, it indicates resetting to the job's parallelism.
+  optional meta.TableParallelism parallelism = 2;
+}
+
+message AlterFragmentParallelismResponse {}
+
 message AlterCdcTableBackfillParallelismRequest {
   uint32 table_id = 1;
   meta.TableParallelism parallelism = 2;
@@ -337,6 +372,7 @@ message CreateFunctionResponse {
 
 message DropFunctionRequest {
   uint32 function_id = 1;
+  bool cascade = 2;
 }
 
 message DropFunctionResponse {
@@ -587,6 +623,22 @@ message CompactIcebergTableResponse {
   uint64 task_id = 2;
 }
 
+message ExpireIcebergTableSnapshotsRequest {
+  uint32 sink_id = 1;
+}
+
+message ExpireIcebergTableSnapshotsResponse {
+  common.Status status = 1;
+}
+
+message AlterStreamingJobConfigRequest {
+  uint32 job_id = 1;
+  map<string, string> entries_to_add = 2;
+  repeated string keys_to_remove = 3;
+}
+
+message AlterStreamingJobConfigResponse {}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -601,6 +653,7 @@ service DdlService {
   rpc CreateMaterializedView(CreateMaterializedViewRequest) returns (CreateMaterializedViewResponse);
   rpc DropMaterializedView(DropMaterializedViewRequest) returns (DropMaterializedViewResponse);
   rpc CreateTable(CreateTableRequest) returns (CreateTableResponse);
+  rpc CreateIcebergTable(CreateIcebergTableRequest) returns (CreateIcebergTableResponse);
   rpc CreateSecret(CreateSecretRequest) returns (CreateSecretResponse);
   rpc DropSecret(DropSecretRequest) returns (DropSecretResponse);
   rpc AlterSecret(AlterSecretRequest) returns (AlterSecretResponse);
@@ -609,6 +662,7 @@ service DdlService {
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
   rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);
+  rpc AlterFragmentParallelism(AlterFragmentParallelismRequest) returns (AlterFragmentParallelismResponse);
   rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
@@ -631,5 +685,7 @@ service DdlService {
   rpc AlterSwapRename(AlterSwapRenameRequest) returns (AlterSwapRenameResponse);
   rpc AlterDatabaseParam(AlterDatabaseParamRequest) returns (AlterDatabaseParamResponse);
   rpc CompactIcebergTable(CompactIcebergTableRequest) returns (CompactIcebergTableResponse);
+  rpc ExpireIcebergTableSnapshots(ExpireIcebergTableSnapshotsRequest) returns (ExpireIcebergTableSnapshotsResponse);
   rpc AlterCdcTableBackfillParallelism(AlterCdcTableBackfillParallelismRequest) returns (AlterCdcTableBackfillParallelismResponse);
+  rpc AlterStreamingJobConfig(AlterStreamingJobConfigRequest) returns (AlterStreamingJobConfigResponse);
 }

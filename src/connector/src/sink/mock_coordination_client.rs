@@ -25,8 +25,8 @@ use tokio::sync::mpsc::{self, Receiver};
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::Status;
 
-use super::boxed::BoxCoordinator;
 use super::{BOUNDED_CHANNEL_SIZE, SinkParam};
+use crate::sink::{SinkCommitCoordinator, SinkError};
 
 #[derive(Clone)]
 pub enum SinkCoordinationRpcClientEnum {
@@ -66,10 +66,10 @@ impl SinkCoordinationRpcClientEnum {
 
 #[derive(Clone)]
 pub struct MockMetaClient {
-    mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<BoxCoordinator>>,
+    mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<SinkCommitCoordinator>>,
 }
 impl MockMetaClient {
-    pub fn new(mock_coordinator_committer: BoxCoordinator) -> Self {
+    pub fn new(mock_coordinator_committer: SinkCommitCoordinator) -> Self {
         Self {
             mock_coordinator_committer: std::sync::Arc::new(tokio::sync::Mutex::new(
                 mock_coordinator_committer,
@@ -84,12 +84,12 @@ impl MockMetaClient {
 
 #[derive(Clone)]
 pub struct MockSinkCoordinationRpcClient {
-    mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<BoxCoordinator>>,
+    mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<SinkCommitCoordinator>>,
 }
 
 impl MockSinkCoordinationRpcClient {
     pub fn new(
-        mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<BoxCoordinator>>,
+        mock_coordinator_committer: std::sync::Arc<tokio::sync::Mutex<SinkCommitCoordinator>>,
     ) -> Self {
         Self {
             mock_coordinator_committer,
@@ -119,7 +119,7 @@ impl MockSinkCoordinationRpcClient {
         match receiver_stream.try_recv() {
             Ok(CoordinateRequest {
                 msg:
-                    Some(risingwave_pb::connector_service::coordinate_request::Msg::StartRequest(
+                    Some(coordinate_request::Msg::StartRequest(
                         coordinate_request::StartCoordinationRequest {
                             param: Some(_param),
                             vnode_bitmap: Some(_vnode_bitmap),
@@ -155,21 +155,48 @@ impl MockSinkCoordinationRpcClient {
                 match receiver_stream.recv().await {
                     Some(CoordinateRequest {
                         msg:
-                            Some(risingwave_pb::connector_service::coordinate_request::Msg::CommitRequest(coordinate_request::CommitRequest {
-                                epoch,
-                                metadata,
-                            })),
+                            Some(coordinate_request::Msg::CommitRequest(
+                                coordinate_request::CommitRequest {
+                                    epoch, metadata, ..
+                                },
+                            )),
                     }) => {
-                        mock_coordinator_committer.clone().lock().await.commit(epoch, vec![metadata.unwrap()]).await.map_err(|e| Status::from_error(Box::new(e)))?;
-                        response_tx_clone.clone().send(Ok(CoordinateResponse {
-                            msg: Some(coordinate_response::Msg::CommitResponse(CommitResponse{epoch})),
-                        })).await.map_err(|e| Status::from_error(Box::new(e)))?;
-                    },
+                        let result: Result<(), SinkError> = try {
+                            let mut guard = mock_coordinator_committer.lock().await;
+                            match &mut *guard {
+                                SinkCommitCoordinator::SinglePhase(coordinator) => {
+                                    coordinator.init().await?;
+                                    coordinator
+                                        .commit(epoch, vec![metadata.unwrap()], None)
+                                        .await?;
+                                }
+                                SinkCommitCoordinator::TwoPhase(coordinator) => {
+                                    coordinator.init().await?;
+                                    let metadata = coordinator
+                                        .pre_commit(epoch, vec![metadata.unwrap()], None)
+                                        .await?;
+                                    coordinator.commit(epoch, metadata).await?;
+                                }
+                            }
+                        };
+                        result.map_err(|e| Status::from_error(Box::new(e)))?;
+                        response_tx_clone
+                            .clone()
+                            .send(Ok(CoordinateResponse {
+                                msg: Some(coordinate_response::Msg::CommitResponse(
+                                    CommitResponse { epoch },
+                                )),
+                            }))
+                            .await
+                            .map_err(|e| Status::from_error(Box::new(e)))?;
+                    }
                     msg => {
-                        return Err::<ReceiverStream<CoordinateResponse>, tonic::Status>(Status::invalid_argument(format!(
-                            "expected CoordinateRequest::CommitRequest , get {:?}",
-                            msg
-                        )));
+                        return Err::<ReceiverStream<CoordinateResponse>, tonic::Status>(
+                            Status::invalid_argument(format!(
+                                "expected CoordinateRequest::CommitRequest , get {:?}",
+                                msg
+                            )),
+                        );
                     }
                 }
             }

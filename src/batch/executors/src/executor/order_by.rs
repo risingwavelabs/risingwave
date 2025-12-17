@@ -125,7 +125,7 @@ impl SortExecutor {
         let mut input_stream = self.child.execute();
         #[for_await]
         for chunk in &mut input_stream {
-            let chunk = chunk?.compact();
+            let chunk = chunk?.compact_vis();
             let chunk_estimated_heap_size = chunk.estimated_heap_size();
             chunks.push(chunk);
             if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
@@ -852,7 +852,7 @@ mod tests {
                 Field::unnamed(
                     StructType::unnamed(vec![DataType::Varchar, DataType::Float32]).into(),
                 ),
-                Field::unnamed(DataType::List(Box::new(DataType::Int64))),
+                Field::unnamed(DataType::Int64.list()),
             ],
         };
         let mut struct_builder = StructArrayBuilder::with_type(
@@ -862,8 +862,7 @@ mod tests {
                 DataType::Float32,
             ])),
         );
-        let mut list_builder =
-            ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Int64)));
+        let mut list_builder = ListArrayBuilder::with_type(0, DataType::Int64.list());
         // {abcd, -1.2}   .
         // {c, 0}         [1, ., 3]
         // {c, .}         .
@@ -918,8 +917,7 @@ mod tests {
                 DataType::Float32,
             ])),
         );
-        let mut list_builder =
-            ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Int64)));
+        let mut list_builder = ListArrayBuilder::with_type(0, DataType::Int64.list());
         // {abcd, -1.2}   .
         // {c, 0}         [2]
         // {c, 0}         [1, ., 3]

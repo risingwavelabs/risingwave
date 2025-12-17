@@ -46,8 +46,6 @@ public interface ReplicationStream extends AutoCloseable {
          */
         void process(ReplicationMessage message) throws SQLException, InterruptedException;
 
-        /* patched code */
-
         /** Return the Debezium event dispatcher to be used for dispatching schema change events. */
         default EventDispatcher<PostgresPartition, TableId> getEventDispatcher() {
             return null;
@@ -64,7 +62,6 @@ public interface ReplicationStream extends AutoCloseable {
         default boolean includeSchemaChange() {
             return false;
         }
-        /* patched code */
     }
 
     /**

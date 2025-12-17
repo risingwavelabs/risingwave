@@ -60,7 +60,7 @@ impl HummockManager {
         &self,
         group_1: CompactionGroupId,
         group_2: CompactionGroupId,
-        created_tables: HashSet<u32>,
+        created_tables: HashSet<TableId>,
     ) -> Result<()> {
         self.merge_compaction_group_impl(group_1, group_2, Some(created_tables))
             .await
@@ -70,7 +70,7 @@ impl HummockManager {
         &self,
         group_1: CompactionGroupId,
         group_2: CompactionGroupId,
-        created_tables: Option<HashSet<u32>>,
+        created_tables: Option<HashSet<TableId>>,
     ) -> Result<()> {
         let compaction_guard = self.compaction.write().await;
         let mut versioning_guard = self.versioning.write().await;
@@ -118,7 +118,10 @@ impl HummockManager {
 
         let created_tables = if let Some(created_tables) = created_tables {
             // if the created_tables is provided, use it directly, most for test
-            assert!(cfg!(debug_assertions));
+            #[expect(clippy::assertions_on_constants)]
+            {
+                assert!(cfg!(debug_assertions));
+            }
             created_tables
         } else {
             match self.metadata_manager.get_created_table_ids().await {
@@ -135,11 +138,11 @@ impl HummockManager {
 
         fn contains_creating_table(
             table_ids: &Vec<TableId>,
-            created_tables: &HashSet<u32>,
+            created_tables: &HashSet<TableId>,
         ) -> bool {
             table_ids
                 .iter()
-                .any(|table_id| !created_tables.contains(&table_id.table_id()))
+                .any(|table_id| !created_tables.contains(table_id))
         }
 
         // do not merge the compaction group which is creating
@@ -147,7 +150,7 @@ impl HummockManager {
             || contains_creating_table(&member_table_ids_2, &created_tables)
         {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge creating group {} next_group {} member_table_ids_1 {:?} member_table_ids_2 {:?}",
+                "Cannot merge creating group {} next_group {} member_table_ids_1 {:?} member_table_ids_2 {:?}",
                 group_1, group_2, member_table_ids_1, member_table_ids_2
             )));
         }
@@ -263,8 +266,7 @@ impl HummockManager {
         // TODO: remove compaciton group_id from state_table_info
         // rewrite compaction_group_id for all tables
         new_version_delta.with_latest_version(|version, new_version_delta| {
-            for table_id in combined_member_table_ids {
-                let table_id = TableId::new(table_id.table_id());
+            for &table_id in combined_member_table_ids {
                 let info = version
                     .state_table_info
                     .info()
@@ -404,7 +406,7 @@ impl HummockManager {
             .state_table_info
             .compaction_group_member_table_ids(parent_group_id)
             .iter()
-            .map(|table_id| table_id.table_id)
+            .copied()
             .collect::<BTreeSet<_>>();
 
         if !member_table_ids.contains(&table_id_to_split) {
@@ -428,7 +430,7 @@ impl HummockManager {
         let (table_ids_left, table_ids_right) =
             group_split::split_table_ids_with_table_id_and_vnode(
                 &table_ids,
-                split_full_key.user_key.table_id.table_id(),
+                split_full_key.user_key.table_id,
                 split_full_key.user_key.get_vnode_id(),
             );
         if table_ids_left.is_empty() || table_ids_right.is_empty() {
@@ -464,12 +466,19 @@ impl HummockManager {
         let (new_compaction_group_id, config) = {
             // All NewCompactionGroup pairs are mapped to one new compaction group.
             let new_compaction_group_id = next_compaction_group_id(&self.env).await?;
-            // The new config will be persisted later.
+            // Inherit config from parent group
             let config = self
                 .compaction_group_manager
                 .read()
                 .await
-                .default_compaction_config()
+                .try_get_compaction_group_config(parent_group_id)
+                .ok_or_else(|| {
+                    Error::CompactionGroup(format!(
+                        "parent group {} config not found",
+                        parent_group_id
+                    ))
+                })?
+                .compaction_config()
                 .as_ref()
                 .clone();
 
@@ -493,8 +502,7 @@ impl HummockManager {
         };
 
         new_version_delta.with_latest_version(|version, new_version_delta| {
-            for table_id in &table_ids_right {
-                let table_id = TableId::new(*table_id);
+            for &table_id in &table_ids_right {
                 let info = version
                     .state_table_info
                     .info()
@@ -621,7 +629,7 @@ impl HummockManager {
                 .state_table_info
                 .compaction_group_member_table_ids(parent_group_id)
                 .iter()
-                .map(|table_id| table_id.table_id)
+                .copied()
                 .collect_vec()
         };
 
@@ -632,7 +640,7 @@ impl HummockManager {
             )));
         }
 
-        fn check_table_ids_valid(cg_id_to_table_ids: &BTreeMap<u64, Vec<u32>>) {
+        fn check_table_ids_valid(cg_id_to_table_ids: &BTreeMap<u64, Vec<TableId>>) {
             // 1. table_ids in different cg are sorted.
             {
                 cg_id_to_table_ids
@@ -667,7 +675,7 @@ impl HummockManager {
         // The new compaction group id is always generate on the right side
         // Hence, we return the first compaction group id as the result
         // split 1
-        let mut cg_id_to_table_ids: BTreeMap<u64, Vec<u32>> = BTreeMap::new();
+        let mut cg_id_to_table_ids: BTreeMap<u64, Vec<TableId>> = BTreeMap::new();
         let table_id_to_split = *table_ids.first().unwrap();
         let mut target_compaction_group_id = 0;
         let result_vec = self
@@ -758,7 +766,7 @@ impl HummockManager {
     pub async fn try_move_high_throughput_table_to_dedicated_cg(
         &self,
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
-        table_id: u32,
+        table_id: TableId,
         _table_size: &u64,
         parent_group_id: u64,
     ) {
@@ -869,7 +877,7 @@ impl HummockManager {
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
         group: &CompactionGroupStatistic,
         next_group: &CompactionGroupStatistic,
-        created_tables: &HashSet<u32>,
+        created_tables: &HashSet<TableId>,
     ) -> Result<()> {
         GroupMergeValidator::validate_group_merge(
             group,
@@ -987,7 +995,7 @@ impl GroupMergeValidator {
 
     fn check_is_creating_compaction_group(
         group: &CompactionGroupStatistic,
-        created_tables: &HashSet<u32>,
+        created_tables: &HashSet<TableId>,
     ) -> bool {
         group
             .table_statistic
@@ -998,7 +1006,7 @@ impl GroupMergeValidator {
     async fn validate_group_merge(
         group: &CompactionGroupStatistic,
         next_group: &CompactionGroupStatistic,
-        created_tables: &HashSet<u32>,
+        created_tables: &HashSet<TableId>,
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
         opts: &Arc<MetaOpts>,
         versioning: &MonitoredRwLock<Versioning>,
@@ -1039,10 +1047,42 @@ impl GroupMergeValidator {
             )));
         }
 
+        // Do not merge compaction groups with different compaction configs.
+        // Different configs lead to different max_estimated_group_size calculations,
+        // which can cause scheduling conflicts (continuous split/merge cycles).
+        // The following fields in CompactionConfig affect max_estimated_group_size:
+        //   - max_bytes_for_level_base
+        //   - max_bytes_for_level_multiplier
+        //   - max_compaction_bytes
+        //   - sub_level_max_compaction_bytes
+        // If any of these fields differ, the groups may have incompatible scheduling.
+        if group.compaction_group_config.compaction_config
+            != next_group.compaction_group_config.compaction_config
+        {
+            let left_config = group.compaction_group_config.compaction_config.as_ref();
+            let right_config = next_group
+                .compaction_group_config
+                .compaction_config
+                .as_ref();
+
+            tracing::warn!(
+                group_id = group.group_id,
+                next_group_id = next_group.group_id,
+                left_config = ?left_config,
+                right_config = ?right_config,
+                "compaction config mismatch detected while merging compaction groups"
+            );
+
+            return Err(Error::CompactionGroup(format!(
+                "Cannot merge group {} and next_group {} with different compaction configs. left_config: {:?}, right_config: {:?}",
+                group.group_id, next_group.group_id, left_config, right_config
+            )));
+        }
+
         // do not merge the compaction group which is creating
         if Self::check_is_creating_compaction_group(group, created_tables) {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge creating group {} next_group {}",
+                "Cannot merge creating group {} next_group {}",
                 group.group_id, next_group.group_id
             )));
         }
@@ -1054,7 +1094,7 @@ impl GroupMergeValidator {
             opts,
         ) {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge high throughput group {} next_group {}",
+                "Cannot merge high throughput group {} next_group {}",
                 group.group_id, next_group.group_id
             )));
         }
@@ -1064,7 +1104,7 @@ impl GroupMergeValidator {
 
         if (group.group_size + next_group.group_size) > size_limit {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge huge group {} group_size {} next_group {} next_group_size {} size_limit {}",
+                "Cannot merge huge group {} group_size {} next_group {} next_group_size {} size_limit {}",
                 group.group_id,
                 group.group_size,
                 next_group.group_id,
@@ -1075,7 +1115,7 @@ impl GroupMergeValidator {
 
         if Self::check_is_creating_compaction_group(next_group, created_tables) {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge creating group {} next group {}",
+                "Cannot merge creating group {} next group {}",
                 group.group_id, next_group.group_id
             )));
         }
@@ -1086,7 +1126,7 @@ impl GroupMergeValidator {
             opts,
         ) {
             return Err(Error::CompactionGroup(format!(
-                "Not Merge high throughput group {} next group {}",
+                "Cannot merge high throughput group {} next group {}",
                 group.group_id, next_group.group_id
             )));
         }
@@ -1097,14 +1137,14 @@ impl GroupMergeValidator {
             let levels = &versioning_guard.current_version.levels;
             if !levels.contains_key(&group.group_id) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge group {} not exist",
+                    "Cannot merge group {} not exist",
                     group.group_id
                 )));
             }
 
             if !levels.contains_key(&next_group.group_id) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge next group {} not exist",
+                    "Cannot merge next group {} not exist",
                     next_group.group_id
                 )));
             }
@@ -1124,7 +1164,7 @@ impl GroupMergeValidator {
 
             if group_state.is_write_stop() || group_state.is_emergency() {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge write limit group {} next group {}",
+                    "Cannot merge write limit group {} next group {}",
                     group.group_id, next_group.group_id
                 )));
             }
@@ -1139,7 +1179,7 @@ impl GroupMergeValidator {
 
             if next_group_state.is_write_stop() || next_group_state.is_emergency() {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge write limit next group {} group {}",
+                    "Cannot merge write limit next group {} group {}",
                     next_group.group_id, group.group_id
                 )));
             }
@@ -1153,7 +1193,7 @@ impl GroupMergeValidator {
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge write limit group {} next group {}, will trigger write stop after merge",
+                    "Cannot merge write limit group {} next group {}, will trigger write stop after merge",
                     group.group_id, next_group.group_id
                 )));
             }
@@ -1166,7 +1206,7 @@ impl GroupMergeValidator {
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge write limit next group {} group {}, will trigger write stop after merge",
+                    "Cannot merge write limit next group {} group {}, will trigger write stop after merge",
                     next_group.group_id, group.group_id
                 )));
             }
@@ -1180,7 +1220,7 @@ impl GroupMergeValidator {
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge write limit next group {} group {}, will trigger write stop after merge",
+                    "Cannot merge write limit next group {} group {}, will trigger write stop after merge",
                     next_group.group_id, group.group_id
                 )));
             }
@@ -1192,7 +1232,7 @@ impl GroupMergeValidator {
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(
-                    "Not Merge emergency group {} next group {}, will trigger emergency after merge",
+                    "Cannot merge emergency group {} next group {}, will trigger emergency after merge",
                     group.group_id, next_group.group_id
                 )));
             }

@@ -26,7 +26,7 @@ use crate::task::CreateMviewProgressReporter;
 const DEFAULT_CHUNK_SIZE: usize = 1024;
 
 /// Execute `values` in stream. As is a leaf, current workaround holds a `barrier_executor`.
-/// May refractor with `BarrierRecvExecutor` in the near future.
+/// May refactor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutor {
     ctx: ActorContextRef,
 
@@ -39,7 +39,6 @@ pub struct ValuesExecutor {
 }
 
 impl ValuesExecutor {
-    /// Currently hard-code the `pk_indices` as the last column.
     pub fn new(
         ctx: ActorContextRef,
         schema: Schema,
@@ -119,9 +118,12 @@ impl ValuesExecutor {
             }
         }
 
+        let mut finish_reported = !emit;
+
         while let Some(barrier) = barrier_receiver.recv().await {
-            if emit {
+            if !finish_reported {
                 progress.finish(barrier.epoch, 0);
+                finish_reported = true;
             }
             yield Message::Barrier(barrier);
         }
@@ -204,13 +206,8 @@ mod tests {
         // Init barrier
         let first_message =
             Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
-                adds: Default::default(),
                 added_actors: maplit::hashset! {actor_id},
-                splits: Default::default(),
-                pause: false,
-                subscriptions_to_add: vec![],
-                backfill_nodes_to_pause: Default::default(),
-                actor_cdc_table_snapshot_splits: Default::default(),
+                ..Default::default()
             }));
         tx.send(first_message).unwrap();
 
@@ -225,7 +222,7 @@ mod tests {
         let result = values_msg
             .into_chunk()
             .unwrap()
-            .compact()
+            .compact_vis()
             .data_chunk()
             .to_owned();
 

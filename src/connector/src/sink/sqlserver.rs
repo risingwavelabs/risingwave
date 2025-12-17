@@ -21,7 +21,7 @@ use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Decimal};
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use tiberius::numeric::Numeric;
@@ -154,13 +154,9 @@ impl TryFrom<SinkParam> for SqlServerSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = SqlServerConfig::from_btreemap(param.properties)?;
-        SqlServerSink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
+        SqlServerSink::new(config, schema, pk_indices, param.sink_type.is_append_only())
     }
 }
 
@@ -419,7 +415,7 @@ impl SqlServerSinkWriter {
                 SqlOp::Merge(_) => {
                     write!(
                         &mut query_str,
-                        r#"MERGE {} AS [TARGET]
+                        r#"MERGE {} WITH (HOLDLOCK) AS [TARGET]
                         USING (VALUES ({})) AS [SOURCE] ({})
                         ON {}
                         WHEN MATCHED THEN UPDATE SET {}
@@ -610,7 +606,7 @@ fn bind_params(
                 ScalarRefImpl::Int256(_) => return Err(data_type_not_supported("Int256")),
                 ScalarRefImpl::Serial(_) => return Err(data_type_not_supported("Serial")),
                 ScalarRefImpl::Map(_) => return Err(data_type_not_supported("Map")),
-                ScalarRefImpl::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+                ScalarRefImpl::Vector(_) => return Err(data_type_not_supported("Vector")),
             },
             None => match schema[col_idx].data_type {
                 DataType::Boolean => {
@@ -659,7 +655,7 @@ fn bind_params(
                 DataType::Serial => return Err(data_type_not_supported("Serial")),
                 DataType::Int256 => return Err(data_type_not_supported("Int256")),
                 DataType::Map(_) => return Err(data_type_not_supported("Map")),
-                DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+                DataType::Vector(_) => return Err(data_type_not_supported("Vector")),
             },
         };
     }
@@ -694,7 +690,7 @@ fn check_data_type_compatibility(data_type: &DataType) -> Result<()> {
         DataType::Serial => Err(data_type_not_supported("Serial")),
         DataType::Int256 => Err(data_type_not_supported("Int256")),
         DataType::Map(_) => Err(data_type_not_supported("Map")),
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
+        DataType::Vector(_) => Err(data_type_not_supported("Vector")),
     }
 }
 

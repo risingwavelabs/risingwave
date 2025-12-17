@@ -23,7 +23,7 @@ use risingwave_pb::stream_plan::{StreamScanNode, StreamScanType};
 use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
-use crate::common::table::state_table::{ReplicatedStateTable, StateTable};
+use crate::common::table::state_table::{ReplicatedStateTable, StateTableBuilder};
 use crate::executor::{
     ArrangementBackfillExecutor, BackfillExecutor, ChainExecutor, RearrangedChainExecutor,
     TroublemakerExecutor, UpstreamTableExecutor,
@@ -42,7 +42,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
         // For reporting the progress.
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.id);
+            .register_create_mview_progress(&params.actor_context);
 
         let output_indices = node
             .output_indices
@@ -75,7 +75,9 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
 
                 let state_table = if let Ok(table) = node.get_state_table() {
                     Some(
-                        StateTable::from_table_catalog(table, state_store.clone(), vnodes.clone())
+                        StateTableBuilder::new(table, state_store.clone(), vnodes.clone())
+                            .enable_preload_all_rows_by_config(&params.config)
+                            .build()
                             .await,
                     )
                 } else {
@@ -92,7 +94,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                     output_indices,
                     progress,
                     params.executor_stats.clone(),
-                    params.env.config().developer.chunk_size,
+                    params.config.developer.chunk_size,
                     node.rate_limit.into(),
                     params.fragment_id,
                 )
@@ -109,26 +111,25 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 let vnodes = params.vnode_bitmap.map(Arc::new);
 
                 let state_table = node.get_state_table().unwrap();
-                let state_table = StateTable::from_table_catalog(
-                    state_table,
-                    state_store.clone(),
-                    vnodes.clone(),
-                )
-                .await;
+                let state_table =
+                    StateTableBuilder::new(state_table, state_store.clone(), vnodes.clone())
+                        .enable_preload_all_rows_by_config(&params.config)
+                        .build()
+                        .await;
 
                 let upstream_table = node.get_arrangement_table().unwrap();
                 let versioned = upstream_table.get_version().is_ok();
 
                 macro_rules! new_executor {
                     ($SD:ident) => {{
-                        let upstream_table =
-                            ReplicatedStateTable::<_, $SD>::from_table_catalog_with_output_column_ids(
-                                upstream_table,
-                                state_store.clone(),
-                                vnodes,
-                                column_ids,
-                            )
-                            .await;
+                        // TODO: can it be ConsistentOldValue?
+                        let upstream_table = ReplicatedStateTable::new_replicated(
+                            upstream_table,
+                            state_store.clone(),
+                            vnodes,
+                            column_ids,
+                        )
+                        .await;
                         ArrangementBackfillExecutor::<_, $SD>::new(
                             upstream_table,
                             upstream,
@@ -136,7 +137,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                             output_indices,
                             progress,
                             params.executor_stats.clone(),
-                            params.env.config().developer.chunk_size,
+                            params.config.developer.chunk_size,
                             node.rate_limit.into(),
                             params.fragment_id,
                         )
@@ -178,10 +179,12 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
                 );
 
                 let state_table = node.get_state_table()?;
-                let state_table =
-                    StateTable::from_table_catalog(state_table, state_store.clone(), vnodes).await;
+                let state_table = StateTableBuilder::new(state_table, state_store.clone(), vnodes)
+                    .enable_preload_all_rows_by_config(&params.config)
+                    .build()
+                    .await;
 
-                let chunk_size = params.env.config().developer.chunk_size;
+                let chunk_size = params.config.developer.chunk_size;
                 let snapshot_epoch = node
                     .snapshot_backfill_epoch
                     .ok_or_else(|| anyhow!("snapshot epoch not set for {:?}", node))?;
@@ -213,10 +216,7 @@ impl ExecutorBuilder for StreamScanExecutorBuilder {
             info.identity = format!("{} (troubled)", info.identity);
             Ok((
                 params.info,
-                TroublemakerExecutor::new(
-                    (info, exec).into(),
-                    params.env.config().developer.chunk_size,
-                ),
+                TroublemakerExecutor::new((info, exec).into(), params.config.developer.chunk_size),
             )
                 .into())
         } else {

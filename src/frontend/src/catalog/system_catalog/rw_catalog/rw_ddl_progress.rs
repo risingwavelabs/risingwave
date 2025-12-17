@@ -37,16 +37,17 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDdlProgress>> {
     let table_ids = ddl_progresses
         .iter()
         .map(|progress| progress.id as u32)
+        .map_into()
         .collect_vec();
 
     // TODO: fetch initialized_at_epoch together with ddl_progresses
-    let tables = reader.meta_client.get_tables(&table_ids, false).await?;
+    let tables = reader.meta_client.get_tables(table_ids, false).await?;
 
     let ddl_progress = ddl_progresses
         .into_iter()
         .map(|s| {
             let initialized_at = tables
-                .get(&(s.id as u32))
+                .get(&(s.id as u32).into())
                 .and_then(|table| table.initialized_at_epoch.map(Epoch::from));
 
             RwDdlProgress {

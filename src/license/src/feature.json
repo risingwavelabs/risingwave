@@ -24,6 +24,11 @@
             "const": "SnowflakeSink"
         },
         {
+            "description": "Delivering data to redis stream.",
+            "type": "string",
+            "const": "RedisSinkStream"
+        },
+        {
             "description": "Delivering data to DynamoDb.",
             "type": "string",
             "const": "DynamoDbSink"
@@ -92,6 +97,16 @@
             "description": "Sink auto schema change.",
             "type": "string",
             "const": "SinkAutoSchemaChange"
+        },
+        {
+            "description": "Support state table memory preload for boosting performance.",
+            "type": "string",
+            "const": "StateTableMemoryPreload"
+        },
+        {
+            "description": "Support locality backfill for complex streaming queries.",
+            "type": "string",
+            "const": "LocalityBackfill"
         }
     ]
 }

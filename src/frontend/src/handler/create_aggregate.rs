@@ -127,7 +127,7 @@ pub async fn handle_create_aggregate(
     })?;
 
     let function = Function {
-        id: FunctionId::placeholder().0,
+        id: FunctionId::placeholder(),
         schema_id,
         database_id,
         name: function_name,
@@ -145,6 +145,8 @@ pub async fn handle_create_aggregate(
         always_retry_on_network_error: false,
         is_async: None,
         is_batched: None,
+        created_at_epoch: None,
+        created_at_cluster_version: None,
     };
 
     let catalog_writer = session.catalog_writer()?;

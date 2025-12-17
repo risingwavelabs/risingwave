@@ -50,6 +50,10 @@ impl BatchProject {
         BatchProject { base, core }
     }
 
+    pub fn core(&self) -> &generic::Project<PlanRef> {
+        &self.core
+    }
+
     pub fn exprs(&self) -> &Vec<ExprImpl> {
         &self.core.exprs
     }

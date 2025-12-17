@@ -61,8 +61,7 @@ fn fetch_schema_info(
         ))
         .into());
     };
-    let (source_def, _) =
-        reader.get_source_by_id(db_name.as_str(), schema_path, &source_id.table_id())?;
+    let (source_def, _) = reader.get_source_by_id(db_name.as_str(), schema_path, source_id)?;
     Ok((table_def.clone(), source_def.clone()))
 }
 
@@ -83,7 +82,7 @@ fn rewrite_table_definition(
         mut with_options,
         append_only,
         on_conflict,
-        with_version_column,
+        with_version_columns,
         query,
         engine,
         ..
@@ -128,10 +127,10 @@ fn rewrite_table_definition(
         or_replace,
         temporary,
         if_not_exists,
-        name: name.clone(),
+        name,
         columns: columns.clone(),
         wildcard_idx,
-        constraints: constraints.clone(),
+        constraints,
         with_options: {
             with_options.retain(|item| {
                 TABLE_PROPS.contains(item.name.real_value().to_lowercase().as_str())
@@ -142,7 +141,7 @@ fn rewrite_table_definition(
         source_watermarks: vec![], // no source, no watermark
         append_only,
         on_conflict,
-        with_version_column,
+        with_version_columns,
         query,
         cdc_table_info: None,
         include_column_options: vec![],

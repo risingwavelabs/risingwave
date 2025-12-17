@@ -319,7 +319,7 @@ impl FieldGeneratorImpl {
             Self::Timestamp(_) => DataType::Timestamp,
             Self::Timestamptz(_) => DataType::Timestamptz,
             Self::Struct(_) => todo!("data_type for struct"),
-            Self::List(inner, _) => DataType::List(Box::new(inner.data_type())),
+            Self::List(inner, _) => DataType::list(inner.data_type()),
         }
     }
 }

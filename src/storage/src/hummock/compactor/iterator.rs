@@ -20,6 +20,7 @@ use std::time::Instant;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use fail::fail_point;
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::FullKey;
@@ -139,10 +140,7 @@ impl SstableStreamIterator {
 
     async fn prune_from_valid_block_iter(&mut self) -> HummockResult<()> {
         while let Some(block_iter) = self.block_iter.as_mut() {
-            if self
-                .sstable_table_ids
-                .contains(&block_iter.table_id().table_id)
-            {
+            if self.sstable_table_ids.contains(&block_iter.table_id()) {
                 return Ok(());
             } else {
                 self.next_block().await?;
@@ -400,13 +398,13 @@ impl ConcatSstableIterator {
 
     #[cfg(test)]
     pub fn for_test(
-        existing_table_ids: Vec<StateTableId>,
+        existing_table_ids: Vec<impl Into<StateTableId>>,
         sst_infos: Vec<SstableInfo>,
         key_range: KeyRange,
         sstable_store: SstableStoreRef,
     ) -> Self {
         Self::new(
-            existing_table_ids,
+            existing_table_ids.into_iter().map(Into::into).collect(),
             sst_infos,
             key_range,
             sstable_store,
@@ -592,7 +590,7 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompa
         self.inner.next().await?;
         self.processed_key_num += 1;
 
-        if self.processed_key_num % PROGRESS_KEY_INTERVAL == 0 {
+        if self.processed_key_num.is_multiple_of(PROGRESS_KEY_INTERVAL) {
             self.task_progress
                 .inc_progress_key(PROGRESS_KEY_INTERVAL as _);
         }
@@ -635,7 +633,7 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompa
 
 pub(crate) fn filter_block_metas(
     block_metas: &Vec<BlockMeta>,
-    existing_table_ids: &HashSet<u32>,
+    existing_table_ids: &HashSet<TableId>,
     key_range: KeyRange,
 ) -> Vec<BlockMeta> {
     if block_metas.is_empty() {
@@ -673,7 +671,7 @@ pub(crate) fn filter_block_metas(
 
     // skip blocks that are not in existing_table_ids
     while start_index <= end_index {
-        let start_block_table_id = block_metas[start_index].table_id().table_id();
+        let start_block_table_id = block_metas[start_index].table_id();
         if existing_table_ids.contains(&start_block_table_id) {
             break;
         }
@@ -683,7 +681,7 @@ pub(crate) fn filter_block_metas(
         let block_metas_to_search = &block_metas[start_index..=end_index];
 
         start_index += block_metas_to_search
-            .partition_point(|block_meta| block_meta.table_id().table_id() == start_block_table_id);
+            .partition_point(|block_meta| block_meta.table_id() == start_block_table_id);
 
         if old_start_index == start_index {
             // no more blocks with the same table_id
@@ -692,7 +690,7 @@ pub(crate) fn filter_block_metas(
     }
 
     while start_index <= end_index {
-        let end_block_table_id = block_metas[end_index].table_id().table_id();
+        let end_block_table_id = block_metas[end_index].table_id();
         if existing_table_ids.contains(&end_block_table_id) {
             break;
         }
@@ -702,7 +700,7 @@ pub(crate) fn filter_block_metas(
 
         end_index = start_index
             + block_metas_to_search
-                .partition_point(|block_meta| block_meta.table_id().table_id() < end_block_table_id)
+                .partition_point(|block_meta| block_meta.table_id() < end_block_table_id)
                 .saturating_sub(1);
 
         if end_index == old_end_index {
@@ -976,7 +974,7 @@ mod tests {
 
             let ret = filter_block_metas(
                 &block_metas,
-                &HashSet::from_iter(vec![1_u32, 2, 3].into_iter()),
+                &HashSet::from_iter(vec![1_u32.into(), 2.into(), 3.into()].into_iter()),
                 KeyRange::default(),
             );
 
@@ -986,14 +984,14 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
             assert_eq!(
                 3,
                 FullKey::decode(&ret[2].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
 
@@ -1015,7 +1013,7 @@ mod tests {
 
             let ret = filter_block_metas(
                 &block_metas,
-                &HashSet::from_iter(vec![2_u32, 3].into_iter()),
+                &HashSet::from_iter(vec![2_u32.into(), 3.into()].into_iter()),
                 KeyRange::default(),
             );
 
@@ -1025,14 +1023,14 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
             assert_eq!(
                 3,
                 FullKey::decode(&ret[1].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
 
@@ -1054,7 +1052,7 @@ mod tests {
 
             let ret = filter_block_metas(
                 &block_metas,
-                &HashSet::from_iter(vec![1_u32, 2_u32].into_iter()),
+                &HashSet::from_iter(vec![1_u32.into(), 2_u32.into()].into_iter()),
                 KeyRange::default(),
             );
 
@@ -1064,14 +1062,14 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
             assert_eq!(
                 2,
                 FullKey::decode(&ret[1].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
 
@@ -1092,7 +1090,7 @@ mod tests {
             ];
             let ret = filter_block_metas(
                 &block_metas,
-                &HashSet::from_iter(vec![2_u32].into_iter()),
+                &HashSet::from_iter(vec![2_u32.into()].into_iter()),
                 KeyRange::default(),
             );
 
@@ -1102,7 +1100,7 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
 
@@ -1131,7 +1129,7 @@ mod tests {
             ];
             let ret = filter_block_metas(
                 &block_metas,
-                &HashSet::from_iter(vec![2_u32].into_iter()),
+                &HashSet::from_iter(vec![2_u32.into()].into_iter()),
                 KeyRange::default(),
             );
 
@@ -1141,7 +1139,7 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
 
@@ -1171,7 +1169,7 @@ mod tests {
 
             let ret = filter_block_metas(
                 &block_metas,
-                &HashSet::from_iter(vec![2_u32].into_iter()),
+                &HashSet::from_iter(vec![2_u32.into()].into_iter()),
                 KeyRange::default(),
             );
 
@@ -1181,7 +1179,7 @@ mod tests {
                 FullKey::decode(&ret[0].smallest_key)
                     .user_key
                     .table_id
-                    .table_id()
+                    .as_raw_id()
             );
         }
     }

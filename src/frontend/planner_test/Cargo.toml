@@ -18,7 +18,7 @@ paste = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_sqlparser = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_with = "3"
 serde_yaml = "0.9"
 thiserror-ext = { workspace = true }

@@ -73,6 +73,16 @@ message ChannelStats {
   uint64 send_row_count = 4 [json_name = "o"];
 }
 
+message ChannelDeltaStats {
+  uint32 actor_count = 1 [json_name = "n"];
+  // Sum of output blocking duration of all actors in nanoseconds
+  double backpressure_rate = 2 [json_name = "b"];
+  // Sum of input row count of all actors
+  double recv_throughput = 3 [json_name = "i"];
+  // Sum of output row count of all actors
+  double send_throughput = 4 [json_name = "o"];
+}
+
 message FragmentStats {
   uint32 actor_count = 2 [json_name = "n"];
   uint64 current_epoch = 3 [json_name = "e"];
@@ -86,6 +96,13 @@ message RelationStats {
 message GetStreamingStatsResponse {
   // Key: "<upstream_fragment_id>_<downstream_fragment_id>"
   map<string, ChannelStats> channel_stats = 1;
+  map<uint32, FragmentStats> fragment_stats = 2;
+  map<uint32, RelationStats> relation_stats = 3;
+}
+
+message GetStreamingPrometheusStatsResponse {
+  // Key: "<upstream_fragment_id>_<downstream_fragment_id>"
+  map<string, ChannelDeltaStats> channel_stats = 1;
   map<uint32, FragmentStats> fragment_stats = 2;
   map<uint32, RelationStats> relation_stats = 3;
 }

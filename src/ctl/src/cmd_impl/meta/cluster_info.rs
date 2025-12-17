@@ -19,6 +19,7 @@ use itertools::Itertools;
 use risingwave_common::catalog::FragmentTypeFlag;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
+use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::meta::GetClusterInfoResponse;
 use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::source::ConnectorSplits;
@@ -40,14 +41,10 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
         revision: _,
     } = get_cluster_info(context).await?;
 
-    let mut actor_splits_map: BTreeMap<u32, (usize, String)> = BTreeMap::new();
+    let mut actor_splits_map: BTreeMap<ActorId, (usize, String)> = BTreeMap::new();
 
     // build actor_splits_map
     for table_fragment in &table_fragments {
-        if table_fragment.actor_splits.is_empty() {
-            continue;
-        }
-
         for fragment in table_fragment.fragments.values() {
             let fragment_type_mask = fragment.fragment_type_mask;
             if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
@@ -76,11 +73,8 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
         }
     }
 
-    // print in the second iteration. Otherwise we don't have upstream splits info
+    // print in the second iteration. Otherwise, we don't have upstream splits info
     for table_fragment in &table_fragments {
-        if table_fragment.actor_splits.is_empty() {
-            continue;
-        }
         if ignore_id {
             println!("Table");
         } else {
@@ -177,7 +171,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
 
     let mut table = Table::new();
 
-    let cross_out_if_creating = |cell: Cell, fid: u32| -> Cell {
+    let cross_out_if_creating = |cell: Cell, fid: FragmentId| -> Cell {
         match fragment_states[&fid] {
             State::Unspecified => unreachable!(),
             State::Creating => cell.add_attribute(Attribute::CrossedOut),

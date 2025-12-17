@@ -17,6 +17,7 @@ use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
+use crate::catalog::OwnedByUserCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 
@@ -54,6 +55,25 @@ pub async fn handle_drop_database(
             }
         }
     };
+
+    // Check if database was created by an admin user, if so, require admin privilege to drop
+    {
+        let user_reader = session.env().user_info_reader().read_guard();
+        let current_user = user_reader
+            .get_user_by_name(&session.user_name())
+            .ok_or_else(|| ErrorCode::PermissionDenied("Session user is invalid".to_owned()))?;
+
+        // If the database owner was an admin, only admin users can delete it
+        if let Some(database_owner) = user_reader.get_user_by_id(&database.owner())
+            && database_owner.is_admin
+            && !current_user.is_admin
+        {
+            return Err(ErrorCode::PermissionDenied(
+                "only admin users can drop databases created by admin users".to_owned(),
+            )
+            .into());
+        }
+    }
 
     session.check_privilege_for_drop_alter_db_schema(&database)?;
 

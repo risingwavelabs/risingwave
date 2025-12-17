@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::{
     DataType, DateTimeField, Decimal, Interval, MapType, ScalarImpl, StructType,
@@ -125,12 +124,9 @@ impl Binder {
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
         let element_type = align_types(exprs.iter_mut())?;
-        let expr: ExprImpl = FunctionCall::new_unchecked(
-            ExprType::Array,
-            exprs,
-            DataType::List(Box::new(element_type)),
-        )
-        .into();
+        let expr: ExprImpl =
+            FunctionCall::new_unchecked(ExprType::Array, exprs, DataType::list(element_type))
+                .into();
         Ok(expr)
     }
 
@@ -147,16 +143,13 @@ impl Binder {
         let key_type = align_types(keys.iter_mut())?;
         let value_type = align_types(values.iter_mut())?;
 
-        let keys: ExprImpl = FunctionCall::new_unchecked(
-            ExprType::Array,
-            keys,
-            DataType::List(Box::new(key_type.clone())),
-        )
-        .into();
+        let keys: ExprImpl =
+            FunctionCall::new_unchecked(ExprType::Array, keys, DataType::list(key_type.clone()))
+                .into();
         let values: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             values,
-            DataType::List(Box::new(value_type.clone())),
+            DataType::list(value_type.clone()),
         )
         .into();
 
@@ -182,7 +175,7 @@ impl Binder {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             exprs,
-            DataType::List(Box::new(element_type.clone())),
+            DataType::list(element_type.clone()),
         )
         .into();
         Ok(expr)
@@ -203,13 +196,13 @@ impl Binder {
         let keys: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             keys,
-            DataType::List(Box::new(map_type.key().clone())),
+            DataType::list(map_type.key().clone()),
         )
         .into();
         let values: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             values,
-            DataType::List(Box::new(map_type.value().clone())),
+            DataType::list(map_type.value().clone()),
         )
         .into();
 
@@ -225,10 +218,10 @@ impl Binder {
     pub(super) fn bind_index(&mut self, obj: &Expr, index: &Expr) -> Result<ExprImpl> {
         let obj = self.bind_expr_inner(obj)?;
         match obj.return_type() {
-            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
+            DataType::List(l) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayAccess,
                 vec![obj, self.bind_expr_inner(index)?],
-                *return_type,
+                l.into_elem(),
             )
             .into()),
             DataType::Map(m) => Ok(FunctionCall::new_unchecked(
@@ -267,10 +260,10 @@ impl Binder {
                 .cast_implicit(&DataType::Int32)?,
         };
         match obj.return_type() {
-            DataType::List(return_type) => Ok(FunctionCall::new_unchecked(
+            t @ DataType::List(_) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayRangeAccess,
                 vec![obj, start, end],
-                DataType::List(return_type),
+                t,
             )
             .into()),
             data_type => Err(ErrorCode::BindError(format!(
@@ -287,8 +280,7 @@ impl Binder {
             .iter()
             .map(|e| self.bind_expr_inner(e))
             .collect::<Result<Vec<ExprImpl>>>()?;
-        let data_type =
-            StructType::unnamed(exprs.iter().map(|e| e.return_type()).collect_vec()).into();
+        let data_type = StructType::row_expr_type(exprs.iter().map(|e| e.return_type())).into();
         let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
         Ok(expr)
     }
@@ -413,14 +405,14 @@ mod tests {
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11)],
-            DataType::List(Box::new(DataType::Int32)),
+            DataType::Int32.list(),
         )
         .into();
         let expr_pb = expr.to_expr_proto();
         let expr = build_from_prost(&expr_pb).unwrap();
         match expr.return_type() {
-            DataType::List(datatype) => {
-                assert_eq!(datatype, Box::new(DataType::Int32));
+            DataType::List(list) => {
+                assert_eq!(list.into_elem(), DataType::Int32);
             }
             _ => panic!("unexpected type"),
         };
@@ -431,7 +423,7 @@ mod tests {
         let array_expr = FunctionCall::new_unchecked(
             ExprType::Array,
             vec![ExprImpl::literal_int(11), ExprImpl::literal_int(22)],
-            DataType::List(Box::new(DataType::Int32)),
+            DataType::Int32.list(),
         )
         .into();
 
@@ -458,7 +450,7 @@ mod tests {
             "2 minutes",
             "1 month",
         ];
-        let data = vec![
+        let data = [
             Literal::new(
                 Some(ScalarImpl::Interval(Interval::from_minutes(60))),
                 DataType::Interval,

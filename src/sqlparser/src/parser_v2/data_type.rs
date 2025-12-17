@@ -15,7 +15,7 @@
 //! This module contains parsers for data types. To handle the anbiguity of `>>` and `> >` in struct definition,
 //! we need to use a stateful parser here. See [`with_state`] for more information.
 
-use core::cell::RefCell;
+use std::cell::RefCell;
 use std::rc::Rc;
 
 use winnow::combinator::{
@@ -93,10 +93,12 @@ where
         }
     };
 
+    // Note: although we support empty(zero-field) struct and we allow `0` occurrences here, users
+    // still need to leave a whitespace between `<` and `>` to prevent it from being tokenized as `Neq`.
     delimited(
         Token::Lt,
         cut_err(separated(
-            1..,
+            0..,
             trace(
                 "struct_field",
                 seq! {

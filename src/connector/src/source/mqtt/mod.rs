@@ -20,7 +20,7 @@ pub mod split;
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 use with_options::WithOptions;

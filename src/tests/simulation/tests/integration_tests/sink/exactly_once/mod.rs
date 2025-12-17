@@ -38,10 +38,10 @@ async fn test_exactly_once_sink_basic() -> Result<()> {
 }
 
 #[tokio::test]
-async fn test_exactly_once_sink_corner_case() {
+async fn test_exactly_once_sink_corner_case() -> Result<()> {
     // If, during a re-commit, a new snapshot_id is generated instead of using the previously persisted snapshot_id, it can lead to duplicate data when consecutive "23" appears in err_events.
     let err_rate_list = vec![0.0, 0.0, 0.3, 0.3, 0.0];
-    let _ = test_exactly_once_sink_inner(err_rate_list).await;
+    test_exactly_once_sink_inner(err_rate_list).await
 }
 
 async fn test_exactly_once_sink_inner(err_rate_list: Vec<f64>) -> Result<()> {
@@ -64,7 +64,7 @@ async fn test_exactly_once_sink_inner(err_rate_list: Vec<f64>) -> Result<()> {
 
     let internal_tables = session.run("show internal tables").await?;
 
-    let table_name_prefix = "__internal_test_sink_";
+    let table_name_prefix = "public.__internal_test_sink_";
 
     let sink_internal_table_name: String = TryInto::<[&str; 1]>::try_into(
         internal_tables

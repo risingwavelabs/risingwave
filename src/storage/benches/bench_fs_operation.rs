@@ -157,7 +157,7 @@ where
 
 fn criterion_tokio(c: &mut Criterion) {
     let payload_size = gen_test_payload().len();
-    let tokio_path = TempDir::new().unwrap().into_path();
+    let tokio_path = TempDir::new().unwrap().keep();
     run_tokio_bench(c, "write", &tokio_path, |mut file, stats, payload| {
         async move {
             let _timer = stats.start_timer();
@@ -245,7 +245,7 @@ where
 }
 
 fn criterion_std(c: &mut Criterion) {
-    let std_path = TempDir::new().unwrap().into_path();
+    let std_path = TempDir::new().unwrap().keep();
     run_std_bench(c, "write", &std_path, |mut file, stats, payload| {
         let _timer = stats.start_timer();
         file.write_all(payload).unwrap();

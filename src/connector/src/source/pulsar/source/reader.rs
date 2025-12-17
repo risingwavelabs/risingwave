@@ -12,15 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+use std::task::Poll;
+
 use anyhow::Context;
 use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
-use pulsar::consumer::InitialPosition;
+use moka::future::Cache as MokaCache;
+use prost_011::Message as _;
+use pulsar::consumer::{InitialPosition, Message};
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
 use risingwave_common::{bail, ensure};
+use thiserror_ext::AsReport;
 
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
@@ -28,8 +34,11 @@ use crate::source::pulsar::split::PulsarSplit;
 use crate::source::pulsar::{PulsarEnumeratorOffset, PulsarProperties};
 use crate::source::{
     BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitMetaData,
-    SplitReader, into_chunk_stream,
+    SplitReader, build_pulsar_ack_channel_id, into_chunk_stream,
 };
+pub static PULSAR_ACK_CHANNEL: LazyLock<
+    MokaCache<String, tokio::sync::mpsc::UnboundedSender<Vec<u8>>>,
+> = LazyLock::new(|| moka::future::Cache::builder().build()); // mapping:
 
 const PULSAR_DEFAULT_SUBSCRIPTION_PREFIX: &str = "rw-consumer";
 
@@ -82,7 +91,9 @@ impl SplitReader for PulsarSplitReader {
 
 /// Filter offset for pulsar messages
 #[derive(Debug, Clone)]
-pub struct PulsarFilterOffset {
+struct PulsarFilterOffset {
+    /// Ledger ID of the message
+    pub ledger_id: u64,
     /// Entry ID of the message
     pub entry_id: u64,
     /// Batch index of the message, if any
@@ -94,9 +105,7 @@ pub struct PulsarBrokerReader {
     #[expect(dead_code)]
     pulsar: Pulsar<TokioExecutor>,
     consumer: Consumer<Vec<u8>, TokioExecutor>,
-    #[expect(dead_code)]
     split: PulsarSplit,
-    #[expect(dead_code)]
     split_id: SplitId,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
@@ -161,7 +170,7 @@ impl SplitReader for PulsarBrokerReader {
 
         tracing::debug!("creating consumer for pulsar split topic {}", topic,);
 
-        let builder: ConsumerBuilder<TokioExecutor> = pulsar
+        let mut builder: ConsumerBuilder<TokioExecutor> = pulsar
             .consumer()
             .with_topic(&topic)
             .with_subscription_type(SubType::Exclusive)
@@ -176,52 +185,54 @@ impl SplitReader for PulsarBrokerReader {
 
         let mut already_read_offset = None;
 
-        let builder = match split.start_offset.clone() {
+        let mut consumer_options = match split.start_offset.clone() {
             PulsarEnumeratorOffset::Earliest => {
-                if topic.starts_with("non-persistent://") {
+                let initial_position = if topic.starts_with("non-persistent://") {
                     tracing::warn!(
                         "Earliest offset is not supported for non-persistent topic, use Latest instead"
                     );
-                    builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
-                    )
+                    InitialPosition::Latest
                 } else {
-                    builder.with_options(
-                        ConsumerOptions::default()
-                            .with_initial_position(InitialPosition::Earliest)
-                            .durable(false),
-                    )
-                }
-            }
-            PulsarEnumeratorOffset::Latest => builder.with_options(
+                    InitialPosition::Earliest
+                };
                 ConsumerOptions::default()
-                    .with_initial_position(InitialPosition::Latest)
-                    .durable(false),
-            ),
+                    .with_initial_position(initial_position)
+                    .durable(false)
+            }
+            PulsarEnumeratorOffset::Latest => ConsumerOptions::default()
+                .with_initial_position(InitialPosition::Latest)
+                .durable(false),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
                     tracing::warn!(
                         "MessageId offset is not supported for non-persistent topic, use Latest instead"
                     );
-                    builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
-                    )
+                    ConsumerOptions::default().with_initial_position(InitialPosition::Latest)
                 } else {
                     let start_message_id = parse_message_id(m.as_str())?;
                     already_read_offset = Some(PulsarFilterOffset {
+                        ledger_id: start_message_id.ledger_id,
                         entry_id: start_message_id.entry_id,
                         batch_index: start_message_id.batch_index,
                     });
-                    builder.with_options(pulsar::ConsumerOptions {
+                    ConsumerOptions {
                         durable: Some(false),
                         start_message_id: Some(start_message_id),
                         ..Default::default()
-                    })
+                    }
                 }
             }
-
-            PulsarEnumeratorOffset::Timestamp(_) => builder,
+            PulsarEnumeratorOffset::Timestamp(_) => ConsumerOptions::default(),
         };
+
+        // Apply read_compacted option to all consumer options
+        consumer_options.read_compacted = props.consumer_options.read_compacted;
+
+        builder = builder.with_options(consumer_options);
+
+        if let Some(delay) = props.subscription_unacked_resend_delay {
+            builder = builder.with_unacked_message_resend_delay(Some(delay));
+        }
 
         let consumer: Consumer<Vec<u8>, _> = builder.build().await?;
         if let PulsarEnumeratorOffset::Timestamp(_ts) = split.start_offset {
@@ -230,6 +241,8 @@ impl SplitReader for PulsarBrokerReader {
             //     .seek(None, None, Some(ts as u64), pulsar.clone())
             //     .await?;
         }
+
+        tracing::info!("consumer created with split {:?}", split);
 
         Ok(Self {
             pulsar,
@@ -251,25 +264,32 @@ impl SplitReader for PulsarBrokerReader {
 
 impl PulsarBrokerReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
-    async fn into_data_stream(self) {
+    async fn into_data_stream(mut self) {
         let max_chunk_size = self.source_ctx.source_ctrl_opts.chunk_size;
-        let mut already_read_offset = self.already_read_offset;
+        let mut already_read_offset = self.already_read_offset.take();
         #[for_await]
-        for msgs in self.consumer.ready_chunks(max_chunk_size) {
+        for msgs in self.into_stream().await.ready_chunks(max_chunk_size) {
+            let msgs = msgs
+                .into_iter()
+                .collect::<Result<Vec<Message<Vec<u8>>>, _>>()?;
             let mut res = Vec::with_capacity(msgs.len());
             for msg in msgs {
-                let msg = msg?;
-
                 if let Some(PulsarFilterOffset {
+                    ledger_id,
                     entry_id,
                     batch_index,
                 }) = already_read_offset
                 {
                     let message_id = msg.message_id();
 
-                    // for most case, we only compare `entry_id`
-                    // but for batch message, we need to compare `batch_index` if the `entry_id` is the same
-                    if message_id.entry_id <= entry_id && message_id.batch_index <= batch_index {
+                    // If we have a previously stored offset, check that the messages we're consuming
+                    // appear after. Note that entry IDs and batch indexes are only monotonically increasing
+                    // within a BookKeeper ledger, so we must check that the ledger IDs match. If they don't match,
+                    // messages are coming from a new ledger and we can safely ignore the stored offset.
+                    if message_id.ledger_id == ledger_id
+                        && message_id.entry_id <= entry_id
+                        && message_id.batch_index <= batch_index
+                    {
                         tracing::info!(
                             "skipping message with entry_id: {}, batch_index: {:?} as expected offset after entry_id {} batch_index {:?}",
                             message_id.entry_id,
@@ -288,5 +308,112 @@ impl PulsarBrokerReader {
             }
             yield res;
         }
+    }
+
+    async fn into_stream(self) -> PulsarConsumeStream {
+        let (ack_tx, ack_rx) = tokio::sync::mpsc::unbounded_channel();
+        let channel_entry = build_pulsar_ack_channel_id(self.source_ctx.source_id, &self.split_id);
+        PULSAR_ACK_CHANNEL
+            .entry(channel_entry)
+            .and_upsert_with(|_| std::future::ready(ack_tx))
+            .await;
+
+        PulsarConsumeStream {
+            source_ctx: self.source_ctx,
+            split_id: self.split_id,
+            pulsar_reader: self.consumer,
+            ack_rx,
+            topic: self.split.topic.to_string(),
+        }
+    }
+}
+
+struct PulsarConsumeStream {
+    source_ctx: SourceContextRef,
+    split_id: SplitId,
+    pulsar_reader: Consumer<Vec<u8>, TokioExecutor>,
+    ack_rx: tokio::sync::mpsc::UnboundedReceiver<Vec<u8>>,
+    topic: String,
+}
+
+impl PulsarConsumeStream {
+    fn do_ack(&mut self, message_id_bytes: Vec<u8>) {
+        let message_id = match MessageIdData::decode(message_id_bytes.as_slice()) {
+            Ok(message_id) => message_id,
+            Err(e) => {
+                tracing::warn!(
+                    error=%e.as_report(), "meet error when decode message id, skip ack"
+                );
+                return;
+            }
+        };
+        let topic = self.topic.clone();
+        tracing::debug!(
+            "ack message id: {:?} from channel {}",
+            message_id,
+            build_pulsar_ack_channel_id(self.source_ctx.source_id, &self.split_id)
+        );
+        #[cfg(not(madsim))]
+        {
+            // FIXME: madsim does not support block_on and block_in_place
+            let _ = tokio::task::block_in_place(move || {
+                tokio::runtime::Handle::current().block_on(async {
+                    self.pulsar_reader
+                        .cumulative_ack_with_id(&topic, message_id)
+                        .await
+                })
+            })
+            .map_err(|e| {
+                tracing::warn!(
+                    error=%e.as_report(), "meet error when ack message"
+                )
+            });
+        }
+    }
+}
+
+impl futures::Stream for PulsarConsumeStream {
+    type Item = Result<Message<Vec<u8>>, pulsar::error::Error>;
+
+    fn poll_next(
+        mut self: std::pin::Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+    ) -> std::task::Poll<Option<Self::Item>> {
+        match (
+            self.ack_rx.poll_recv(cx),
+            self.pulsar_reader.poll_next_unpin(cx),
+        ) {
+            (Poll::Pending, Poll::Pending) => {}
+            (Poll::Ready(some_ack), Poll::Pending) => {
+                if let Some(ack_message_id) = some_ack {
+                    self.do_ack(ack_message_id);
+                }
+            }
+            (Poll::Pending, Poll::Ready(maybe_message)) => match maybe_message {
+                Some(Ok(msg)) => {
+                    return Poll::Ready(Some(Ok(msg)));
+                }
+                Some(Err(e)) => {
+                    return Poll::Ready(Some(Err(e)));
+                }
+                None => {}
+            },
+            (Poll::Ready(some_ack), Poll::Ready(maybe_message)) => {
+                if let Some(ack_message_id) = some_ack {
+                    self.do_ack(ack_message_id);
+                }
+                match maybe_message {
+                    Some(Ok(msg)) => {
+                        return Poll::Ready(Some(Ok(msg)));
+                    }
+                    Some(Err(e)) => {
+                        return Poll::Ready(Some(Err(e)));
+                    }
+                    None => {}
+                }
+            }
+        }
+
+        Poll::Pending
     }
 }

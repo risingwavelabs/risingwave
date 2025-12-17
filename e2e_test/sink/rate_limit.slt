@@ -57,6 +57,9 @@ statement ok
 DROP SINK s1;
 
 statement ok
+DROP SINK s3;
+
+statement ok
 DROP TABLE t2;
 
 statement ok

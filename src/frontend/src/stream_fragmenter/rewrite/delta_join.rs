@@ -43,7 +43,7 @@ fn build_no_shuffle_exchange_for_delta_join(
             )),
         }))),
         input: vec![],
-        append_only: upstream.append_only,
+        stream_kind: upstream.stream_kind,
     }
 }
 
@@ -64,7 +64,7 @@ fn build_consistent_hash_shuffle_exchange_for_delta_join(
             )),
         }))),
         input: vec![],
-        append_only: upstream.append_only,
+        stream_kind: upstream.stream_kind,
     }
 }
 
@@ -104,7 +104,7 @@ fn build_lookup_for_delta_join(
             exchange_node_arrangement.clone(),
             exchange_node_stream.clone(),
         ],
-        append_only: exchange_node_stream.append_only,
+        stream_kind: exchange_node_stream.stream_kind,
     }
 }
 
@@ -172,9 +172,13 @@ fn build_delta_join_inner(
             use_current_epoch: false,
             // will be updated later to a global id
             arrangement_table_id: if is_local_table_id {
-                Some(ArrangementTableId::TableId(delta_join_node.left_table_id))
+                Some(ArrangementTableId::TableId(
+                    delta_join_node.left_table_id.as_raw_id(),
+                ))
             } else {
-                Some(ArrangementTableId::IndexId(delta_join_node.left_table_id))
+                Some(ArrangementTableId::IndexId(
+                    delta_join_node.left_table_id.as_raw_id(),
+                ))
             },
             column_mapping: lookup_0_column_reordering,
             arrangement_table_info: delta_join_node.left_info.clone(),
@@ -201,9 +205,13 @@ fn build_delta_join_inner(
             use_current_epoch: true,
             // will be updated later to a global id
             arrangement_table_id: if is_local_table_id {
-                Some(ArrangementTableId::TableId(delta_join_node.right_table_id))
+                Some(ArrangementTableId::TableId(
+                    delta_join_node.right_table_id.as_raw_id(),
+                ))
             } else {
-                Some(ArrangementTableId::IndexId(delta_join_node.right_table_id))
+                Some(ArrangementTableId::IndexId(
+                    delta_join_node.right_table_id.as_raw_id(),
+                ))
             },
             column_mapping: lookup_1_column_reordering,
             arrangement_table_info: delta_join_node.right_info.clone(),
@@ -287,7 +295,7 @@ fn build_delta_join_inner(
             order: vec![1, 0],
         }))),
         input: vec![exchange_l0m.clone(), exchange_l1m.clone()],
-        append_only: node.append_only,
+        stream_kind: node.stream_kind,
     };
 
     state.fragment_graph.add_edge(

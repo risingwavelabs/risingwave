@@ -35,8 +35,9 @@ pub struct StreamOverWindow {
 }
 
 impl StreamOverWindow {
-    pub fn new(core: generic::OverWindow<PlanRef>) -> Self {
+    pub fn new(core: generic::OverWindow<PlanRef>) -> Result<Self> {
         assert!(core.funcs_have_same_partition_and_order());
+        reject_upsert_input!(core.input);
 
         let input = &core.input;
         let watermark_columns = WatermarkColumns::new();
@@ -44,13 +45,13 @@ impl StreamOverWindow {
         let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
-            // TODO(kind): reject upsert input
             StreamKind::Retract, // general over window cannot be append-only
             false,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
-        StreamOverWindow { base, core }
+
+        Ok(StreamOverWindow { base, core })
     }
 
     fn infer_state_table(&self) -> TableCatalog {
@@ -94,7 +95,7 @@ impl PlanTreeNodeUnary<Stream> for StreamOverWindow {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core)
+        Self::new(core).unwrap()
     }
 }
 impl_plan_tree_node_for_unary! { Stream, StreamOverWindow }
@@ -126,19 +127,16 @@ impl StreamNode for StreamOverWindow {
             .infer_state_table()
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
-        let cache_policy = self
-            .base
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_over_window_cache_policy();
 
         PbNodeBody::OverWindow(Box::new(OverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
-            cache_policy: cache_policy.to_protobuf() as _,
+
+            // Cache policy should now be read from per-job config override.
+            #[allow(deprecated)]
+            cache_policy: PbOverWindowCachePolicy::Unspecified as _,
         }))
     }
 }

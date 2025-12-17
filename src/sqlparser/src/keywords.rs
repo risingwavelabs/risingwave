@@ -25,10 +25,7 @@
 //! 3. a `RESERVED_FOR_TABLE_ALIAS` array with keywords reserved in a
 //!    "table alias" context.
 
-use core::fmt;
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Defines a string constant for a single keyword: `kw_def!(SELECT);`
 /// expands to `pub const SELECT = "SELECT";`
@@ -48,7 +45,6 @@ macro_rules! define_keywords {
         $ident:ident $(= $string_keyword:expr)?
     ),*) => {
         #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
-        #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
         #[expect(non_camel_case_types, clippy::enum_variant_names)]
         pub enum Keyword {
             NoKeyword,
@@ -96,7 +92,6 @@ define_keywords!(
     AUTHORIZATION,
     AUTO,
     AVG,
-    BACKFILL,
     BASE64,
     BEGIN,
     BEGIN_FRAME,
@@ -143,6 +138,7 @@ define_keywords!(
     COMMITTED,
     CONCURRENTLY,
     CONDITION,
+    CONFIG,
     CONFLICT,
     CONFLUENT,
     CONNECT,
@@ -159,8 +155,6 @@ define_keywords!(
     COVAR_POP,
     COVAR_SAMP,
     CREATE,
-    CREATEDB,
-    CREATEUSER,
     CROSS,
     CUBE,
     CUME_DIST,
@@ -203,19 +197,16 @@ define_keywords!(
     DISCONNECT,
     DISTINCT,
     DISTRIBUTED,
-    DISTSQL,
     DO,
     DOT,
     DOUBLE,
     DROP,
-    DURATION_SECS,
     DYNAMIC,
     EACH,
     ELEMENT,
     ELSE,
     EMIT,
     ENCODE,
-    ENCRYPTED,
     END,
     END_EXEC = "END-EXEC",
     END_FRAME,
@@ -318,8 +309,6 @@ define_keywords!(
     LOCALTIME,
     LOCALTIMESTAMP,
     LOCATION,
-    LOGICAL,
-    LOGIN,
     LOWER,
     MAP,
     MATCH,
@@ -344,13 +333,9 @@ define_keywords!(
     NEW,
     NEXT,
     NO,
-    NOCREATEDB,
-    NOCREATEUSER,
-    NOLOGIN,
     NONE,
     NORMALIZE,
     NOSCAN,
-    NOSUPERUSER,
     NOT,
     NOTHING,
     NOTNULL,
@@ -360,7 +345,6 @@ define_keywords!(
     NULLIF,
     NULLS,
     NUMERIC,
-    OAUTH,
     OBJECT,
     OCCURRENCES_REGEX,
     OCTET_LENGTH,
@@ -390,13 +374,11 @@ define_keywords!(
     PARTITION,
     PARTITIONED,
     PARTITIONS,
-    PASSWORD,
     PERCENT,
     PERCENTILE_CONT,
     PERCENTILE_DISC,
     PERCENT_RANK,
     PERIOD,
-    PHYSICAL,
     PLACING,
     PLAN,
     PORTION,
@@ -501,6 +483,7 @@ define_keywords!(
     STDDEV_POP,
     STDDEV_SAMP,
     STDIN,
+    STDOUT,
     STORED,
     STRING,
     STRUCT,
@@ -511,7 +494,6 @@ define_keywords!(
     SUBSTRING_REGEX,
     SUCCEEDS,
     SUM,
-    SUPERUSER,
     SWAP,
     SYMMETRIC,
     SYNC,
@@ -536,7 +518,6 @@ define_keywords!(
     TINYINT,
     TO,
     TOP,
-    TRACE,
     TRAILING,
     TRANSACTION,
     TRANSLATE,

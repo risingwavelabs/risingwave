@@ -33,7 +33,7 @@ export RW_BUILD_INSTRUMENT_COVERAGE=1
 echo "--- Build Rust components"
 
 if [[ "$profile" == "ci-dev" ]]; then
-    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link,all-connectors --no-default-features)
+    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link,all-connectors,datafusion --no-default-features)
 else
     RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
     configure_static_openssl
@@ -52,7 +52,7 @@ cargo build \
     --timings
 
 
-artifacts=(risingwave sqlsmith compaction-test risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev)
+artifacts=(risingwave sqlsmith sqlsmith-reducer compaction-test risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev)
 
 echo "--- Check link info"
 check_link_info "$profile"

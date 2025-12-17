@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
+use risingwave_pb::id::SubscriberId;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use tracing::warn;
@@ -50,12 +51,14 @@ impl FragmentEdgeBuildResult {
             Item = (
                 FragmentId,
                 &StreamNode,
-                impl Iterator<Item = (&StreamActor, WorkerId)> + '_,
+                impl Iterator<Item = (&StreamActor, WorkerId)>,
+                impl IntoIterator<Item = SubscriberId>,
             ),
         >,
     ) -> StreamJobActorsToCreate {
         let mut actors_to_create = StreamJobActorsToCreate::default();
-        for (fragment_id, node, actors) in actors {
+        for (fragment_id, node, actors, subscriber_ids) in actors {
+            let subscriber_ids: HashSet<_> = subscriber_ids.into_iter().collect();
             for (actor, worker_id) in actors {
                 let upstreams = self
                     .upstreams
@@ -71,7 +74,7 @@ impl FragmentEdgeBuildResult {
                     .entry(worker_id)
                     .or_default()
                     .entry(fragment_id)
-                    .or_insert_with(|| (node.clone(), vec![]))
+                    .or_insert_with(|| (node.clone(), vec![], subscriber_ids.clone()))
                     .1
                     .push((actor.clone(), upstreams, dispatchers))
             }
@@ -130,7 +133,11 @@ impl FragmentEdgeBuilder {
         }
     }
 
-    fn add_edge(&mut self, fragment_id: FragmentId, downstream: &DownstreamFragmentRelation) {
+    pub(super) fn add_edge(
+        &mut self,
+        fragment_id: FragmentId,
+        downstream: &DownstreamFragmentRelation,
+    ) {
         let fragment = &self
             .fragments
             .get(&fragment_id)
@@ -197,7 +204,7 @@ impl FragmentEdgeBuilder {
                 } else if cfg!(debug_assertions) {
                     panic!("cannot find new upstreams for actor {} in fragment {} to new_upstream {}. Current upstreams {:?}", actor_id, fragment_id, new_upstream_fragment_id, actor_upstreams);
                 } else {
-                    warn!(actor_id, fragment_id, new_upstream_fragment_id, ?actor_upstreams, "cannot find new upstreams for actor");
+                    warn!(%actor_id, %fragment_id, %new_upstream_fragment_id, ?actor_upstreams, "cannot find new upstreams for actor");
                 }
                 !actor_upstreams.is_empty()
             })
@@ -210,7 +217,7 @@ impl FragmentEdgeBuilder {
                 self.result.upstreams
             );
         } else {
-            warn!(fragment_id, new_upstream_fragment_id, original_upstream_fragment_id, upstreams = ?self.result.upstreams, "cannot find new upstreams to replace");
+            warn!(%fragment_id, %new_upstream_fragment_id, %original_upstream_fragment_id, upstreams = ?self.result.upstreams, "cannot find new upstreams to replace");
         }
     }
 

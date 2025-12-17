@@ -20,19 +20,23 @@ mod storage_catalog;
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use ::iceberg::io::{S3_ACCESS_KEY_ID, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY};
+use ::iceberg::io::{
+    S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
+};
 use ::iceberg::table::Table;
-use ::iceberg::{Catalog, TableIdent};
+use ::iceberg::{Catalog, CatalogBuilder, TableIdent};
 use anyhow::{Context, anyhow};
 use iceberg::io::{
-    AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT, GCS_CREDENTIALS_JSON,
-    GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD,
+    ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT,
+    GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
 use phf::{Set, phf_set};
 use risingwave_common::bail;
+use risingwave_common::error::IcebergError;
+use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
-use serde_derive::Deserialize;
+use serde::Deserialize;
 use serde_with::serde_as;
 use url::Url;
 use with_options::WithOptions;
@@ -51,13 +55,28 @@ pub struct IcebergCommon {
     #[serde(rename = "catalog.type")]
     pub catalog_type: Option<String>,
     #[serde(rename = "s3.region")]
-    pub region: Option<String>,
+    pub s3_region: Option<String>,
     #[serde(rename = "s3.endpoint")]
-    pub endpoint: Option<String>,
+    pub s3_endpoint: Option<String>,
     #[serde(rename = "s3.access.key")]
-    pub access_key: Option<String>,
+    pub s3_access_key: Option<String>,
     #[serde(rename = "s3.secret.key")]
-    pub secret_key: Option<String>,
+    pub s3_secret_key: Option<String>,
+    #[serde(rename = "s3.iam_role_arn")]
+    pub s3_iam_role_arn: Option<String>,
+
+    #[serde(rename = "glue.access.key")]
+    pub glue_access_key: Option<String>,
+    #[serde(rename = "glue.secret.key")]
+    pub glue_secret_key: Option<String>,
+    #[serde(rename = "glue.iam_role_arn")]
+    pub glue_iam_role_arn: Option<String>,
+    #[serde(rename = "glue.region")]
+    pub glue_region: Option<String>,
+    /// AWS Client id, can be omitted for storage catalog or when
+    /// caller's AWS account ID matches glue id
+    #[serde(rename = "glue.id")]
+    pub glue_id: Option<String>,
 
     #[serde(rename = "gcs.credential")]
     pub gcs_credential: Option<String>,
@@ -69,40 +88,38 @@ pub struct IcebergCommon {
     #[serde(rename = "azblob.endpoint_url")]
     pub azblob_endpoint_url: Option<String>,
 
+    #[serde(rename = "adlsgen2.account_name")]
+    pub adlsgen2_account_name: Option<String>,
+    #[serde(rename = "adlsgen2.account_key")]
+    pub adlsgen2_account_key: Option<String>,
+    #[serde(rename = "adlsgen2.endpoint")]
+    pub adlsgen2_endpoint: Option<String>,
+
     /// Path of iceberg warehouse.
     #[serde(rename = "warehouse.path")]
     pub warehouse_path: Option<String>,
-    /// AWS Client id, can be omitted for storage catalog or when
-    /// caller's AWS account ID matches glue id
-    #[serde(rename = "glue.id")]
-    pub glue_id: Option<String>,
     /// Catalog name, default value is risingwave.
     #[serde(rename = "catalog.name")]
     pub catalog_name: Option<String>,
     /// URI of iceberg catalog, only applicable in rest catalog.
     #[serde(rename = "catalog.uri")]
     pub catalog_uri: Option<String>,
-    #[serde(rename = "database.name")]
-    pub database_name: Option<String>,
-    /// Full name of table, must include schema name.
-    #[serde(rename = "table.name")]
-    pub table_name: String,
     /// Credential for accessing iceberg catalog, only applicable in rest catalog.
     /// A credential to exchange for a token in the `OAuth2` client credentials flow.
     #[serde(rename = "catalog.credential")]
-    pub credential: Option<String>,
+    pub catalog_credential: Option<String>,
     /// token for accessing iceberg catalog, only applicable in rest catalog.
     /// A Bearer token which will be used for interaction with the server.
     #[serde(rename = "catalog.token")]
-    pub token: Option<String>,
+    pub catalog_token: Option<String>,
     /// `oauth2_server_uri` for accessing iceberg catalog, only applicable in rest catalog.
     /// Token endpoint URI to fetch token from if the Rest Catalog is not the authorization server.
     #[serde(rename = "catalog.oauth2_server_uri")]
-    pub oauth2_server_uri: Option<String>,
+    pub catalog_oauth2_server_uri: Option<String>,
     /// scope for accessing iceberg catalog, only applicable in rest catalog.
     /// Additional scope for `OAuth2`.
     #[serde(rename = "catalog.scope")]
-    pub scope: Option<String>,
+    pub catalog_scope: Option<String>,
 
     /// The signing region to use when signing requests to the REST catalog.
     #[serde(rename = "catalog.rest.signing_region")]
@@ -125,7 +142,7 @@ pub struct IcebergCommon {
         default,
         deserialize_with = "deserialize_optional_bool_from_string"
     )]
-    pub path_style_access: Option<bool>,
+    pub s3_path_style_access: Option<bool>,
     /// Enable config load. This parameter set to true will load warehouse credentials from the environment. Only allowed to be used in a self-hosted environment.
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub enable_config_load: Option<bool>,
@@ -145,7 +162,11 @@ pub struct IcebergCommon {
     /// - Each header is a key-value pair, separated by an '='.
     /// - Multiple headers can be specified, separated by a ';'.
     #[serde(rename = "catalog.header")]
-    pub header: Option<String>,
+    pub catalog_header: Option<String>,
+
+    /// Enable vended credentials for iceberg REST catalog.
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub vended_credentials: Option<bool>,
 }
 
 impl EnforceSecret for IcebergCommon {
@@ -156,12 +177,72 @@ impl EnforceSecret for IcebergCommon {
         "catalog.credential",
         "catalog.token",
         "catalog.oauth2_server_uri",
+        "adlsgen2.account_key",
+        "adlsgen2.client_secret",
+        "glue.access.key",
+        "glue.secret.key",
     };
+}
+
+#[serde_as]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
+#[serde(deny_unknown_fields)]
+pub struct IcebergTableIdentifier {
+    #[serde(rename = "database.name")]
+    pub database_name: Option<String>,
+    /// Full name of table, must include schema name when database is provided.
+    #[serde(rename = "table.name")]
+    pub table_name: String,
+}
+
+impl IcebergTableIdentifier {
+    pub fn database_name(&self) -> Option<&str> {
+        self.database_name.as_deref()
+    }
+
+    pub fn table_name(&self) -> &str {
+        &self.table_name
+    }
+
+    pub fn to_table_ident(&self) -> ConnectorResult<TableIdent> {
+        let ret = if let Some(database_name) = &self.database_name {
+            TableIdent::from_strs(vec![database_name, &self.table_name])
+        } else {
+            TableIdent::from_strs(vec![&self.table_name])
+        };
+
+        Ok(ret.context("Failed to create table identifier")?)
+    }
 }
 
 impl IcebergCommon {
     pub fn catalog_type(&self) -> &str {
-        self.catalog_type.as_deref().unwrap_or("storage")
+        let catalog_type: &str = self.catalog_type.as_deref().unwrap_or("storage");
+        if self.vended_credentials() && catalog_type == "rest" {
+            "rest_rust"
+        } else {
+            catalog_type
+        }
+    }
+
+    pub fn vended_credentials(&self) -> bool {
+        self.vended_credentials.unwrap_or(false)
+    }
+
+    fn glue_access_key(&self) -> Option<&str> {
+        self.glue_access_key
+            .as_deref()
+            .or(self.s3_access_key.as_deref())
+    }
+
+    fn glue_secret_key(&self) -> Option<&str> {
+        self.glue_secret_key
+            .as_deref()
+            .or(self.s3_secret_key.as_deref())
+    }
+
+    fn glue_region(&self) -> Option<&str> {
+        self.glue_region.as_deref().or(self.s3_region.as_deref())
     }
 
     pub fn catalog_name(&self) -> String {
@@ -172,8 +253,20 @@ impl IcebergCommon {
     }
 
     pub fn headers(&self) -> ConnectorResult<HashMap<String, String>> {
-        if let Some(header) = &self.header {
-            let mut headers = HashMap::new();
+        let mut headers = HashMap::new();
+        let user_agent = match Deployment::current() {
+            Deployment::Ci => "RisingWave(CI)".to_owned(),
+            Deployment::Cloud => "RisingWave(Cloud)".to_owned(),
+            Deployment::Other => "RisingWave(OSS)".to_owned(),
+        };
+        if self.vended_credentials() {
+            headers.insert(
+                "X-Iceberg-Access-Delegation".to_owned(),
+                "vended-credentials".to_owned(),
+            );
+        }
+        headers.insert("User-Agent".to_owned(), user_agent);
+        if let Some(header) = &self.catalog_header {
             for pair in header.split(';') {
                 let mut parts = pair.split('=');
                 if let (Some(key), Some(value)) = (parts.next(), parts.next()) {
@@ -182,15 +275,18 @@ impl IcebergCommon {
                     bail!("Invalid header format: {}", pair);
                 }
             }
-            Ok(headers)
-        } else {
-            Ok(HashMap::new())
         }
+        Ok(headers)
     }
 
     pub fn enable_config_load(&self) -> bool {
         // If the env var is set to true, we disable the default config load. (Cloud environment)
         if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+            if matches!(self.enable_config_load, Some(true)) {
+                tracing::warn!(
+                    "`enable_config_load` can't be enabled in SaaS environment, the behavior might be unexpected"
+                );
+            }
             return false;
         }
         self.enable_config_load.unwrap_or(false)
@@ -206,22 +302,25 @@ impl IcebergCommon {
         let file_io_props = {
             let catalog_type = self.catalog_type().to_owned();
 
-            if let Some(region) = &self.region {
+            if let Some(region) = &self.s3_region {
                 // iceberg-rust
                 iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
             }
 
-            if let Some(endpoint) = &self.endpoint {
+            if let Some(endpoint) = &self.s3_endpoint {
                 // iceberg-rust
                 iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
             }
 
             // iceberg-rust
-            if let Some(access_key) = &self.access_key {
+            if let Some(access_key) = &self.s3_access_key {
                 iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
             }
-            if let Some(secret_key) = &self.secret_key {
+            if let Some(secret_key) = &self.s3_secret_key {
                 iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+            }
+            if let Some(role_arn) = &self.s3_iam_role_arn {
+                iceberg_configs.insert(S3_ASSUME_ROLE_ARN.to_owned(), role_arn.clone());
             }
             if let Some(gcs_credential) = &self.gcs_credential {
                 iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
@@ -245,6 +344,17 @@ impl IcebergCommon {
 
                 if catalog_type != "rest" && catalog_type != "rest_rust" {
                     bail!("azblob unsupported in {} catalog", &catalog_type);
+                }
+            }
+
+            if let (Some(account_name), Some(account_key)) = (
+                self.adlsgen2_account_name.as_ref(),
+                self.adlsgen2_account_key.as_ref(),
+            ) {
+                iceberg_configs.insert(ADLS_ACCOUNT_NAME.to_owned(), account_name.clone());
+                iceberg_configs.insert(ADLS_ACCOUNT_KEY.to_owned(), account_key.clone());
+                if catalog_type != "rest" && catalog_type != "rest_rust" {
+                    bail!("adlsgen2 unsupported in {} catalog", &catalog_type);
                 }
             }
 
@@ -298,6 +408,13 @@ impl IcebergCommon {
                 (!enable_config_load).to_string(),
             );
 
+            if let Some(path_style_access) = self.s3_path_style_access {
+                iceberg_configs.insert(
+                    S3_PATH_STYLE_ACCESS.to_owned(),
+                    path_style_access.to_string(),
+                );
+            }
+
             iceberg_configs
         };
 
@@ -322,21 +439,21 @@ impl IcebergCommon {
             // suppress log of S3FileIO like: Unclosed S3FileIO instance created by...
             java_catalog_configs.insert("init-creation-stacktrace".to_owned(), "false".to_owned());
 
-            if let Some(region) = &self.region {
+            if let Some(region) = &self.s3_region {
                 java_catalog_configs.insert("client.region".to_owned(), region.clone());
             }
-            if let Some(endpoint) = &self.endpoint {
+            if let Some(endpoint) = &self.s3_endpoint {
                 java_catalog_configs.insert("s3.endpoint".to_owned(), endpoint.clone());
             }
 
-            if let Some(access_key) = &self.access_key {
+            if let Some(access_key) = &self.s3_access_key {
                 java_catalog_configs.insert("s3.access-key-id".to_owned(), access_key.clone());
             }
-            if let Some(secret_key) = &self.secret_key {
+            if let Some(secret_key) = &self.s3_secret_key {
                 java_catalog_configs.insert("s3.secret-access-key".to_owned(), secret_key.clone());
             }
 
-            if let Some(path_style_access) = self.path_style_access {
+            if let Some(path_style_access) = &self.s3_path_style_access {
                 java_catalog_configs.insert(
                     "s3.path-style-access".to_owned(),
                     path_style_access.to_string(),
@@ -348,19 +465,19 @@ impl IcebergCommon {
                 java_catalog_configs.insert(format!("header.{}", header_name), header_value);
             }
 
-            match self.catalog_type.as_deref() {
-                Some("rest") => {
-                    if let Some(credential) = &self.credential {
+            match self.catalog_type() {
+                "rest" => {
+                    if let Some(credential) = &self.catalog_credential {
                         java_catalog_configs.insert("credential".to_owned(), credential.clone());
                     }
-                    if let Some(token) = &self.token {
+                    if let Some(token) = &self.catalog_token {
                         java_catalog_configs.insert("token".to_owned(), token.clone());
                     }
-                    if let Some(oauth2_server_uri) = &self.oauth2_server_uri {
+                    if let Some(oauth2_server_uri) = &self.catalog_oauth2_server_uri {
                         java_catalog_configs
                             .insert("oauth2-server-uri".to_owned(), oauth2_server_uri.clone());
                     }
-                    if let Some(scope) = &self.scope {
+                    if let Some(scope) = &self.catalog_scope {
                         java_catalog_configs.insert("scope".to_owned(), scope.clone());
                     }
                     if let Some(rest_signing_region) = &self.rest_signing_region {
@@ -379,41 +496,66 @@ impl IcebergCommon {
                             rest_sigv4_enabled.to_string(),
                         );
 
-                        if let Some(access_key) = &self.access_key {
+                        if let Some(access_key) = &self.s3_access_key {
                             java_catalog_configs
                                 .insert("rest.access-key-id".to_owned(), access_key.clone());
                         }
 
-                        if let Some(secret_key) = &self.secret_key {
+                        if let Some(secret_key) = &self.s3_secret_key {
                             java_catalog_configs
                                 .insert("rest.secret-access-key".to_owned(), secret_key.clone());
                         }
                     }
                 }
-                Some("glue") => {
-                    if !enable_config_load {
+                "glue" => {
+                    let glue_access_key = self.glue_access_key();
+                    let glue_secret_key = self.glue_secret_key();
+                    let has_glue_credentials =
+                        glue_access_key.is_some() && glue_secret_key.is_some();
+                    let should_configure_glue_provider = !enable_config_load
+                        || has_glue_credentials
+                        || self.glue_iam_role_arn.is_some();
+
+                    if should_configure_glue_provider {
                         java_catalog_configs.insert(
                             "client.credentials-provider".to_owned(),
                             "com.risingwave.connector.catalog.GlueCredentialProvider".to_owned(),
                         );
-                        // Use S3 ak/sk and region as glue ak/sk and region by default.
-                        // TODO: use different ak/sk and region for s3 and glue.
-                        if let Some(access_key) = &self.access_key {
+                        if let Some(region) = self.glue_region() {
                             java_catalog_configs.insert(
-                                "client.credentials-provider.glue.access-key-id".to_owned(),
-                                access_key.clone(),
+                                "client.credentials-provider.glue.region".to_owned(),
+                                region.to_owned(),
                             );
                         }
-                        if let Some(secret_key) = &self.secret_key {
+                        if let Some(access_key) = glue_access_key {
+                            java_catalog_configs.insert(
+                                "client.credentials-provider.glue.access-key-id".to_owned(),
+                                access_key.to_owned(),
+                            );
+                        }
+                        if let Some(secret_key) = glue_secret_key {
                             java_catalog_configs.insert(
                                 "client.credentials-provider.glue.secret-access-key".to_owned(),
-                                secret_key.clone(),
+                                secret_key.to_owned(),
+                            );
+                        }
+                        if let Some(role_arn) = self.glue_iam_role_arn.as_deref() {
+                            java_catalog_configs.insert(
+                                "client.credentials-provider.glue.iam-role-arn".to_owned(),
+                                role_arn.to_owned(),
+                            );
+                        }
+                        if enable_config_load && !has_glue_credentials {
+                            java_catalog_configs.insert(
+                                "client.credentials-provider.glue.use-default-credential-chain"
+                                    .to_owned(),
+                                "true".to_owned(),
                             );
                         }
                     }
 
-                    if let Some(region) = &self.region {
-                        java_catalog_configs.insert("client.region".to_owned(), region.clone());
+                    if let Some(region) = self.glue_region() {
+                        java_catalog_configs.insert("client.region".to_owned(), region.to_owned());
                         java_catalog_configs.insert(
                             "glue.endpoint".to_owned(),
                             format!("https://glue.{}.amazonaws.com", region),
@@ -433,16 +575,6 @@ impl IcebergCommon {
 }
 
 impl IcebergCommon {
-    pub fn full_table_name(&self) -> ConnectorResult<TableIdent> {
-        let ret = if let Some(database_name) = &self.database_name {
-            TableIdent::from_strs(vec![database_name, &self.table_name])
-        } else {
-            TableIdent::from_strs(vec![&self.table_name])
-        };
-
-        Ok(ret.context("Failed to create table identifier")?)
-    }
-
     /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
     pub async fn create_catalog(
         &self,
@@ -461,10 +593,11 @@ impl IcebergCommon {
                     "s3" | "s3a" => StorageCatalogConfig::S3(
                         storage_catalog::StorageCatalogS3Config::builder()
                             .warehouse(warehouse)
-                            .access_key(self.access_key.clone())
-                            .secret_key(self.secret_key.clone())
-                            .region(self.region.clone())
-                            .endpoint(self.endpoint.clone())
+                            .access_key(self.s3_access_key.clone())
+                            .secret_key(self.s3_secret_key.clone())
+                            .region(self.s3_region.clone())
+                            .endpoint(self.s3_endpoint.clone())
+                            .path_style_access(self.s3_path_style_access)
                             .enable_config_load(Some(self.enable_config_load()))
                             .build(),
                     ),
@@ -496,31 +629,37 @@ impl IcebergCommon {
                 if let Some(gcs_credential) = &self.gcs_credential {
                     iceberg_configs.insert(GCS_CREDENTIALS_JSON.to_owned(), gcs_credential.clone());
                 } else {
-                    if let Some(region) = &self.region {
+                    if let Some(region) = &self.s3_region {
                         iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
                     }
-                    if let Some(endpoint) = &self.endpoint {
+                    if let Some(endpoint) = &self.s3_endpoint {
                         iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
                     }
-                    if let Some(access_key) = &self.access_key {
+                    if let Some(access_key) = &self.s3_access_key {
                         iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
                     }
-                    if let Some(secret_key) = &self.secret_key {
+                    if let Some(secret_key) = &self.s3_secret_key {
                         iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                    }
+                    if let Some(path_style_access) = &self.s3_path_style_access {
+                        iceberg_configs.insert(
+                            S3_PATH_STYLE_ACCESS.to_owned(),
+                            path_style_access.to_string(),
+                        );
                     }
                 };
 
-                if let Some(credential) = &self.credential {
+                if let Some(credential) = &self.catalog_credential {
                     iceberg_configs.insert("credential".to_owned(), credential.clone());
                 }
-                if let Some(token) = &self.token {
+                if let Some(token) = &self.catalog_token {
                     iceberg_configs.insert("token".to_owned(), token.clone());
                 }
-                if let Some(oauth2_server_uri) = &self.oauth2_server_uri {
+                if let Some(oauth2_server_uri) = &self.catalog_oauth2_server_uri {
                     iceberg_configs
                         .insert("oauth2-server-uri".to_owned(), oauth2_server_uri.clone());
                 }
-                if let Some(scope) = &self.scope {
+                if let Some(scope) = &self.catalog_scope {
                     iceberg_configs.insert("scope".to_owned(), scope.clone());
                 }
 
@@ -529,59 +668,74 @@ impl IcebergCommon {
                     iceberg_configs.insert(format!("header.{}", header_name), header_value);
                 }
 
-                let config_builder =
-                    iceberg_catalog_rest::RestCatalogConfig::builder()
-                        .uri(self.catalog_uri.clone().with_context(|| {
-                            "`catalog.uri` must be set in rest catalog".to_owned()
-                        })?)
-                        .props(iceberg_configs);
-
-                let config = match &self.warehouse_path {
-                    Some(warehouse_path) => {
-                        config_builder.warehouse(warehouse_path.clone()).build()
-                    }
-                    None => config_builder.build(),
-                };
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config);
+                iceberg_configs.insert(
+                    iceberg_catalog_rest::REST_CATALOG_PROP_URI.to_owned(),
+                    self.catalog_uri
+                        .clone()
+                        .with_context(|| "`catalog.uri` must be set in rest catalog".to_owned())?,
+                );
+                if let Some(warehouse_path) = &self.warehouse_path {
+                    iceberg_configs.insert(
+                        iceberg_catalog_rest::REST_CATALOG_PROP_WAREHOUSE.to_owned(),
+                        warehouse_path.clone(),
+                    );
+                }
+                let catalog = iceberg_catalog_rest::RestCatalogBuilder::default()
+                    .load("rest", iceberg_configs)
+                    .await
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
                 Ok(Arc::new(catalog))
             }
             "glue_rust" => {
                 let mut iceberg_configs = HashMap::new();
                 // glue
-                if let Some(region) = &self.region {
-                    iceberg_configs.insert(AWS_REGION_NAME.to_owned(), region.clone());
+                if let Some(region) = self.glue_region() {
+                    iceberg_configs.insert(AWS_REGION_NAME.to_owned(), region.to_owned());
                 }
-                if let Some(access_key) = &self.access_key {
-                    iceberg_configs.insert(AWS_ACCESS_KEY_ID.to_owned(), access_key.clone());
+                if let Some(access_key) = self.glue_access_key() {
+                    iceberg_configs.insert(AWS_ACCESS_KEY_ID.to_owned(), access_key.to_owned());
                 }
-                if let Some(secret_key) = &self.secret_key {
-                    iceberg_configs.insert(AWS_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
+                if let Some(secret_key) = self.glue_secret_key() {
+                    iceberg_configs.insert(AWS_SECRET_ACCESS_KEY.to_owned(), secret_key.to_owned());
                 }
                 // s3
-                if let Some(region) = &self.region {
+                if let Some(region) = &self.s3_region {
                     iceberg_configs.insert(S3_REGION.to_owned(), region.clone());
                 }
-                if let Some(endpoint) = &self.endpoint {
+                if let Some(endpoint) = &self.s3_endpoint {
                     iceberg_configs.insert(S3_ENDPOINT.to_owned(), endpoint.clone());
                 }
-                if let Some(access_key) = &self.access_key {
+                if let Some(access_key) = &self.s3_access_key {
                     iceberg_configs.insert(S3_ACCESS_KEY_ID.to_owned(), access_key.clone());
                 }
-                if let Some(secret_key) = &self.secret_key {
+                if let Some(secret_key) = &self.s3_secret_key {
                     iceberg_configs.insert(S3_SECRET_ACCESS_KEY.to_owned(), secret_key.clone());
                 }
-                let config_builder =
-                    iceberg_catalog_glue::GlueCatalogConfig::builder()
-                        .warehouse(self.warehouse_path.clone().ok_or_else(|| {
-                            anyhow!("`warehouse.path` must be set in glue catalog")
-                        })?)
-                        .props(iceberg_configs);
-                let config = if let Some(uri) = self.catalog_uri.as_deref() {
-                    config_builder.uri(uri.to_owned()).build()
-                } else {
-                    config_builder.build()
-                };
-                let catalog = iceberg_catalog_glue::GlueCatalog::new(config).await?;
+                if let Some(role_arn) = &self.s3_iam_role_arn {
+                    iceberg_configs.insert(S3_ASSUME_ROLE_ARN.to_owned(), role_arn.clone());
+                }
+                if let Some(path_style_access) = &self.s3_path_style_access {
+                    iceberg_configs.insert(
+                        S3_PATH_STYLE_ACCESS.to_owned(),
+                        path_style_access.to_string(),
+                    );
+                }
+                iceberg_configs.insert(
+                    iceberg_catalog_glue::GLUE_CATALOG_PROP_WAREHOUSE.to_owned(),
+                    self.warehouse_path
+                        .clone()
+                        .ok_or_else(|| anyhow!("`warehouse.path` must be set in glue catalog"))?,
+                );
+                if let Some(uri) = self.catalog_uri.as_deref() {
+                    iceberg_configs.insert(
+                        iceberg_catalog_glue::GLUE_CATALOG_PROP_URI.to_owned(),
+                        uri.to_owned(),
+                    );
+                }
+                let catalog = iceberg_catalog_glue::GlueCatalogBuilder::default()
+                    .load("glue", iceberg_configs)
+                    .await
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
                 Ok(Arc::new(catalog))
             }
             catalog_type
@@ -623,6 +777,7 @@ impl IcebergCommon {
     /// TODO: remove the arguments and put them into `IcebergCommon`. Currently the handling in source and sink are different, so pass them separately to be safer.
     pub async fn load_table(
         &self,
+        table: &IcebergTableIdentifier,
         java_catalog_props: &HashMap<String, String>,
     ) -> ConnectorResult<Table> {
         let catalog = self
@@ -630,8 +785,8 @@ impl IcebergCommon {
             .await
             .context("Unable to load iceberg catalog")?;
 
-        let table_id = self
-            .full_table_name()
+        let table_id = table
+            .to_table_ident()
             .context("Unable to parse table name")?;
 
         catalog.load_table(&table_id).await.map_err(Into::into)

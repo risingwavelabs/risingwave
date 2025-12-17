@@ -31,9 +31,10 @@ use risingwave_pb::stream_plan::SourceNode;
 use super::*;
 use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
-    DummySourceExecutor, FsListExecutor, IcebergListExecutor, SourceExecutor,
-    SourceStateTableHandler, StreamSourceCore,
+    BatchIcebergListExecutor, BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor,
+    IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
+use crate::from_proto::source::is_full_reload_refresh;
 
 pub struct SourceExecutorBuilder;
 
@@ -114,7 +115,7 @@ pub fn create_source_desc_builder(
         row_id_index.map(|x| x as _),
         with_properties,
         source_info,
-        params.env.config().developer.connector_message_buffer_size,
+        params.config.developer.connector_message_buffer_size,
         // `pk_indices` is used to ensure that a message will be skipped instead of parsed
         // with null pk when the pk column is missing.
         //
@@ -122,9 +123,9 @@ pub fn create_source_desc_builder(
         // passed via `StreamSource` so null pk may be emitted to downstream.
         //
         // TODO: use the correct information to fill in pk_dicies.
-        // We should consdier add back the "pk_column_ids" field removed by #8841 in
+        // We should consider add back the "pk_column_ids" field removed by #8841 in
         // StreamSource
-        params.info.pk_indices.clone(),
+        params.info.stream_key.clone(),
     )
 }
 
@@ -142,10 +143,12 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
+            let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
             let exec = {
-                let source_id = TableId::new(source.source_id);
+                let source_id = source.source_id;
                 let source_name = source.source_name.clone();
                 let mut source_info = source.get_info()?.clone();
+                let associated_table_id = source.associated_table_id;
 
                 if source_info.format_encode_options.is_empty() {
                     // compatible code: quick fix for <https://github.com/risingwavelabs/risingwave/issues/14755>,
@@ -211,16 +214,61 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else if source.with_properties.is_iceberg_connector() {
-                    IcebergListExecutor::new(
-                        params.actor_context.clone(),
-                        stream_source_core,
-                        params.executor_stats.clone(),
-                        barrier_receiver,
-                        system_params,
-                        source.rate_limit,
-                        params.env.config().clone(),
-                    )
-                    .boxed()
+                    if is_full_reload_refresh {
+                        BatchIcebergListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            source
+                                .downstream_columns
+                                .as_ref()
+                                .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            params.local_barrier_manager.clone(),
+                            associated_table_id,
+                        )
+                        .boxed()
+                    } else {
+                        IcebergListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            source
+                                .downstream_columns
+                                .as_ref()
+                                .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            system_params,
+                            source.rate_limit,
+                            params.config.clone(),
+                        )
+                        .boxed()
+                    }
+                } else if source.with_properties.is_batch_connector() {
+                    if source
+                        .with_properties
+                        .get_connector()
+                        .map(|c| {
+                            c.eq_ignore_ascii_case(
+                                risingwave_connector::source::BATCH_POSIX_FS_CONNECTOR,
+                            )
+                        })
+                        .unwrap_or(false)
+                    {
+                        BatchPosixFsListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            system_params,
+                            source.rate_limit,
+                            params.local_barrier_manager.clone(),
+                            associated_table_id,
+                        )
+                        .boxed()
+                    } else {
+                        unreachable!("unknown batch connector");
+                    }
                 } else {
                     let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
                     SourceExecutor::new(
@@ -244,7 +292,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     params.info,
                     TroublemakerExecutor::new(
                         (info, exec).into(),
-                        params.env.config().developer.chunk_size,
+                        params.config.developer.chunk_size,
                     ),
                 )
                     .into())

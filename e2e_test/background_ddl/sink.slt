@@ -29,9 +29,6 @@ statement ok
 recover;
 
 onlyif can-use-recover
-sleep 5s
-
-onlyif can-use-recover
 statement count 1
 show jobs;
 
@@ -55,7 +52,31 @@ drop sink sink2;
 statement count 0
 show jobs;
 
-# TODO: support backfill progress for background sink into table
+statement ok
+create table t1(v1 int primary key);
+
+statement ok
+create sink sink2 into t1 from t;
+
+statement count 1
+show jobs;
+
+onlyif can-use-recover
+statement ok
+recover;
+
+onlyif can-use-recover
+statement count 1
+show jobs;
+
+statement ok
+drop sink sink2;
+
+statement count 0
+show jobs;
+
+statement ok
+drop table t1;
 
 statement ok
 drop table t cascade;

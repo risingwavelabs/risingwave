@@ -121,8 +121,8 @@ impl DispatchOutputMapping {
 
 mod type_mapping {
     use risingwave_common::types::{
-        DataType, DatumCow, DatumRef, ListValue, MapValue, ScalarImpl, StructValue, ToOwnedDatum,
-        data_types,
+        DataType, DatumCow, DatumRef, ListValue, MapValue, ScalarImpl, ScalarRef as _, StructValue,
+        ToOwnedDatum, data_types,
     };
     use risingwave_common::util::iter_util::ZipEqFast;
 
@@ -145,16 +145,18 @@ mod type_mapping {
         }
 
         match (from_type, into_type) {
+            (DataType::Vector(dim1), DataType::Vector(dim2)) => {
+                assert_eq!(dim1, dim2);
+                DatumCow::Borrowed(Some(scalar))
+            }
             (data_types::simple!(), data_types::simple!()) => DatumCow::Borrowed(Some(scalar)),
-            (DataType::Vector(_), DataType::Vector(_)) => todo!("VECTOR_PLACEHOLDER"),
-
-            (DataType::List(from_inner_type), DataType::List(into_inner_type)) => {
+            (DataType::List(from_list_type), DataType::List(into_list_type)) => {
                 let list = scalar.into_list();
 
                 // Recursively map each element.
-                let mut builder = into_inner_type.create_array_builder(list.len());
+                let mut builder = into_list_type.elem().create_array_builder(list.len());
                 for datum in list.iter() {
-                    let datum = do_map(datum, from_inner_type, into_inner_type);
+                    let datum = do_map(datum, from_list_type.elem(), into_list_type.elem());
                     builder.append(datum);
                 }
                 let list = ListValue::new(builder.finish());
@@ -180,7 +182,7 @@ mod type_mapping {
                 }
                 let values = ListValue::new(value_builder.finish());
 
-                let map = MapValue::try_from_kv(keys.to_owned(), values).unwrap();
+                let map = MapValue::try_from_kv(keys.to_owned_scalar(), values).unwrap();
 
                 DatumCow::Owned(Some(ScalarImpl::Map(map)))
             }

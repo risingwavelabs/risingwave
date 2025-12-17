@@ -34,6 +34,7 @@ use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 use strum_macros::{Display, EnumString};
 use tokio_util::compat::{Compat, FuturesAsyncWriteCompatExt};
+use uuid::Uuid;
 use with_options::WithOptions;
 
 use crate::enforce_secret::EnforceSecret;
@@ -174,9 +175,9 @@ impl<S: OpendalSinkBackend> TryFrom<SinkParam> for FileSink<S> {
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
         let config = S::from_btreemap(param.properties)?;
-        let path = S::get_path(config.clone()).clone();
+        let path = S::get_path(config.clone());
         let op = S::new_operator(config.clone())?;
-        let batching_strategy = S::get_batching_strategy(config.clone());
+        let batching_strategy = S::get_batching_strategy(config);
         let engine_type = S::get_engine_type();
         let format_desc = match param.format_desc {
             Some(desc) => desc,
@@ -207,6 +208,7 @@ pub struct OpenDalSinkWriter {
     sink_writer: Option<FileWriterEnum>,
     write_path: String,
     executor_id: u64,
+    unique_writer_id: Uuid,
     encode_type: SinkEncode,
     row_encoder: JsonEncoder,
     engine_type: EngineType,
@@ -251,7 +253,8 @@ impl OpenDalSinkWriter {
                     if w.bytes_written() > 0 {
                         let metadata = w.close().await?;
                         tracing::info!(
-                            "writer {:?}_{:?}finish write file, metadata: {:?}",
+                            "writer {} (executor_id: {}, created_time: {}) finish write file, metadata: {:?}",
+                            self.unique_writer_id,
                             self.executor_id,
                             self.created_time
                                 .duration_since(UNIX_EPOCH)
@@ -282,7 +285,7 @@ impl OpenDalSinkWriter {
 
 /// Private methods related to batching.
 impl OpenDalSinkWriter {
-    /// Method for judging whether batch condiction is met.
+    /// Method for judging whether batch condition is met.
     fn can_commit(&self) -> bool {
         self.duration_seconds_since_writer_created() >= self.batching_strategy.rollover_seconds
             || self.current_bached_row_num >= self.batching_strategy.max_row_count
@@ -379,6 +382,7 @@ impl OpenDalSinkWriter {
             operator,
             sink_writer: None,
             executor_id,
+            unique_writer_id: Uuid::now_v7(),
             encode_type: format_desc.encode.clone(),
             row_encoder,
             engine_type,
@@ -404,7 +408,7 @@ impl OpenDalSinkWriter {
         // With batching in place, the file writing process is decoupled from checkpoints.
         // The current file naming convention is as follows:
         // 1. A subdirectory is defined based on `path_partition_prefix` (e.g., by day、hour or month or none.).
-        // 2. The file name includes the `executor_id` and the creation time in seconds since the UNIX epoch.
+        // 2. The file name includes a unique UUID (v7, which contains timestamp) and the creation time in seconds since the UNIX epoch.
         // If the engine type is `Fs`, the path is automatically handled, and the filename does not include a path prefix.
         // 3. For the Snowflake Sink, the `write_path` parameter can be empty.
         // When the `write_path` is not specified, the data will be written to the root of the specified bucket.
@@ -419,7 +423,7 @@ impl OpenDalSinkWriter {
                 "{}{}{}_{}.{}",
                 base_path,
                 self.path_partition_prefix(&create_time),
-                self.executor_id,
+                self.unique_writer_id,
                 create_time.as_secs(),
                 suffix,
             )
@@ -432,6 +436,9 @@ impl OpenDalSinkWriter {
     }
 
     async fn create_sink_writer(&mut self) -> Result<()> {
+        // Update the `created_time` to the current time when creating a new writer.
+        self.created_time = SystemTime::now();
+
         let object_writer = self.create_object_writer().await?;
         match self.encode_type {
             SinkEncode::Parquet => {
@@ -451,8 +458,6 @@ impl OpenDalSinkWriter {
             }
         }
         self.current_bached_row_num = 0;
-
-        self.created_time = SystemTime::now();
 
         Ok(())
     }

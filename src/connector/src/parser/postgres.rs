@@ -15,7 +15,7 @@
 use std::sync::LazyLock;
 
 use risingwave_common::catalog::Schema;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Decimal, ScalarImpl};
 use thiserror_ext::AsReport;
@@ -23,7 +23,7 @@ use thiserror_ext::AsReport;
 use crate::parser::scalar_adapter::ScalarAdapter;
 use crate::parser::utils::log_error;
 
-static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 
 macro_rules! handle_data_type {
     ($row:expr, $i:expr, $name:expr, $type:ty) => {{
@@ -96,12 +96,12 @@ pub fn postgres_cell_to_scalar_impl(
                 }
             }
         }
-        DataType::List(dtype) => match **dtype {
+        DataType::List(list) => match list.elem() {
             // TODO(Kexiang): allow DataType::List(_)
-            DataType::Struct(_) | DataType::List(_) | DataType::Serial => {
+            elem @ (DataType::Struct(_) | DataType::List(_) | DataType::Serial) => {
                 tracing::warn!(
                     "unsupported List data type {:?}, set the List to empty",
-                    **dtype
+                    elem
                 );
                 None
             }
@@ -116,8 +116,7 @@ pub fn postgres_cell_to_scalar_impl(
                 }
             }
         },
-        DataType::Vector(_) => todo!("VECTOR_PLACEHOLDER"),
-        DataType::Struct(_) | DataType::Serial | DataType::Map(_) => {
+        DataType::Vector(_) | DataType::Struct(_) | DataType::Serial | DataType::Map(_) => {
             // Is this branch reachable?
             // Struct and Serial are not supported
             tracing::warn!(name, ?data_type, "unsupported data type, set to null");

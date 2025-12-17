@@ -188,19 +188,21 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for TopN<PlanRef> {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        let input_stream_key = self.input.stream_key()?;
-        let mut stream_key = self.group_key.clone();
-        if !self.limit_attr.max_one_row() {
+        if self.limit_attr.max_one_row() {
+            // We can use the group key as the stream key when there is at most one record for each
+            // value of the group key.
+            Some(self.group_key.clone())
+        } else {
+            // Otherwise, use the union of the group key and the input stream key.
+            let mut stream_key = self.group_key.clone();
+            let input_stream_key = self.input.stream_key()?;
             for i in input_stream_key {
                 if !stream_key.contains(i) {
                     stream_key.push(*i);
                 }
             }
+            Some(stream_key)
         }
-        // else: We can use the group key as the stream key when there is at most one record for each
-        // value of the group key.
-
-        Some(stream_key)
     }
 
     fn ctx(&self) -> OptimizerContextRef {

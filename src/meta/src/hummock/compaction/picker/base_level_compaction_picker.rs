@@ -283,7 +283,7 @@ impl LevelCompactionPicker {
                     });
 
                     // reduce log
-                    if log_counter % 100 == 0 {
+                    if log_counter.is_multiple_of(100) {
                         tracing::warn!(
                             "skip task with level count: {}, file count: {}, select size: {}, target size: {}, target level size: {}",
                             result.input_levels.len(),

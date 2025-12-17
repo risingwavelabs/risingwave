@@ -1,6 +1,13 @@
+# Test user DDL statements.
+statement error unexpected user option
+CREATE USER user1 WITH "LOGIn";
+
+statement error unexpected user option
+CREATE USER user1 WITH "LOGIN";
+
 # Create a user.
 statement ok
-CREATE USER user WITH SUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b';
+CREATE USER user WITH "login" SUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b';
 
 # Create another user with duplicate name.
 statement error

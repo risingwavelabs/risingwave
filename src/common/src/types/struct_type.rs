@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::fmt::{Debug, Display, Formatter};
+use std::iter::empty;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -88,7 +89,7 @@ impl StructType {
     }
 
     /// Creates a struct type with unnamed fields. The names will be assigned `f1`, `f2`, etc.
-    pub fn unnamed(fields: Vec<DataType>) -> Self {
+    pub fn unnamed(fields: impl IntoIterator<Item = DataType>) -> Self {
         let fields = fields
             .into_iter()
             .enumerate()
@@ -102,7 +103,15 @@ impl StructType {
         }))
     }
 
+    /// Creates a struct type for `ROW` expression with unnamed fields.
+    pub fn row_expr_type(fields: impl IntoIterator<Item = DataType>) -> Self {
+        Self::unnamed(fields)
+    }
+
     /// Attaches given field ids to the struct type.
+    ///
+    /// Note that for empty struct, this method is a no-op, as [`StructType::ids`] will always
+    /// return `Some(<empty>)` for empty struct.
     pub fn with_ids(self, ids: impl IntoIterator<Item = ColumnId>) -> Self {
         let ids: Box<[ColumnId]> = ids.into_iter().collect();
 
@@ -112,16 +121,21 @@ impl StructType {
             "ids should not contain placeholder value"
         );
 
+        // No-op for empty struct.
+        if self.is_empty() {
+            return self;
+        }
+
         let mut inner = Arc::unwrap_or_clone(self.0);
         inner.field_ids = Some(ids);
         Self(Arc::new(inner))
     }
 
-    /// Whether the struct type has field ids.
+    /// Whether the struct type has field ids. An empty struct is considered to have ids.
     ///
     /// Note that this does not recursively check whether composite fields have ids.
     pub fn has_ids(&self) -> bool {
-        self.0.field_ids.is_some()
+        self.is_empty() || self.0.field_ids.is_some()
     }
 
     /// Whether the fields are unnamed.
@@ -166,9 +180,15 @@ impl StructType {
     /// Gets an iterator over the field ids.
     ///
     /// Returns `None` if they are not present. See documentation on the field `field_ids`
-    /// for the cases.
+    /// for the cases. For empty struct, this returns `Some(<empty>)`.
     pub fn ids(&self) -> Option<impl ExactSizeIterator<Item = ColumnId> + '_> {
-        self.0.field_ids.as_ref().map(|ids| ids.iter().copied())
+        if self.is_empty() {
+            Some(Either::Left(empty()))
+        } else {
+            (self.0.field_ids.as_ref())
+                .map(|field_ids| field_ids.iter().copied())
+                .map(Either::Right)
+        }
     }
 
     /// Gets the field id at the given index.
@@ -176,7 +196,7 @@ impl StructType {
     /// Returns `None` if they are not present. See documentation on the field `field_ids`
     /// for the cases.
     pub fn id_at(&self, index: usize) -> Option<ColumnId> {
-        self.0.field_ids.as_ref().map(|ids| ids[index])
+        self.ids().map(|mut ids| ids.nth(index).unwrap())
     }
 
     /// Get an iterator over the field ids, or a sequence of placeholder ids if they are not present.

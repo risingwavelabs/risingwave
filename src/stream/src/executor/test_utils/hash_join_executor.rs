@@ -134,7 +134,7 @@ pub async fn setup_bench_stream_hash_join(
         .into_iter()
         .collect();
     let schema_len = schema.len();
-    let info = ExecutorInfo::new(
+    let info = ExecutorInfo::for_test(
         Schema { fields: schema },
         vec![0, 1, 3, 4],
         "HashJoinExecutor".to_owned(),
