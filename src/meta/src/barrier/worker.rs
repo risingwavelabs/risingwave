@@ -283,7 +283,14 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 if result_tx.send(progress).is_err() {
                                     error!("failed to send get ddl progress");
                                 }
-                            }// Handle adhoc recovery triggered by user.
+                            }
+                            BarrierManagerRequest::GetCdcProgress(result_tx) => {
+                                let progress = self.checkpoint_control.gen_cdc_progress();
+                                if result_tx.send(progress).is_err() {
+                                    error!("failed to send get ddl progress");
+                                }
+                            }
+                            // Handle adhoc recovery triggered by user.
                             BarrierManagerRequest::AdhocRecovery(sender) => {
                                 self.adhoc_recovery().await;
                                 if sender.send(()).is_err() {
@@ -375,17 +382,28 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }));
                                 Self::report_collect_failure(&self.env, &error);
                                 self.context.notify_creating_job_failed(Some(database_id), format!("{}", error.as_report())).await;
-                                match self.context.reload_database_runtime_info(database_id).await? { Some(runtime_info) => {
-                                    runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
-                                        warn!(%database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
-                                    })?;
-                                    entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
-                                } _ => {
-                                    info!(%database_id, "database removed after reloading empty runtime info");
-                                    // mark ready to unblock subsequent request
-                                    self.context.mark_ready(MarkReadyOptions::Database(database_id));
-                                    entering_initializing.remove();
-                                }}
+                                match self.context.reload_database_runtime_info(database_id).await.and_then(|runtime_info| {
+                                    runtime_info.map(|runtime_info| {
+                                        runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
+                                            warn!(%database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
+                                        })?;
+                                        Ok(runtime_info)
+                                    })
+                                    .transpose()
+                                }) {
+                                    Ok(Some(runtime_info)) => {
+                                        entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
+                                    }
+                                    Ok(None) => {
+                                        info!(%database_id, "database removed after reloading empty runtime info");
+                                        // mark ready to unblock subsequent request
+                                        self.context.mark_ready(MarkReadyOptions::Database(database_id));
+                                        entering_initializing.remove();
+                                    }
+                                    Err(e) => {
+                                        entering_initializing.fail_reload_runtime_info(e);
+                                    }
+                                }
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
@@ -772,7 +790,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut background_jobs,
                 hummock_version_stats,
                 database_infos,
-                mut cdc_table_snapshot_split_assignment,
+                mut cdc_table_snapshot_splits,
             } = runtime_info_snapshot;
 
             let term_id = Uuid::new_v4().to_string();
@@ -808,7 +826,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &mut mv_depended_subscriptions,
                         is_paused,
                         &hummock_version_stats,
-                        &mut cdc_table_snapshot_split_assignment,
+                        &mut cdc_table_snapshot_splits,
                     );
                     let node_to_collect = match result {
                         Ok(info) => {

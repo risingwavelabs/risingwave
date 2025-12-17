@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use datafusion::physical_plan::execute_stream;
-use datafusion::prelude::SessionContext;
+use datafusion::prelude::{SessionConfig as DFSessionConfig, SessionContext as DFSessionContext};
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
@@ -47,13 +47,11 @@ pub async fn execute_datafusion_plan(
     plan: DfBatchQueryPlanResult,
     formats: Vec<Format>,
 ) -> RwResult<RwPgResponse> {
-    let ctx = SessionContext::new();
+    let df_config = create_config(session.as_ref());
+    let ctx = DFSessionContext::new_with_config(df_config);
     let state = ctx.state();
 
-    // TODO: update datafusion context with risingwave session info
-
     let pg_descs: Vec<PgFieldDescriptor> = plan.schema.fields().iter().map(to_pg_field).collect();
-
     let column_types = plan.schema.fields().iter().map(|f| f.data_type()).collect();
 
     // avoid optimizing by datafusion
@@ -181,4 +179,15 @@ impl CastExecutor {
         }
         Ok(DataChunk::new(arrays, chunk.visibility().clone()))
     }
+}
+
+fn create_config(session: &SessionImpl) -> DFSessionConfig {
+    let rw_config = session.config();
+
+    let mut df_config = DFSessionConfig::new();
+    if let Some(batch_parallelism) = rw_config.batch_parallelism().0 {
+        df_config = df_config.with_target_partitions(batch_parallelism.get().try_into().unwrap());
+    }
+    df_config = df_config.with_batch_size(session.env().batch_config().developer.chunk_size);
+    df_config
 }

@@ -29,6 +29,7 @@ use risingwave_pb::stream_service::streaming_control_stream_request::PbInitReque
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::MetaResult;
+use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::command::CommandContext;
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
@@ -101,7 +102,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]
     async fn finish_cdc_table_backfill(&self, job: JobId) -> MetaResult<()> {
-        self.env.cdc_table_backfill_tracker.complete_job(job).await
+        CdcTableBackfillTracker::mark_complete_job(&self.env.meta_store().conn, job).await
     }
 
     #[await_tree::instrument("new_control_stream({})", node.id)]
@@ -479,8 +480,6 @@ impl CommandContext {
                     .await?
             }
             Command::DropSubscription { .. } => {}
-            Command::MergeSnapshotBackfillStreamingJobs(_) => {}
-            Command::StartFragmentBackfill { .. } => {}
             Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
         }
 

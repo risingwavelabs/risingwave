@@ -22,7 +22,7 @@ use datafusion::logical_expr::{
     TableScan, Values, build_join_schema,
 };
 use datafusion::prelude::lit;
-use datafusion_common::{DFSchema, ScalarValue};
+use datafusion_common::{DFSchema, NullEquality, ScalarValue};
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
@@ -80,7 +80,7 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
                 .or_insert(0);
             *count += 1;
             if *count > 1 {
-                let take_expr = std::mem::replace(expr, DFExpr::Literal(ScalarValue::Null));
+                let take_expr = std::mem::replace(expr, DFExpr::Literal(ScalarValue::Null, None));
                 *expr = take_expr.alias_qualified(relation, format!("{}@{}", field.name(), count));
             }
         }
@@ -148,6 +148,11 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
 
         let join_schema =
             build_join_schema(left_plan.schema(), right_plan.schema(), &df_join_type)?;
+        let null_equality = if null_equals_null {
+            NullEquality::NullEqualsNull
+        } else {
+            NullEquality::NullEqualsNothing
+        };
         let join = Join {
             left: left_plan,
             right: right_plan,
@@ -156,7 +161,7 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
             join_type: df_join_type,
             join_constraint: JoinConstraint::On,
             schema: Arc::new(join_schema),
-            null_equals_null,
+            null_equality,
         };
         if plan.output_indices_are_trivial() {
             return Ok(Arc::new(LogicalPlan::Join(join)));

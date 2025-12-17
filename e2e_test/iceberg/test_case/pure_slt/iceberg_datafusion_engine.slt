@@ -33,6 +33,7 @@ statement ok
 FLUSH;
 
 sleep 5s
+
 query ??
 select * from t;
 ----
@@ -42,6 +43,44 @@ query ??
 select * from t for system_time as of '2222-12-10 11:48:06';
 ----
 1 xxx
+
+statement ok
+insert into t select i, repeat('x', i + 2) from generate_series(2,5) as s(i);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+statement ok
+delete from t where id = 1;
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?? rowsort
+select * from t;
+----
+2 xxxx
+3 xxxxx
+4 xxxxxx
+5 xxxxxxx
+
+statement ok
+delete from t where id >= 4;
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?? rowsort
+select * from t;
+----
+2 xxxx
+3 xxxxx
 
 statement ok
 DROP TABLE t;
@@ -197,6 +236,24 @@ SELECT id, price, date FROM price WHERE price < 180.20
 
 statement ok
 DROP TABLE price;
+
+# test error ui
+statement ok
+create table t(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t values(1, 'xxx');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query error error while evaluating expression `str_parse\('xxx'\)`
+select name::jsonb from t;
+
+statement ok
+DROP TABLE t;
 
 statement ok
 DROP CONNECTION my_conn;

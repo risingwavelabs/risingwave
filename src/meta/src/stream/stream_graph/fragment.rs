@@ -846,6 +846,26 @@ impl StreamFragmentGraph {
         }
     }
 
+    pub fn fit_snapshot_backfill_epochs(
+        &mut self,
+        mut snapshot_backfill_epochs: HashMap<u64, u64>,
+    ) {
+        for fragment in self.fragments.values_mut() {
+            visit_stream_node_cont_mut(fragment.node.as_mut().unwrap(), |node| {
+                if let PbNodeBody::StreamScan(scan) = node.node_body.as_mut().unwrap()
+                    && let StreamScanType::SnapshotBackfill
+                    | StreamScanType::CrossDbSnapshotBackfill = scan.stream_scan_type()
+                {
+                    let Some(epoch) = snapshot_backfill_epochs.remove(&node.operator_id) else {
+                        panic!("no snapshot epoch found for node {:?}", node)
+                    };
+                    scan.snapshot_backfill_epoch = Some(epoch);
+                }
+                true
+            })
+        }
+    }
+
     /// Returns the fragment id where the streaming job node located.
     pub fn table_fragment_id(&self) -> FragmentId {
         self.fragments

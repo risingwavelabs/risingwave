@@ -27,7 +27,6 @@ use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatab
 use thiserror_ext::AsReport;
 use tracing::{info, warn};
 
-use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::control::DatabaseCheckpointControlStatus;
 use crate::barrier::checkpoint::creating_job::CreatingStreamingJobControl;
@@ -39,6 +38,7 @@ use crate::barrier::worker::{
     RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
+use crate::{MetaError, MetaResult};
 
 /// We can treat each database as a state machine of 3 states: `Running`, `Resetting` and `Initializing`.
 /// The state transition can be triggered when receiving 3 variants of response: `ReportDatabaseFailure`, `BarrierComplete`, `DatabaseReset`.
@@ -381,7 +381,7 @@ impl CheckpointControl {
                     None
                 }
                 DatabaseRecoveringStage::Initializing { .. } => {
-                    warn!(database_id = %database_id, "");
+                    warn!(database_id = %database_id, "failed to initialize database");
                     let (backoff_future, reset_request_id) = state.next_retry();
                     let remaining_workers =
                         control_stream_manager.reset_database(database_id, reset_request_id);
@@ -432,7 +432,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             fragment_relations,
             mut source_splits,
             mut background_jobs,
-            mut cdc_table_snapshot_split_assignment,
+            mut cdc_table_snapshot_splits,
         } = runtime_info;
         let result: MetaResult<_> = try {
             let mut builder = FragmentEdgeBuilder::new(
@@ -455,7 +455,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &mut mv_depended_subscriptions,
                 false,
                 &self.control.hummock_version_stats,
-                &mut cdc_table_snapshot_split_assignment,
+                &mut cdc_table_snapshot_splits,
             )?
         };
         match result {
@@ -483,6 +483,38 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 };
             }
         }
+    }
+
+    pub(crate) fn fail_reload_runtime_info(self, e: MetaError) {
+        let database_status = self
+            .control
+            .databases
+            .get_mut(&self.database_id)
+            .expect("should exist");
+        let status = match database_status {
+            DatabaseCheckpointControlStatus::Running(_) => {
+                unreachable!("should not enter initializing when running")
+            }
+            DatabaseCheckpointControlStatus::Recovering(state) => match state.stage {
+                DatabaseRecoveringStage::Initializing { .. } => {
+                    unreachable!("can only enter initializing when resetting")
+                }
+                DatabaseRecoveringStage::Resetting { .. } => state,
+            },
+        };
+        warn!(
+            database_id = %self.database_id,
+            e = %e.as_report(),
+            "failed to reload runtime info"
+        );
+        let (backoff_future, reset_request_id) = status.next_retry();
+        status.metrics.recovery_failure_cnt.inc();
+        status.stage = DatabaseRecoveringStage::Resetting {
+            remaining_workers: Default::default(),
+            reset_resps: Default::default(),
+            reset_request_id,
+            backoff_future: Some(backoff_future),
+        };
     }
 
     pub(crate) fn remove(self) {

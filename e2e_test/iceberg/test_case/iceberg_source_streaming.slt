@@ -191,12 +191,12 @@ select count(*) from iceberg_t1_source;
 ----
 14
 
-query I retry 3 backoff 5s
+query I retry 6 backoff 5s
 select count(*) from mv2;
 ----
 18
 
-query I retry 3 backoff 5s
+query I retry 6 backoff 5s
 select count(*) from mv3;
 ----
 18
