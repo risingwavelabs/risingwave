@@ -12,8 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use futures_async_stream::try_stream;
-use hashbrown::HashSet;
 use itertools::Itertools;
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
