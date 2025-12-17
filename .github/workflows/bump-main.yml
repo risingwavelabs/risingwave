@@ -9,6 +9,9 @@ jobs:
   bump-main-branch-version:
     runs-on: ubuntu-latest
     if: github.event.created == true
+    permissions:
+      contents: write
+      pull-requests: write
     
     steps:
       - name: Checkout code
