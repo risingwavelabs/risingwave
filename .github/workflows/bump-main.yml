@@ -1,4 +1,4 @@
-name: Release Branch Initialization
+name: Bump Main Branch Version
 
 on:
   push:
@@ -17,18 +17,62 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Run initialization tasks
+      - name: Bump main branch version
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          release_branch_name=${{ github.ref_name }}"
+          release_branch_name="${{ github.ref_name }}"
           echo "New release branch detected: ${release_branch_name}"
+          
+          # Parse current version from branch name
+          release=$(echo $release_branch_name | cut -d'-' -f2)
+          major=$(echo $release | cut -d'.' -f1)
+          minor=$(echo $release | cut -d'.' -f2)
+          
+          QUERY='query ListMilestones($name: String!, $owner: String!) {
+            repository(owner: $owner, name: $name) {
+              milestones(first: 100, states: [OPEN]) {
+                nodes { title number }
+              }
+            }
+          }'
 
-          patch=$(echo $release_branch_name | cut -d'-' -f2)
-          echo "--- Bump main branch version files"
-          sed -i "s/^version = .*$/version = \"${patch}.0-alpha\"/" Cargo.toml
+          # Fetch milestones directly
+          milestones_json=$(gh api graphql -f query="$QUERY" -F owner='${{ github.repository_owner }}' -F name='${{ github.event.repository.name }}')
+
+          # Find next milestone
+          next_minor=$((minor + 1))
+          milestone=$(echo "$milestones_json" | jq -r ".data.repository.milestones.nodes[] | select (.title==\"release-$major.$next_minor\") // empty")
+
+          if [[ -z "$milestone" ]]; then
+            echo "Milestone release-$major.$next_minor does not exist. Checking next major..."
+            next_major=$((major + 1))
+            milestone=$(echo "$milestones_json" | jq -r ".data.repository.milestones.nodes[] | select (.title==\"release-$next_major.0\") // empty")
+            
+            if [[ -z "$milestone" ]]; then
+              echo "No next milestone found. Please create it manually."
+              exit 1
+            else
+              version="$next_major.0.0-alpha"
+            fi
+          else
+            version="$major.$next_minor.0-alpha"
+          fi
+
+          # Update files
+          echo "Bumping version to: $version"
+          sed -i "s/^version = .*$/version = \"${version}\"/" Cargo.toml
           cargo update -vv -w
           
-          git checkout -b bump-main-${patch}
-          git add Cargo.toml Cargo.lock
-          git commit -m "chore: bump main branch version to ${patch}.0-alpha"
-          git push -u origin bump-main-${patch}
-          gh pr create --title "chore: bump main branch version to ${patch}.0-alpha" --body "This PR bumps the main branch version to ${patch}.0-alpha." --base main --head bump-main-${patch} --reviewer risingwavelabs/performance-reliability
+          # Export version for the next step
+          echo "NEW_VERSION=$version" >> $GITHUB_ENV
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6 # Note: v6 is the current stable major version
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: "chore: bump main branch version to ${{ env.NEW_VERSION }}"
+          body: "This PR automatically bumps the main branch version after creating ${{ github.ref_name }}."
+          base: main
+          branch: "automation/bump-version-${{ env.NEW_VERSION }}"
+          commit-message: "chore: bump version to ${{ env.NEW_VERSION }}"
