@@ -2089,15 +2089,14 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
                 // only commit data
                 let snapshot_id = snapshot_id
                     .ok_or_else(|| SinkError::Iceberg(anyhow!("Snapshot id missing")))?;
-                return self
-                    .commit_data_only(epoch, write_results, snapshot_id)
-                    .await;
+                self.commit_data_only(epoch, write_results, snapshot_id)
+                    .await
             }
             (false, true) => {
                 // only commit schema change
                 let add_columns = add_columns
                     .ok_or_else(|| SinkError::Iceberg(anyhow!("Schema metadata missing")))?;
-                return self.commit_schema_only(epoch, add_columns).await;
+                self.commit_schema_only(epoch, add_columns).await
             }
             (true, true) => {
                 // commit data and schema change
@@ -2105,14 +2104,11 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
                     .ok_or_else(|| SinkError::Iceberg(anyhow!("Snapshot id missing")))?;
                 let add_columns = add_columns
                     .ok_or_else(|| SinkError::Iceberg(anyhow!("Schema metadata missing")))?;
-                return self
-                    .commit_data_and_schema(epoch, write_results, snapshot_id, add_columns)
-                    .await;
+                self.commit_data_and_schema(epoch, write_results, snapshot_id, add_columns)
+                    .await
             }
-            (false, false) => {}
+            (false, false) => Ok(()),
         }
-
-        Ok(())
     }
 
     async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) {
