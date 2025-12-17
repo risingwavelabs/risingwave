@@ -509,6 +509,14 @@ enum ThrottleCommands {
     Sink(ThrottleCommandArgs),
 }
 
+#[derive(Clone, Debug, clap::ValueEnum)]
+pub enum ThrottleTypeArg {
+    Dml,
+    Backfill,
+    Source,
+    Sink,
+}
+
 #[derive(Clone, Debug, Args)]
 pub struct ThrottleCommandArgs {
     /// The ID of the object to throttle
@@ -517,9 +525,9 @@ pub struct ThrottleCommandArgs {
     /// The rate limit to apply
     #[clap(long)]
     rate: Option<u32>,
-    /// The type of throttle to apply. Options: dml, backfill, source, sink
-    #[clap(long, value_name = "TYPE", required = true)]
-    throttle_type: String,
+    /// The type of throttle to apply
+    #[clap(long, value_enum, required = true)]
+    throttle_type: ThrottleTypeArg,
 }
 
 #[derive(Subcommand, Clone, Debug)]
