@@ -43,12 +43,14 @@ read_branches() {
   git for-each-ref "refs/remotes/${remote}/release-*" --format '%(refname:short)'
 }
 
-all_release_branches="$(read_branches || true)"
+all_release_branches="$(read_branches)"
 echo "Release branches (remote: ${remote}):"
 if [[ -n "$all_release_branches" ]]; then
   echo "$all_release_branches"
 else
   echo "(none)"
+  echo "Error: failed to find any ${remote}/release-* branches; refusing to bypass version check." >&2
+  exit 1
 fi
 
 latest_major=-1
@@ -73,7 +75,7 @@ while IFS= read -r branch; do
 done < <(printf '%s\n' "$all_release_branches")
 
 if [[ "$latest_major" -lt 0 ]]; then
-  echo "No ${remote}/release-X.Y* branches found; skipping."
+  echo "No ${remote}/release-X.Y branches found; skipping."
   exit 0
 fi
 
