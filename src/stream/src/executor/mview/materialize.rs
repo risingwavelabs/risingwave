@@ -408,6 +408,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                         match msg {
                             Message::Watermark(w) => {
+                                // TODO(ttl): if it's our watermark column, update watermark to state table.
                                 yield Message::Watermark(w);
                             }
                             Message::Chunk(chunk) if self.is_dummy_table => {
