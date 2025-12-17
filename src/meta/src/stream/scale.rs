@@ -1064,7 +1064,7 @@ impl GlobalStreamManager {
                         }
 
                         LocalNotification::StreamingJobBackfillFinished(job_id) => {
-                            tracing::info!(job_id = %job_id, "received backfill finished notification");
+                            tracing::debug!(job_id = %job_id, "received backfill finished notification");
                             if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
                                 tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
                             }
