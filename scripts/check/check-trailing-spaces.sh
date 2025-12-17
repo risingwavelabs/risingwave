@@ -18,14 +18,26 @@ print_help() {
     echo
     echo "Options:"
     echo "  -f, --fix              Fix trailing spaces."
+    echo "  -s, --skip-dir <dir>   Skip a directory (can be specified multiple times)."
+    echo "                          Example: $self --skip-dir target --skip-dir src/tests"
     echo "  -h, --help             Show this help message and exit."
 }
 
 fix=false
+skip_dirs=()
 while [ $# -gt 0 ]; do
     case $1 in
     -f | --fix)
         fix=true
+        ;;
+    -s | --skip-dir)
+        shift
+        if [ $# -eq 0 ]; then
+            echo -e "${RED}${BOLD}$self: missing argument for --skip-dir${NONE}"
+            print_help
+            exit 1
+        fi
+        skip_dirs+=("$1")
         ;;
     -h | --help)
         print_help
@@ -43,16 +55,38 @@ done
 temp_file=$(mktemp)
 
 echo -ne "${BLUE}"
-git grep -nIP --untracked '[[:space:]]+$' -- ':!src/tests/regress/data' | tee $temp_file || true
+# Build git pathspec exclusions. `--` separates revs/options from pathspecs.
+# Default: search repo root, but skip `.cargo/` (it often contains generated/config files).
+git_grep_pathspec=(-- ':' ':!.cargo')
+for d in "${skip_dirs[@]}"; do
+    # Normalize leading "./" to keep the pathspec consistent.
+    d="${d#./}"
+    git_grep_pathspec+=(":!${d}")
+done
+
+git grep -nIP --untracked '[[:space:]]+$' "${git_grep_pathspec[@]}" | tee $temp_file || true
 echo -ne "${NONE}"
 
 bad_files=$(cat $temp_file | cut -f1 -d ':' | sort -u)
 rm $temp_file
 
+# Portable in-place sed (GNU vs BSD/macOS).
+sed_inplace() {
+    local expr=$1
+    local file=$2
+    if sed --version >/dev/null 2>&1; then
+        # GNU sed
+        sed -i -e "${expr}" "${file}"
+    else
+        # BSD/macOS sed
+        sed -i '' -e "${expr}" "${file}"
+    fi
+}
+
 if [ ! -z "$bad_files" ]; then
     if [[ $fix == true ]]; then
         for file in $bad_files; do
-            sed -i '' -e's/[[:space:]]*$//' "$file"
+            sed_inplace 's/[[:space:]]*$//' "$file"
         done
 
         echo
