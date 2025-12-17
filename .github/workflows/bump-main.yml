@@ -70,16 +70,18 @@ jobs:
           cargo update -vv -w
           
           # Export version for the next step
-          echo "new_version=$version" >> $GITHUB_OUTPUT
+          echo "NEW_VERSION=$version" >> $GITHUB_OUTPUT
 
       - name: Create Pull Request
         uses: peter-evans/create-pull-request@v6 # Note: v6 is the current stable major version
-        if: steps.bump.outputs.new_version != ''
+        if: steps.bump.outputs.NEW_VERSION != ''
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.NEW_VERSION }}
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
-          title: "chore: bump main branch version to ${{ env.new_version }}"
-          body: "This PR automatically bumps the main branch version after creating ${{ github.ref_name }}."
+          title: "chore: bump main branch version to ${{ env.NEW_VERSION }}"
+          body: "This PR automatically bumps the main branch version after creating ${{ env.ref_name }}."
           base: main
-          branch: "automation/bump-version-${{ env.new_version }}"
-          commit-message: "chore: bump version to ${{ env.new_version }}"
-          reviewers: 'cyliu0'
+          branch: "automation/bump-version-${{ env.NEW_VERSION }}"
+          commit-message: "chore: bump version to ${{ env.NEW_VERSION }}"
+          reviewers: 'performance-reliability'
