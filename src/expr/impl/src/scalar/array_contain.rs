@@ -35,6 +35,26 @@ use risingwave_expr::function;
 /// f
 ///
 /// query I
+/// SELECT array[1,2,3] @> array[3,1];
+/// ----
+/// t
+///
+/// query I
+/// SELECT array[1,2] @> array[1,1];
+/// ----
+/// t
+///
+/// query I
+/// SELECT array[1,2,3] @> array[]::int[];
+/// ----
+/// t
+///
+/// query I
+/// SELECT ARRAY[]::int[] @> ARRAY[]::int[];
+/// ----
+/// t
+///
+/// query I
 /// select array[[[1,2],[3,4]],[[5,6],[7,8]]] @> array[2,3];
 /// ----
 /// t
@@ -53,15 +73,30 @@ use risingwave_expr::function;
 /// select array[1,null,2] @> array[1,null,2];
 /// ----
 /// f
+///
+/// query I
+/// select array[1,null,2] @> array[1,2];
+/// ----
+/// t
+///
+/// query I
+/// SELECT array[1,NULL,2] @> array[NULL]::int[];
+/// ----
+/// f
+///
+/// query I
+/// SELECT NULL::int[] @> ARRAY[1];
+/// ----
+/// NULL
 /// ```
 #[function("array_contains(anyarray, anyarray) -> boolean")]
 fn array_contains(left: ListRef<'_>, right: ListRef<'_>) -> bool {
     let flatten = left.flatten();
     let set: HashSet<_> = flatten.iter().collect();
-    if set.contains(&None) {
-        return false;
-    }
-    right.flatten().iter().all(|item| set.contains(&item))
+    right
+        .flatten()
+        .iter()
+        .all(|item| item.is_some_and(|v| set.contains(&Some(v))))
 }
 
 #[function("array_contained(anyarray, anyarray) -> boolean")]
