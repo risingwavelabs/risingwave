@@ -37,7 +37,9 @@ use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
-use crate::controller::scale::{PreparedRenderContext, RenderedGraph, WorkerInfo, render_prepared};
+use crate::controller::scale::{
+    FragmentRenderMap, PreparedRenderContext, RenderedGraph, WorkerInfo, render_prepared,
+};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
@@ -177,8 +179,7 @@ impl GlobalBarrierWorkerContextImpl {
         prepared: &PreparedRenderContext,
         worker_nodes: &ActiveStreamingWorkerNodes,
         adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>>
-    {
+    ) -> MetaResult<FragmentRenderMap> {
         if prepared.is_empty() {
             return Ok(HashMap::new());
         }
@@ -208,29 +209,13 @@ impl GlobalBarrierWorkerContextImpl {
             prepared,
         )?;
 
-        Ok(fragments
-            .into_iter()
-            .map(|(loaded_database_id, job_fragment_infos)| {
-                if let Some(database_id) = database_id {
-                    assert_eq!(database_id, loaded_database_id);
-                }
-                (
-                    loaded_database_id,
-                    job_fragment_infos
-                        .into_iter()
-                        .map(|(job_id, fragment_infos)| {
-                            (
-                                job_id,
-                                fragment_infos
-                                    .into_iter()
-                                    .map(|(fragment_id, info)| (fragment_id as _, info))
-                                    .collect(),
-                            )
-                        })
-                        .collect(),
-                )
-            })
-            .collect())
+        if let Some(database_id) = database_id {
+            for loaded_database_id in fragments.keys() {
+                assert_eq!(*loaded_database_id, database_id);
+            }
+        }
+
+        Ok(fragments)
     }
 
     #[expect(clippy::type_complexity)]
@@ -368,10 +353,7 @@ impl GlobalBarrierWorkerContextImpl {
     /// the operator.
     async fn recovery_table_with_upstream_sinks(
         &self,
-        inflight_jobs: &mut HashMap<
-            DatabaseId,
-            HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
-        >,
+        inflight_jobs: &mut FragmentRenderMap,
     ) -> MetaResult<()> {
         let mut jobs = inflight_jobs.values_mut().try_fold(
             HashMap::new(),
@@ -812,7 +794,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     async fn load_stream_actors(
         &self,
-        all_info: &HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>,
+        all_info: &FragmentRenderMap,
     ) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let job_ids = all_info
             .values()
