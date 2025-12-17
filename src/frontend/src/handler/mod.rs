@@ -668,6 +668,9 @@ pub async fn handle(
         Statement::SetTimeZone { local: _, value } => {
             variable::handle_set_time_zone(handler_args, value)
         }
+        Statement::SetRole { local: _, role } if role.real_value() == "none" => {
+            Ok(RwPgResponse::empty_result(StatementType::SET_VARIABLE))
+        }
         Statement::ShowVariable { variable } => variable::handle_show(handler_args, variable),
         Statement::CreateIndex {
             name,

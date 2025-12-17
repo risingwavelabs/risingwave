@@ -17,3 +17,15 @@ set synchronize_seqscans to f;
 
 statement ok
 set synchronize_seqscans to default;
+
+statement ok
+set role none;
+
+statement ok
+set role "none";
+
+statement ok
+set role noNe;
+
+statement error
+set role "noNe";
