@@ -325,16 +325,21 @@ impl MaterializeCache {
         for key in keys {
             self.metrics.materialize_cache_total_count.inc();
 
-            if self.lru_cache.contains(key) {
-                if self.lru_cache.get(key).unwrap().is_some() {
-                    self.metrics.materialize_data_exist_count.inc();
-                }
+            if let Some(cached) = self.lru_cache.get(key) {
                 self.metrics.materialize_cache_hit_count.inc();
+                if let Some(_row) = cached {
+                    self.metrics.materialize_data_exist_count.inc();
+                    // TODO(ttl): If the watermark column of the row is below the committed watermark, we need to consider
+                    // it as inexistent by putting a None into the cache.
+                }
                 continue;
             }
+
             futures.push(async {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
                 let row = table.get_row(key_row).await?.map(CompactedRow::from);
+                // TODO(ttl): If the watermark column of the row is below the committed watermark, we need to consider
+                // it as inexistent by returning a None.
                 StreamExecutorResult::Ok((key.to_vec(), row))
             });
         }
