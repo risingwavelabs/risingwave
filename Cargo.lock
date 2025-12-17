@@ -8,8 +8,8 @@ version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "1a38cdcc3e43dc645038c2b6339dd98610c48ae593cc67839452e6670fa09f27"
 dependencies = [
- "arrow-array 55.1.0",
- "arrow-schema 55.1.0",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
 ]
 
 [[package]]
@@ -20,8 +20,8 @@ checksum = "75c8a313f30eb7d90584eda8760037c746a1827297100b64704b30f3f6cbd203"
 dependencies = [
  "adbc_core",
  "adbc_ffi",
- "arrow-array 55.1.0",
- "arrow-schema 55.1.0",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
  "libloading 0.8.9",
  "toml 0.9.8",
 ]
@@ -33,8 +33,8 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "08d36274376fdc4849cf47a78f3baeef4ae1654ef703dc3148d91adde3336c11"
 dependencies = [
  "adbc_core",
- "arrow-array 55.1.0",
- "arrow-schema 55.1.0",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
 ]
 
 [[package]]
@@ -46,8 +46,8 @@ dependencies = [
  "adbc_core",
  "adbc_driver_manager",
  "adbc_ffi",
- "arrow-array 55.1.0",
- "arrow-schema 55.1.0",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
  "url",
 ]
 
@@ -615,9 +615,6 @@ name = "arrow-schema"
 version = "54.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cfaf5e440be44db5413b75b72c2a87c1f8f0627117d110264048f2969b99e9"
-dependencies = [
- "bitflags 2.10.0",
-]
 
 [[package]]
 name = "arrow-schema"

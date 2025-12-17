@@ -25,7 +25,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::array::arrow::{Arrow55FromArrow, arrow_array_55, arrow_schema_55};
+use risingwave_common::array::arrow::{Arrow56FromArrow, arrow_array_56, arrow_schema_56};
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
@@ -45,22 +45,22 @@ mod schema;
 #[derive(Default)]
 pub struct AdbcSnowflakeArrowConvert;
 
-impl Arrow55FromArrow for AdbcSnowflakeArrowConvert {}
+impl Arrow56FromArrow for AdbcSnowflakeArrowConvert {}
 
 impl AdbcSnowflakeArrowConvert {
     pub fn chunk_from_record_batch(
         &self,
-        batch: &arrow_array_55::RecordBatch,
+        batch: &arrow_array_56::RecordBatch,
     ) -> Result<risingwave_common::array::DataChunk, risingwave_common::array::ArrayError> {
-        Arrow55FromArrow::from_record_batch(self, batch)
+        Arrow56FromArrow::from_record_batch(self, batch)
     }
 
     /// Convert Arrow 55 field to RisingWave `DataType`
     pub fn type_from_field(
         &self,
-        field: &arrow_schema_55::Field,
+        field: &arrow_schema_56::Field,
     ) -> Result<risingwave_common::types::DataType, risingwave_common::array::ArrayError> {
-        Arrow55FromArrow::from_field(self, field)
+        Arrow56FromArrow::from_field(self, field)
     }
 }
 
@@ -289,7 +289,7 @@ impl AdbcSnowflakeProperties {
         &self,
         connection: &mut Connection,
         query: &str,
-    ) -> ConnectorResult<Vec<arrow_array_55::RecordBatch>> {
+    ) -> ConnectorResult<Vec<arrow_array_56::RecordBatch>> {
         let mut statement = connection
             .new_statement()
             .context("Failed to create statement")?;
@@ -310,7 +310,7 @@ impl AdbcSnowflakeProperties {
     /// Execute a custom query and return the results as a vector of Arrow record batches.
     /// This is useful for metadata queries needed for split generation.
     /// Creates a new connection for each query - use `execute_query_with_connection` for better performance.
-    pub fn execute_query(&self, query: &str) -> ConnectorResult<Vec<arrow_array_55::RecordBatch>> {
+    pub fn execute_query(&self, query: &str) -> ConnectorResult<Vec<arrow_array_56::RecordBatch>> {
         let database = self.create_database()?;
         let mut connection = self.create_connection(&database)?;
         self.execute_query_with_connection(&mut connection, query)

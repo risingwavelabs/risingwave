@@ -19,6 +19,7 @@ use futures::stream;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::array::Op;
+use risingwave_common::array::arrow::arrow_array_56::RecordBatch;
 use risingwave_common::id::TableId;
 use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
 use risingwave_connector::source::ConnectorProperties;
@@ -354,7 +355,7 @@ impl<S: StateStore> BatchAdbcSnowflakeFetchExecutor<S> {
     /// Convert Arrow `RecordBatch`es to `StreamChunk`s
     fn convert_batches_to_chunks(
         split_id: &str,
-        batches: Vec<risingwave_common::array::arrow::arrow_array_55::RecordBatch>,
+        batches: Vec<RecordBatch>,
     ) -> StreamExecutorResult<Vec<StreamChunk>> {
         let converter = AdbcSnowflakeArrowConvert;
         let mut chunks = Vec::new();

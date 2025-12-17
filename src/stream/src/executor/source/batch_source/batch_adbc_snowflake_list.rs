@@ -20,7 +20,7 @@ use anyhow::{Context, anyhow};
 use either::Either;
 use parking_lot::RwLock;
 use risingwave_common::array::Op;
-use risingwave_common::array::arrow::arrow_array_55::Array as Array55;
+use risingwave_common::array::arrow::arrow_array_56::Array as Array56;
 use risingwave_common::id::TableId;
 use risingwave_common::types::{DataType, JsonbRef, JsonbVal, ScalarRef};
 use risingwave_connector::source::ConnectorProperties;
@@ -320,7 +320,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
         properties: &AdbcSnowflakeProperties,
         connection: &mut risingwave_connector::source::adbc_snowflake::Connection,
     ) -> StreamExecutorResult<Option<String>> {
-        use risingwave_common::array::arrow::arrow_array_55;
+        use risingwave_common::array::arrow::arrow_array_56;
 
         // Get current timestamp from Snowflake to use as snapshot reference
         let query = "SELECT CURRENT_TIMESTAMP()::STRING";
@@ -332,7 +332,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
             && let Some(array) = batch
                 .column(0)
                 .as_any()
-                .downcast_ref::<arrow_array_55::StringArray>()
+                .downcast_ref::<arrow_array_56::StringArray>()
         {
             let timestamp: String = array.value(0).into();
             return Ok(Some(timestamp));
@@ -347,7 +347,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
         properties: &AdbcSnowflakeProperties,
         connection: &mut risingwave_connector::source::adbc_snowflake::Connection,
     ) -> StreamExecutorResult<(Vec<String>, i64)> {
-        use risingwave_common::array::arrow::arrow_array_55;
+        use risingwave_common::array::arrow::arrow_array_56;
 
         // Get primary key names via SHOW PRIMARY KEYS.
         // This avoids depending on INFORMATION_SCHEMA.KEY_COLUMN_USAGE which may be restricted
@@ -380,12 +380,12 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
             let col_name_array = batch
                 .column(col_name_idx)
                 .as_any()
-                .downcast_ref::<arrow_array_55::StringArray>()
+                .downcast_ref::<arrow_array_56::StringArray>()
                 .ok_or_else(|| anyhow!("column_name is not StringArray"))?;
             let key_seq_array = batch
                 .column(key_seq_idx)
                 .as_any()
-                .downcast_ref::<arrow_array_55::Int64Array>()
+                .downcast_ref::<arrow_array_56::Int64Array>()
                 .ok_or_else(|| anyhow!("key_sequence is not Int64Array"))?;
 
             for i in 0..batch.num_rows() {
@@ -414,7 +414,7 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
             && let Some(array) = batch
                 .column(0)
                 .as_any()
-                .downcast_ref::<arrow_array_55::Int64Array>()
+                .downcast_ref::<arrow_array_56::Int64Array>()
         {
             estimated_count = array.value(0);
         }
@@ -475,20 +475,20 @@ impl<S: StateStore> BatchAdbcSnowflakeListExecutor<S> {
 
     /// Extract min and max values from query result batches
     fn extract_pk_range_from_batches(
-        batches: &[risingwave_common::array::arrow::arrow_array_55::RecordBatch],
+        batches: &[risingwave_common::array::arrow::arrow_array_56::RecordBatch],
     ) -> Option<(String, String)> {
-        use risingwave_common::array::arrow::arrow_array_55;
+        use risingwave_common::array::arrow::arrow_array_56;
 
         if let Some(batch) = batches.first()
             && batch.num_rows() > 0
             && let Some(min_array) = batch
                 .column(0)
                 .as_any()
-                .downcast_ref::<arrow_array_55::StringArray>()
+                .downcast_ref::<arrow_array_56::StringArray>()
             && let Some(max_array) = batch
                 .column(1)
                 .as_any()
-                .downcast_ref::<arrow_array_55::StringArray>()
+                .downcast_ref::<arrow_array_56::StringArray>()
         {
             let min_val: String = min_array.value(0).into();
             let max_val: String = max_array.value(0).into();
