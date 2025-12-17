@@ -26,12 +26,11 @@ use datafusion_common::{Column, Result as DFResult, ScalarValue};
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::BoxedError;
 use risingwave_common::types::DataType as RwDataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{BoxedExpression, ValueImpl, build_from_prost};
 
-use crate::datafusion::{ColumnTrait, convert_expr, convert_scalar_value};
+use crate::datafusion::{ColumnTrait, convert_expr, convert_scalar_value, to_datafusion_error};
 use crate::error::Result as RwResult;
 use crate::expr::{Expr, ExprType, FunctionCall};
 
@@ -225,10 +224,7 @@ fn fallback_rw_expr_builder(
         .collect::<Vec<_>>();
 
     let func = RwScalarFunction {
-        name: format!(
-            "RisingWave Scalar Function (type: {})",
-            func_call.func_type().as_str_name()
-        ),
+        name: format!("RisingWave Scalar Function ({:?})", func_call),
         expr: boxed_expr,
         input_columns: column_vec,
         signature: Signature {
@@ -245,11 +241,15 @@ fn fallback_rw_expr_builder(
     }))
 }
 
-#[derive(Debug)]
+#[derive(Debug, educe::Educe)]
+#[educe(PartialEq, Eq, Hash)]
 struct RwScalarFunction {
+    // Datafusion uses function name as column identifier, so we need to keep unique names for different functions to avoid conflicts
     name: String,
-    expr: BoxedExpression,
     input_columns: Vec<Column>,
+    #[educe(PartialEq(ignore), Hash(ignore))]
+    expr: BoxedExpression,
+    #[educe(PartialEq(ignore), Hash(ignore))]
     signature: Signature,
 }
 
@@ -269,11 +269,11 @@ impl ScalarUDFImpl for RwScalarFunction {
     fn return_type(&self, _: &[DFDataType]) -> DFResult<DFDataType> {
         let field = IcebergArrowConvert
             .to_arrow_field("", &self.expr.return_type())
-            .map_err(boxed)?;
+            .map_err(to_datafusion_error)?;
         Ok(field.data_type().clone())
     }
 
-    fn invoke_with_args(&self, args: ScalarFunctionArgs<'_>) -> DFResult<ColumnarValue> {
+    fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DFResult<ColumnarValue> {
         let opts = RecordBatchOptions::new()
             .with_match_field_names(false)
             .with_row_count(Some(args.number_rows));
@@ -291,21 +291,22 @@ impl ScalarUDFImpl for RwScalarFunction {
         let record_batch = RecordBatch::try_new_with_options(input_schema, columns, &opts)?;
         let chunk = IcebergArrowConvert
             .chunk_from_record_batch(&record_batch)
-            .map_err(boxed)?;
+            .map_err(to_datafusion_error)?;
         let value = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(self.expr.eval_v2(&chunk))
         })
-        .map_err(boxed)?;
+        .map_err(to_datafusion_error)?;
         let res = match value {
             ValueImpl::Array(array_impl) => {
                 let array = IcebergArrowConvert
-                    .to_arrow_array(args.return_type, &array_impl)
-                    .map_err(boxed)?;
+                    .to_arrow_array(args.return_field.data_type(), &array_impl)
+                    .map_err(to_datafusion_error)?;
                 ColumnarValue::Array(array)
             }
             ValueImpl::Scalar { value, .. } => {
                 let value = match value {
-                    Some(v) => convert_scalar_value(&v, self.expr.return_type()).map_err(boxed)?,
+                    Some(v) => convert_scalar_value(&v, self.expr.return_type())
+                        .map_err(to_datafusion_error)?,
                     None => ScalarValue::Null,
                 };
                 ColumnarValue::Scalar(value)
@@ -313,9 +314,4 @@ impl ScalarUDFImpl for RwScalarFunction {
         };
         Ok(res)
     }
-}
-
-fn boxed<E: std::error::Error + Send + Sync + 'static>(e: E) -> BoxedError {
-    // Convert to anyhow::Error first to capture backtrace information.
-    anyhow::Error::new(e).into()
 }

@@ -49,6 +49,7 @@ pub(crate) enum LogStoreBufferItem {
         is_checkpoint: bool,
         next_epoch: u64,
         add_columns: Option<Vec<Field>>,
+        is_stop: bool,
     },
 }
 
@@ -299,6 +300,7 @@ impl LogStoreBufferSender {
         is_checkpoint: bool,
         next_epoch: u64,
         add_columns: Option<Vec<Field>>,
+        is_stop: bool,
     ) {
         self.buffer.inner().add_item(
             epoch,
@@ -306,6 +308,7 @@ impl LogStoreBufferSender {
                 is_checkpoint,
                 next_epoch,
                 add_columns,
+                is_stop,
             },
         );
         self.update_notify.notify_waiters();

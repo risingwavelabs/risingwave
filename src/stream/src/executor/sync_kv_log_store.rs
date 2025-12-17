@@ -1049,6 +1049,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                 is_checkpoint: barrier.is_checkpoint(),
                 next_epoch: barrier.epoch.curr,
                 add_columns: None,
+                is_stop: false,
             },
         ));
         buffer.next_chunk_id = 0;

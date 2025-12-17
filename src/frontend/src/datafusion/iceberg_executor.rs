@@ -26,7 +26,7 @@ use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, Partitioning, PlanProperties};
 use datafusion::prelude::Expr;
-use datafusion_common::{DataFusionError, internal_err, not_impl_err};
+use datafusion_common::{DataFusionError, exec_err, internal_err, not_impl_err};
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iceberg::scan::FileScanTask;
@@ -105,9 +105,7 @@ impl ExecutionPlan for IcebergScan {
         context: Arc<TaskContext>,
     ) -> datafusion_common::Result<SendableRecordBatchStream> {
         if partition >= self.inner.tasks.len() {
-            return Err(DataFusionError::Internal(
-                "IcebergScan: partition out of bounds".to_owned(),
-            ));
+            return exec_err!("IcebergScan: partition out of bounds");
         }
 
         let chunk_size = context.session_config().batch_size();
@@ -190,12 +188,6 @@ impl IcebergScanInner {
         if let Some(snapshot_id) = self.snapshot_id {
             scan_builder = scan_builder.snapshot_id(snapshot_id);
         }
-        if matches!(
-            self.iceberg_scan_type,
-            IcebergScanType::EqualityDeleteScan | IcebergScanType::PositionDeleteScan
-        ) {
-            scan_builder = scan_builder.with_delete_file_processing_enabled(true);
-        }
         let scan = scan_builder.build().map_err(to_datafusion_error)?;
 
         let mut position_delete_files_set = HashSet::new();
@@ -203,7 +195,7 @@ impl IcebergScanInner {
 
         #[for_await]
         for scan_task in scan.plan_files().await.map_err(to_datafusion_error)? {
-            let scan_task = scan_task.map_err(to_datafusion_error)?;
+            let mut scan_task = scan_task.map_err(to_datafusion_error)?;
             match self.iceberg_scan_type {
                 IcebergScanType::DataScan => {
                     if scan_task.data_file_content != DataContentType::Data {
@@ -212,6 +204,8 @@ impl IcebergScanInner {
                             scan_task.data_file_content
                         );
                     }
+                    // Delete files are handled by dedicated scans; clear them for data scan tasks.
+                    scan_task.deletes.clear();
                     yield scan_task;
                 }
                 IcebergScanType::EqualityDeleteScan => {
@@ -256,7 +250,6 @@ impl IcebergScanInner {
             let stream = reader
                 .clone()
                 .read(tokio_stream::once(Ok(task.clone())).boxed())
-                .await
                 .map_err(to_datafusion_error)?;
             let mut pos_start: i64 = 0;
 

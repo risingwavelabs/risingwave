@@ -1031,6 +1031,16 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
+    let append_only = row_id_index.is_some();
+    if is_create_source && !append_only && !watermark_descs.is_empty() {
+        return Err(ErrorCode::NotSupported(
+            "Defining watermarks on source requires the source connector to be append only."
+                .to_owned(),
+            "Use the key words `FORMAT PLAIN`".to_owned(),
+        )
+        .into());
+    }
+
     bind_sql_column_constraints(
         session,
         source_name.clone(),
@@ -1055,7 +1065,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         database_id,
         columns,
         pk_col_ids,
-        append_only: row_id_index.is_some(),
+        append_only,
         owner: session.user_id(),
         info: source_info,
         row_id_index,

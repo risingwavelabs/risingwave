@@ -237,6 +237,24 @@ SELECT id, price, date FROM price WHERE price < 180.20
 statement ok
 DROP TABLE price;
 
+# test error ui
+statement ok
+create table t(id int primary key, name varchar) with(commit_checkpoint_interval = 1) engine = iceberg;
+
+statement ok
+insert into t values(1, 'xxx');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query error error while evaluating expression `str_parse\('xxx'\)`
+select name::jsonb from t;
+
+statement ok
+DROP TABLE t;
+
 statement ok
 DROP CONNECTION my_conn;
 

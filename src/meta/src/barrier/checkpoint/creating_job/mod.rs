@@ -43,9 +43,7 @@ use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::{
-    BackfillOrderState, BarrierKind, Command, CreateStreamingJobCommandInfo, TracedEpoch,
-};
+use crate::barrier::{BackfillOrderState, BarrierKind, CreateStreamingJobCommandInfo, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::StreamJobActorsToCreate;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -507,26 +505,36 @@ impl CreatingStreamingJobControl {
         Ok(())
     }
 
-    pub(super) fn on_new_command(
+    pub(super) fn start_consume_upstream(
         &mut self,
         control_stream_manager: &mut ControlStreamManager,
-        command: Option<&Command>,
         barrier_info: &BarrierInfo,
-    ) -> MetaResult<Option<HashMap<FragmentId, InflightFragmentInfo>>> {
-        let job_id = self.job_id;
-        let start_consume_upstream =
-            if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
-                jobs_to_merge.contains_key(&job_id)
-            } else {
-                false
-            };
-        if start_consume_upstream {
-            info!(
-                %job_id,
-                prev_epoch = barrier_info.prev_epoch(),
-                "start consuming upstream"
-            );
-        }
+    ) -> MetaResult<HashMap<FragmentId, InflightFragmentInfo>> {
+        info!(
+            job_id = %self.job_id,
+            prev_epoch = barrier_info.prev_epoch(),
+            "start consuming upstream"
+        );
+        let fragment_infos = self.status.start_consume_upstream(barrier_info);
+        Self::inject_barrier(
+            self.database_id,
+            self.job_id,
+            control_stream_manager,
+            &mut self.barrier_control,
+            &self.node_actors,
+            None,
+            barrier_info.clone(),
+            None,
+            None,
+        )?;
+        Ok(fragment_infos)
+    }
+
+    pub(super) fn on_new_upstream_barrier(
+        &mut self,
+        control_stream_manager: &mut ControlStreamManager,
+        barrier_info: &BarrierInfo,
+    ) -> MetaResult<()> {
         let progress_epoch =
             if let Some(max_collected_epoch) = self.barrier_control.max_collected_epoch() {
                 max(max_collected_epoch, self.backfill_epoch)
@@ -540,21 +548,7 @@ impl CreatingStreamingJobControl {
                 .0
                 .saturating_sub(progress_epoch) as _,
         );
-        let fragment_infos = if start_consume_upstream {
-            let fragment_infos = self.status.start_consume_upstream(barrier_info);
-            Self::inject_barrier(
-                self.database_id,
-                self.job_id,
-                control_stream_manager,
-                &mut self.barrier_control,
-                &self.node_actors,
-                None,
-                barrier_info.clone(),
-                None,
-                None,
-            )?;
-            Some(fragment_infos)
-        } else {
+        {
             for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(barrier_info) {
                 Self::inject_barrier(
                     self.database_id,
@@ -568,9 +562,8 @@ impl CreatingStreamingJobControl {
                     mutation,
                 )?;
             }
-            None
-        };
-        Ok(fragment_infos)
+        }
+        Ok(())
     }
 
     pub(crate) fn collect(&mut self, resp: BarrierCompleteResponse) -> bool {

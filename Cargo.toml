@@ -79,7 +79,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "2.7.0-alpha"
+version = "2.8.0-alpha"
 edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -151,9 +151,7 @@ axum-extra = "0.9"
 chrono = { version = "0.4.40", default-features = false }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
-# Use a forked version which removes the dependencies on dynamo db to reduce
-# compile time and binary size.
-deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
+deltalake = { version = "0.29", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 # TODO(MrCroxx): Switch to a release version.
 foyer = { version = "0.21.0", features = ["serde", "tracing", "nightly"] }
@@ -171,15 +169,15 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
     "nightly",
 ] }
 hytra = "0.1"
-# branch dev_rebase_main_20250325
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd", features = [
+# branch dev_rebase_main_20251111
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fc3867d81aa279bdfecd8703b56144cfb80e9c12", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "1d79e119ffb30bda0fafcb3114a17c77f46dc6fd" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fc3867d81aa279bdfecd8703b56144cfb80e9c12" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fc3867d81aa279bdfecd8703b56144cfb80e9c12" }
 
 adbc_core = { version = "0.21" }
 adbc_snowflake = { version = "0.21", default-features = false }
@@ -206,7 +204,7 @@ parking_lot = { version = "0.12", features = [
     "arc_lock",
     "deadlock_detection",
 ] }
-parquet = { version = "54", features = ["async"] }
+parquet = { version = "56", features = ["async"] }
 pin-project-lite = "0.2"
 prost = { version = "0.13" }
 prost-build = { version = "0.13" }
@@ -266,15 +264,17 @@ risingwave_variables = { path = "./src/utils/variables" }
 rw_futures_util = { path = "src/utils/futures_util" }
 rw_iter_util = { path = "src/utils/iter_util" }
 rw_resource_util = { path = "src/utils/resource_util" }
-sea-orm = { version = "~1.1", features = [
+# Pin sea-orm & sqlx to a specific version as we are using a patched version of sqlx
+# for compatibility with madsim.
+sea-orm = { version = "=1.1.1", features = [
     "sqlx-all",
     "runtime-tokio-native-tls",
     "with-uuid",
 ] }
-sea-orm-migration = "~1.1"
+sea-orm-migration = "=1.1.1"
 serde = { version = "1", features = ["derive"] }
 smallvec = "1.15"
-sqlx = { version = "0.8.2", default-features = false, features = [
+sqlx = { version = "=0.8.2", default-features = false, features = [
     "bigdecimal",
     "chrono",
     "json",
