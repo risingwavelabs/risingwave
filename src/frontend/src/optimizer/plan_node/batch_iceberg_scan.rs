@@ -77,6 +77,7 @@ impl BatchIcebergScan {
         core: generic::Source,
         iceberg_scan_type: IcebergScanType,
         snapshot_id: Option<i64>,
+        predicate: IcebergPredicate,
     ) -> Self {
         let base = PlanBase::new_batch_with_core(
             &core,
@@ -89,7 +90,7 @@ impl BatchIcebergScan {
             base,
             core,
             iceberg_scan_type,
-            predicate: IcebergPredicate::AlwaysTrue,
+            predicate,
             snapshot_id,
         }
     }

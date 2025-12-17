@@ -216,9 +216,13 @@ impl PredicatePushdown for LogicalIcebergScan {
 
 impl ToBatch for LogicalIcebergScan {
     fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
-        let plan =
-            BatchIcebergScan::new(self.core.clone(), self.iceberg_scan_type, self.snapshot_id)
-                .into();
+        let plan = BatchIcebergScan::new(
+            self.core.clone(),
+            self.iceberg_scan_type,
+            self.snapshot_id,
+            self.predicate.clone(),
+        )
+        .into();
         Ok(plan)
     }
 }
