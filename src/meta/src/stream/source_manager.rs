@@ -492,22 +492,22 @@ impl SourceManager {
     }
 
     /// Force tick for specific updated source workers after properties update.
-    async fn force_tick_updated_sources(&self, updated_source_ids: Vec<u32>) {
+    async fn force_tick_updated_sources(&self, updated_source_ids: Vec<SourceId>) {
         let core = self.core.lock().await;
         for source_id in updated_source_ids {
-            if let Some(handle) = core.managed_sources.get(&(source_id as SourceId)) {
-                tracing::info!("forcing tick for updated source {}", source_id);
+            if let Some(handle) = core.managed_sources.get(&source_id) {
+                tracing::info!("forcing tick for updated source {}", source_id.as_raw_id());
                 if let Err(e) = handle.force_tick().await {
                     tracing::warn!(
                         error = %e.as_report(),
                         "failed to force tick for source {} after properties update",
-                        source_id
+                        source_id.as_raw_id()
                     );
                 }
             } else {
                 tracing::warn!(
                     "source {} not found when trying to force tick after update",
-                    source_id
+                    source_id.as_raw_id()
                 );
             }
         }

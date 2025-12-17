@@ -64,7 +64,11 @@ pub async fn handle_alter_connection_connector_props(
     }
 
     meta_client
-        .alter_connection_connector_props(connection_id, changed_props, changed_secret_refs)
+        .alter_connection_connector_props(
+            connection_id.as_raw_id(),
+            changed_props,
+            changed_secret_refs,
+        )
         .await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_CONNECTION))

@@ -1525,6 +1525,7 @@ impl MetaClient {
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref: None, // Connections don't reference other connections
             object_type: AlterConnectorPropsObject::Connection as i32,
+            extra_options: None,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
         Ok(())

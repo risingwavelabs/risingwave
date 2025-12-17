@@ -656,7 +656,7 @@ impl<S: StateStore> SourceExecutor<S> {
                                 {
                                     // rebuild the stream reader with new props
                                     tracing::info!(
-                                        actor_id = self.actor_ctx.id,
+                                        actor_id = %self.actor_ctx.id,
                                         source_id = %source_id,
                                         "updating source connector properties",
                                     );
