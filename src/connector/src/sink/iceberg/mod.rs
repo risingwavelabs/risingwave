@@ -100,63 +100,6 @@ pub const ICEBERG_SINK: &str = "iceberg";
 
 // ============ Helper functions for schema change ============
 
-/// Convert Arrow `DataType` to Iceberg `Type`
-fn arrow_type_to_iceberg_type(arrow_type: &ArrowDataType) -> Result<iceberg::spec::Type> {
-    use iceberg::spec::{PrimitiveType, Type};
-
-    let iceberg_type = match arrow_type {
-        ArrowDataType::Boolean => Type::Primitive(PrimitiveType::Boolean),
-        ArrowDataType::Int32 => Type::Primitive(PrimitiveType::Int),
-        ArrowDataType::Int64 => Type::Primitive(PrimitiveType::Long),
-        ArrowDataType::Float32 => Type::Primitive(PrimitiveType::Float),
-        ArrowDataType::Float64 => Type::Primitive(PrimitiveType::Double),
-        ArrowDataType::Utf8 | ArrowDataType::LargeUtf8 => Type::Primitive(PrimitiveType::String),
-        ArrowDataType::Binary | ArrowDataType::LargeBinary => {
-            Type::Primitive(PrimitiveType::Binary)
-        }
-        ArrowDataType::Date32 => Type::Primitive(PrimitiveType::Date),
-        ArrowDataType::Timestamp(_, _) => Type::Primitive(PrimitiveType::Timestamptz),
-        ArrowDataType::Decimal128(precision, scale) => Type::Primitive(PrimitiveType::Decimal {
-            precision: *precision as u32,
-            scale: *scale as u32,
-        }),
-        ArrowDataType::List(field) | ArrowDataType::LargeList(field) => {
-            let element_type = arrow_type_to_iceberg_type(field.data_type())?;
-            Type::List(iceberg::spec::ListType {
-                element_field: Arc::new(iceberg::spec::NestedField::list_element(
-                    0, // Will be assigned by Iceberg
-                    element_type,
-                    !field.is_nullable(),
-                )),
-            })
-        }
-        ArrowDataType::Struct(fields) => {
-            let mut iceberg_fields = Vec::new();
-            for (idx, field) in fields.iter().enumerate() {
-                let field_type = arrow_type_to_iceberg_type(field.data_type())?;
-                iceberg_fields.push(Arc::new(iceberg::spec::NestedField {
-                    id: idx as i32, // Temporary ID
-                    name: field.name().clone(),
-                    required: !field.is_nullable(),
-                    field_type: Box::new(field_type),
-                    doc: None,
-                    initial_default: None,
-                    write_default: None,
-                }));
-            }
-            Type::Struct(iceberg::spec::StructType::new(iceberg_fields))
-        }
-        _ => {
-            return Err(SinkError::Iceberg(anyhow!(
-                "Unsupported Arrow type for Iceberg: {:?}",
-                arrow_type
-            )));
-        }
-    };
-
-    Ok(iceberg_type)
-}
-
 /// Serialize `add_columns` information to bytes for storage in metadata
 fn serialize_add_columns(fields: Vec<Field>) -> Result<Vec<u8>> {
     use prost::Message;
@@ -2141,28 +2084,32 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         let snapshot_id = parsed_commit_metadata.snapshot_id;
         let add_columns = parsed_commit_metadata.add_columns;
 
-        if data_file_need_committed && !schema_change_need_commit {
-            let snapshot_id =
-                snapshot_id.ok_or_else(|| SinkError::Iceberg(anyhow!("Snapshot id missing")))?;
-            return self
-                .commit_data_only(epoch, write_results, snapshot_id)
-                .await;
-        }
-
-        if !data_file_need_committed && schema_change_need_commit {
-            let add_columns = add_columns
-                .ok_or_else(|| SinkError::Iceberg(anyhow!("Schema metadata missing")))?;
-            return self.commit_schema_only(epoch, add_columns).await;
-        }
-
-        if data_file_need_committed && schema_change_need_commit {
-            let snapshot_id =
-                snapshot_id.ok_or_else(|| SinkError::Iceberg(anyhow!("Snapshot id missing")))?;
-            let add_columns = add_columns
-                .ok_or_else(|| SinkError::Iceberg(anyhow!("Schema metadata missing")))?;
-            return self
-                .commit_data_and_schema(epoch, write_results, snapshot_id, add_columns)
-                .await;
+        match (data_file_need_committed, schema_change_need_commit) {
+            (true, false) => {
+                // only commit data
+                let snapshot_id = snapshot_id
+                    .ok_or_else(|| SinkError::Iceberg(anyhow!("Snapshot id missing")))?;
+                return self
+                    .commit_data_only(epoch, write_results, snapshot_id)
+                    .await;
+            }
+            (false, true) => {
+                // only commit schema change
+                let add_columns = add_columns
+                    .ok_or_else(|| SinkError::Iceberg(anyhow!("Schema metadata missing")))?;
+                return self.commit_schema_only(epoch, add_columns).await;
+            }
+            (true, true) => {
+                // commit data and schema change
+                let snapshot_id = snapshot_id
+                    .ok_or_else(|| SinkError::Iceberg(anyhow!("Snapshot id missing")))?;
+                let add_columns = add_columns
+                    .ok_or_else(|| SinkError::Iceberg(anyhow!("Schema metadata missing")))?;
+                return self
+                    .commit_data_and_schema(epoch, write_results, snapshot_id, add_columns)
+                    .await;
+            }
+            (false, false) => {}
         }
 
         Ok(())
@@ -2574,7 +2521,12 @@ impl IcebergSinkCommitter {
                 .map_err(SinkError::Iceberg)?;
 
             // Convert Arrow DataType to Iceberg Type
-            let iceberg_type = arrow_type_to_iceberg_type(arrow_field.data_type())?;
+            let iceberg_type = iceberg::arrow::arrow_type_to_type(arrow_field.data_type())
+                .map_err(|err| {
+                    SinkError::Iceberg(
+                        anyhow!(err).context("Failed to convert Arrow type to Iceberg type"),
+                    )
+                })?;
 
             // Create NestedField with the next available field ID
             let nested_field = Arc::new(NestedField::optional(
