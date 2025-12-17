@@ -73,6 +73,7 @@ pub struct JdbcConfig {
     /// Enable TCP keepalive for MySQL connections.
     /// Default: true
     #[serde(rename = "jdbc.tcp.keep.alive")]
+    #[with_option(allow_alter_on_fly)]
     pub tcp_keep_alive: Option<bool>,
 
     /// Time in milliseconds before sending the first keepalive probe (MySQL specific).
@@ -80,16 +81,19 @@ pub struct JdbcConfig {
     /// For AWS RDS, consider setting this to 300000 (5 minutes) or less.
     #[serde(rename = "jdbc.tcp.keep.alive.time.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub tcp_keep_alive_time_ms: Option<i32>,
 
     /// Interval in milliseconds between keepalive probes (MySQL specific).
     #[serde(rename = "jdbc.tcp.keep.alive.interval.ms")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub tcp_keep_alive_interval_ms: Option<i32>,
 
     /// Number of unacknowledged keepalive probes before closing the connection (MySQL specific).
     #[serde(rename = "jdbc.tcp.keep.alive.count")]
     #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
     pub tcp_keep_alive_count: Option<i32>,
 }
 

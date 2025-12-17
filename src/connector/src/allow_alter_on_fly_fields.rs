@@ -198,6 +198,16 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "compaction.type".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // JdbcConfig
+    map.try_insert(
+        std::any::type_name::<JdbcConfig>().to_owned(),
+        [
+            "jdbc.tcp.keep.alive".to_owned(),
+            "jdbc.tcp.keep.alive.time.ms".to_owned(),
+            "jdbc.tcp.keep.alive.interval.ms".to_owned(),
+            "jdbc.tcp.keep.alive.count".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // KafkaConfig
     map.try_insert(
         std::any::type_name::<KafkaConfig>().to_owned(),

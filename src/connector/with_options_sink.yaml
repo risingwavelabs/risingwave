@@ -746,6 +746,7 @@ JdbcConfig:
       Enable TCP keepalive for MySQL connections.
       Default: true
     required: false
+    allow_alter_on_fly: true
   - name: jdbc.tcp.keep.alive.time.ms
     field_type: i32
     comments: |-
@@ -753,14 +754,17 @@ JdbcConfig:
       This should be set to a value less than your network's idle timeout.
       For AWS RDS, consider setting this to 300000 (5 minutes) or less.
     required: false
+    allow_alter_on_fly: true
   - name: jdbc.tcp.keep.alive.interval.ms
     field_type: i32
     comments: Interval in milliseconds between keepalive probes (MySQL specific).
     required: false
+    allow_alter_on_fly: true
   - name: jdbc.tcp.keep.alive.count
     field_type: i32
     comments: Number of unacknowledged keepalive probes before closing the connection (MySQL specific).
     required: false
+    allow_alter_on_fly: true
 KafkaConfig:
   fields:
   - name: topic
