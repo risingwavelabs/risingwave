@@ -2599,10 +2599,8 @@ impl IcebergSinkCommitter {
 
         let updated_table = action
             .apply(txn)
-            .map_err(|err| {
-                tracing::error!(error = %err, "Failed to apply schema update action");
-                SinkError::Iceberg(anyhow!(err))
-            })?
+            .context("Failed to apply schema update action")
+            .map_err(SinkError::Iceberg)?
             .commit(self.catalog.as_ref())
             .await
             .context("Failed to commit table schema change")
