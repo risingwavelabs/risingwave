@@ -284,7 +284,7 @@ impl UploadingTask {
                         debug!(task_info = ?self.task_info, "upload task finish");
                     }
                 })
-                .inspect_err(|e| error!(task_info = ?self.task_info, err = ?e.as_report(), "upload task failed"))
+                .inspect_err(|e| error!(task_info = ?self.task_info, err = %e.as_report(), "upload task failed"))
                 .map(|output| {
                     Arc::new(StagingSstableInfo::new(
                         output.new_value_ssts,

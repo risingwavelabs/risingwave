@@ -396,7 +396,7 @@ impl IcebergCompactionManager {
                 tokio::select! {
                     _ = interval.tick() => {
                         if let Err(e) = manager.perform_gc_operations().await {
-                            tracing::error!(error = ?e.as_report(), "GC operations failed");
+                            tracing::error!(error = %e.as_report(), "GC operations failed");
                         }
                     },
                     _ = &mut shutdown_rx => {
@@ -538,7 +538,7 @@ impl IcebergCompactionManager {
 
         for sink_id in sink_ids {
             if let Err(e) = self.check_and_expire_snapshots(&sink_id).await {
-                tracing::error!(error = ?e.as_report(), "Failed to perform GC for sink {}", sink_id.sink_id);
+                tracing::error!(error = %e.as_report(), "Failed to perform GC for sink {}", sink_id.sink_id);
             }
         }
 
