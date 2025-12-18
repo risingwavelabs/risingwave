@@ -346,7 +346,10 @@ impl StreamMaterialize {
             derive_pk(input, user_distributed_by, user_order_by, &columns)
         };
 
-        // Add ttl watermark column to stream key.
+        // Add TTL watermark column to stream key.
+        // When a row comes in to a TTL-ed table and we cannot find it in the table, we still cannot tell
+        // whether it is a new row or an update to an expired row. Adding the TTL watermark column to the stream key
+        // can ensure there's no double-insert from the view of the downstream jobs. See RFC for more details.
         for idx in ttl_watermark_indices.iter().copied() {
             if !stream_key.contains(&idx) {
                 stream_key.push(idx);
