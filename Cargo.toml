@@ -79,7 +79,7 @@ exclude = [
 resolver = "2"
 
 [workspace.package]
-version = "2.7.0-alpha"
+version = "2.8.0-alpha"
 edition = "2024"
 homepage = "https://github.com/risingwavelabs/risingwave"
 keywords = ["sql", "database", "streaming"]
@@ -151,8 +151,7 @@ axum-extra = "0.9"
 chrono = { version = "0.4.40", default-features = false }
 clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
-# TODO: bump deltalake to 0.29 to avoid duplicated deps on arrow and datafusion
-deltalake = { version = "0.26", features = ["s3", "gcs", "datafusion"] }
+deltalake = { version = "0.29", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 # TODO(MrCroxx): Switch to a release version.
 foyer = { version = "0.21.0", features = ["serde", "tracing", "nightly"] }
@@ -171,14 +170,14 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20251111
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "20fb0cf17b949a4ca68a3d65b12743cf79ab095e", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fc3867d81aa279bdfecd8703b56144cfb80e9c12", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "20fb0cf17b949a4ca68a3d65b12743cf79ab095e" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "20fb0cf17b949a4ca68a3d65b12743cf79ab095e" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fc3867d81aa279bdfecd8703b56144cfb80e9c12" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "fc3867d81aa279bdfecd8703b56144cfb80e9c12" }
 
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
