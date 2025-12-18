@@ -340,7 +340,7 @@ where
         if let Ok(sql) = msg.get_sql()
             && let Some(sql) = sql
         {
-            record_sql_in_span(&sql, self.redact_sql_option_keywords.clone(), &mut span);
+            record_sql_in_span(sql, self.redact_sql_option_keywords.clone(), &mut span);
         }
         span
     }
