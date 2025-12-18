@@ -37,9 +37,13 @@ impl RegexpContext {
         } else {
             pattern.to_owned()
         };
-
+        let limit = std::env::var("RW_REGEX_BACKTRACK_LIMIT")
+            .unwrap_or("1000000".into())
+            .parse()
+            .unwrap();
         Ok(Self {
             regex: RegexBuilder::new(&origin)
+                .backtrack_limit(limit)
                 .build()
                 .map_err(|e| ExprError::Parse(e.to_report_string().into()))?,
             global: options.global,
