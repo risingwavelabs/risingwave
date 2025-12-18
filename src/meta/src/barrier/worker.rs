@@ -362,7 +362,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 self.context.notify_creating_job_failed(Some(database_id), format!("{}", error.as_report())).await;
                                 match self.context.reload_database_runtime_info(database_id).await? { Some(runtime_info) => {
                                     runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
-                                        warn!(database_id = database_id.database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
+                                        warn!(database_id = database_id.database_id, err = %e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
                                     })?;
                                     let workers = InflightFragmentInfo::workers(runtime_info.job_infos.values().flat_map(|job| job.fragment_infos()));
                                     for worker_id in workers {
@@ -743,7 +743,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 .reload_runtime_info()
                 .await?;
             runtime_info_snapshot.validate().inspect_err(|e| {
-                warn!(err = ?e.as_report(), ?runtime_info_snapshot, "reloaded runtime info failed to validate");
+                warn!(err = %e.as_report(), ?runtime_info_snapshot, "reloaded runtime info failed to validate");
             })?;
             let BarrierWorkerRuntimeInfoSnapshot {
                 active_streaming_nodes,

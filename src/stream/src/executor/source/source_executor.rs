@@ -168,7 +168,7 @@ impl<S: StateStore> SourceExecutor<S> {
                             Err(e) => {
                                 tracing::error!(
                                     target: "auto_schema_change",
-                                    error = ?e.as_report(), "schema change error");
+                                    error = %e.as_report(), "schema change error");
                                 finish_tx.send(()).unwrap();
                             }
                         }
@@ -367,7 +367,7 @@ impl<S: StateStore> SourceExecutor<S> {
     ) -> StreamExecutorResult<()> {
         let core = self.stream_source_core.as_mut().unwrap();
         tracing::error!(
-            error = ?e.as_report(),
+            error = %e.as_report(),
             actor_id = self.actor_ctx.id,
             source_id = %core.source_id,
             "stream source reader error",
