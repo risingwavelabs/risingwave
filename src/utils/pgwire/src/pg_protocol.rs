@@ -159,10 +159,19 @@ pub fn cstr_to_str(b: &Bytes) -> Result<&str, Utf8Error> {
     std::str::from_utf8(without_null)
 }
 
+fn record_sql_in_current_span(
+    sql: &str,
+    redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+) -> String {
+    let mut span = tracing::Span::current();
+    record_sql_in_span(sql, redact_sql_option_keywords, &mut span)
+}
+
 /// Record `sql` in the current tracing span.
 fn record_sql_in_span(
     sql: &str,
     redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
+    span: &mut tracing::Span,
 ) -> String {
     let redacted_sql = if let Some(keywords) = redact_sql_option_keywords
         && !keywords.is_empty()
@@ -172,7 +181,7 @@ fn record_sql_in_span(
         sql.to_owned()
     };
     let truncated = truncated_fmt::TruncatedFmt(&redacted_sql, *RW_QUERY_LOG_TRUNCATE_LEN);
-    tracing::Span::current().record("sql", tracing::field::display(&truncated));
+    span.record("sql", tracing::field::display(&truncated));
     truncated.to_string()
 }
 
@@ -304,13 +313,19 @@ where
             _ => return tracing::Span::none(),
         };
 
-        tracing::info_span!(
+        let mut span = tracing::info_span!(
             target: PGWIRE_ROOT_SPAN_TARGET,
             "handle_query",
             mode,
             session_id,
-            sql = tracing::field::Empty, // record SQL later in each `process` call
-        )
+            sql = tracing::field::Empty,
+        );
+        if let Ok(sql) = msg.get_sql()
+            && let Some(sql) = sql
+        {
+            record_sql_in_span(&sql, self.redact_sql_option_keywords.clone(), &mut span);
+        }
+        span
     }
 
     /// Return type `Option<()>` is essentially a bool, but allows `?` for early return.
@@ -699,7 +714,8 @@ where
     }
 
     async fn process_query_msg(&mut self, sql: Arc<str>) -> PsqlResult<()> {
-        let truncated_sql = record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+        let truncated_sql =
+            record_sql_in_current_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
 
         session.check_idle_in_transaction_timeout()?;
@@ -838,7 +854,7 @@ where
 
     async fn process_parse_msg(&mut self, mut msg: FeParseMessage) -> PsqlResult<()> {
         let sql = Arc::from(cstr_to_str(&msg.sql_bytes).unwrap());
-        record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+        record_sql_in_current_span(&sql, self.redact_sql_option_keywords.clone());
         let session = self.session.clone().unwrap();
         let statement_name = cstr_to_str(&msg.statement_name).unwrap().to_owned();
         let type_ids = std::mem::take(&mut msg.type_ids);
@@ -982,7 +998,7 @@ where
                 let portal = self.get_portal(&portal_name)?;
                 let sql = format!("{}", portal);
                 let truncated_sql =
-                    record_sql_in_span(&sql, self.redact_sql_option_keywords.clone());
+                    record_sql_in_current_span(&sql, self.redact_sql_option_keywords.clone());
                 drop(sql);
 
                 session.check_idle_in_transaction_timeout()?;
