@@ -787,7 +787,9 @@ impl VnodeKeyRangeCollector {
             }
         }
 
-        (!self.ranges.is_empty()).then_some(VnodeRangeInfo {
+        // Only emit vnode key-ranges if we have multiple vnodes.
+        // Single-vnode SSTs don't need vnode hints since vnode_range == sst_range.
+        (self.ranges.len() >= 2).then_some(VnodeRangeInfo {
             vnode_key_ranges: self.ranges,
         })
     }
@@ -982,25 +984,17 @@ pub(super) mod tests {
     fn test_vnode_key_range_collector_single_vnode() {
         let vnode = VirtualNode::from_index(5);
 
-        // Single key
+        // Single key - should return None (single-vnode SSTs don't need hints)
         let mut collector = VnodeKeyRangeCollector::with_limit(Some(10)).unwrap();
         collector.observe_key(vnode, b"only", &[]);
-        let info = collector.finish(b"only").unwrap();
-        assert_eq!(info.vnode_key_ranges.len(), 1);
-        let range = info.vnode_key_ranges.get(&vnode).unwrap();
-        assert_eq!(range.left.as_ref(), b"only");
-        assert_eq!(range.right.as_ref(), b"only");
+        assert!(collector.finish(b"only").is_none());
 
-        // Multiple keys, same vnode
+        // Multiple keys, same vnode - should also return None
         let mut collector = VnodeKeyRangeCollector::with_limit(Some(10)).unwrap();
         collector.observe_key(vnode, b"a", &[]);
         collector.observe_key(vnode, b"b", b"a");
         collector.observe_key(vnode, b"c", b"b");
-        let info = collector.finish(b"c").unwrap();
-        assert_eq!(info.vnode_key_ranges.len(), 1);
-        let range = info.vnode_key_ranges.get(&vnode).unwrap();
-        assert_eq!(range.left.as_ref(), b"a");
-        assert_eq!(range.right.as_ref(), b"c");
+        assert!(collector.finish(b"c").is_none());
     }
 
     #[tokio::test]
