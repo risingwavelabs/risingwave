@@ -48,6 +48,25 @@ pub struct MaterializeCache {
 type CacheValue = Option<CompactedRow>;
 type ChangeBuffer = crate::common::change_buffer::ChangeBuffer<Vec<u8>, OwnedRow>;
 
+fn row_below_committed_watermark<S: StateStore, SD: ValueRowSerde>(
+    row_serde: &BasicSerde,
+    table: &StateTableInner<S, SD>,
+    row: &CompactedRow,
+) -> StreamExecutorResult<bool> {
+    let Some(clean_watermark_index) = table.clean_watermark_index else {
+        return Ok(false);
+    };
+    let Some(committed_watermark) = table.get_committed_watermark() else {
+        return Ok(false);
+    };
+    let deserialized = row_serde.deserializer.deserialize(row.row.clone())?;
+    Ok(cmp_datum(
+        deserialized.datum_at(clean_watermark_index),
+        Some(committed_watermark.as_scalar_ref_impl()),
+        OrderType::ascending(),
+    ) == std::cmp::Ordering::Less)
+}
+
 impl MaterializeCache {
     /// Create a new `MaterializeCache`.
     ///
@@ -327,19 +346,38 @@ impl MaterializeCache {
 
             if let Some(cached) = self.lru_cache.get(key) {
                 self.metrics.materialize_cache_hit_count.inc();
-                if let Some(_row) = cached {
-                    self.metrics.materialize_data_exist_count.inc();
-                    // TODO(ttl): If the watermark column of the row is below the committed watermark, we need to consider
-                    // it as inexistent by putting a None into the cache.
+                if let Some(row) = cached {
+                    if row_below_committed_watermark(&self.row_serde, table, row)? {
+                        self.lru_cache.put(key.to_vec(), None);
+                    } else {
+                        self.metrics.materialize_data_exist_count.inc();
+                    }
                 }
                 continue;
             }
 
-            futures.push(async {
+            let row_serde = self.row_serde.clone();
+            let committed_watermark = table.get_committed_watermark().cloned();
+            let clean_watermark_index = table.clean_watermark_index;
+            futures.push(async move {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
                 let row = table.get_row(key_row).await?.map(CompactedRow::from);
-                // TODO(ttl): If the watermark column of the row is below the committed watermark, we need to consider
-                // it as inexistent by returning a None.
+                let row = match row {
+                    Some(row)
+                        if committed_watermark.is_some() && clean_watermark_index.is_some() =>
+                    {
+                        let committed_watermark = committed_watermark.as_ref().unwrap();
+                        let clean_watermark_index = clean_watermark_index.unwrap();
+                        let deserialized = row_serde.deserializer.deserialize(row.row.clone())?;
+                        let below = cmp_datum(
+                            deserialized.datum_at(clean_watermark_index),
+                            Some(committed_watermark.as_scalar_ref_impl()),
+                            OrderType::ascending(),
+                        ) == std::cmp::Ordering::Less;
+                        (!below).then_some(row)
+                    }
+                    other => other,
+                };
                 StreamExecutorResult::Ok((key.to_vec(), row))
             });
         }
