@@ -11,17 +11,286 @@ SET streaming_parallelism TO 1;
 statement ok
 create table ttl (
     k int primary key,
-    v int,
-    watermark for v as v - 10 with ttl
+    ts int,
+    v varchar,
+    watermark for ts as ts - 10 with ttl
 );
 
 query TT
 show create table ttl;
 ----
-public.ttl CREATE TABLE ttl (k INT PRIMARY KEY, v INT, WATERMARK FOR v AS v - 10 WITH TTL)
+public.ttl CREATE TABLE ttl (k INT PRIMARY KEY, ts INT, v CHARACTER VARYING, WATERMARK FOR ts AS ts - 10 WITH TTL)
 
+# 1 = Insert, 2 = Delete, 3 = UpdateInsert, 4 = UpdateDelete
 statement ok
 create materialized view ttl_changelog as with c as changelog from ttl select * from c;
+
+statement ok
+create materialized view ttl_mv as select * from ttl;
+
+# Prepare data
+statement ok
+insert into ttl values (1, 5, 'a');
+
+statement ok
+insert into ttl values (2, 20, 'b');
+
+# Watermark bumped to 20 - 10 = 10
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+2 20 b
+
+# INSERT: data above the watermark, should be visible
+statement ok
+insert into ttl values (3, 15, 'c');
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+2 20 b
+3 15 c
+
+# INSERT: data below the watermark, should be invisible
+statement ok
+insert into ttl values (4, 5, 'd');
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+2 20 b
+3 15 c
+
+# UPSERT(non-ts): data above the watermark, should be visible and U-/U+
+statement ok
+insert into ttl values (3, 15, 'cc');
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+3 15 c 4
+3 15 cc 3
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+2 20 b
+3 15 cc
+
+# UPSERT(non-ts): data below the watermark, should be invisible
+statement ok
+insert into ttl values (1, 5, 'aa');
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+3 15 c 4
+3 15 cc 3
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+2 20 b
+3 15 cc
+
+# UPSERT(ts): data above the watermark, should be visible and -/+ since ts is in the stream key
+statement ok
+insert into ttl values (3, 16, 'cc');
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+3 15 c 4
+3 15 cc 3
+3 15 cc 2
+3 16 cc 1
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+2 20 b
+3 16 cc
+
+# UPSERT(ts): data below the watermark, should be invisible
+statement ok
+insert into ttl values (1, 6, 'a');
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+3 15 c 4
+3 15 cc 3
+3 15 cc 2
+3 16 cc 1
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+2 20 b
+3 16 cc
+
+# UPSERT(ts): data above the watermark is updated to below the watermark, should be deleted
+statement ok
+insert into ttl values (3, 4, 'cc');
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+3 15 c 4
+3 15 cc 3
+3 15 cc 2
+3 16 cc 1
+3 16 cc 2
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+2 20 b
+
+# UPSERT(ts): data below the watermark is updated to above the watermark, should be considered a new row
+statement ok
+insert into ttl values (1, 18, 'aa');
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+3 15 c 4
+3 15 cc 3
+3 15 cc 2
+3 16 cc 1
+3 16 cc 2
+1 18 aa 1
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+1 18 aa
+2 20 b
+
+# DELETE: data above the watermark, should be deleted
+statement ok
+delete from ttl where k = 2;
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+3 15 c 4
+3 15 cc 3
+3 15 cc 2
+3 16 cc 1
+3 16 cc 2
+1 18 aa 1
+2 20 b 2
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+1 18 aa
+
+# Watermark bumped to 30 - 10 = 20
+statement ok
+insert into ttl values (4, 30, 'd');
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+3 15 c 4
+3 15 cc 3
+3 15 cc 2
+3 16 cc 1
+3 16 cc 2
+1 18 aa 1
+2 20 b 2
+4 30 d 1
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+1 18 aa
+4 30 d
+
+# DELETE: data below the watermark, should be no-op
+# TODO(ttl): this actually relies on the expired data hasn't been cleaned up by storage yet,
+#            otherwise no row will be matched and we are actually issuing nothing.
+statement ok
+delete from ttl where k = 1;
+
+query IIVI
+select * from ttl_changelog order by _rw_timestamp;
+----
+1 5 a 1
+2 20 b 1
+3 15 c 1
+3 15 c 4
+3 15 cc 3
+3 15 cc 2
+3 16 cc 1
+3 16 cc 2
+1 18 aa 1
+2 20 b 2
+4 30 d 1
+
+query IIV
+select * from ttl_mv order by k, ts;
+----
+1 5 a
+1 18 aa
+4 30 d
 
 statement ok
 drop table ttl cascade;
