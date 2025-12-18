@@ -52,6 +52,15 @@ pub enum FeMessage {
     ServerThrottle(ServerThrottleReason),
 }
 
+impl FeMessage {
+    pub fn get_sql(&self) -> Result<Option<&str>> {
+        match self {
+            FeMessage::Query(q) => Ok(Some(q.get_sql()?)),
+            _ => Ok(None),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ServerThrottleReason {
     TooLargeMessage,
