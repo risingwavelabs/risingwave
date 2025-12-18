@@ -157,7 +157,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_iter_item",
             "Total bytes gotten from state store scan(), for calculating read throughput",
-            size_buckets.clone(),
+            size_buckets,
         );
         let iter_item = register_guarded_histogram_vec_with_registry!(
             opts,
