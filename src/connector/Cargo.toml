@@ -35,7 +35,7 @@ sink-doris = []
 sink-starrocks = []
 
 [dependencies]
-# rust adbc 0.21 maps to lib 0.19
+# Rust ADBC crates (e.g., adbc_core 0.21) are built against the ADBC C/C++ core driver library version 0.19
 adbc_core = { workspace = true, optional = true }
 adbc_snowflake = { workspace = true, optional = true, default-features = false }
 anyhow = "1"

@@ -432,10 +432,9 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
         };
 
     let mut is_full_reload = false;
-    let source_refresh_mode = if let Some(source_refresh_mode_str) =
-        with_options.remove(SOURCE_REFRESH_MODE_KEY)
-    {
-        match source_refresh_mode_str.to_uppercase().as_str() {
+    let source_refresh_mode_str = with_options.remove(SOURCE_REFRESH_MODE_KEY);
+    let source_refresh_mode = if let Some(source_refresh_mode_str) = &source_refresh_mode_str {
+        Some(match source_refresh_mode_str.to_uppercase().as_str() {
             "STREAMING" => {
                 if source_refresh_interval_sec.is_some() {
                     return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
@@ -461,7 +460,7 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
                     SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
                 ))));
             }
-        }
+        })
     } else {
         // also check the `refresh_interval_sec` is not provided when `refresh_mode` is not provided
         if source_refresh_interval_sec.is_some() {
@@ -470,23 +469,17 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
                 SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
             ))));
         }
-        // Batch connectors require FULL_RELOAD mode
-        if with_options.is_batch_connector() {
-            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
-                with_options.get_connector().unwrap(),
-            ))));
-        }
-        return Ok(None);
+        None
     };
 
+    // Batch connectors require FULL_RELOAD mode.
     if with_options.is_batch_connector() && !is_full_reload {
         return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-            "Refreshable batch source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
+            "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
             with_options.get_connector().unwrap(),
         ))));
     }
-    Ok(Some(source_refresh_mode))
+    Ok(source_refresh_mode)
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(

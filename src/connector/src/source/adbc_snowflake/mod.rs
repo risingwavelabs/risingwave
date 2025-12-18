@@ -42,8 +42,6 @@ pub const ADBC_SNOWFLAKE_CONNECTOR: &str = "adbc_snowflake";
 
 mod schema;
 
-/// Converter for Arrow 55 record batches to RisingWave `DataChunks`.
-/// This is similar to `IcebergArrowConvert` but uses Arrow 55 (used by `adbc_snowflake`).
 #[derive(Default)]
 pub struct AdbcSnowflakeArrowConvert;
 
@@ -57,7 +55,6 @@ impl AdbcSnowflakeArrowConvert {
         Arrow56FromArrow::from_record_batch(self, batch)
     }
 
-    /// Convert Arrow 55 field to RisingWave `DataType`
     pub fn type_from_field(
         &self,
         field: &arrow_schema::Field,
@@ -245,7 +242,7 @@ impl AdbcSnowflakeProperties {
         // Validate driver availability and load the driver
         let mut driver = Driver::try_load().context(
             "Failed to load ADBC Snowflake driver shared library. \
-                Check the following:\
+                Check the following:\n\
                 1. The ADBC Snowflake driver is installed correctly\n\
                 2. The shared library (libadbc_driver_snowflake.so on Linux, \
                    libadbc_driver_snowflake.dylib on macOS, or \

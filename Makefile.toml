@@ -88,9 +88,6 @@ env_scripts = [
 
   is_adbc_enabled = get_env ENABLE_ADBC
   if ${is_adbc_enabled}
-    # flags = get_env RISINGWAVE_FEATURE_FLAGS
-    # set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features source-adbc_snowflake"
-
     # Set the ADBC driver manager path for runtime loading
     set_env ADBC_DRIVER_PATH "${PREFIX_BIN}/adbc"
     # Add ADBC library path to LD_LIBRARY_PATH (Linux) or DYLD_LIBRARY_PATH (macOS)
