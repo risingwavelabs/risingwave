@@ -408,7 +408,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                         match msg {
                             Message::Watermark(w) => {
-                                // TODO(ttl): if it's our watermark column, update watermark to state table.
+                                if self.state_table.clean_watermark_index == Some(w.col_idx) {
+                                    self.state_table.update_watermark(w.val.clone());
+                                }
                                 yield Message::Watermark(w);
                             }
                             Message::Chunk(chunk) if self.is_dummy_table => {
@@ -653,7 +655,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     for msg in input.by_ref() {
                         let msg = msg?;
                         match msg {
-                            Message::Watermark(w) => yield Message::Watermark(w),
+                            Message::Watermark(w) => {
+                                if self.state_table.clean_watermark_index == Some(w.col_idx) {
+                                    self.state_table.update_watermark(w.val.clone());
+                                }
+                                yield Message::Watermark(w)
+                            }
                             Message::Chunk(chunk) => {
                                 tracing::warn!(chunk = %chunk.to_pretty(), "chunk is ignored during merge phase");
                             }
