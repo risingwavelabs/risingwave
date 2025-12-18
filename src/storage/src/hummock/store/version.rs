@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 use std::collections::vec_deque::VecDeque;
-use std::collections::{Bound, HashMap};
+use std::ops::Bound::{self, Excluded, Included};
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -748,19 +749,37 @@ impl HummockVersionReader {
                         continue;
                     }
                     table_info_idx = table_info_idx.saturating_sub(1);
-                    let ord = level.table_infos[table_info_idx]
-                        .key_range
-                        .compare_right_with_user_key(full_key.user_key.as_ref());
-                    // the case that the key falls into the gap between two ssts
-                    if ord == Ordering::Less {
-                        sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
-                        continue;
+                    let sstable_info = &level.table_infos[table_info_idx];
+
+                    {
+                        // filter sstable key range that is definitely not containing the key
+                        let ord = sstable_info
+                            .key_range
+                            .compare_right_with_user_key(full_key.user_key.as_ref());
+                        // the case that the key falls into the gap between two ssts
+                        if ord == Ordering::Less {
+                            sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_FILE");
+                            continue;
+                        }
+
+                        // filter vnode-key range that is definitely not containing the key
+                        if let Some(vnode_key_ranges) = &sstable_info.vnode_key_ranges {
+                            let vnode = VirtualNode::from_index(full_key.user_key.get_vnode_id());
+                            // Only skip if vnode exists and key is out of range
+                            // If vnode not found, it may be due to incomplete stats (reached limit)
+                            if let Some(key_range) = vnode_key_ranges.vnode_key_ranges.get(&vnode) {
+                                if key_range.user_key_out_of_range(full_key.user_key.as_ref()) {
+                                    sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_VNODE_KEY_RANGE");
+                                    continue;
+                                }
+                            }
+                        }
                     }
 
                     local_stats.non_overlapping_get_count += 1;
                     if let Some(iter) = get_from_sstable_info(
                         self.sstable_store.clone(),
-                        &level.table_infos[table_info_idx],
+                        sstable_info,
                         full_key.to_ref(),
                         &read_options,
                         dist_key_hash,
@@ -1021,9 +1040,25 @@ impl HummockVersionReader {
                     );
                     local_stats.non_overlapping_iter_count += 1;
                 } else {
+                    let sstable_info = &sstable_infos[0];
+
+                    // Filter by vnode key range, similar to get operation
+                    if let Some(vnode_key_ranges) = &sstable_info.vnode_key_ranges {
+                        if let Included(start_key) | Excluded(start_key) = &user_key_range_ref.0 {
+                            let vnode = VirtualNode::from_index(start_key.get_vnode_id());
+                            // Only skip if vnode exists and start key is out of range
+                            // If vnode not found, it may be due to incomplete stats (reached limit)
+                            if let Some(key_range) = vnode_key_ranges.vnode_key_ranges.get(&vnode) {
+                                if key_range.user_key_out_of_range(*start_key) {
+                                    continue;
+                                }
+                            }
+                        }
+                    }
+
                     let sstable = self
                         .sstable_store
-                        .sstable(&sstable_infos[0], local_stats)
+                        .sstable(sstable_info, local_stats)
                         .await?;
 
                     if let Some(dist_hash) = bloom_filter_prefix_hash.as_ref()
@@ -1045,7 +1080,7 @@ impl HummockVersionReader {
                         sstable,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
-                        &sstable_infos[0],
+                        sstable_info,
                     ));
                     local_stats.non_overlapping_iter_count += 1;
                 }

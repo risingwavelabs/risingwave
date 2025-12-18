@@ -67,6 +67,7 @@ pub trait KeyRangeCommon {
         self.compare_right_with_user_key(FullKey::decode(full_key).user_key)
     }
     fn compare_right_with_user_key(&self, ukey: UserKey<&[u8]>) -> std::cmp::Ordering;
+    fn user_key_out_of_range(&self, ukey: UserKey<&[u8]>) -> bool;
 }
 
 #[macro_export]
@@ -122,6 +123,15 @@ macro_rules! impl_key_range_common {
                 } else {
                     ret
                 }
+            }
+
+            /// Check if a user key is definitely outside this key range.
+            /// Returns true if the key is guaranteed to be out of range.
+            fn user_key_out_of_range(&self, ukey: $crate::key::UserKey<&[u8]>) -> bool {
+                use $crate::key::FullKey;
+                // key < left or key > right
+                FullKey::decode(&self.left).user_key > ukey
+                    || self.compare_right_with_user_key(ukey) == cmp::Ordering::Less
             }
         }
     };
