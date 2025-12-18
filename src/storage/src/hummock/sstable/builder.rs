@@ -751,15 +751,10 @@ impl VnodeKeyRangeCollector {
     /// * `prev_key` - The previous key (used as right boundary when vnode switches)
     ///
     /// # Semantics
-    /// Implements "allow over-limit write": if inserting a range causes `current_size` to exceed
-    /// `max_bytes`, that range is still added, but subsequent ranges are skipped.
+    /// Implements "allow over-limit write": inserting a range may cause `current_size` to exceed
+    /// `max_bytes`, but stops before starting the next range if it would exceed the limit.
     fn observe_key(&mut self, vnode: VirtualNode, key: &[u8], prev_key: &[u8]) {
         if matches!(self.state, CollectorState::Stopped) {
-            return;
-        }
-
-        if self.current_size > self.max_bytes {
-            self.state = CollectorState::Stopped;
             return;
         }
 
@@ -778,6 +773,7 @@ impl VnodeKeyRangeCollector {
                 current_left.extend_from_slice(key);
             }
             Some(prev_vnode) if *prev_vnode != vnode => {
+                // Seal previous vnode's range first
                 let range = KeyRange {
                     left: Bytes::from(mem::take(current_left)),
                     right: Bytes::copy_from_slice(prev_key),
@@ -788,6 +784,14 @@ impl VnodeKeyRangeCollector {
                 self.ranges.insert(*prev_vnode, range);
                 self.current_size += range_size;
 
+                // Stop if starting next range would exceed limit
+                let estimated_next_size = mem::size_of::<VirtualNode>() + key.len();
+                if self.current_size + estimated_next_size > self.max_bytes {
+                    self.state = CollectorState::Stopped;
+                    return;
+                }
+
+                // Start new range for current vnode
                 *current_vnode = Some(vnode);
                 current_left.clear();
                 current_left.extend_from_slice(key);
@@ -946,9 +950,9 @@ pub(super) mod tests {
     fn test_vnode_key_range_collector_respects_limit() {
         // Test case 1: Basic limit enforcement with small keys
         // Each range: 2 (VirtualNode) + 2 (left key) + 2 (right key) = 6 bytes
-        // Limit: 6 bytes, expect 2 vnodes with "allow over-limit write"
+        // Limit: 11 bytes, expect 2 vnodes with "allow over-limit write"
         {
-            let mut collector = VnodeKeyRangeCollector::with_limit(Some(6)).unwrap();
+            let mut collector = VnodeKeyRangeCollector::with_limit(Some(11)).unwrap();
             let vnode_1 = VirtualNode::from_index(1);
             let vnode_2 = VirtualNode::from_index(2);
             let vnode_3 = VirtualNode::from_index(3);
@@ -964,9 +968,12 @@ pub(super) mod tests {
 
             collector.observe_key(vnode_1, &k1, &[]);
             collector.observe_key(vnode_1, &k2, &k1);
+            // Switch to vnode_2: inserts vnode_1 (size=6, total=6)
+            // Check: 6 + 2 + 2 = 10 > 11? No. Start vnode_2
             collector.observe_key(vnode_2, &k3, &k2);
             collector.observe_key(vnode_2, &k4, &k3);
-            // vnode_3 triggers capacity check, should be skipped
+            // Switch to vnode_3: inserts vnode_2 (size=6, total=12, exceeds limit but allowed)
+            // Check: 12 + 2 + 2 = 16 > 11? Yes! Stop
             collector.observe_key(vnode_3, &k5, &k4);
             // Continue calling after capacity reached - these should also be ignored
             collector.observe_key(vnode_3, &k6, &k5);
