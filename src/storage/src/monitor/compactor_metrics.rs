@@ -58,8 +58,8 @@ pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
 
 impl CompactorMetrics {
     fn new(registry: &Registry) -> Self {
-        // 256B - 4GB
-        let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
+        // 256B - 4GB, finer resolution near 256MB (adds two extra buckets)
+        let size_buckets = exponential_buckets(256.0, 8.0, 9).unwrap();
         // 10ms - 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         let opts = histogram_opts!(
