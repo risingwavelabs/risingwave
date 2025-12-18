@@ -7,6 +7,9 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["adbc_core"]
+
 [features]
 default = []
 all-sinks = [
@@ -17,7 +20,8 @@ all-sinks = [
     "sink-doris",
     "sink-starrocks",
 ]
-all-sources = []
+all-sources = ["source-adbc_snowflake"]
+source-adbc_snowflake = ["dep:adbc_core"]
 sink-bigquery = [
     "dep:gcp-bigquery-client",
     "dep:google-cloud-bigquery",
@@ -31,6 +35,7 @@ sink-doris = []
 sink-starrocks = []
 
 [dependencies]
+adbc_core = { version = "0.17", optional = true }
 anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"

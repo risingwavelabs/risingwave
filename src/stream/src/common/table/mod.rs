@@ -13,7 +13,6 @@
 // limitations under the License.
 
 pub mod state_table;
-mod state_table_cache;
 
 #[cfg(test)]
 pub mod test_state_table;

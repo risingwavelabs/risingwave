@@ -17,7 +17,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use risingwave_common::array::StreamChunkBuilder;
-use risingwave_common::config::MetricLevel;
 use tokio::sync::mpsc;
 
 use super::exchange::input::BoxedActorInput;
@@ -256,18 +255,14 @@ impl MergeExecutor {
         chunk_size: usize,
         schema: Schema,
     ) -> MergeUpstream {
-        let merge_barrier_align_duration = if metrics.level >= MetricLevel::Debug {
-            Some(
-                metrics
-                    .merge_barrier_align_duration
-                    .with_guarded_label_values(&[
-                        &actor_context.id.to_string(),
-                        &actor_context.fragment_id.to_string(),
-                    ]),
-            )
-        } else {
-            None
-        };
+        let merge_barrier_align_duration = Some(
+            metrics
+                .merge_barrier_align_duration
+                .with_guarded_label_values(&[
+                    &actor_context.id.to_string(),
+                    &actor_context.fragment_id.to_string(),
+                ]),
+        );
 
         BufferChunks::new(
             // Futures of all active upstreams.

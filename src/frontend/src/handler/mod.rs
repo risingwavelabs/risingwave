@@ -42,6 +42,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_connection_props;
 mod alter_database_param;
 mod alter_mv;
 mod alter_owner;
@@ -1339,6 +1340,14 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_CONNECTION,
+                )
+                .await
+            }
+            AlterConnectionOperation::AlterConnectorProps { alter_props } => {
+                alter_connection_props::handle_alter_connection_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
                 )
                 .await
             }

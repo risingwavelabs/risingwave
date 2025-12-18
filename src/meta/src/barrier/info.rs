@@ -1008,14 +1008,12 @@ impl InflightDatabaseInfo {
                 | Command::Pause
                 | Command::Resume
                 | Command::DropStreamingJobs { .. }
-                | Command::MergeSnapshotBackfillStreamingJobs(_)
                 | Command::RescheduleFragment { .. }
                 | Command::SourceChangeSplit { .. }
                 | Command::Throttle(_)
                 | Command::CreateSubscription { .. }
                 | Command::DropSubscription { .. }
                 | Command::ConnectorPropsChange(_)
-                | Command::StartFragmentBackfill { .. }
                 | Command::Refresh { .. }
                 | Command::ListFinish { .. }
                 | Command::LoadFinish { .. } => {

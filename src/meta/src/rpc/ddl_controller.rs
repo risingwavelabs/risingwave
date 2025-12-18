@@ -1939,11 +1939,11 @@ impl DdlController {
             let old_state_graph =
                 state_match::Graph::from_existing(&old_fragments, &old_fragments_upstreams);
             let new_state_graph = state_match::Graph::from_building(&fragment_graph);
-            let mapping =
-                state_match::match_graph_internal_tables(&new_state_graph, &old_state_graph)
-                    .context("incompatible altering on the streaming job states")?;
+            let result = state_match::match_graph(&new_state_graph, &old_state_graph)
+                .context("incompatible altering on the streaming job states")?;
 
-            fragment_graph.fit_internal_table_ids_with_mapping(mapping);
+            fragment_graph.fit_internal_table_ids_with_mapping(result.table_matches);
+            fragment_graph.fit_snapshot_backfill_epochs(result.snapshot_backfill_epochs);
         } else {
             // If it's ALTER TABLE or SOURCE, use a trivial table id matching algorithm to keep the original behavior.
             // TODO(alter-mv): this is actually a special case of ALTER MV, can we merge the two branches?

@@ -16,33 +16,35 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::{RecordBatch, RecordBatchOptions};
 use datafusion::arrow::datatypes::{DataType as DFDataType, Field, Fields, Schema};
+use datafusion::logical_expr::binary::BinaryTypeCoercer;
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
     BinaryExpr, Case, Cast, ColumnarValue, Operator, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl,
     Signature, TypeSignature, Volatility,
 };
 use datafusion::prelude::Expr as DFExpr;
-use datafusion_common::{Column, Result as DFResult, ScalarValue};
+use datafusion_common::{Result as DFResult, ScalarValue};
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::error::BoxedError;
 use risingwave_common::types::DataType as RwDataType;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{BoxedExpression, ValueImpl, build_from_prost};
 
-use crate::datafusion::{ColumnTrait, convert_expr, convert_scalar_value};
-use crate::error::Result as RwResult;
+use crate::datafusion::{
+    CastExecutor, ColumnTrait, convert_expr, convert_scalar_value, to_datafusion_error,
+};
+use crate::error::{Result as RwResult, RwError};
 use crate::expr::{Expr, ExprType, FunctionCall};
 
 pub fn convert_function_call(
     func_call: &FunctionCall,
-    input_schema: &impl ColumnTrait,
+    input_columns: &impl ColumnTrait,
 ) -> RwResult<DFExpr> {
     macro_rules! try_rules {
         ( $($func:ident),* ) => {
             $(
-                if let Some(df_expr) = $func(func_call, input_schema) {
+                if let Some(df_expr) = $func(func_call, input_columns) {
                     return Ok(df_expr);
                 }
             )*
@@ -62,7 +64,10 @@ pub fn convert_function_call(
     );
 }
 
-fn convert_unary_func(func_call: &FunctionCall, input_schema: &impl ColumnTrait) -> Option<DFExpr> {
+fn convert_unary_func(
+    func_call: &FunctionCall,
+    input_columns: &impl ColumnTrait,
+) -> Option<DFExpr> {
     if func_call.inputs().len() != 1 {
         return None;
     }
@@ -72,7 +77,7 @@ fn convert_unary_func(func_call: &FunctionCall, input_schema: &impl ColumnTrait)
             match $arg {
                 $(
                 ExprType::$func_type => {
-                    let arg = convert_expr(&func_call.inputs()[0], input_schema).ok()?;
+                    let arg = convert_expr(&func_call.inputs()[0], input_columns).ok()?;
                     Some(DFExpr::$df_expr_variant(Box::new(arg)))
                 }
                 )*
@@ -117,7 +122,8 @@ fn convert_binary_op(expr_type: ExprType) -> Option<Operator> {
         (And, And),
         (Or, Or),
         (IsDistinctFrom, IsDistinctFrom),
-        (RegexpMatch, RegexMatch),
+        // datafusion's regex misses some features, waiting https://github.com/apache/datafusion/issues/18778
+        // (RegexpMatch, RegexMatch),
         (Like, LikeMatch),
         (ILike, ILikeMatch),
         (BitwiseAnd, BitwiseAnd),
@@ -130,14 +136,32 @@ fn convert_binary_op(expr_type: ExprType) -> Option<Operator> {
 
 fn convert_binary_func(
     func_call: &FunctionCall,
-    input_schema: &impl ColumnTrait,
+    input_columns: &impl ColumnTrait,
 ) -> Option<DFExpr> {
     if func_call.inputs().len() != 2 {
         return None;
     }
+    if !func_call
+        .inputs()
+        .iter()
+        .all(|input| input.return_type().is_datafusion_native())
+    {
+        return None;
+    }
+
     let op = convert_binary_op(func_call.func_type())?;
-    let left = convert_expr(&func_call.inputs()[0], input_schema).ok()?;
-    let right = convert_expr(&func_call.inputs()[1], input_schema).ok()?;
+    let lhs_type = func_call.inputs()[0].return_type().to_datafusion_native()?;
+    let rhs_type = func_call.inputs()[1].return_type().to_datafusion_native()?;
+    if BinaryTypeCoercer::new(&lhs_type, &op, &rhs_type)
+        .get_result_type()
+        .is_err()
+    {
+        // Check if DataFusion can handle the binary operation with the given types
+        return None;
+    }
+
+    let left = convert_expr(&func_call.inputs()[0], input_columns).ok()?;
+    let right = convert_expr(&func_call.inputs()[1], input_columns).ok()?;
     Some(DFExpr::BinaryExpr(BinaryExpr {
         left: Box::new(left),
         op,
@@ -145,7 +169,7 @@ fn convert_binary_func(
     }))
 }
 
-fn convert_case_func(func_call: &FunctionCall, input_schema: &impl ColumnTrait) -> Option<DFExpr> {
+fn convert_case_func(func_call: &FunctionCall, input_columns: &impl ColumnTrait) -> Option<DFExpr> {
     if func_call.func_type() != ExprType::Case {
         return None;
     }
@@ -154,7 +178,7 @@ fn convert_case_func(func_call: &FunctionCall, input_schema: &impl ColumnTrait) 
         .inputs()
         .iter()
         .map(|arg| {
-            let expr = convert_expr(arg, input_schema).ok()?;
+            let expr = convert_expr(arg, input_columns).ok()?;
             Some(Box::new(expr))
         })
         .collect::<Option<Vec<_>>>()?;
@@ -172,7 +196,7 @@ fn convert_case_func(func_call: &FunctionCall, input_schema: &impl ColumnTrait) 
     }))
 }
 
-fn convert_cast_func(func_call: &FunctionCall, input_schema: &impl ColumnTrait) -> Option<DFExpr> {
+fn convert_cast_func(func_call: &FunctionCall, input_columns: &impl ColumnTrait) -> Option<DFExpr> {
     if func_call.inputs().len() != 1 {
         return None;
     }
@@ -186,7 +210,7 @@ fn convert_cast_func(func_call: &FunctionCall, input_schema: &impl ColumnTrait) 
         return None;
     }
 
-    let arg = convert_expr(&func_call.inputs()[0], input_schema).ok()?;
+    let arg = convert_expr(&func_call.inputs()[0], input_columns).ok()?;
     let target_type = IcebergArrowConvert
         .to_arrow_field("", &func_call.return_type())
         .ok()?
@@ -199,18 +223,43 @@ fn convert_cast_func(func_call: &FunctionCall, input_schema: &impl ColumnTrait) 
 }
 
 // TODO: verify more cast safety cases
-// case 1: IcebergArrowConvert just converts Jsonb to varchar. So any cast from or to Jsonb should not be handled by DataFusion
+// case 1: both from and to are datafusion native types
 fn can_cast_by_datafusion(from: &RwDataType, to: &RwDataType) -> bool {
-    fn contain_jsonb(dt: &RwDataType) -> bool {
-        match dt {
-            RwDataType::Jsonb => true,
-            RwDataType::Struct(v) => v.types().any(contain_jsonb),
-            RwDataType::List(list) => contain_jsonb(list.elem()),
-            RwDataType::Map(map) => contain_jsonb(map.key()) || contain_jsonb(map.value()),
+    from.is_datafusion_native() && to.is_datafusion_native()
+}
+
+#[easy_ext::ext(RwDataTypeDataFusionExt)]
+impl RwDataType {
+    fn is_datafusion_native(&self) -> bool {
+        match self {
+            RwDataType::Boolean
+            | RwDataType::Int32
+            | RwDataType::Int64
+            | RwDataType::Float32
+            | RwDataType::Float64
+            | RwDataType::Date
+            | RwDataType::Time
+            | RwDataType::Timestamp
+            | RwDataType::Timestamptz
+            | RwDataType::Varchar
+            | RwDataType::Bytea
+            | RwDataType::Serial => true,
+            RwDataType::Struct(v) => v.types().all(RwDataTypeDataFusionExt::is_datafusion_native),
+            RwDataType::List(list) => list.elem().is_datafusion_native(),
+            RwDataType::Map(map) => {
+                map.key().is_datafusion_native() && map.value().is_datafusion_native()
+            }
             _ => false,
         }
     }
-    !contain_jsonb(from) && !contain_jsonb(to)
+
+    fn to_datafusion_native(&self) -> Option<DFDataType> {
+        if !self.is_datafusion_native() {
+            return None;
+        }
+        let arrow_field = IcebergArrowConvert.to_arrow_field("", self).ok()?;
+        Some(arrow_field.data_type().clone())
+    }
 }
 
 // TODO: handle children type casting. For example, (DATE - INTERVAL), datafusion will interpret INTERVAL as string, we need to cast it to Interval type before calling risingwave boxed expression.
@@ -218,24 +267,33 @@ fn fallback_rw_expr_builder(
     func_call: &FunctionCall,
     input_columns: &impl ColumnTrait,
 ) -> Option<DFExpr> {
+    let cast = CastExecutor::from_iter(
+        (0..input_columns.len()).map(|i| input_columns.df_data_type(i)),
+        (0..input_columns.len()).map(|i| input_columns.rw_data_type(i)),
+    )
+    .ok()?;
     let boxed_expr = build_from_prost(&func_call.try_to_expr_proto().ok()?).ok()?;
 
-    let column_vec = (0..input_columns.len())
-        .map(|i| input_columns.column(i))
+    let column_name = (0..input_columns.len())
+        .map(|i| input_columns.column(i).flat_name())
         .collect::<Vec<_>>();
 
+    let volatility = match func_call.is_pure() {
+        true => Volatility::Immutable,
+        false => Volatility::Volatile,
+    };
     let func = RwScalarFunction {
         name: format!("RisingWave Scalar Function ({:?})", func_call),
+        column_name,
+        cast,
         expr: boxed_expr,
-        input_columns: column_vec,
         signature: Signature {
             type_signature: TypeSignature::Any(input_columns.len()),
-            volatility: Volatility::Volatile,
+            volatility,
         },
     };
     Some(DFExpr::ScalarFunction(ScalarFunction {
         func: Arc::new(ScalarUDF::new_from_impl(func)),
-        // TODO(opt): analyze dependent columns to reduce the costs of arguments
         args: (0..input_columns.len())
             .map(|i| DFExpr::Column(input_columns.column(i)))
             .collect(),
@@ -247,7 +305,9 @@ fn fallback_rw_expr_builder(
 struct RwScalarFunction {
     // Datafusion uses function name as column identifier, so we need to keep unique names for different functions to avoid conflicts
     name: String,
-    input_columns: Vec<Column>,
+    column_name: Vec<String>,
+    #[educe(PartialEq(ignore), Hash(ignore))]
+    cast: CastExecutor,
     #[educe(PartialEq(ignore), Hash(ignore))]
     expr: BoxedExpression,
     #[educe(PartialEq(ignore), Hash(ignore))]
@@ -270,7 +330,7 @@ impl ScalarUDFImpl for RwScalarFunction {
     fn return_type(&self, _: &[DFDataType]) -> DFResult<DFDataType> {
         let field = IcebergArrowConvert
             .to_arrow_field("", &self.expr.return_type())
-            .map_err(boxed)?;
+            .map_err(to_datafusion_error)?;
         Ok(field.data_type().clone())
     }
 
@@ -285,28 +345,33 @@ impl ScalarUDFImpl for RwScalarFunction {
             .collect::<DFResult<Vec<_>>>()?;
         let input_fields: Fields = columns
             .iter()
-            .zip_eq_fast(self.input_columns.iter())
-            .map(|(array, col)| Field::new(col.name(), array.data_type().clone(), true))
+            .zip_eq_fast(self.column_name.iter())
+            .map(|(array, name)| Field::new(name, array.data_type().clone(), true))
             .collect();
         let input_schema = Arc::new(Schema::new(input_fields));
         let record_batch = RecordBatch::try_new_with_options(input_schema, columns, &opts)?;
         let chunk = IcebergArrowConvert
             .chunk_from_record_batch(&record_batch)
-            .map_err(boxed)?;
+            .map_err(to_datafusion_error)?;
         let value = tokio::task::block_in_place(|| {
-            tokio::runtime::Handle::current().block_on(self.expr.eval_v2(&chunk))
+            tokio::runtime::Handle::current().block_on(async {
+                let chunk = self.cast.execute(chunk).await?;
+                let value = self.expr.eval_v2(&chunk).await?;
+                Ok::<ValueImpl, RwError>(value)
+            })
         })
-        .map_err(boxed)?;
+        .map_err(to_datafusion_error)?;
         let res = match value {
             ValueImpl::Array(array_impl) => {
                 let array = IcebergArrowConvert
                     .to_arrow_array(args.return_field.data_type(), &array_impl)
-                    .map_err(boxed)?;
+                    .map_err(to_datafusion_error)?;
                 ColumnarValue::Array(array)
             }
             ValueImpl::Scalar { value, .. } => {
                 let value = match value {
-                    Some(v) => convert_scalar_value(&v, self.expr.return_type()).map_err(boxed)?,
+                    Some(v) => convert_scalar_value(&v, self.expr.return_type())
+                        .map_err(to_datafusion_error)?,
                     None => ScalarValue::Null,
                 };
                 ColumnarValue::Scalar(value)
@@ -314,9 +379,4 @@ impl ScalarUDFImpl for RwScalarFunction {
         };
         Ok(res)
     }
-}
-
-fn boxed<E: std::error::Error + Send + Sync + 'static>(e: E) -> BoxedError {
-    // Convert to anyhow::Error first to capture backtrace information.
-    anyhow::Error::new(e).into()
 }

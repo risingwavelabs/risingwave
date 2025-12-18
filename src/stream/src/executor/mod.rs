@@ -29,7 +29,6 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FusedStream, FuturesUnordered, StreamFuture};
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
-use prometheus::Histogram;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
@@ -1450,7 +1449,7 @@ pub struct DynamicReceivers<InputId, M> {
     /// Currently only used for union.
     barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
     /// Only for merge. If None, then we don't take `Instant::now()` and `observe` during `poll_next`
-    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+    merge_barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
 }
 
 impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> Stream
@@ -1534,8 +1533,7 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
                         barrier_align_duration.inc_by(start_ts.elapsed().as_nanos() as u64);
                     }
                     if let Some(merge_barrier_align_duration) = &self.merge_barrier_align_duration {
-                        // Observe did a few atomic operation inside, we want to avoid the overhead.
-                        merge_barrier_align_duration.observe(start_ts.elapsed().as_secs_f64())
+                        merge_barrier_align_duration.inc_by(start_ts.elapsed().as_nanos() as u64);
                     }
 
                     break;
@@ -1559,7 +1557,7 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
     pub fn new(
         upstreams: Vec<BoxedMessageInput<InputId, M>>,
         barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
-        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+        merge_barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
     ) -> Self {
         let mut this = Self {
             barrier: None,
@@ -1638,7 +1636,9 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
         });
     }
 
-    pub fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram>> {
+    pub fn merge_barrier_align_duration(
+        &self,
+    ) -> Option<LabelGuardedMetric<GenericCounter<AtomicU64>>> {
         self.merge_barrier_align_duration.clone()
     }
 

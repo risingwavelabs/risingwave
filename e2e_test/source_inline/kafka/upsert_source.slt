@@ -23,6 +23,19 @@ WITH (
  topic = 'test_include_key')
 FORMAT UPSERT ENCODE JSON
 
+statement error Defining watermarks on source requires the source connector to be append only
+CREATE SOURCE upsert_students_with_watermark (
+    primary key (rw_key),
+    ts TIMESTAMP,
+    WATERMARK FOR ts AS ts - INTERVAL '5' SECOND
+)
+INCLUDE KEY AS rw_key
+WITH (
+ ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+ topic = 'test_include_key')
+FORMAT UPSERT ENCODE JSON
+
+
 query TT
 SHOW CREATE SOURCE upsert_students
 ----
