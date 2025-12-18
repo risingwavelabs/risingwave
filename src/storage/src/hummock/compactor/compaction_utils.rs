@@ -119,11 +119,11 @@ impl CompactionStatistics {
     }
 }
 
-/// Returns the effective vnode key-range hint limit for this compaction task.
+/// Returns the effective vnode key-range hint limit (in bytes) for this compaction task.
 ///
 /// The hint is only meaningful when all input SSTs belong to a single table.
 pub fn effective_vnode_key_range_limit(task: &CompactTask) -> Option<usize> {
-    let limit = task.max_vnode_key_range_count.filter(|&v| v > 0)? as usize;
+    let limit = task.max_vnode_key_range_bytes.filter(|&v| v > 0)? as usize;
     (task.build_compact_table_ids().len() == 1).then_some(limit)
 }
 
@@ -147,7 +147,7 @@ pub struct TaskConfig {
     pub table_schemas: HashMap<TableId, PbTableSchema>,
     /// `disable_drop_column_optimization` should only be set in benchmark.
     pub disable_drop_column_optimization: bool,
-    pub max_vnode_key_range_count: Option<usize>,
+    pub max_vnode_key_range_bytes: Option<usize>,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {

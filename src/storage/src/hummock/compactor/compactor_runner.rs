@@ -89,7 +89,7 @@ impl CompactorRunner {
         };
 
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
-        options.max_vnode_key_range_count = effective_vnode_key_range_limit(&task);
+        options.max_vnode_key_range_bytes = effective_vnode_key_range_limit(&task);
         let kv_count = task
             .input_ssts
             .iter()
@@ -123,7 +123,7 @@ impl CompactorRunner {
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
                 disable_drop_column_optimization: false,
-                max_vnode_key_range_count: effective_vnode_key_range_limit(&task),
+                max_vnode_key_range_bytes: effective_vnode_key_range_limit(&task),
             },
             object_id_getter,
         );

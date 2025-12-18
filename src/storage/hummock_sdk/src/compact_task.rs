@@ -77,7 +77,7 @@ pub struct CompactTask {
     pub table_schemas: BTreeMap<TableId, PbTableSchema>,
 
     pub max_sub_compaction: u32,
-    pub max_vnode_key_range_count: Option<u32>,
+    pub max_vnode_key_range_bytes: Option<u32>,
 }
 
 impl CompactTask {
@@ -125,7 +125,7 @@ impl CompactTask {
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
                 .sum::<usize>()
             + self
-                .max_vnode_key_range_count
+                .max_vnode_key_range_bytes
                 .map(|_| size_of::<u32>())
                 .unwrap_or_default()
     }
@@ -301,7 +301,7 @@ impl From<PbCompactTask> for CompactTask {
                 .collect(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
-            max_vnode_key_range_count: pb_compact_task.max_vnode_key_range_count,
+            max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -377,7 +377,7 @@ impl From<&PbCompactTask> for CompactTask {
                 .collect(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
-            max_vnode_key_range_count: pb_compact_task.max_vnode_key_range_count,
+            max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -431,7 +431,7 @@ impl From<CompactTask> for PbCompactTask {
             table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
-            max_vnode_key_range_count: compact_task.max_vnode_key_range_count,
+            max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -485,7 +485,7 @@ impl From<&CompactTask> for PbCompactTask {
             table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
-            max_vnode_key_range_count: compact_task.max_vnode_key_range_count,
+            max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
         }
     }
 }

@@ -161,7 +161,7 @@ pub fn build_compaction_config_vec(
         configs.push(MutableConfig::VnodeAlignedLevelSizeThreshold(c))
     }
     if let Some(c) = max_vnode_key_range_count {
-        configs.push(MutableConfig::MaxVnodeKeyRangeCount(c))
+        configs.push(MutableConfig::MaxVnodeKeyRangeBytes(c))
     }
 
     configs

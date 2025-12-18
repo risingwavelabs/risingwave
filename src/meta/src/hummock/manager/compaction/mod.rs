@@ -510,9 +510,9 @@ impl HummockManager {
                     task_type: compact_task.compaction_task_type,
                     split_weight_by_vnode: vnode_partition_count,
                     max_sub_compaction: group_config.compaction_config.max_sub_compaction,
-                    max_vnode_key_range_count: group_config
+                    max_vnode_key_range_bytes: group_config
                         .compaction_config
-                        .max_vnode_key_range_count,
+                        .max_vnode_key_range_bytes,
                     ..Default::default()
                 };
 
