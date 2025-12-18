@@ -1,0 +1,87 @@
+name: Bump Main Branch Version
+
+on:
+  push:
+    branches:
+      - 'release-[0-9]*.[0-9]*'
+
+jobs:
+  bump-main-branch-version:
+    runs-on: ubuntu-latest
+    if: github.event.created == true
+    permissions:
+      contents: write
+      pull-requests: write
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Bump main branch version
+        id: bump
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [[ ! "${{ github.ref_name }}" =~ ^release-[0-9]+\.[0-9]+$ ]]; then
+            echo "Branch ${{ github.ref_name }} does not match strict X.Y format. Exiting."
+            exit 0 # Use 0 to avoid a 'Failed' red mark, or 1 to fail the build
+          fi
+          release_branch_name="${{ github.ref_name }}"
+          echo "New release branch detected: ${release_branch_name}"
+          
+          # Parse current version from branch name
+          release=$(echo $release_branch_name | cut -d'-' -f2)
+          major=$(echo $release | cut -d'.' -f1)
+          minor=$(echo $release | cut -d'.' -f2)
+          
+          QUERY='query ListMilestones($name: String!, $owner: String!) {
+            repository(owner: $owner, name: $name) {
+              milestones(first: 100, states: [OPEN]) {
+                nodes { title number }
+              }
+            }
+          }'
+
+          # Fetch milestones directly
+          milestones_json=$(gh api graphql -f query="$QUERY" -F owner='${{ github.repository_owner }}' -F name='${{ github.event.repository.name }}')
+
+          # Find next milestone
+          next_minor=$((minor + 1))
+          milestone=$(echo "$milestones_json" | jq -r ".data.repository.milestones.nodes[] | select (.title==\"release-$major.$next_minor\") // empty")
+
+          if [[ -z "$milestone" ]]; then
+            echo "Milestone release-$major.$next_minor does not exist. Checking next major..."
+            next_major=$((major + 1))
+            milestone=$(echo "$milestones_json" | jq -r ".data.repository.milestones.nodes[] | select (.title==\"release-$next_major.0\") // empty")
+            
+            if [[ -z "$milestone" ]]; then
+              echo "No next milestone found. Please create it manually."
+              exit 1
+            else
+              version="$next_major.0.0-alpha"
+            fi
+          else
+            version="$major.$next_minor.0-alpha"
+          fi
+
+          # Update files
+          echo "Bumping version to: $version"
+          sed -i "s/^version = .*$/version = \"${version}\"/" Cargo.toml
+          cargo update -vv -w
+          
+          # Export version for the next step
+          echo "NEW_VERSION=$version" >> $GITHUB_OUTPUT
+
+      - name: Create Pull Request
+        uses: peter-evans/create-pull-request@v6 # Note: v6 is the current stable major version
+        if: steps.bump.outputs.NEW_VERSION != ''
+        env:
+          NEW_VERSION: ${{ steps.bump.outputs.NEW_VERSION }}
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          title: "chore: bump main branch version to ${{ env.NEW_VERSION }}"
+          body: "This PR automatically bumps the main branch version after creating ${{ github.ref_name }} branch."
+          base: main
+          branch: "automation/bump-version-${{ env.NEW_VERSION }}"
+          commit-message: "chore: bump version to ${{ env.NEW_VERSION }}"
+          reviewers: 'performance-reliability'
