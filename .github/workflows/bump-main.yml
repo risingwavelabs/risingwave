@@ -80,7 +80,7 @@ jobs:
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           title: "chore: bump main branch version to ${{ env.NEW_VERSION }}"
-          body: "This PR automatically bumps the main branch version after creating ${{ env.ref_name }}."
+          body: "This PR automatically bumps the main branch version after creating ${{ github.ref_name }} branch."
           base: main
           branch: "automation/bump-version-${{ env.NEW_VERSION }}"
           commit-message: "chore: bump version to ${{ env.NEW_VERSION }}"
