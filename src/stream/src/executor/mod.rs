@@ -317,8 +317,8 @@ pub const INVALID_EPOCH: u64 = 0;
 type UpstreamFragmentId = FragmentId;
 type SplitAssignments = HashMap<ActorId, Vec<SplitImpl>>;
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "test"), derive(Default))]
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
 pub struct UpdateMutation {
     pub dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
     pub merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
@@ -328,10 +328,11 @@ pub struct UpdateMutation {
     pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub sink_add_columns: HashMap<SinkId, Vec<Field>>,
+    pub subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "test"), derive(Default))]
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
 pub struct AddMutation {
     pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
     pub added_actors: HashSet<ActorId>,
@@ -346,15 +347,16 @@ pub struct AddMutation {
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "test"), derive(Default))]
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
 pub struct StopMutation {
     pub dropped_actors: HashSet<ActorId>,
     pub dropped_sink_fragments: HashSet<FragmentId>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
-#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, Clone)]
 pub enum Mutation {
     Stop(StopMutation),
     Update(UpdateMutation),
@@ -366,7 +368,7 @@ pub enum Mutation {
     ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
-        subscriptions_to_drop: Vec<(SubscriberId, TableId)>,
+        subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
     },
     StartFragmentBackfill {
         fragment_ids: HashSet<FragmentId>,
@@ -663,6 +665,19 @@ impl Barrier {
             })
     }
 
+    pub fn as_subscriptions_to_drop(&self) -> Option<&[SubscriptionUpstreamInfo]> {
+        match self.mutation.as_deref() {
+            Some(Mutation::DropSubscriptions {
+                subscriptions_to_drop,
+            })
+            | Some(Mutation::Update(UpdateMutation {
+                subscriptions_to_drop,
+                ..
+            })) => Some(subscriptions_to_drop.as_slice()),
+            _ => None,
+        }
+    }
+
     pub fn get_curr_epoch(&self) -> Epoch {
         Epoch(self.epoch.curr)
     }
@@ -740,22 +755,23 @@ impl Mutation {
 
         match self {
             Mutation::Stop(StopMutation {
-                dropped_actors,
-                dropped_sink_fragments,
-            }) => PbMutation::Stop(PbStopMutation {
+                               dropped_actors,
+                               dropped_sink_fragments,
+                           }) => PbMutation::Stop(PbStopMutation {
                 actors: dropped_actors.iter().copied().collect(),
                 dropped_sink_fragments: dropped_sink_fragments.iter().copied().collect(),
             }),
             Mutation::Update(UpdateMutation {
-                dispatchers,
-                merges,
-                vnode_bitmaps,
-                dropped_actors,
-                actor_splits,
-                actor_new_dispatchers,
-                actor_cdc_table_snapshot_splits,
-                sink_add_columns,
-            }) => PbMutation::Update(PbUpdateMutation {
+                                 dispatchers,
+                                 merges,
+                                 vnode_bitmaps,
+                                 dropped_actors,
+                                 actor_splits,
+                                 actor_new_dispatchers,
+                                 actor_cdc_table_snapshot_splits,
+                                 sink_add_columns,
+                                subscriptions_to_drop,
+                             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
                 actor_vnode_bitmap_update: vnode_bitmaps
@@ -776,7 +792,7 @@ impl Mutation {
                     })
                     .collect(),
                 actor_cdc_table_snapshot_splits: Some(PbCdcTableSnapshotSplitsWithGeneration {
-                    splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
+                    splits: actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id, (splits, generation))| {
                         (*actor_id, risingwave_pb::source::PbCdcTableSnapshotSplits {
                             splits: splits.iter().map(risingwave_connector::source::cdc::build_cdc_table_snapshot_split).collect(),
                             generation: *generation,
@@ -794,17 +810,18 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                subscriptions_to_drop: subscriptions_to_drop.clone(),
             }),
             Mutation::Add(AddMutation {
-                adds,
-                added_actors,
-                splits,
-                pause,
-                subscriptions_to_add,
-                backfill_nodes_to_pause,
-                actor_cdc_table_snapshot_splits,
-                new_upstream_sinks,
-            }) => PbMutation::Add(PbAddMutation {
+                              adds,
+                              added_actors,
+                              splits,
+                              pause,
+                              subscriptions_to_add,
+                              backfill_nodes_to_pause,
+                              actor_cdc_table_snapshot_splits,
+                              new_upstream_sinks,
+                          }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -829,7 +846,7 @@ impl Mutation {
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
                 actor_cdc_table_snapshot_splits:
                 Some(PbCdcTableSnapshotSplitsWithGeneration {
-                    splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
+                    splits: actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id, (splits, generation))| {
                         (*actor_id, risingwave_pb::source::PbCdcTableSnapshotSplits {
                             splits: splits.iter().map(risingwave_connector::source::cdc::build_cdc_table_snapshot_split).collect(),
                             generation: *generation,
@@ -871,15 +888,7 @@ impl Mutation {
             Mutation::DropSubscriptions {
                 subscriptions_to_drop,
             } => PbMutation::DropSubscriptions(PbDropSubscriptionsMutation {
-                info: subscriptions_to_drop
-                    .iter()
-                    .map(
-                        |(subscriber_id, upstream_mv_table_id)| SubscriptionUpstreamInfo {
-                            subscriber_id: *subscriber_id,
-                            upstream_mv_table_id: *upstream_mv_table_id,
-                        },
-                    )
-                    .collect(),
+                info: subscriptions_to_drop.clone(),
             }),
             Mutation::ConnectorPropsChange(map) => {
                 PbMutation::ConnectorPropsChange(PbConnectorPropsChangeMutation {
@@ -984,6 +993,7 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                subscriptions_to_drop: update.subscriptions_to_drop.clone(),
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {
@@ -1061,11 +1071,7 @@ impl Mutation {
                     .collect(),
             ),
             PbMutation::DropSubscriptions(drop) => Mutation::DropSubscriptions {
-                subscriptions_to_drop: drop
-                    .info
-                    .iter()
-                    .map(|info| (info.subscriber_id, info.upstream_mv_table_id))
-                    .collect(),
+                subscriptions_to_drop: drop.info.clone(),
             },
             PbMutation::ConnectorPropsChange(alter_connector_props) => {
                 Mutation::ConnectorPropsChange(
@@ -1254,7 +1260,8 @@ impl Watermark {
     }
 }
 
-#[derive(Debug, EnumAsInner, PartialEq, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, EnumAsInner, Clone)]
 pub enum MessageInner<M> {
     Chunk(StreamChunk),
     Barrier(BarrierInner<M>),
@@ -1276,7 +1283,7 @@ pub type DispatcherMessage = MessageInner<()>;
 
 /// `MessageBatchInner` is used exclusively by `Dispatcher` and the `Merger`/`Receiver` for exchanging messages between them.
 /// It shares the same message type as the fundamental `MessageInner`, but batches multiple barriers into a single message.
-#[derive(Debug, EnumAsInner, PartialEq, Clone)]
+#[derive(Debug, EnumAsInner, Clone)]
 pub enum MessageBatchInner<M> {
     Chunk(StreamChunk),
     BarrierBatch(Vec<BarrierInner<M>>),

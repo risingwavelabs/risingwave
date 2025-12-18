@@ -72,7 +72,10 @@ use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
-use crate::model::{ActorId, FragmentId, StreamActor, StreamJobActorsToCreate, SubscriptionId};
+use crate::model::{
+    ActorId, FragmentDownstreamRelation, FragmentId, StreamActor, StreamJobActorsToCreate,
+    SubscriptionId,
+};
 use crate::stream::cdc::{
     CdcTableSnapshotSplits, is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
@@ -600,6 +603,7 @@ impl ControlStreamManager {
         jobs: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
         state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
+        fragment_relations: &FragmentDownstreamRelation,
         edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
@@ -946,6 +950,7 @@ impl ControlStreamManager {
                     committed_epoch,
                     &barrier_info,
                     info,
+                    fragment_relations,
                     hummock_version_stats,
                     node_actors,
                     mutation.clone(),

@@ -145,7 +145,6 @@ impl ReplaceStreamJobPlan {
             let fragment_change = CommandFragmentChanges::NewFragment {
                 job_id: self.streaming_job.id(),
                 info: new_fragment,
-                is_existing: false,
             };
             fragment_changes
                 .try_insert(fragment_id, fragment_change)
@@ -169,7 +168,6 @@ impl ReplaceStreamJobPlan {
                 let fragment_change = CommandFragmentChanges::NewFragment {
                     job_id: sink.original_sink.id.as_job_id(),
                     info: sink.new_fragment_info(),
-                    is_existing: false,
                 };
                 fragment_changes
                     .try_insert(sink.new_fragment.fragment_id, fragment_change)
@@ -508,7 +506,6 @@ impl Command {
                             CommandFragmentChanges::NewFragment {
                                 job_id: info.streaming_job.id(),
                                 info: fragment_infos,
-                                is_existing: false,
                             },
                         )
                     })
@@ -1230,6 +1227,7 @@ impl Command {
                         splits: actor_cdc_table_snapshot_splits,
                     }),
                     sink_add_columns: Default::default(),
+                    subscriptions_to_drop: vec![],
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
