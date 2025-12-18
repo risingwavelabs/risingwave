@@ -535,6 +535,8 @@ pub struct CompactionConfig {
     pub enable_optimize_l0_interval_selection: bool,
     #[serde(default = "default::compaction_config::vnode_aligned_level_size_threshold")]
     pub vnode_aligned_level_size_threshold: Option<u64>,
+    #[serde(default = "default::compaction_config::max_vnode_key_range_count")]
+    pub max_vnode_key_range_count: Option<u32>,
 }
 
 pub mod default {
@@ -811,6 +813,7 @@ pub mod default {
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
         const DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD: Option<u64> = None;
+        const DEFAULT_MAX_VNODE_KEY_RANGE_COUNT: Option<u32> = None;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -920,6 +923,10 @@ pub mod default {
 
         pub fn vnode_aligned_level_size_threshold() -> Option<u64> {
             DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD
+        }
+
+        pub fn max_vnode_key_range_count() -> Option<u32> {
+            DEFAULT_MAX_VNODE_KEY_RANGE_COUNT
         }
     }
 }

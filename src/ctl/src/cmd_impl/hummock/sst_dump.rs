@@ -226,6 +226,7 @@ pub async fn sst_dump_via_sstable_store(
         range_tombstone_count: 0,
         bloom_filter_kind: Default::default(),
         sst_size: 0,
+        vnode_key_ranges: None,
     }
     .into();
     let sstable_cache = sstable_store

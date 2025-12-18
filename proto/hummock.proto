@@ -15,6 +15,15 @@ enum BloomFilterType {
   BLOCKED = 2;
 }
 
+message VnodeKeyRange {
+  uint32 vnode = 1;
+  KeyRange key_range = 2;
+}
+
+message VnodeKeyRangeInfo {
+  repeated VnodeKeyRange vnode_key_ranges = 1;
+}
+
 message SstableInfo {
   uint64 object_id = 1;
   uint64 sst_id = 2;
@@ -34,6 +43,9 @@ message SstableInfo {
   // In order to calculate more finely in the compaction strategy, we need to re-calculate the sst_size after split sst
   // `sst_size` represents the size of the sst instead of the object size(usually used in the meta).
   uint64 sst_size = 14;
+
+  // Optional pruning hints keyed by vnode when the SST spans only a small set of vnodes.
+  VnodeKeyRangeInfo vnode_key_ranges = 15;
 }
 
 enum LevelType {
@@ -483,6 +495,8 @@ message CompactTask {
   uint32 max_sub_compaction = 26;
   // The compaction group id when the compaction task is created.
   uint64 compaction_group_version_id = 27;
+  // Best-effort cap for vnode-level key range hints to embed into output SSTs.
+  optional uint32 max_vnode_key_range_count = 28;
 }
 
 message LevelHandler {
@@ -784,6 +798,7 @@ message RiseCtlUpdateCompactionConfigRequest {
       // Enable the optimization of the interval selection for the level0 compaction
       bool enable_optimize_l0_interval_selection = 30;
       uint64 vnode_aligned_level_size_threshold = 31;
+      uint32 max_vnode_key_range_count = 32;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -1018,6 +1033,10 @@ message CompactionConfig {
   //
   // Typical value: 50GB.
   optional uint64 vnode_aligned_level_size_threshold = 31;
+
+  // Cap the number of vnode key-range hints recorded into each SST.
+  // 0 or unset disables emitting the map.
+  optional uint32 max_vnode_key_range_count = 32;
 }
 
 message TableStats {

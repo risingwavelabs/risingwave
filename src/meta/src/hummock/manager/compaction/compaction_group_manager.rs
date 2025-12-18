@@ -623,6 +623,9 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                 target.vnode_aligned_level_size_threshold =
                     (*c != u64::MIN && *c != u64::MAX).then_some(*c);
             }
+            MutableConfig::MaxVnodeKeyRangeCount(c) => {
+                target.max_vnode_key_range_count = (*c > 0).then_some(*c);
+            }
         }
     }
 }
