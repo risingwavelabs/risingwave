@@ -463,7 +463,7 @@ fn job_adaptive_parallelism_strategy_from_override(
         Err(error) => {
             tracing::warn!(
                 %job_id,
-                error = %error,
+                error = %error.as_report(),
                 "failed to parse config_override as TOML; skipping adaptive_parallelism_strategy override"
             );
             return None;
