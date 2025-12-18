@@ -57,50 +57,26 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
 
         let left_table = node.get_left_table()?;
         let cleaned_by_watermark = left_table.get_cleaned_by_watermark();
+        let state_table_l = StateTableBuilder::new(node.get_left_table()?, store, vnodes)
+            .enable_preload_all_rows_by_config(&params.config)
+            .build()
+            .await;
 
-        let exec = if cleaned_by_watermark {
-            let state_table_l = StateTableBuilder::new(node.get_left_table()?, store, vnodes)
-                .enable_preload_all_rows_by_config(&params.config)
-                .build()
-                .await;
-
-            DynamicFilterExecutor::<_, true>::new(
-                params.actor_context,
-                params.eval_error_report,
-                params.info.schema.clone(),
-                source_l,
-                source_r,
-                key_l,
-                comparator,
-                state_table_l,
-                state_table_r,
-                params.executor_stats,
-                params.config.developer.chunk_size,
-                cleaned_by_watermark,
-            )
-            .boxed()
-        } else {
-            let state_table_l = StateTableBuilder::new(node.get_left_table()?, store, vnodes)
-                .enable_preload_all_rows_by_config(&params.config)
-                .build()
-                .await;
-
-            DynamicFilterExecutor::<_, false>::new(
-                params.actor_context,
-                params.eval_error_report,
-                params.info.schema.clone(),
-                source_l,
-                source_r,
-                key_l,
-                comparator,
-                state_table_l,
-                state_table_r,
-                params.executor_stats,
-                params.config.developer.chunk_size,
-                cleaned_by_watermark,
-            )
-            .boxed()
-        };
+        let exec = DynamicFilterExecutor::new(
+            params.actor_context,
+            params.eval_error_report,
+            params.info.schema.clone(),
+            source_l,
+            source_r,
+            key_l,
+            comparator,
+            state_table_l,
+            state_table_r,
+            params.executor_stats,
+            params.config.developer.chunk_size,
+            cleaned_by_watermark,
+        )
+        .boxed();
 
         Ok((params.info, exec).into())
     }

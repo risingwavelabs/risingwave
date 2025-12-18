@@ -66,7 +66,8 @@ macro_rules! for_all_metadata_models_v2 {
             {iceberg_namespace_properties, risingwave_meta_model::iceberg_namespace_properties},
             {user_default_privilege, risingwave_meta_model::user_default_privilege},
             {fragment_splits, risingwave_meta_model::fragment_splits},
-            {pending_sink_state, risingwave_meta_model::pending_sink_state}
+            {pending_sink_state, risingwave_meta_model::pending_sink_state},
+            {refresh_jobs, risingwave_meta_model::refresh_job}
         }
     };
 }

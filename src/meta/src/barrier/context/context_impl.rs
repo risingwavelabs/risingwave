@@ -305,9 +305,11 @@ impl CommandContext {
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(SourceChange::UpdateSourceProps {
+                        // Only sources are managed in source manager. Convert object IDs to source IDs and let
+                        // source manager ignore unknown/unregistered sources.
                         source_id_map_new_props: obj_id_map_props
                             .iter()
-                            .map(|(source_id, props)| (source_id.as_source_id(), props.clone()))
+                            .map(|(object_id, props)| (object_id.as_source_id(), props.clone()))
                             .collect(),
                     })
                     .await;
