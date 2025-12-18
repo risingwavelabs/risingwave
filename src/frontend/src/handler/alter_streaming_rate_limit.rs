@@ -124,7 +124,11 @@ pub async fn handle_alter_streaming_rate_limit(
             session.check_privilege_for_drop_alter(schema_name, &**sink)?;
             (StatementType::ALTER_SINK, sink.id.as_raw_id())
         }
-        _ => bail!("Unsupported throttle target: {:?}", throttle_target),
+        _ => bail!(
+            "Unsupported throttle target: {:?} and throttle type: {:?}",
+            throttle_target,
+            throttle_type
+        ),
     };
     execute_with_long_running_notification(
         handle_alter_streaming_rate_limit_by_id(
