@@ -74,6 +74,18 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     state_table: StateTableInner<S, SD>,
 
+    /// Stream key indices of the *output* of this materialize node.
+    ///
+    /// This can be different from the table PK. Typically, there are 3 cases:
+    ///
+    /// - Normal `TABLE`: `stream_key == pk`, so no special handling is needed.
+    /// - TTL-ed `TABLE` (`WITH TTL`): `stream_key` is a superset of `pk` by appending the TTL
+    ///   watermark column. In this case, updates to the same pk may have different stream keys, so
+    ///   we must rewrite such `Update` into `Delete + Insert` before yielding.
+    /// - `MV` or `INDEX`: `pk` can be a superset of `stream_key` to also include the order key or
+    ///   distribution key specified by the user. No special handling is needed either.
+    stream_key_indices: Vec<usize>,
+
     /// Columns of arrange keys (including pk, group keys, join keys, etc.)
     arrange_key_indices: Vec<usize>,
 
@@ -252,6 +264,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             Arc::from(table_columns.into_boxed_slice()),
         );
 
+        let stream_key_indices: Vec<usize> = table_catalog
+            .stream_key
+            .iter()
+            .map(|idx| *idx as usize)
+            .collect();
         let arrange_key_indices: Vec<usize> = arrange_key.iter().map(|k| k.column_index).collect();
         let may_have_downstream = actor_context.initial_dispatch_num != 0;
         let subscriber_ids = actor_context.initial_subscriber_ids.clone();
@@ -292,6 +309,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             input,
             schema,
             state_table,
+            stream_key_indices,
             arrange_key_indices,
             actor_context,
             materialize_cache: MaterializeCache::new(
@@ -477,9 +495,29 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                         let change_buffer =
                                             cache.handle_new(chunk, &self.state_table).await?;
 
-                                        match change_buffer
-                                            .into_chunk::<{ cb_kind::RETRACT }>(data_types.clone())
+                                        let output_chunk = if self.stream_key_indices
+                                            == self.state_table.pk_indices()
                                         {
+                                            change_buffer.into_chunk::<{ cb_kind::RETRACT }>(
+                                                data_types.clone(),
+                                            )
+                                        } else {
+                                            tracing::warn!("DBG: use into_chunk_with_key");
+                                            // We only hit this branch for TTL-ed tables for now.
+                                            // Assert stream key is a superset of pk.
+                                            debug_assert!(
+                                                self.state_table
+                                                    .pk_indices()
+                                                    .iter()
+                                                    .all(|&i| self.stream_key_indices.contains(&i))
+                                            );
+                                            change_buffer.into_chunk_with_key(
+                                                data_types.clone(),
+                                                &self.stream_key_indices,
+                                            )
+                                        };
+
+                                        match output_chunk {
                                             Some(output_chunk) => {
                                                 self.state_table.write_chunk(output_chunk.clone());
                                                 self.state_table.try_flush().await?;
@@ -1050,6 +1088,54 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
         watermark_epoch: AtomicU64Ref,
         conflict_behavior: ConflictBehavior,
     ) -> Self {
+        Self::for_test_inner(
+            input,
+            store,
+            table_id,
+            keys,
+            column_ids,
+            watermark_epoch,
+            conflict_behavior,
+            None,
+        )
+        .await
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn for_test_with_stream_key(
+        input: Executor,
+        store: S,
+        table_id: TableId,
+        keys: Vec<ColumnOrder>,
+        stream_key: Vec<usize>,
+        column_ids: Vec<risingwave_common::catalog::ColumnId>,
+        watermark_epoch: AtomicU64Ref,
+        conflict_behavior: ConflictBehavior,
+    ) -> Self {
+        Self::for_test_inner(
+            input,
+            store,
+            table_id,
+            keys,
+            column_ids,
+            watermark_epoch,
+            conflict_behavior,
+            Some(stream_key),
+        )
+        .await
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    async fn for_test_inner(
+        input: Executor,
+        store: S,
+        table_id: TableId,
+        keys: Vec<ColumnOrder>,
+        column_ids: Vec<risingwave_common::catalog::ColumnId>,
+        watermark_epoch: AtomicU64Ref,
+        conflict_behavior: ConflictBehavior,
+        stream_key: Option<Vec<usize>>,
+    ) -> Self {
         use risingwave_common::util::iter_util::ZipEqFast;
 
         let arrange_columns: Vec<usize> = keys.iter().map(|k| k.column_index).collect();
@@ -1065,18 +1151,16 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             Arc::from((0..columns.len()).collect_vec()),
             Arc::from(columns.clone().into_boxed_slice()),
         );
-        let state_table = StateTableInner::from_table_catalog(
-            &crate::common::table::test_utils::gen_pbtable(
-                table_id,
-                columns,
-                arrange_order_types,
-                arrange_columns.clone(),
-                0,
-            ),
-            store,
-            None,
-        )
-        .await;
+        let stream_key_indices = stream_key.unwrap_or_else(|| arrange_columns.clone());
+        let mut table_catalog = crate::common::table::test_utils::gen_pbtable(
+            table_id,
+            columns,
+            arrange_order_types,
+            arrange_columns.clone(),
+            0,
+        );
+        table_catalog.stream_key = stream_key_indices.iter().map(|i| *i as i32).collect();
+        let state_table = StateTableInner::from_table_catalog(&table_catalog, store, None).await;
 
         let unused = StreamingMetrics::unused();
         let metrics = unused.new_materialize_metrics(table_id, 1.into(), 2.into());
@@ -1086,6 +1170,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
             input,
             schema,
             state_table,
+            stream_key_indices,
             arrange_key_indices: arrange_columns.clone(),
             actor_context: ActorContext::for_test(0),
             materialize_cache: MaterializeCache::new(
@@ -1119,6 +1204,7 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MaterializeExecutor")
             .field("arrange_key_indices", &self.arrange_key_indices)
+            .field("stream_key_indices", &self.stream_key_indices)
             .finish()
     }
 }
@@ -1631,6 +1717,73 @@ mod tests {
                 );
             }
             _ => unreachable!(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_change_buffer_into_chunk_with_stream_key() {
+        // Table PK is (col0), but stream key is (col0, col1). When the value column changes due
+        // to overwrite conflict handling, we should output `- old` + `+ new` rather than `U-`/`U+`.
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let column_ids = vec![0.into(), 1.into()];
+
+        let chunk1 = StreamChunk::from_pretty(
+            " i i
+            + 1 4",
+        );
+        let chunk2 = StreamChunk::from_pretty(
+            " i i
+            + 1 5",
+        );
+
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(chunk1),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Chunk(chunk2),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+        ])
+        .into_executor(schema.clone(), StreamKey::new());
+
+        let mut materialize_executor = MaterializeExecutor::for_test_with_stream_key(
+            source,
+            memory_state_store,
+            table_id,
+            vec![ColumnOrder::new(0, OrderType::ascending())],
+            vec![0, 1],
+            column_ids,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::Overwrite,
+        )
+        .await
+        .boxed()
+        .execute();
+
+        // init barrier + first insert
+        materialize_executor.next().await.transpose().unwrap();
+        materialize_executor.next().await.transpose().unwrap();
+
+        // commit barrier
+        materialize_executor.next().await.transpose().unwrap();
+
+        // overwrite conflict should be converted into delete+insert due to stream key mismatch
+        match materialize_executor.next().await.transpose().unwrap() {
+            Some(Message::Chunk(chunk)) => {
+                assert_eq!(
+                    chunk.compact_vis(),
+                    StreamChunk::from_pretty(
+                        " i i
+                        - 1 4
+                        + 1 5"
+                    )
+                );
+            }
+            other => panic!("expect chunk, got {other:?}"),
         }
     }
 
