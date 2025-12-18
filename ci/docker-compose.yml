@@ -488,7 +488,7 @@ services:
     image: osixia/openldap:1.5.0
     hostname: ldap-server
     environment:
-      LDAP_DISABLE_CHOWN: "true"
+      DISABLE_CHOWN: "true"
       LDAP_ORGANISATION: "Example Corp"
       LDAP_DOMAIN: "example.com"
       LDAP_BASE_DN: "dc=example,dc=com"
