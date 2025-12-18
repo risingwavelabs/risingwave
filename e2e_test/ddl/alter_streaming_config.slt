@@ -70,10 +70,7 @@ alter table cf set config (
     batch.not_streaming = 1
 );
 ----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Invalid input syntax: ALTER CONFIG only accepts options starting with `streaming.`
+db error: ERROR: Invalid input syntax: ALTER CONFIG only accepts options starting with `streaming.` or `adaptive_parallelism_strategy`
 
 
 # Error: invalid type

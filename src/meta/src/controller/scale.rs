@@ -37,6 +37,7 @@ use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, QueryTrait,
     RelationTrait,
 };
+use serde::Deserialize;
 
 use crate::MetaResult;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -436,6 +437,45 @@ struct RenderActorsContext<'a> {
     database_map: &'a HashMap<DatabaseId, database::Model>,
 }
 
+#[derive(Debug, Default, Deserialize)]
+struct AdaptiveParallelismStreamingOverride {
+    adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+}
+
+#[derive(Debug, Default, Deserialize)]
+struct AdaptiveParallelismOverride {
+    #[serde(default)]
+    streaming: AdaptiveParallelismStreamingOverride,
+    adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
+}
+
+/// Parse `adaptive_parallelism_strategy` from the job-level `config_override` if present.
+fn job_adaptive_parallelism_strategy_from_override(
+    job_id: JobId,
+    config_override: &str,
+) -> Option<AdaptiveParallelismStrategy> {
+    if config_override.trim().is_empty() {
+        return None;
+    }
+
+    let parsed: AdaptiveParallelismOverride = match toml::from_str(config_override) {
+        Ok(value) => value,
+        Err(error) => {
+            tracing::warn!(
+                %job_id,
+                error = %error,
+                "failed to parse config_override as TOML; skipping adaptive_parallelism_strategy override"
+            );
+            return None;
+        }
+    };
+
+    parsed
+        .streaming
+        .adaptive_parallelism_strategy
+        .or(parsed.adaptive_parallelism_strategy)
+}
+
 fn render_actors(
     actor_id_counter: &AtomicU32,
     ensembles: &[NoShuffleEnsemble],
@@ -451,6 +491,20 @@ fn render_actors(
         streaming_job_databases,
         database_map,
     } = context;
+
+    let job_adaptive_parallelism_strategies: HashMap<_, _> = job_map
+        .iter()
+        .map(|(&job_id, job)| {
+            let strategy = job
+                .config_override
+                .as_deref()
+                .and_then(|config_override| {
+                    job_adaptive_parallelism_strategy_from_override(job_id, config_override)
+                })
+                .unwrap_or(adaptive_parallelism_strategy);
+            (job_id, strategy)
+        })
+        .collect();
 
     let mut all_fragments: FragmentRenderMap = HashMap::new();
 
@@ -518,12 +572,16 @@ fn render_actors(
 
         let total_parallelism = available_workers.values().map(|w| w.get()).sum::<usize>();
 
+        let job_adaptive_parallelism_strategy = *job_adaptive_parallelism_strategies
+            .get(&job_id)
+            .unwrap_or(&adaptive_parallelism_strategy);
+
         let actual_parallelism = match entry_fragment_parallelism
             .as_ref()
             .unwrap_or(&job.parallelism)
         {
             StreamingParallelism::Adaptive | StreamingParallelism::Custom => {
-                adaptive_parallelism_strategy.compute_target_parallelism(total_parallelism)
+                job_adaptive_parallelism_strategy.compute_target_parallelism(total_parallelism)
             }
             StreamingParallelism::Fixed(n) => *n,
         }
@@ -531,14 +589,15 @@ fn render_actors(
         .min(job.max_parallelism as usize);
 
         tracing::debug!(
-            "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {} fragment_override {:?}",
+            "job {}, final {} parallelism {:?} total_parallelism {} job_max {} vnode count {} fragment_override {:?} job_strategy {:?}",
             job_id,
             actual_parallelism,
             job.parallelism,
             total_parallelism,
             job.max_parallelism,
             vnode_count,
-            entry_fragment_parallelism
+            entry_fragment_parallelism,
+            job_adaptive_parallelism_strategy
         );
 
         let assigner = AssignerBuilder::new(job_id).build();

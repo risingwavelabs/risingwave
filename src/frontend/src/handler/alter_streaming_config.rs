@@ -27,14 +27,21 @@ use crate::handler::{HandlerArgs, RwPgResponse};
 /// A diff of a TOML map. `None` means the key should be removed.
 type TomlMapDiff = TomlMap<String, Option<TomlValue>>;
 
+/// Keys that are allowed without the `streaming.` prefix for job config overrides.
+const ALLOWED_TOP_LEVEL_CONFIG_KEYS: &[&str] = &["adaptive_parallelism_strategy"];
+
 fn collect_options(entries: Vec<SqlOption>) -> Result<TomlMapDiff> {
     let mut map = TomlMap::new();
 
     for SqlOption { name, value } in entries {
         let name = name.real_value();
-        if !name.starts_with("streaming.") {
+        if !name.starts_with("streaming.")
+            && !ALLOWED_TOP_LEVEL_CONFIG_KEYS
+                .iter()
+                .any(|allowed| name.eq_ignore_ascii_case(allowed))
+        {
             bail_invalid_input_syntax!(
-                "ALTER CONFIG only accepts options starting with `streaming.`"
+                "ALTER CONFIG only accepts options starting with `streaming.` or `adaptive_parallelism_strategy`"
             );
         }
         let SqlOptionValue::Value(value) = value else {

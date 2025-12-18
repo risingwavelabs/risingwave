@@ -130,3 +130,50 @@ async fn test_alter_fragment() -> Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn test_adaptive_parallelism_strategy_override_after_recover() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_scale()).await?;
+    let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
+    let mut session = cluster.start_session();
+
+    session.run("create table t (v int);").await?;
+
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 't' and distribution_type = 'HASH';")
+        .await?
+        .assert_result_eq(format!("{default_parallelism}"));
+
+    session
+        .run("alter table t set config ( adaptive_parallelism_strategy = 'bounded(1)' );")
+        .await?;
+
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 't' and distribution_type = 'HASH';")
+        .await?
+        .assert_result_eq(format!("{default_parallelism}"));
+
+    session.run("recover;").await?;
+
+    sleep(Duration::from_secs(5)).await;
+
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 't' and distribution_type = 'HASH';")
+        .await?
+        .assert_result_eq("1");
+
+    session
+        .run("alter table t reset config ( adaptive_parallelism_strategy );")
+        .await?;
+
+    session.run("recover;").await?;
+
+    sleep(Duration::from_secs(5)).await;
+
+    session
+        .run("select distinct parallelism from rw_fragment_parallelism where name = 't' and distribution_type = 'HASH';")
+        .await?
+        .assert_result_eq(format!("{default_parallelism}"));
+
+    Ok(())
+}
