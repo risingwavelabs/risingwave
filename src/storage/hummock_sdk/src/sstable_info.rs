@@ -30,7 +30,7 @@ use crate::{HummockSstableId, HummockSstableObjectId};
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct VnodeRangeInfo {
     /// Map from vnode to its key range in this SST.
-    pub vnode_key_ranges: BTreeMap<VirtualNode, KeyRange>,
+    vnode_key_ranges: BTreeMap<VirtualNode, KeyRange>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -299,6 +299,10 @@ impl From<&SstableInfoInner> for PbSstableInfo {
 }
 
 impl VnodeRangeInfo {
+    pub fn new(vnode_key_ranges: BTreeMap<VirtualNode, KeyRange>) -> Self {
+        Self { vnode_key_ranges }
+    }
+
     pub fn get_vnode_key_range(&self, vnode: VirtualNode) -> Option<&KeyRange> {
         self.vnode_key_ranges.get(&vnode)
     }

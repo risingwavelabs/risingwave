@@ -817,9 +817,7 @@ impl VnodeKeyRangeCollector {
             self.ranges.insert(vnode, range);
         }
 
-        (self.ranges.len() >= 2).then_some(VnodeRangeInfo {
-            vnode_key_ranges: self.ranges,
-        })
+        (self.ranges.len() >= 2).then_some(VnodeRangeInfo::new(self.ranges))
     }
 }
 

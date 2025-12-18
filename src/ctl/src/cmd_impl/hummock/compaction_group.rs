@@ -76,7 +76,7 @@ pub fn build_compaction_config_vec(
     level0_stop_write_threshold_max_size: Option<u64>,
     enable_optimize_l0_interval_selection: Option<bool>,
     vnode_aligned_level_size_threshold: Option<u64>,
-    max_vnode_key_range_count: Option<u32>,
+    max_vnode_key_range_bytes: Option<u32>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -160,7 +160,7 @@ pub fn build_compaction_config_vec(
     if let Some(c) = vnode_aligned_level_size_threshold {
         configs.push(MutableConfig::VnodeAlignedLevelSizeThreshold(c))
     }
-    if let Some(c) = max_vnode_key_range_count {
+    if let Some(c) = max_vnode_key_range_bytes {
         configs.push(MutableConfig::MaxVnodeKeyRangeBytes(c))
     }
 

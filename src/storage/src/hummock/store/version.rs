@@ -767,7 +767,7 @@ impl HummockVersionReader {
                             let vnode = VirtualNode::from_index(full_key.user_key.get_vnode_id());
                             // Only skip if vnode exists and key is out of range
                             // If vnode not found, it may be due to incomplete stats (reached limit)
-                            if let Some(key_range) = vnode_key_ranges.vnode_key_ranges.get(&vnode) {
+                            if let Some(key_range) = vnode_key_ranges.get_vnode_key_range(vnode) {
                                 if key_range.user_key_out_of_range(full_key.user_key.as_ref()) {
                                     sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_VNODE_KEY_RANGE");
                                     continue;
@@ -1048,7 +1048,7 @@ impl HummockVersionReader {
                             let vnode = VirtualNode::from_index(start_key.get_vnode_id());
                             // Only skip if vnode exists and start key is out of range
                             // If vnode not found, it may be due to incomplete stats (reached limit)
-                            if let Some(key_range) = vnode_key_ranges.vnode_key_ranges.get(&vnode) {
+                            if let Some(key_range) = vnode_key_ranges.get_vnode_key_range(vnode) {
                                 if key_range.user_key_out_of_range(*start_key) {
                                     continue;
                                 }
