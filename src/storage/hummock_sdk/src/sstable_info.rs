@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::Arc;
@@ -26,15 +27,11 @@ use crate::key_range::KeyRange;
 use crate::version::{ObjectIdReader, SstableIdReader};
 use crate::{HummockSstableId, HummockSstableObjectId};
 
-#[derive(Debug, PartialEq, Clone)]
-pub struct VnodeRange {
-    pub vnode: VirtualNode,
-    pub key_range: KeyRange,
-}
-
 #[derive(Debug, PartialEq, Clone, Default)]
 pub struct VnodeRangeInfo {
-    pub vnode_key_ranges: Vec<VnodeRange>,
+    /// Map from vnode to its key range in this SST.
+    /// Using BTreeMap for O(log n) lookup and ordered iteration.
+    pub vnode_key_ranges: BTreeMap<VirtualNode, KeyRange>,
 }
 
 #[derive(Debug, PartialEq, Clone)]
@@ -74,10 +71,10 @@ impl SstableInfoInner {
             + size_of::<u64>(); // sst_size
         basic += self.key_range.left.len() + self.key_range.right.len() + size_of::<bool>();
         if let Some(vnode_key_ranges) = &self.vnode_key_ranges {
-            for vnode_range in &vnode_key_ranges.vnode_key_ranges {
+            for (_, key_range) in &vnode_key_ranges.vnode_key_ranges {
                 basic += size_of::<u32>()
-                    + vnode_range.key_range.left.len()
-                    + vnode_range.key_range.right.len()
+                    + key_range.left.len()
+                    + key_range.right.len()
                     + size_of::<bool>();
             }
         }
@@ -97,10 +94,10 @@ impl From<&PbVnodeKeyRangeInfo> for VnodeRangeInfo {
                 .vnode_key_ranges
                 .iter()
                 .filter_map(|range| {
-                    Some(VnodeRange {
-                        vnode: VirtualNode::from_index(range.vnode as usize),
-                        key_range: range.key_range.as_ref()?.into(),
-                    })
+                    Some((
+                        VirtualNode::from_index(range.vnode as usize),
+                        range.key_range.as_ref()?.into(),
+                    ))
                 })
                 .collect(),
         }
@@ -119,12 +116,12 @@ impl From<&VnodeRangeInfo> for PbVnodeKeyRangeInfo {
             vnode_key_ranges: info
                 .vnode_key_ranges
                 .iter()
-                .map(|range| PbVnodeKeyRange {
-                    vnode: range.vnode.to_index() as u32,
+                .map(|(vnode, key_range)| PbVnodeKeyRange {
+                    vnode: vnode.to_index() as u32,
                     key_range: Some(PbKeyRange {
-                        left: range.key_range.left.to_vec(),
-                        right: range.key_range.right.to_vec(),
-                        right_exclusive: range.key_range.right_exclusive,
+                        left: key_range.left.to_vec(),
+                        right: key_range.right.to_vec(),
+                        right_exclusive: key_range.right_exclusive,
                     }),
                 })
                 .collect(),

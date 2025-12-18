@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::mem;
 use std::sync::Arc;
 use std::time::SystemTime;
@@ -23,9 +23,7 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, user_key};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::{
-    SstableInfo, SstableInfoInner, VnodeRange, VnodeRangeInfo,
-};
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeRangeInfo};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::hummock::BloomFilterType;
@@ -714,7 +712,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
 struct VnodeKeyRangeCollector {
     max_vnode_key_range_count: usize,
-    ranges: Vec<VnodeRange>,
+    ranges: BTreeMap<VirtualNode, KeyRange>,
     current_vnode: Option<VirtualNode>,
     current_left: Vec<u8>,
 }
@@ -724,20 +722,10 @@ impl VnodeKeyRangeCollector {
         let limit = limit.unwrap_or(0);
         (limit > 0).then_some(Self {
             max_vnode_key_range_count: limit,
-            ranges: Vec::new(),
+            ranges: BTreeMap::new(),
             current_vnode: None,
             current_left: Vec::new(),
         })
-    }
-
-    fn reached_cap(&self) -> bool {
-        self.ranges.len() >= self.max_vnode_key_range_count
-    }
-
-    fn begin_range(&mut self, vnode: VirtualNode, left_key: &[u8]) {
-        self.current_vnode = Some(vnode);
-        self.current_left.clear();
-        self.current_left.extend_from_slice(left_key);
     }
 
     /// Observe one key (in sorted order).
@@ -749,32 +737,35 @@ impl VnodeKeyRangeCollector {
     /// We intentionally take `prev_key` from the caller to avoid copying the key bytes for every
     /// record just to track "current max key" internally.
     fn observe_key(&mut self, vnode: VirtualNode, key: &[u8], prev_key: &[u8]) {
-        if self.reached_cap() {
+        // Early return if already at capacity
+        if self.ranges.len() >= self.max_vnode_key_range_count {
             return;
         }
 
-        let is_same_vnode = self.current_vnode == Some(vnode);
-        if !is_same_vnode {
-            if self.current_vnode.is_some() && !self.seal_current_range(prev_key) {
-                return;
-            }
-            self.begin_range(vnode, key);
-        }
-    }
+        // Check if vnode changed
+        if self.current_vnode != Some(vnode) {
+            // Seal previous vnode range if exists
+            if let Some(prev_vnode) = self.current_vnode.take() {
+                self.ranges.insert(
+                    prev_vnode,
+                    KeyRange {
+                        left: Bytes::from(mem::take(&mut self.current_left)),
+                        right: Bytes::copy_from_slice(prev_key),
+                        right_exclusive: false,
+                    },
+                );
 
-    fn seal_current_range(&mut self, right_key: &[u8]) -> bool {
-        let Some(vnode) = self.current_vnode.take() else {
-            return !self.reached_cap();
-        };
-        self.ranges.push(VnodeRange {
-            vnode,
-            key_range: KeyRange {
-                left: Bytes::from(mem::take(&mut self.current_left)),
-                right: Bytes::copy_from_slice(right_key),
-                right_exclusive: false,
-            },
-        });
-        !self.reached_cap()
+                // Stop if we reached capacity after insertion
+                if self.ranges.len() >= self.max_vnode_key_range_count {
+                    return;
+                }
+            }
+
+            // Begin new vnode range
+            self.current_vnode = Some(vnode);
+            self.current_left.clear();
+            self.current_left.extend_from_slice(key);
+        }
     }
 
     /// Seal the last open vnode with `last_key` as its right boundary.
@@ -782,20 +773,23 @@ impl VnodeKeyRangeCollector {
     /// Similar to `prev_key` in [`Self::observe_key`], this is provided by the caller to avoid
     /// maintaining a per-key copied "current max key" inside the collector.
     fn finish(mut self, last_key: &[u8]) -> Option<VnodeRangeInfo> {
-        debug_assert!(
-            !self.reached_cap() || self.current_vnode.is_none(),
-            "vnode key-range collector reached cap but still has an open vnode"
-        );
-        if !self.reached_cap() && self.current_vnode.is_some() {
-            let _ = self.seal_current_range(last_key);
+        // Seal the last vnode if it exists and we haven't reached capacity
+        if let Some(vnode) = self.current_vnode.take() {
+            if self.ranges.len() < self.max_vnode_key_range_count {
+                self.ranges.insert(
+                    vnode,
+                    KeyRange {
+                        left: Bytes::from(mem::take(&mut self.current_left)),
+                        right: Bytes::copy_from_slice(last_key),
+                        right_exclusive: false,
+                    },
+                );
+            }
         }
-        if self.ranges.is_empty() {
-            None
-        } else {
-            Some(VnodeRangeInfo {
-                vnode_key_ranges: self.ranges,
-            })
-        }
+
+        (!self.ranges.is_empty()).then_some(VnodeRangeInfo {
+            vnode_key_ranges: self.ranges,
+        })
     }
 }
 
@@ -911,15 +905,15 @@ pub(super) mod tests {
         let info = collector.finish(&k4).unwrap();
         assert_eq!(info.vnode_key_ranges.len(), 2);
 
-        assert_eq!(info.vnode_key_ranges[0].vnode, vnode_1);
-        assert_eq!(info.vnode_key_ranges[0].key_range.left.as_ref(), b"k1");
-        assert_eq!(info.vnode_key_ranges[0].key_range.right.as_ref(), b"k2");
-        assert!(!info.vnode_key_ranges[0].key_range.right_exclusive);
+        let range1 = info.vnode_key_ranges.get(&vnode_1).unwrap();
+        assert_eq!(range1.left.as_ref(), b"k1");
+        assert_eq!(range1.right.as_ref(), b"k2");
+        assert!(!range1.right_exclusive);
 
-        assert_eq!(info.vnode_key_ranges[1].vnode, vnode_2);
-        assert_eq!(info.vnode_key_ranges[1].key_range.left.as_ref(), b"k3");
-        assert_eq!(info.vnode_key_ranges[1].key_range.right.as_ref(), b"k4");
-        assert!(!info.vnode_key_ranges[1].key_range.right_exclusive);
+        let range2 = info.vnode_key_ranges.get(&vnode_2).unwrap();
+        assert_eq!(range2.left.as_ref(), b"k3");
+        assert_eq!(range2.right.as_ref(), b"k4");
+        assert!(!range2.right_exclusive);
     }
 
     #[test]
@@ -940,9 +934,9 @@ pub(super) mod tests {
 
         let info = collector.finish(&k4).unwrap();
         assert_eq!(info.vnode_key_ranges.len(), 1);
-        assert_eq!(info.vnode_key_ranges[0].vnode, vnode_1);
-        assert_eq!(info.vnode_key_ranges[0].key_range.left.as_ref(), b"k1");
-        assert_eq!(info.vnode_key_ranges[0].key_range.right.as_ref(), b"k2");
+        let range = info.vnode_key_ranges.get(&vnode_1).unwrap();
+        assert_eq!(range.left.as_ref(), b"k1");
+        assert_eq!(range.right.as_ref(), b"k2");
     }
 
     #[test]
@@ -970,9 +964,43 @@ pub(super) mod tests {
 
         let info = collector.finish(&k4).unwrap();
         assert_eq!(info.vnode_key_ranges.len(), 1);
-        assert_eq!(info.vnode_key_ranges[0].vnode, vnode_1);
-        assert_eq!(info.vnode_key_ranges[0].key_range.left.as_ref(), b"k1");
-        assert_eq!(info.vnode_key_ranges[0].key_range.right.as_ref(), b"k2");
+        let range = info.vnode_key_ranges.get(&vnode_1).unwrap();
+        assert_eq!(range.left.as_ref(), b"k1");
+        assert_eq!(range.right.as_ref(), b"k2");
+    }
+
+    #[test]
+    fn test_vnode_key_range_collector_disabled_and_empty() {
+        assert!(VnodeKeyRangeCollector::with_limit(None).is_none());
+        assert!(VnodeKeyRangeCollector::with_limit(Some(0)).is_none());
+
+        let collector = VnodeKeyRangeCollector::with_limit(Some(10)).unwrap();
+        assert!(collector.finish(b"any").is_none());
+    }
+
+    #[test]
+    fn test_vnode_key_range_collector_single_vnode() {
+        let vnode = VirtualNode::from_index(5);
+
+        // Single key
+        let mut collector = VnodeKeyRangeCollector::with_limit(Some(10)).unwrap();
+        collector.observe_key(vnode, b"only", &[]);
+        let info = collector.finish(b"only").unwrap();
+        assert_eq!(info.vnode_key_ranges.len(), 1);
+        let range = info.vnode_key_ranges.get(&vnode).unwrap();
+        assert_eq!(range.left.as_ref(), b"only");
+        assert_eq!(range.right.as_ref(), b"only");
+
+        // Multiple keys, same vnode
+        let mut collector = VnodeKeyRangeCollector::with_limit(Some(10)).unwrap();
+        collector.observe_key(vnode, b"a", &[]);
+        collector.observe_key(vnode, b"b", b"a");
+        collector.observe_key(vnode, b"c", b"b");
+        let info = collector.finish(b"c").unwrap();
+        assert_eq!(info.vnode_key_ranges.len(), 1);
+        let range = info.vnode_key_ranges.get(&vnode).unwrap();
+        assert_eq!(range.left.as_ref(), b"a");
+        assert_eq!(range.right.as_ref(), b"c");
     }
 
     #[tokio::test]
