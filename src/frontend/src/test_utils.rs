@@ -81,7 +81,7 @@ use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, FragmentId, SchemaId, SecretId, SinkId};
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
@@ -89,7 +89,6 @@ use crate::session::{AuthContext, FrontendEnv, SessionImpl};
 use crate::user::UserId;
 use crate::user::user_manager::UserInfoManager;
 use crate::user::user_service::UserInfoWriter;
-use crate::error::RwError;
 
 /// An embedded frontend without starting meta and without starting frontend as a tcp server.
 pub struct LocalFrontend {
