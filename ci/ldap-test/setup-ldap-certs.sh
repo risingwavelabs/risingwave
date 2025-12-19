@@ -111,6 +111,9 @@ openssl x509 -req -in "$CERT_DIR/client.csr" \
 # Cleanup
 rm -f "$CERT_DIR"/*.csr "$CERT_DIR"/*.cnf "$CERT_DIR"/*.srl
 
+chmod 644 "$CERT_DIR"/*.crt
+chmod 600 "$CERT_DIR"/*.key
+
 # Verify certificates
 echo "--- Verifying certificates ---"
 for f in "$CERT_DIR"/*.crt; do
