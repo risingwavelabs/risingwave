@@ -232,11 +232,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         largest_key: Vec<u8>,
         mut meta: BlockMeta,
     ) -> HummockResult<bool> {
-        if self.vnode_range_collector.is_some() {
-            // Raw blocks bypass key iteration, so we can't build accurate vnode ranges.
-            self.vnode_range_collector = None;
-        }
-
         let table_id = smallest_key.user_key.table_id;
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             if !self.block_builder.is_empty() {
@@ -715,9 +710,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 }
 
 /// Collects vnode key-range hints for single-table SSTs with byte-based capacity limit.
-///
-/// Only emits hints when an SST contains multiple vnodes (>= 2), since single-vnode SSTs
-/// have `vnode_range` == `sst_range`.
 struct VnodeKeyRangeCollector {
     max_bytes: usize,
     ranges: BTreeMap<VirtualNode, KeyRange>,
@@ -821,7 +813,9 @@ impl VnodeKeyRangeCollector {
             self.ranges.insert(vnode, range);
         }
 
-        (self.ranges.len() >= 2).then_some(VnodeRangeInfo::new(self.ranges))
+        // Only emits hints when an SST contains multiple vnodes (> 1), since single-vnode SSTs
+        // have `vnode_range` == `sst_range`.
+        (self.ranges.len() > 1).then_some(VnodeRangeInfo::new(self.ranges))
     }
 }
 
