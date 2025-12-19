@@ -88,6 +88,7 @@ use risingwave_common::{
 };
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
+use risingwave_pb::id::ExecutorId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
 use starrocks::STARROCKS_SINK;
@@ -563,7 +564,7 @@ impl SinkMetrics {
 #[derive(Clone)]
 pub struct SinkWriterParam {
     // TODO(eric): deprecate executor_id
-    pub executor_id: u64,
+    pub executor_id: ExecutorId,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<SinkMetaClient>,
     // The val has two effect:

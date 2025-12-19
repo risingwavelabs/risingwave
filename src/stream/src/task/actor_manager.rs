@@ -25,6 +25,7 @@ use risingwave_common::config::{MetricLevel, StreamingConfig, merge_streaming_co
 use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_pb::id::{ExecutorId, GlobalOperatorId};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{self, StreamNode, StreamScanNode, StreamScanType};
@@ -79,13 +80,13 @@ pub(crate) struct StreamActorManager {
 }
 
 impl StreamActorManager {
-    fn get_executor_id(actor_context: &ActorContext, node: &StreamNode) -> u64 {
+    fn get_executor_id(actor_context: &ActorContext, node: &StreamNode) -> ExecutorId {
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
         unique_executor_id(actor_context.id, node.operator_id)
     }
 
-    fn get_executor_info(node: &StreamNode, executor_id: u64) -> ExecutorInfo {
+    fn get_executor_info(node: &StreamNode, executor_id: ExecutorId) -> ExecutorInfo {
         let schema: Schema = node.fields.iter().map(Field::from).collect();
 
         let stream_key = node
@@ -583,10 +584,10 @@ pub struct ExecutorParams {
     pub info: ExecutorInfo,
 
     /// Executor id, unique across all actors.
-    pub executor_id: u64,
+    pub executor_id: ExecutorId,
 
     /// Operator id, unique for each operator in fragment.
-    pub operator_id: u64,
+    pub operator_id: GlobalOperatorId,
 
     /// Information of the operator from plan node, like `StreamHashJoin { .. }`.
     // TODO: use it for `identity`

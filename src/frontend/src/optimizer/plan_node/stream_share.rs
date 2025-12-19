@@ -106,7 +106,7 @@ impl StreamShare {
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<PbStreamNode> {
-        let operator_id = self.base.id().0 as u32;
+        let operator_id = self.base.id().to_stream_node_operator_id();
 
         match state.get_share_stream_node(operator_id) {
             None => {
@@ -123,7 +123,7 @@ impl StreamShare {
                     input,
                     identity: self.distill_to_string(),
                     node_body: Some(node_body),
-                    operator_id: self.id().0 as _,
+                    operator_id: self.id().to_stream_node_operator_id(),
                     stream_key: self
                         .stream_key()
                         .unwrap_or_else(|| panic!("should always have a stream key in the stream plan but not, sub plan: {}",
