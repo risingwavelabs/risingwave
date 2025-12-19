@@ -794,9 +794,9 @@ pub mod default {
         const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * MB;
         // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
-        const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
+        const DEFAULT_LEVEL_MULTIPLIER: u64 = 10;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * MB; // 512MB;
-        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 128;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
         const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
@@ -805,11 +805,12 @@ pub mod default {
         const DEFAULT_MAX_LEVEL: u32 = 6;
         const DEFAULT_MAX_L0_COMPACT_LEVEL_COUNT: u32 = 42;
         const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MIN_SIZE: u64 = 4 * MB;
-        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MAX_COUNT: u32 = 64;
+        const DEFAULT_SST_ALLOWED_TRIVIAL_MOVE_MAX_COUNT: u32 = 256;
         const DEFAULT_EMERGENCY_LEVEL0_SST_FILE_COUNT: u32 = 2000; // > 50G / 32M = 1600
         const DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION: u32 = 256;
-        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
+        const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 5000;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
+        const DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION: bool = true;
         const DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD: Option<u64> = None;
 
         use crate::catalog::hummock::CompactionFilterFlag;
@@ -915,7 +916,7 @@ pub mod default {
         }
 
         pub fn enable_optimize_l0_interval_selection() -> bool {
-            false
+            DEFAULT_ENABLE_OPTIMIZE_L0_INTERVAL_SELECTION
         }
 
         pub fn vnode_aligned_level_size_threshold() -> Option<u64> {
