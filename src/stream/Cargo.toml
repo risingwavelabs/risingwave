@@ -10,6 +10,8 @@ repository = { workspace = true }
 [features]
 dhat-heap = ["dhat"]
 test = []
+all-sources = ["source-adbc_snowflake"]
+source-adbc_snowflake = ["risingwave_connector/source-adbc_snowflake"]
 
 [dependencies]
 anyhow = "1"
@@ -40,6 +42,7 @@ memcomparable = "0.2"
 moka = { version = "0.12.0", features = ["sync"] }
 multimap = "0.10"
 parking_lot = { workspace = true }
+paste = "1"
 pin-project = "1"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
