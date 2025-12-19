@@ -8,17 +8,23 @@ echo "--- Preparing certificate directory: $CERT_DIR ---"
 mkdir -p "$CERT_DIR"
 
 echo "--- Cleaning old certificates..."
-rm -f "$CERT_DIR"/*.crt "$CERT_DIR"/*.key "$CERT_DIR"/*.srl "$CERT_DIR"/*.csr "$CERT_DIR"/*.cnf "$CERT_DIR"/.pem
+rm -f "$CERT_DIR"/*.crt "$CERT_DIR"/*.key "$CERT_DIR"/*.srl "$CERT_DIR"/*.csr "$CERT_DIR"/*.cnf "$CERT_DIR"/*.pem
 
 # --- Generate DH Parameters ---
+# This can take very long time, especially on CI. So we've pre-generated it and checked it in.
 DH_PARAM_FILE="$CERT_DIR/dhparam.pem"
-if [ ! -f "$DH_PARAM_FILE" ]; then
-    echo "--- Generating DH parameters (this may take a while) ---"
-    openssl dhparam -out "$DH_PARAM_FILE" 2048
-    echo "✅ DH parameters generated at $DH_PARAM_FILE"
-else
-    echo "✅ DH parameters already exist, skipping generation"
-fi
+# openssl dhparam -out "$DH_PARAM_FILE" 2048
+cat <<EOF | tee "$DH_PARAM_FILE"
+-----BEGIN DH PARAMETERS-----
+MIIBCAKCAQEAz8vaB5uWWz54GIsOPDHG0dGmNGl74tpkgIM862jT7SjEXe8IbXbx
+Xz6skzuDrercRsfGhGxraE6bIecuAHyvmNW9/VopMbWwHcG1ZaywJq+m1ErKPhnZ
+hyJUA/NRsRFSar7aMJ3AuPYl6NAAGH3rLeSHFBJlZ18JOgwbYKfeei0NONgEv5H1
+EAcL0FwGMFYhE3Zr6F178RUAFleejaMcffgvnUw/Qaet7KRQnTe5E6uAeYwWn66V
+NiQ9AJ0AS9kuo+ZM1OdoaEJBDyO4sFAwZHYAlHx5QhzarpWg9RkZ1fSp5n/q2p6I
++Eld51k/LZMHl5gtEO82M2dbNmvfuvQ8YwIBAg==
+-----END DH PARAMETERS-----
+EOF
+echo "✅ pre-generated DH parameters written at $DH_PARAM_FILE"
 
 echo "--- Generating CA..."
 openssl genrsa -out "$CERT_DIR/ca.key" 4096
