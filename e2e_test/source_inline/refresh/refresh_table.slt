@@ -75,9 +75,7 @@ CREATE SOURCE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Bind error: can't CREATE SOURCE with refreshable batch connector
-
-Hint: use CREATE TABLE instead
+  Protocol error: `refresh_mode` only supported for CREATE TABLE
 
 
 statement ok
