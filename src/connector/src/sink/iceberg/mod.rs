@@ -1943,20 +1943,19 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
     ) -> Result<()> {
         tracing::info!("Starting iceberg direct commit in epoch {epoch}");
         // Commit data if present
-        let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns.clone())? {
-                Some((write_results, snapshot_id)) => (write_results, snapshot_id),
-                None => {
-                    // No data to commit, but may have schema change
-                    if let Some(add_columns) = add_columns {
-                        tracing::info!(?epoch, "No data to commit, but committing schema change");
-                        self.commit_schema_change(add_columns).await?;
-                    } else {
-                        tracing::debug!(?epoch, "no data to commit");
-                    }
-                    return Ok(());
+        let (write_results, snapshot_id) = match self.pre_commit_inner(epoch, metadata)? {
+            Some((write_results, snapshot_id)) => (write_results, snapshot_id),
+            None => {
+                // No data to commit, but may have schema change
+                if let Some(add_columns) = add_columns {
+                    tracing::info!(?epoch, "No data to commit, but committing schema change");
+                    self.commit_schema_change(add_columns).await?;
+                } else {
+                    tracing::debug!(?epoch, "no data to commit");
                 }
-            };
+                return Ok(());
+            }
+        };
 
         self.commit_datafile(epoch, write_results, snapshot_id)
             .await?;
@@ -1999,23 +1998,22 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         let has_schema_change = add_columns.is_some();
 
         // Try to get write_results and snapshot_id
-        let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns.clone())? {
-                Some((write_results, snapshot_id)) => (Some(write_results), Some(snapshot_id)),
-                None => {
-                    // No data to commit
-                    // If there's schema change, we still need to return metadata with only schema change info
-                    if !has_schema_change {
-                        tracing::debug!(?epoch, "no data to commit and no schema change");
-                        return Ok(vec![]);
-                    }
-                    tracing::info!(
-                        ?epoch,
-                        "no data to commit but has schema change, will commit schema only"
-                    );
-                    (None, None)
+        let (write_results, snapshot_id) = match self.pre_commit_inner(epoch, metadata)? {
+            Some((write_results, snapshot_id)) => (Some(write_results), Some(snapshot_id)),
+            None => {
+                // No data to commit
+                // If there's schema change, we still need to return metadata with only schema change info
+                if !has_schema_change {
+                    tracing::debug!(?epoch, "no data to commit and no schema change");
+                    return Ok(vec![]);
                 }
-            };
+                tracing::info!(
+                    ?epoch,
+                    "no data to commit but has schema change, will commit schema only"
+                );
+                (None, None)
+            }
+        };
 
         let mut write_results_bytes = Vec::new();
 
@@ -2275,7 +2273,6 @@ impl IcebergSinkCommitter {
         &mut self,
         _epoch: u64,
         metadata: Vec<SinkMetadata>,
-        _add_columns: Option<Vec<Field>>,
     ) -> Result<Option<(Vec<IcebergCommitResult>, i64)>> {
         // Note: add_columns will be handled in the pre_commit function for serialization
 
