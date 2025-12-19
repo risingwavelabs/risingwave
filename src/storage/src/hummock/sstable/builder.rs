@@ -354,10 +354,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 self.last_table_id,
                 full_key
             );
-            debug_assert!(
-                self.vnode_range_collector.is_none(),
-                "vnode key-range hints are only supported for single-table SSTs"
-            );
             self.table_ids.insert(table_id);
             self.finalize_last_table_stats();
             self.last_table_id = Some(table_id);
@@ -439,6 +435,14 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         };
         let largest_key = self.last_full_key.clone();
         self.finalize_last_table_stats();
+
+        // Vnode key-range hints are only supported for single-table SSTs.
+        // Multi-table SST scenarios should not enable max_vnode_key_range_bytes in config.
+        debug_assert!(
+            self.table_ids.len() <= 1 || self.vnode_range_collector.is_none(),
+            "vnode key-range hints are only supported for single-table SSTs, found {} tables",
+            self.table_ids.len()
+        );
 
         self.build_block().await?;
         let right_exclusive = false;
@@ -713,7 +717,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 /// Collects vnode key-range hints for single-table SSTs with byte-based capacity limit.
 ///
 /// Only emits hints when an SST contains multiple vnodes (>= 2), since single-vnode SSTs
-/// have vnode_range == sst_range.
+/// have `vnode_range` == `sst_range`.
 struct VnodeKeyRangeCollector {
     max_bytes: usize,
     ranges: BTreeMap<VirtualNode, KeyRange>,
