@@ -27,6 +27,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
 
 use crate::common::table::state_table::ReplicatedStateTable;
+use crate::executor::ThrottleType;
 #[cfg(debug_assertions)]
 use crate::executor::backfill::utils::METADATA_STATE_LEN;
 use crate::executor::backfill::utils::{
@@ -557,10 +558,14 @@ where
                                 backfill_paused = false;
                             }
                         }
-                        Mutation::Throttle(actor_to_apply) => {
-                            let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
-                            if let Some(new_rate_limit) = new_rate_limit_entry {
-                                let new_rate_limit = (*new_rate_limit).into();
+                        Mutation::Throttle {
+                            actor_throttle: actor_to_apply,
+                        } => {
+                            let entry = actor_to_apply.get(&self.actor_id);
+                            if let Some(entry) = entry
+                                && entry.throttle_type == ThrottleType::Backfill
+                            {
+                                let new_rate_limit = entry.rate_limit.into();
                                 let old_rate_limit = self.rate_limiter.update(new_rate_limit);
                                 if old_rate_limit != new_rate_limit {
                                     tracing::info!(

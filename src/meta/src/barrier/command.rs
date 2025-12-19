@@ -357,7 +357,7 @@ pub enum Command {
     SourceChangeSplit(SplitState),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
-    /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
+    /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
     Throttle(ThrottleConfig),
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
@@ -888,18 +888,21 @@ impl Command {
             }
 
             Command::Throttle(config) => {
-                let mut actor_to_apply = HashMap::new();
-                for per_fragment in config.values() {
-                    actor_to_apply.extend(
-                        per_fragment
-                            .iter()
-                            .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit })),
-                    );
+                // Flatten to actor -> RateLimit as required by proto.
+                let mut actor_throttle: HashMap<risingwave_pb::id::ActorId, RateLimit> =
+                    HashMap::new();
+                for per_fragment in config.limits.values() {
+                    for (actor_id, entry) in per_fragment {
+                        actor_throttle.insert(
+                            risingwave_pb::id::ActorId::new(actor_id.as_raw_id()),
+                            RateLimit {
+                                rate_limit: entry.rate_limit,
+                                throttle_type: config.throttle_type as i32,
+                            },
+                        );
+                    }
                 }
-
-                Some(Mutation::Throttle(ThrottleMutation {
-                    actor_throttle: actor_to_apply,
-                }))
+                Some(Mutation::Throttle(ThrottleMutation { actor_throttle }))
             }
 
             Command::DropStreamingJobs {

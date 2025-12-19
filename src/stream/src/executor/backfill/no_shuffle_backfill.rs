@@ -24,6 +24,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::batch_table::BatchTable;
 
+use crate::executor::ThrottleType;
 use crate::executor::backfill::utils;
 use crate::executor::backfill::utils::{
     METADATA_STATE_LEN, compute_bounds, construct_initial_finished_state, create_builder,
@@ -465,10 +466,12 @@ where
                                 backfill_paused = false;
                             }
                         }
-                        Mutation::Throttle(actor_to_apply) => {
-                            let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
-                            if let Some(new_rate_limit) = new_rate_limit_entry {
-                                let new_rate_limit = (*new_rate_limit).into();
+                        Mutation::Throttle { actor_throttle } => {
+                            let entry = actor_throttle.get(&self.actor_id);
+                            if let Some(entry) = entry
+                                && entry.throttle_type == ThrottleType::Backfill
+                            {
+                                let new_rate_limit = entry.rate_limit.into();
                                 let old_rate_limit = self.rate_limiter.update(new_rate_limit);
                                 if old_rate_limit != new_rate_limit {
                                     tracing::info!(

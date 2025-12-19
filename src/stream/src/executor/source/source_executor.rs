@@ -44,10 +44,10 @@ use tokio::time::Instant;
 use super::executor_core::StreamSourceCore;
 use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
 use crate::common::rate_limit::limited_chunk_size;
-use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::reader_stream::StreamReaderBuilder;
 use crate::executor::stream_reader::StreamReaderWithPause;
+use crate::executor::{ThrottleType, UpdateMutation};
 use crate::task::LocalBarrierManager;
 
 /// A constant to multiply when calculating the maximum time to wait for a barrier. This is due to
@@ -685,16 +685,17 @@ impl<S: StateStore> SourceExecutor<S> {
                                     },
                                 );
                             }
-                            Mutation::Throttle(actor_to_apply) => {
-                                if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
-                                    && *new_rate_limit != self.rate_limit_rps
+                            Mutation::Throttle { actor_throttle } => {
+                                if let Some(entry) = actor_throttle.get(&self.actor_ctx.id)
+                                    && entry.throttle_type == ThrottleType::Source
+                                    && entry.rate_limit != self.rate_limit_rps
                                 {
                                     tracing::info!(
                                         "updating rate limit from {:?} to {:?}",
                                         self.rate_limit_rps,
-                                        *new_rate_limit
+                                        entry.rate_limit
                                     );
-                                    self.rate_limit_rps = *new_rate_limit;
+                                    self.rate_limit_rps = entry.rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
                                 }

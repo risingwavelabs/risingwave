@@ -41,6 +41,7 @@ use super::{
     get_split_offset_mapping_from_chunk, prune_additional_cols,
 };
 use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::ThrottleType;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
@@ -292,17 +293,18 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
-                                            Mutation::Throttle(actor_to_apply) => {
-                                                if let Some(new_rate_limit) =
-                                                    actor_to_apply.get(&self.actor_ctx.id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                            Mutation::Throttle { actor_throttle } => {
+                                                if let Some(entry) =
+                                                    actor_throttle.get(&self.actor_ctx.id)
+                                                    && entry.throttle_type == ThrottleType::Source
+                                                    && entry.rate_limit != self.rate_limit_rps
                                                 {
                                                     tracing::info!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,
-                                                        *new_rate_limit
+                                                        entry.rate_limit
                                                     );
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                     splits_on_fetch = 0;
                                                 }
                                             }
