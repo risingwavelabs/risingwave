@@ -13,37 +13,43 @@
 // limitations under the License.
 
 use risingwave_common::id::{ActorId, FragmentId};
+use risingwave_pb::id::{ExecutorId, GlobalOperatorId, LocalOperatorId};
 
 /// Generate a globally unique operator id.
-pub fn unique_operator_id(fragment_id: FragmentId, operator_id: u64) -> u64 {
-    assert!(operator_id <= u32::MAX as u64);
-    ((fragment_id.as_raw_id() as u64) << 32) + operator_id
+pub fn unique_operator_id(
+    fragment_id: FragmentId,
+    operator_id: impl Into<LocalOperatorId>,
+) -> GlobalOperatorId {
+    (((fragment_id.as_raw_id() as u64) << 32) + operator_id.into().as_raw_id() as u64).into()
 }
 
 /// Generate a globally unique executor id.
-pub fn unique_executor_id(actor_id: ActorId, operator_id: u64) -> u64 {
-    assert!(operator_id <= u32::MAX as u64);
-    ((actor_id.as_raw_id() as u64) << 32) + operator_id
+pub fn unique_executor_id(
+    actor_id: ActorId,
+    operator_id: impl Into<LocalOperatorId>,
+) -> ExecutorId {
+    (((actor_id.as_raw_id() as u64) << 32) + operator_id.into().as_raw_id() as u64).into()
 }
 
 /// Decompose a unique executor id into actor id and operator id.
-pub fn unique_executor_id_into_parts(unique_executor_id: u64) -> (u32, u32) {
-    let actor_id = (unique_executor_id >> 32) as u32;
-    let operator_id = (unique_executor_id & 0xFFFFFFFF) as u32;
-    (actor_id, operator_id)
+pub fn unique_executor_id_into_parts(unique_executor_id: ExecutorId) -> (ActorId, LocalOperatorId) {
+    let actor_id = (unique_executor_id.as_raw_id() >> 32) as u32;
+    let operator_id = (unique_executor_id.as_raw_id() & 0xFFFFFFFF) as u32;
+    (actor_id.into(), operator_id.into())
 }
 
-pub fn unique_operator_id_into_parts(unique_operator_id: u64) -> (u32, u32) {
-    let fragment_id = (unique_operator_id >> 32) as u32;
-    let operator_id = (unique_operator_id & 0xFFFFFFFF) as u32;
-    (fragment_id, operator_id)
+pub fn unique_operator_id_into_parts(
+    unique_operator_id: GlobalOperatorId,
+) -> (FragmentId, LocalOperatorId) {
+    let fragment_id = (unique_operator_id.as_raw_id() >> 32) as u32;
+    let operator_id = (unique_operator_id.as_raw_id() & 0xFFFFFFFF) as u32;
+    (fragment_id.into(), operator_id.into())
 }
 
 pub fn unique_executor_id_from_unique_operator_id(
     actor_id: ActorId,
-    unique_operator_id: u64,
-) -> u64 {
-    // keep only low-32 bits
-    let unique_operator_id = unique_operator_id & 0xFFFFFFFF;
-    ((actor_id.as_raw_id() as u64) << 32) + unique_operator_id
+    unique_operator_id: GlobalOperatorId,
+) -> ExecutorId {
+    let (_, operator_id) = unique_operator_id_into_parts(unique_operator_id);
+    unique_executor_id(actor_id, operator_id)
 }
