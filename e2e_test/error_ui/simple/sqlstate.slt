@@ -1,0 +1,24 @@
+# SQLSTATE coverage tests (for the error codes we already support, plus 3D000).
+#
+# Requires sqllogictest v0.29.0+ for `statement error (<SQLSTATE>)` syntax.
+
+# Duplicate object -> 42710.
+statement ok
+create table sqlstate_slt_dup(v int);
+
+statement error (42710)
+create table sqlstate_slt_dup(v int);
+
+statement ok
+drop table sqlstate_slt_dup;
+
+# Undefined object -> 42704.
+statement ok
+drop table if exists sqlstate_slt_no_such;
+
+statement error (42704)
+drop table sqlstate_slt_no_such;
+
+# Invalid catalog name -> 3D000.
+statement error (3D000)
+set database to sqlstate_missing_db;
