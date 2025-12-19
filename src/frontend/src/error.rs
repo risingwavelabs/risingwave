@@ -138,7 +138,7 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("Protocol error: {0}")]
-    ProtocolError(String),
+    ProtocolError(#[message] String),
     #[error("Scheduler error: {0}")]
     SchedulerError(
         #[source]
@@ -175,7 +175,7 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("Permission denied: {0}")]
-    PermissionDenied(String),
+    PermissionDenied(#[message] String),
     #[error("Failed to get/set session config: {0}")]
     SessionConfig(
         #[from]

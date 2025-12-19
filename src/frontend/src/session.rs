@@ -103,7 +103,10 @@ use crate::catalog::{
     CatalogError, CatalogErrorInner, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
     check_schema_writable,
 };
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{
+    ErrorCode, Result, RwError, bail_invalid_input_syntax, bail_permission_denied,
+    bail_protocol_error,
+};
 use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
     Portal, PrepareStatement, handle_bind, handle_execute, handle_parse,
@@ -1491,13 +1494,14 @@ pub struct SessionManagerImpl {
 }
 
 impl SessionManager for SessionManagerImpl {
+    type Error = RwError;
     type Session = SessionImpl;
 
     fn create_dummy_session(
         &self,
         database_id: DatabaseId,
         user_id: u32,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    ) -> Result<Arc<Self::Session>> {
         let dummy_addr = Address::Tcp(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
             5691, // port of meta
@@ -1507,10 +1511,7 @@ impl SessionManager for SessionManagerImpl {
         if let Some(user_name) = reader.get_user_name_by_id(user_id) {
             self.connect_inner(database_id, user_name.as_str(), Arc::new(dummy_addr))
         } else {
-            Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Role id {} does not exist", user_id),
-            )))
+            bail_invalid_input_syntax!("Role id {} does not exist", user_id)
         }
     }
 
@@ -1519,18 +1520,10 @@ impl SessionManager for SessionManagerImpl {
         database: &str,
         user_name: &str,
         peer_addr: AddressRef,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    ) -> Result<Arc<Self::Session>> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        let database_id = reader
-            .get_database_by_name(database)
-            .map_err(|_| {
-                Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("database \"{}\" does not exist", database),
-                ))
-            })?
-            .id();
+        let database_id = reader.get_database_by_name(database)?.id();
 
         self.connect_inner(database_id, user_name, peer_addr)
     }
@@ -1601,16 +1594,11 @@ impl SessionManagerImpl {
         database_id: DatabaseId,
         user_name: &str,
         peer_addr: AddressRef,
-    ) -> std::result::Result<Arc<SessionImpl>, BoxedError> {
+    ) -> Result<Arc<SessionImpl>> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
         let (database_name, database_owner) = {
-            let db = reader.get_database_by_id(database_id).map_err(|_| {
-                Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("database \"{}\" does not exist", database_id),
-                ))
-            })?;
+            let db = reader.get_database_by_id(database_id)?;
             (db.name(), db.owner())
         };
 
@@ -1618,17 +1606,11 @@ impl SessionManagerImpl {
         let reader = user_reader.read_guard();
         if let Some(user) = reader.get_user_by_name(user_name) {
             if !user.can_login {
-                return Err(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("User {} is not allowed to login", user_name),
-                )));
+                bail_permission_denied!("User {} is not allowed to login", user_name);
             }
             let has_privilege = user.has_privilege(database_id, AclMode::Connect);
             if !user.is_super && database_owner != user.id && !has_privilege {
-                return Err(Box::new(Error::new(
-                    ErrorKind::PermissionDenied,
-                    "User does not have CONNECT privilege.",
-                )));
+                bail_permission_denied!("User does not have CONNECT privilege.");
             }
 
             // Check HBA configuration for LDAP authentication
@@ -1651,16 +1633,13 @@ impl SessionManagerImpl {
 
             // TODO: adding `FATAL` message support for no matching HBA entry.
             let Some(hba_entry_opt) = hba_entry_opt else {
-                return Err(Box::new(Error::new(
-                    ErrorKind::PermissionDenied,
-                    format!(
-                        "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
-                    ),
-                )));
+                bail_permission_denied!(
+                    "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
+                );
             };
 
             // Determine the user authenticator based on the user's auth info.
-            let authenticator_by_info = || -> std::result::Result<UserAuthenticator, BoxedError> {
+            let authenticator_by_info = || -> Result<UserAuthenticator> {
                 let authenticator = match &user.auth_info {
                     None => UserAuthenticator::None,
                     Some(auth_info) => match auth_info.encryption_type() {
@@ -1684,13 +1663,10 @@ impl SessionManagerImpl {
                             cluster_id: self.env.meta_client().cluster_id().to_owned(),
                         },
                         _ => {
-                            return Err(Box::new(Error::new(
-                                ErrorKind::Unsupported,
-                                format!(
-                                    "Unsupported auth type: {}",
-                                    auth_info.encryption_type().as_str_name()
-                                ),
-                            )));
+                            bail_protocol_error!(
+                                "Unsupported auth type: {}",
+                                auth_info.encryption_type().as_str_name()
+                            );
                         }
                     },
                 };
@@ -1715,10 +1691,9 @@ impl SessionManagerImpl {
                     UserAuthenticator::Ldap(user_name.to_owned(), hba_entry_opt.clone())
                 }
                 _ => {
-                    return Err(Box::new(Error::new(
-                        ErrorKind::PermissionDenied,
-                        format!("password authentication failed for user \"{user_name}\""),
-                    )));
+                    bail_permission_denied!(
+                        "password authentication failed for user \"{user_name}\""
+                    );
                 }
             };
 
@@ -1742,15 +1717,13 @@ impl SessionManagerImpl {
 
             Ok(session_impl)
         } else {
-            Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Role {} does not exist", user_name),
-            )))
+            bail_invalid_input_syntax!("Role {} does not exist", user_name);
         }
     }
 }
 
 impl Session for SessionImpl {
+    type Error = RwError;
     type Portal = Portal;
     type PreparedStatement = PrepareStatement;
     type ValuesStream = PgResponseStream;
@@ -1761,7 +1734,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         stmt: Statement,
         format: Format,
-    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+    ) -> Result<PgResponse<PgResponseStream>> {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
@@ -1783,7 +1756,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         statement: Option<Statement>,
         params_types: Vec<Option<DataType>>,
-    ) -> std::result::Result<PrepareStatement, BoxedError> {
+    ) -> Result<PrepareStatement> {
         Ok(if let Some(statement) = statement {
             handle_parse(self, statement, params_types).await?
         } else {
@@ -1797,7 +1770,7 @@ impl Session for SessionImpl {
         params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
-    ) -> std::result::Result<Portal, BoxedError> {
+    ) -> Result<Portal> {
         Ok(handle_bind(
             prepare_statement,
             params,
@@ -1806,10 +1779,7 @@ impl Session for SessionImpl {
         )?)
     }
 
-    async fn execute(
-        self: Arc<Self>,
-        portal: Portal,
-    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+    async fn execute(self: Arc<Self>, portal: Portal) -> Result<PgResponse<PgResponseStream>> {
         let rsp = handle_execute(self, portal).await?;
         Ok(rsp)
     }
@@ -1817,7 +1787,7 @@ impl Session for SessionImpl {
     fn describe_statement(
         self: Arc<Self>,
         prepare_statement: PrepareStatement,
-    ) -> std::result::Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
+    ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>)> {
         Ok(match prepare_statement {
             PrepareStatement::Empty => (vec![], vec![]),
             PrepareStatement::Prepared(prepare_statement) => (
@@ -1831,15 +1801,13 @@ impl Session for SessionImpl {
         })
     }
 
-    fn describe_portal(
-        self: Arc<Self>,
-        portal: Portal,
-    ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
+    fn describe_portal(self: Arc<Self>, portal: Portal) -> Result<Vec<PgFieldDescriptor>> {
         match portal {
             Portal::Empty => Ok(vec![]),
             Portal::Portal(portal) => {
                 let mut columns = infer(Some(portal.bound_result.bound), portal.statement)?;
-                let formats = FormatIterator::new(&portal.result_formats, columns.len())?;
+                let formats = FormatIterator::new(&portal.result_formats, columns.len())
+                    .map_err(|e| RwError::from(ErrorCode::ProtocolError(e)))?;
                 columns.iter_mut().zip_eq_fast(formats).for_each(|(c, f)| {
                     if f == Format::Binary {
                         c.set_to_binary()
@@ -1851,11 +1819,11 @@ impl Session for SessionImpl {
         }
     }
 
-    fn get_config(&self, key: &str) -> std::result::Result<String, BoxedError> {
+    fn get_config(&self, key: &str) -> Result<String> {
         self.config().get(key).map_err(Into::into)
     }
 
-    fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {
+    fn set_config(&self, key: &str, value: String) -> Result<String> {
         Self::set_config(self, key, value).map_err(Into::into)
     }
 

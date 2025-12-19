@@ -674,13 +674,13 @@ where
         let session = self
             .session_mgr
             .connect(&db_name, &user_name, self.peer_addr.clone())
-            .map_err(PsqlError::StartupError)?;
+            .map_err(|e| PsqlError::StartupError(e.into()))?;
 
         let application_name = msg.config.get("application_name");
         if let Some(application_name) = application_name {
             session
                 .set_config("application_name", application_name.clone())
-                .map_err(PsqlError::StartupError)?;
+                .map_err(|e| PsqlError::StartupError(e.into()))?;
         }
 
         match session.user_authenticator() {
@@ -693,7 +693,11 @@ where
                     .write_no_flush(BeMessage::BackendKeyData(session.id()))?;
 
                 self.stream.write_no_flush(BeMessage::ParameterStatus(
-                    BeParameterStatusMessage::TimeZone(&session.get_config("timezone")?),
+                    BeParameterStatusMessage::TimeZone(
+                        &session
+                            .get_config("timezone")
+                            .map_err(|e| PsqlError::StartupError(e.into()))?,
+                    ),
                 ))?;
                 self.stream
                     .write_parameter_status_msg_no_flush(&ParameterStatus {
@@ -723,8 +727,11 @@ where
         let authenticator = session.user_authenticator();
         authenticator.authenticate(&msg.password).await?;
         self.stream.write_no_flush(BeMessage::AuthenticationOk)?;
+        let timezone = session
+            .get_config("timezone")
+            .map_err(|e| PsqlError::StartupError(e.into()))?;
         self.stream.write_no_flush(BeMessage::ParameterStatus(
-            BeParameterStatusMessage::TimeZone(&session.get_config("timezone")?),
+            BeParameterStatusMessage::TimeZone(&timezone),
         ))?;
         self.stream
             .write_parameter_status_msg_no_flush(&ParameterStatus::default())?;
@@ -794,7 +801,7 @@ where
                 .write_no_flush(BeMessage::NoticeResponse(&notice))?;
         }
 
-        let mut res = res.map_err(PsqlError::SimpleQueryError)?;
+        let mut res = res.map_err(|e| PsqlError::SimpleQueryError(e.into()))?;
 
         for notice in res.notices() {
             self.stream
@@ -964,7 +971,7 @@ where
         let prepare_statement = session
             .parse(stmt, param_types)
             .await
-            .map_err(PsqlError::ExtendedPrepareError)?;
+            .map_err(|e| PsqlError::ExtendedPrepareError(e.into()))?;
 
         if statement_name.is_empty() {
             self.unnamed_prepare_statement.replace(prepare_statement);
@@ -1006,7 +1013,7 @@ where
 
         let portal = session
             .bind(prepare_statement, msg.params, param_formats, result_formats)
-            .map_err(PsqlError::Uncategorized)?;
+            .map_err(|e| PsqlError::Uncategorized(e.into()))?;
 
         if portal_name.is_empty() {
             self.result_cache.remove(&portal_name);
@@ -1057,7 +1064,7 @@ where
                 let _exec_context_guard = session.init_exec_context(truncated_sql.into());
                 let result = session.clone().execute(portal).await;
 
-                let pg_response = result.map_err(PsqlError::ExtendedExecuteError)?;
+                let pg_response = result.map_err(|e| PsqlError::ExtendedExecuteError(e.into()))?;
                 let mut result_cache = ResultCache::new(pg_response);
                 let is_consume_completed =
                     result_cache.consume::<S>(row_max, &mut self.stream).await?;
@@ -1085,7 +1092,7 @@ where
                 .clone()
                 .unwrap()
                 .describe_statement(prepare_statement)
-                .map_err(PsqlError::Uncategorized)?;
+                .map_err(|e| PsqlError::Uncategorized(e.into()))?;
             self.stream.write_no_flush(BeMessage::ParameterDescription(
                 &param_types.iter().map(|t| t.to_oid()).collect_vec(),
             ))?;
@@ -1103,7 +1110,7 @@ where
 
             let row_descriptions = session
                 .describe_portal(portal)
-                .map_err(PsqlError::Uncategorized)?;
+                .map_err(|e| PsqlError::Uncategorized(e.into()))?;
 
             if row_descriptions.is_empty() {
                 // According https://www.postgresql.org/docs/current/protocol-flow.html#:~:text=The%20response%20is%20a%20RowDescri[…]0a%20query%20that%20will%20return%20rows%3B,
