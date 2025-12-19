@@ -256,21 +256,65 @@ script = '''
 #!/usr/bin/env bash
 set -e
 
+LOG_SIZE_LIMIT=8192
+LOG_LINE_DUPLICATE_LIMIT=1000
+TMP_FILE=$(mktemp)
+
+bye() {
+  local status=$?
+  if [[ $status -eq 2 ]]; then
+    echo "Please disable unnecessary logs by doing following:"
+    echo "- Use DEBUG or TRACE level for logs that are debugging-oriented."
+    echo "- Use LogSuppressor to apply rate limit to verbose logs."
+  fi
+  if [[ $status -ne 0 ]]; then
+    echo "You may download the log files from the \"Artifacts\" tab."
+  fi
+  rm -f "${TMP_FILE}"
+  exit $status
+}
+trap bye EXIT
+
 echo "~~~ Check logs"
+echo "Log file sizes:"
 du -ah ${PREFIX_LOG}
 
+# Check if there is any panic in log.
 for out_file in ${PREFIX_LOG}/*.log
 do
   if grep "panicked at" "$out_file" -C 100; then
-    echo "$(tput setaf 1)\"panicked at\" found in $out_file$(tput sgr0), please check if there's any bugs in this PR."
-    echo "You may find \"risedev-logs\" artifacts and download logs after all workflows finish."
+    echo "$(tput setaf 1)ERROR: \"panicked at\" found in $out_file$(tput sgr0). Please check if there's any bugs in this PR."
     exit 1
   fi
 done
 
-if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > 8192 )) ; then
-    echo "$(tput setaf 1)ERROR: total log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0) Please disable unnecessary logs."
-    exit 1
+# Check if there are too many duplicated lines in log.
+log_files=( "${PREFIX_LOG}"/*.log )
+if [ -e "${log_files[0]}" ]; then
+  # Extract timestamped lines, drop empties, and normalize strings/numbers to spot repeated patterns.
+  sed -En 's/^[0-9]{4}-[0-9]{2}-[0-9]{2}[T ][0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?(Z|[+-][0-9]{2}:[0-9]{2})?[[:space:]]+//p' "${log_files[@]}" \
+    | awk 'NF { print }' \
+    | perl -pe 'BEGIN { $ph = "<...>"; } s/"([^"\\]|\\.)*"/$ph/g; s/(?<![[:alnum:]_])-?[0-9]+(\.[0-9]+)?(?![[:alnum:]_])/$ph/g' \
+    > "${TMP_FILE}"
+
+  total_lines=$(wc -l < "${TMP_FILE}")
+  if [ "$total_lines" -gt 0 ]; then
+    top_duplicates=$(sort "${TMP_FILE}" | uniq -c | sort -nr | head -30)
+    echo "Top duplicated lines:"
+    echo "(Note: DEBUG/TRACE logs are shown here but won't fail the check.)"
+    echo "$top_duplicates"
+    max_count=$(echo "$top_duplicates" | awk '{count=$1; $1=""; sub(/^ /,""); if ($1 !~ /^DEBUG/) { print count; exit }}')
+    if [ "${max_count:-0}" -gt ${LOG_LINE_DUPLICATE_LIMIT} ]; then
+      echo "$(tput setaf 1)ERROR: non-DEBUG/TRACE log line repeated too many times (up to ${max_count}).$(tput sgr0)"
+      exit 2
+    fi
+  fi
+fi
+
+# Check if the total log size is too large.
+if (( "$(du -sk ${PREFIX_LOG} | cut -f1)" > ${LOG_SIZE_LIMIT} )) ; then
+  echo "$(tput setaf 1)ERROR: total log size is significantly large ($(du -sh ${PREFIX_LOG} | cut -f1)).$(tput sgr0)"
+  exit 2
 fi
 '''
 
