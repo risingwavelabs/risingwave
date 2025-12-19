@@ -513,6 +513,11 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
         }
     }
 
+    #[allow(dead_code)]
+    pub fn update_state_table_watermark(&mut self, watermark: ScalarImpl) {
+        self.state.table.update_watermark(watermark.clone());
+    }
+
     /// Take the state for the given `key` out of the hash table and return it. One **MUST** call
     /// `update_state` after some operations to put the state back.
     ///
