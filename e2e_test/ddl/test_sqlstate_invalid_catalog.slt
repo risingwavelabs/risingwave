@@ -1,0 +1,28 @@
+# Test SQLSTATE 3D000 (Invalid Catalog Name) for database not found errors
+
+# Try to connect to a non-existent database using USE
+# This should return SQLSTATE 3D000 (Invalid Catalog Name)
+statement error (3D000)
+use non_existent_database;
+
+# Try to drop a non-existent database
+# This should return SQLSTATE 3D000 (Invalid Catalog Name)
+statement error (3D000)
+drop database non_existent_database;
+
+# Create a database and then drop it
+statement ok
+create database test_db;
+
+statement ok
+drop database test_db;
+
+# Try to drop the same database again
+# This should return SQLSTATE 3D000 (Invalid Catalog Name)
+statement error (3D000)
+drop database test_db;
+
+# Try to use a database that was just dropped
+# This should return SQLSTATE 3D000 (Invalid Catalog Name)
+statement error (3D000)
+use test_db;

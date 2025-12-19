@@ -129,8 +129,13 @@ impl CatalogError {
     /// Provide the Postgres error code for the error.
     fn provide_postgres_error_code(&self, request: &mut std::error::Request<'_>) {
         match self.inner() {
-            CatalogErrorInner::NotFound { .. } => {
-                request.provide_value(PostgresErrorCode::UndefinedObject);
+            CatalogErrorInner::NotFound { object_type, .. } => {
+                // Return InvalidCatalogName (3D000) for database not found
+                if *object_type == "database" {
+                    request.provide_value(PostgresErrorCode::InvalidCatalogName);
+                } else {
+                    request.provide_value(PostgresErrorCode::UndefinedObject);
+                }
             }
             CatalogErrorInner::Duplicated { .. } => {
                 request.provide_value(PostgresErrorCode::DuplicateObject);
