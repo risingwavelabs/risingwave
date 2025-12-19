@@ -135,6 +135,7 @@ pub enum ErrorCode {
     CatalogError(
         #[source]
         #[backtrace]
+        #[message]
         BoxedError,
     ),
     #[error("Protocol error: {0}")]

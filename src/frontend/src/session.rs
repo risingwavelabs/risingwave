@@ -104,8 +104,7 @@ use crate::catalog::{
     check_schema_writable,
 };
 use crate::error::{
-    ErrorCode, Result, RwError, bail_invalid_input_syntax, bail_permission_denied,
-    bail_protocol_error,
+    ErrorCode, Result, RwError, bail_catalog_error, bail_permission_denied, bail_protocol_error,
 };
 use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
@@ -1511,7 +1510,7 @@ impl SessionManager for SessionManagerImpl {
         if let Some(user_name) = reader.get_user_name_by_id(user_id) {
             self.connect_inner(database_id, user_name.as_str(), Arc::new(dummy_addr))
         } else {
-            bail_invalid_input_syntax!("Role id {} does not exist", user_id)
+            bail_catalog_error!("Role id {} does not exist", user_id)
         }
     }
 
@@ -1717,7 +1716,7 @@ impl SessionManagerImpl {
 
             Ok(session_impl)
         } else {
-            bail_invalid_input_syntax!("Role {} does not exist", user_name);
+            bail_catalog_error!("Role {} does not exist", user_name);
         }
     }
 }

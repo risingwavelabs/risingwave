@@ -468,7 +468,12 @@ where
 
                     PsqlError::StartupError(_) | PsqlError::PasswordError => {
                         self.stream
-                            .write_no_flush(BeMessage::ErrorResponse(&e))
+                            .write_no_flush(BeMessage::ErrorResponse {
+                                error: &e,
+                                // At this time we're not in a session, use compact error message for
+                                // better alignment with Postgres' UI.
+                                pretty: false,
+                            })
                             .ok()?;
                         let _ = self.stream.flush().await;
                         return None;
@@ -476,14 +481,20 @@ where
 
                     PsqlError::SimpleQueryError(_) | PsqlError::ServerThrottle(_) => {
                         self.stream
-                            .write_no_flush(BeMessage::ErrorResponse(&e))
+                            .write_no_flush(BeMessage::ErrorResponse {
+                                error: &e,
+                                pretty: true,
+                            })
                             .ok()?;
                         self.ready_for_query().ok()?;
                     }
 
                     PsqlError::IdleInTxnTimeout | PsqlError::Panic(_) => {
                         self.stream
-                            .write_no_flush(BeMessage::ErrorResponse(&e))
+                            .write_no_flush(BeMessage::ErrorResponse {
+                                error: &e,
+                                pretty: true,
+                            })
                             .ok()?;
                         let _ = self.stream.flush().await;
 
@@ -498,7 +509,10 @@ where
                     | PsqlError::ExtendedPrepareError(_)
                     | PsqlError::ExtendedExecuteError(_) => {
                         self.stream
-                            .write_no_flush(BeMessage::ErrorResponse(&e))
+                            .write_no_flush(BeMessage::ErrorResponse {
+                                error: &e,
+                                pretty: true,
+                            })
                             .ok()?;
                     }
                 }
