@@ -494,7 +494,6 @@ impl StreamActorManager {
             .developer
             .enable_actor_tokio_metrics
         {
-            tracing::info!("Tokio metrics are enabled.");
             let streaming_metrics = self.streaming_metrics.clone();
             let actor_monitor_task = self.runtime.spawn(async move {
                 let metrics = streaming_metrics.new_actor_metrics(actor_id, fragment_id);
