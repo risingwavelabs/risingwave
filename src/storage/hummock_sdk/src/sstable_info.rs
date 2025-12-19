@@ -306,6 +306,11 @@ impl VnodeRangeInfo {
     pub fn get_vnode_key_range(&self, vnode: VirtualNode) -> Option<&KeyRange> {
         self.vnode_key_ranges.get(&vnode)
     }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn vnode_key_ranges(&self) -> &BTreeMap<VirtualNode, KeyRange> {
+        &self.vnode_key_ranges
+    }
 }
 
 impl SstableInfo {
