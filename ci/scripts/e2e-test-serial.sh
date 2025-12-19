@@ -93,7 +93,7 @@ risedev slt -p 4566 -d dev './e2e_test/dashboard/**/*.slt'
 cluster_stop
 
 echo "--- e2e, $mode, streaming"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn" \
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn,risingwave_storage::hummock::compactor=error" \
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}" --label "serial"
