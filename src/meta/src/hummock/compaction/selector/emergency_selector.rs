@@ -41,7 +41,7 @@ impl CompactionSelector for EmergencySelector {
             group.compaction_config.clone(),
             developer_config.clone(),
         );
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let ctx = dynamic_level_core.calculate_level_base_size(levels, level_handlers);
         let picker = EmergencyCompactionPicker::new(
             ctx.base_level,
             group.compaction_config.clone(),

@@ -518,6 +518,7 @@ pub fn trigger_lsm_stat(
     compaction_config: Arc<CompactionConfig>,
     levels: &Levels,
     compaction_group_id: CompactionGroupId,
+    level_handlers: &[crate::hummock::level_handler::LevelHandler],
 ) {
     let group_label = compaction_group_id.to_string();
     // compact_pending_bytes
@@ -526,7 +527,7 @@ pub fn trigger_lsm_stat(
         compaction_config.clone(),
         Arc::new(CompactionDeveloperConfig::default()),
     );
-    let ctx = dynamic_level_core.calculate_level_base_size(levels);
+    let ctx = dynamic_level_core.calculate_level_base_size(levels, level_handlers);
     {
         let compact_pending_bytes_needed =
             dynamic_level_core.compact_pending_bytes_needed_with_ctx(levels, &ctx);

@@ -215,6 +215,14 @@ enum HummockCommands {
         enable_optimize_l0_interval_selection: Option<bool>,
         #[clap(long)]
         vnode_aligned_level_size_threshold: Option<u64>,
+        #[clap(long)]
+        enable_score_v2: Option<bool>,
+        #[clap(long)]
+        level0_non_overlapping_file_size_threshold: Option<u64>,
+        #[clap(long)]
+        level0_non_overlapping_file_count_threshold: Option<u32>,
+        #[clap(long)]
+        level0_non_overlapping_level_count_threshold: Option<u32>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -665,6 +673,10 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
             vnode_aligned_level_size_threshold,
+            enable_score_v2,
+            level0_non_overlapping_file_size_threshold,
+            level0_non_overlapping_file_count_threshold,
+            level0_non_overlapping_level_count_threshold,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -705,6 +717,10 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_stop_write_threshold_max_size,
                     enable_optimize_l0_interval_selection,
                     vnode_aligned_level_size_threshold,
+                    enable_score_v2,
+                    level0_non_overlapping_file_size_threshold,
+                    level0_non_overlapping_file_count_threshold,
+                    level0_non_overlapping_level_count_threshold,
                 ),
             )
             .await?

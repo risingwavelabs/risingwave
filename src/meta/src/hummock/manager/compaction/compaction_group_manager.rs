@@ -623,6 +623,18 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
                 target.vnode_aligned_level_size_threshold =
                     (*c != u64::MIN && *c != u64::MAX).then_some(*c);
             }
+            MutableConfig::EnableScoreV2(c) => {
+                target.enable_score_v2 = Some(*c);
+            }
+            MutableConfig::Level0NonOverlappingFileSizeThreshold(c) => {
+                target.level0_non_overlapping_file_size_threshold = Some(*c);
+            }
+            MutableConfig::Level0NonOverlappingFileCountThreshold(c) => {
+                target.level0_non_overlapping_file_count_threshold = Some(*c);
+            }
+            MutableConfig::Level0NonOverlappingLevelCountThreshold(c) => {
+                target.level0_non_overlapping_level_count_threshold = Some(*c);
+            }
         }
     }
 }

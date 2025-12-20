@@ -48,7 +48,7 @@ impl CompactionSelector for TtlCompactionSelector {
         } = context;
         let dynamic_level_core =
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
-        let ctx = dynamic_level_core.calculate_level_base_size(levels);
+        let ctx = dynamic_level_core.calculate_level_base_size(levels, level_handlers);
         let picker = TtlReclaimCompactionPicker::new(table_id_to_options);
         let state = self.state.entry(group.group_id).or_default();
         let compaction_input = picker.pick_compaction(levels, level_handlers, state)?;

@@ -535,6 +535,14 @@ pub struct CompactionConfig {
     pub enable_optimize_l0_interval_selection: bool,
     #[serde(default = "default::compaction_config::vnode_aligned_level_size_threshold")]
     pub vnode_aligned_level_size_threshold: Option<u64>,
+    #[serde(default = "default::compaction_config::enable_score_v2")]
+    pub enable_score_v2: bool,
+    #[serde(default = "default::compaction_config::level0_non_overlapping_file_size_threshold")]
+    pub level0_non_overlapping_file_size_threshold: u64,
+    #[serde(default = "default::compaction_config::level0_non_overlapping_file_count_threshold")]
+    pub level0_non_overlapping_file_count_threshold: u32,
+    #[serde(default = "default::compaction_config::level0_non_overlapping_level_count_threshold")]
+    pub level0_non_overlapping_level_count_threshold: u32,
 }
 
 pub mod default {
@@ -794,12 +802,12 @@ pub mod default {
         const DEFAULT_TARGET_FILE_SIZE_BASE: u64 = 32 * MB;
         // 32MB
         const DEFAULT_MAX_SUB_COMPACTION: u32 = 4;
-        const DEFAULT_LEVEL_MULTIPLIER: u64 = 5;
+        const DEFAULT_LEVEL_MULTIPLIER: u64 = 10;
         const DEFAULT_MAX_SPACE_RECLAIM_BYTES: u64 = 512 * MB; // 512MB;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_SUB_LEVEL_NUMBER: u64 = 300;
         const DEFAULT_MAX_COMPACTION_FILE_COUNT: u64 = 100;
         const DEFAULT_MIN_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 3;
-        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 12;
+        const DEFAULT_MIN_OVERLAPPING_SUB_LEVEL_COMPACT_LEVEL_COUNT: u32 = 8;
         const DEFAULT_TOMBSTONE_RATIO_PERCENT: u32 = 40;
         const DEFAULT_EMERGENCY_PICKER: bool = true;
         const DEFAULT_MAX_LEVEL: u32 = 6;
@@ -811,6 +819,9 @@ pub mod default {
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
         const DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD: Option<u64> = None;
+        const DEFAULT_LEVEL0_NON_OVERLAPPING_FILE_SIZE_THRESHOLD: u64 = 8 * 1024 * MB; // 8GB
+        const DEFAULT_LEVEL0_NON_OVERLAPPING_FILE_COUNT_THRESHOLD: u32 = 64;
+        const DEFAULT_LEVEL0_NON_OVERLAPPING_LEVEL_COUNT_THRESHOLD: u32 = 9;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -915,11 +926,27 @@ pub mod default {
         }
 
         pub fn enable_optimize_l0_interval_selection() -> bool {
+            true
+        }
+
+        pub fn enable_score_v2() -> bool {
             false
         }
 
         pub fn vnode_aligned_level_size_threshold() -> Option<u64> {
             DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD
+        }
+
+        pub fn level0_non_overlapping_file_size_threshold() -> u64 {
+            DEFAULT_LEVEL0_NON_OVERLAPPING_FILE_SIZE_THRESHOLD
+        }
+
+        pub fn level0_non_overlapping_file_count_threshold() -> u32 {
+            DEFAULT_LEVEL0_NON_OVERLAPPING_FILE_COUNT_THRESHOLD
+        }
+
+        pub fn level0_non_overlapping_level_count_threshold() -> u32 {
+            DEFAULT_LEVEL0_NON_OVERLAPPING_LEVEL_COUNT_THRESHOLD
         }
     }
 }
