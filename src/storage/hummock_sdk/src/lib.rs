@@ -42,6 +42,7 @@ pub mod change_log;
 pub mod compact;
 pub mod compact_task;
 pub mod compaction_group;
+pub mod filter_utils;
 pub mod key;
 pub mod key_range;
 pub mod level;

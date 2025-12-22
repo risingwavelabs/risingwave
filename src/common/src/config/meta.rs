@@ -518,6 +518,8 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_size: u64,
     #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
     pub enable_optimize_l0_interval_selection: bool,
+    #[serde(default = "default::compaction_config::max_kv_count_for_xor16")]
+    pub max_kv_count_for_xor16: Option<u64>,
 }
 
 pub mod default {
@@ -785,6 +787,7 @@ pub mod default {
         const DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION: u32 = 256;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
+        pub const DEFAULT_MAX_KV_COUNT_FOR_XOR16: u64 = 256 * 1024;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -890,6 +893,10 @@ pub mod default {
 
         pub fn enable_optimize_l0_interval_selection() -> bool {
             false
+        }
+
+        pub fn max_kv_count_for_xor16() -> Option<u64> {
+            Some(DEFAULT_MAX_KV_COUNT_FOR_XOR16)
         }
     }
 }

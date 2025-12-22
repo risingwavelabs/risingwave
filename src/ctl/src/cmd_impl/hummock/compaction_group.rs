@@ -75,6 +75,7 @@ pub fn build_compaction_config_vec(
     level0_stop_write_threshold_max_sst_count: Option<u32>,
     level0_stop_write_threshold_max_size: Option<u64>,
     enable_optimize_l0_interval_selection: Option<bool>,
+    max_kv_count_for_xor16: Option<u64>,
 ) -> Vec<MutableConfig> {
     let mut configs = vec![];
     if let Some(c) = max_bytes_for_level_base {
@@ -154,6 +155,9 @@ pub fn build_compaction_config_vec(
     }
     if let Some(c) = enable_optimize_l0_interval_selection {
         configs.push(MutableConfig::EnableOptimizeL0IntervalSelection(c))
+    }
+    if let Some(c) = max_kv_count_for_xor16 {
+        configs.push(MutableConfig::MaxKvCountForXor16(c))
     }
 
     configs

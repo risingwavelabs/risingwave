@@ -76,6 +76,8 @@ pub struct CompactTask {
     pub table_schemas: BTreeMap<u32, PbTableSchema>,
 
     pub max_sub_compaction: u32,
+
+    pub max_kv_count_for_xor16: Option<u64>,
 }
 
 impl CompactTask {
@@ -213,6 +215,19 @@ impl CompactTask {
             compaction_group_version_id_expected,
         )
     }
+
+    /// Determines whether to use block-based filter for this compaction task.
+    /// Returns true if the total key count exceeds the configured threshold.
+    pub fn should_use_block_based_filter(&self) -> bool {
+        let kv_count = self
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|sst| sst.total_key_count)
+            .sum::<u64>();
+
+        crate::filter_utils::is_kv_count_too_large_for_xor16(kv_count, self.max_kv_count_for_xor16)
+    }
 }
 
 pub fn is_compaction_task_expired(
@@ -281,6 +296,7 @@ impl From<PbCompactTask> for CompactTask {
             table_schemas: pb_compact_task.table_schemas,
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
+            max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
         }
     }
 }
@@ -344,6 +360,7 @@ impl From<&PbCompactTask> for CompactTask {
             table_schemas: pb_compact_task.table_schemas.clone(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
+            max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
         }
     }
 }
@@ -397,6 +414,7 @@ impl From<CompactTask> for PbCompactTask {
             table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
+            max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
         }
     }
 }
@@ -450,6 +468,7 @@ impl From<&CompactTask> for PbCompactTask {
             table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
+            max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
         }
     }
 }
