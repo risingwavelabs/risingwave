@@ -15,7 +15,7 @@
 use core::fmt::Formatter;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicI32, AtomicU32, AtomicUsize, Ordering};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, RwLock, RwLockWriteGuard};
 
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
@@ -40,21 +40,21 @@ pub struct OptimizerContext {
     /// Explain options
     explain_options: ExplainOptions,
     /// Store the trace of optimizer
-    optimizer_trace: Mutex<Vec<String>>,
+    optimizer_trace: RwLock<Vec<String>>,
     /// Store the optimized logical plan of optimizer
-    logical_explain: Mutex<Option<String>>,
+    logical_explain: RwLock<Option<String>>,
     /// Store options or properties from the `with` clause
     with_options: WithOptions,
     /// Store the Session Timezone and whether it was used.
-    session_timezone: Mutex<SessionTimezone>,
+    session_timezone: RwLock<SessionTimezone>,
     /// Total number of optimization rules have been applied.
-    total_rule_applied: Mutex<usize>,
+    total_rule_applied: RwLock<usize>,
     /// Store the configs can be overwritten in with clause
     /// if not specified, use the value from session variable.
     overwrite_options: OverwriteOptions,
     /// Store the mapping between `share_id` and the corresponding
     /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
-    rcte_cache: Mutex<HashMap<ShareId, PlanRef>>,
+    rcte_cache: RwLock<HashMap<ShareId, PlanRef>>,
 
     /// Last assigned plan node ID.
     last_plan_node_id: AtomicI32,
@@ -84,7 +84,7 @@ impl OptimizerContext {
 
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
     pub fn new(mut handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
-        let session_timezone = Mutex::new(SessionTimezone::new(
+        let session_timezone = RwLock::new(SessionTimezone::new(
             handler_args.session.config().timezone(),
         ));
         let overwrite_options = OverwriteOptions::new(&mut handler_args);
@@ -93,13 +93,13 @@ impl OptimizerContext {
             sql: handler_args.sql,
             normalized_sql: handler_args.normalized_sql,
             explain_options,
-            optimizer_trace: Mutex::new(vec![]),
-            logical_explain: Mutex::new(None),
+            optimizer_trace: RwLock::new(vec![]),
+            logical_explain: RwLock::new(None),
             with_options: handler_args.with_options,
             session_timezone,
-            total_rule_applied: Mutex::new(0),
+            total_rule_applied: RwLock::new(0),
             overwrite_options,
-            rcte_cache: Mutex::new(HashMap::new()),
+            rcte_cache: RwLock::new(HashMap::new()),
 
             last_plan_node_id: AtomicI32::new(RESERVED_ID_NUM.into()),
             last_correlated_id: AtomicU32::new(0),
@@ -117,13 +117,13 @@ impl OptimizerContext {
             sql: Arc::from(""),
             normalized_sql: "".to_owned(),
             explain_options: ExplainOptions::default(),
-            optimizer_trace: Mutex::new(vec![]),
-            logical_explain: Mutex::new(None),
+            optimizer_trace: RwLock::new(vec![]),
+            logical_explain: RwLock::new(None),
             with_options: Default::default(),
-            session_timezone: Mutex::new(SessionTimezone::new("UTC".into())),
-            total_rule_applied: Mutex::new(0),
+            session_timezone: RwLock::new(SessionTimezone::new("UTC".into())),
+            total_rule_applied: RwLock::new(0),
             overwrite_options: OverwriteOptions::default(),
-            rcte_cache: Mutex::new(HashMap::new()),
+            rcte_cache: RwLock::new(HashMap::new()),
 
             last_plan_node_id: AtomicI32::new(0),
             last_correlated_id: AtomicU32::new(0),
@@ -179,11 +179,11 @@ impl OptimizerContext {
     }
 
     pub fn add_rule_applied(&self, num: usize) {
-        *self.total_rule_applied.lock().unwrap() += num;
+        *self.total_rule_applied.write().unwrap() += num;
     }
 
     pub fn total_rule_applied(&self) -> usize {
-        *self.total_rule_applied.lock().unwrap()
+        *self.total_rule_applied.read().unwrap()
     }
 
     pub fn is_explain_verbose(&self) -> bool {
@@ -200,10 +200,10 @@ impl OptimizerContext {
 
     pub fn trace(&self, str: impl Into<String>) {
         // If explain type is logical, do not store the trace for any optimizations beyond logical.
-        if self.is_explain_logical() && self.logical_explain.lock().unwrap().is_some() {
+        if self.is_explain_logical() && self.logical_explain.read().unwrap().is_some() {
             return;
         }
-        let mut optimizer_trace = self.optimizer_trace.lock().unwrap();
+        let mut optimizer_trace = self.optimizer_trace.write().unwrap();
         let string = str.into();
         tracing::info!(target: "explain_trace", "\n{}", string);
         optimizer_trace.push(string);
@@ -227,16 +227,16 @@ impl OptimizerContext {
     pub fn may_store_explain_logical(&self, plan: &LogicalPlanRef) {
         if self.is_explain_logical() {
             let str = self.explain_plan_impl(plan);
-            *self.logical_explain.lock().unwrap() = Some(str);
+            *self.logical_explain.write().unwrap() = Some(str);
         }
     }
 
     pub fn take_logical(&self) -> Option<String> {
-        self.logical_explain.lock().unwrap().take()
+        self.logical_explain.write().unwrap().take()
     }
 
     pub fn take_trace(&self) -> Vec<String> {
-        self.optimizer_trace.lock().unwrap().drain(..).collect()
+        self.optimizer_trace.write().unwrap().drain(..).collect()
     }
 
     pub fn with_options(&self) -> &WithOptions {
@@ -261,20 +261,20 @@ impl OptimizerContext {
         &self.normalized_sql
     }
 
-    pub fn session_timezone(&self) -> MutexGuard<'_, SessionTimezone> {
-        self.session_timezone.lock().unwrap()
+    pub fn session_timezone(&self) -> RwLockWriteGuard<'_, SessionTimezone> {
+        self.session_timezone.write().unwrap()
     }
 
     pub fn get_session_timezone(&self) -> String {
-        self.session_timezone.lock().unwrap().timezone()
+        self.session_timezone.read().unwrap().timezone()
     }
 
     pub fn get_rcte_cache_plan(&self, id: &ShareId) -> Option<PlanRef> {
-        self.rcte_cache.lock().unwrap().get(id).cloned()
+        self.rcte_cache.read().unwrap().get(id).cloned()
     }
 
     pub fn insert_rcte_cache_plan(&self, id: ShareId, plan: PlanRef) {
-        self.rcte_cache.lock().unwrap().insert(id, plan);
+        self.rcte_cache.write().unwrap().insert(id, plan);
     }
 }
 
