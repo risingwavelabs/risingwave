@@ -18,7 +18,7 @@ mod mock_catalog;
 mod storage_catalog;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex, OnceLock};
 
 use ::iceberg::io::{
     S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
@@ -26,6 +26,7 @@ use ::iceberg::io::{
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, CatalogBuilder, TableIdent};
 use anyhow::{Context, anyhow};
+use iceberg::io::object_cache::ObjectCache;
 use iceberg::io::{
     ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT,
     GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
@@ -39,13 +40,14 @@ use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 use serde_with::serde_as;
 use url::Url;
+use uuid::Uuid;
 use with_options::WithOptions;
 
 use crate::connector_common::common::DISABLE_DEFAULT_CREDENTIAL;
 use crate::connector_common::iceberg::storage_catalog::StorageCatalogConfig;
 use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
-use crate::error::ConnectorResult;
+use crate::error::{ConnectorError, ConnectorResult};
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
@@ -789,6 +791,32 @@ impl IcebergCommon {
             .to_table_ident()
             .context("Unable to parse table name")?;
 
-        catalog.load_table(&table_id).await.map_err(Into::into)
+        catalog
+            .load_table(&table_id)
+            .await
+            .map(rebuild_table_with_shared_cache)
+            .map_err(Into::<ConnectorError>::into)
     }
+}
+
+/// Get a globally shared object cache keyed by table UUID to avoid reuse after drop & recreate.
+pub(crate) fn shared_object_cache(
+    file_io: &iceberg::io::FileIO,
+    table_uuid: Uuid,
+) -> Arc<ObjectCache> {
+    static CACHE: OnceLock<Mutex<HashMap<Uuid, Arc<ObjectCache>>>> = OnceLock::new();
+
+    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
+    let mut guard = cache.lock().expect("global iceberg cache poisoned");
+
+    guard
+        .entry(table_uuid)
+        .or_insert_with(|| Arc::new(ObjectCache::new(file_io.clone())))
+        .clone()
+}
+
+pub fn rebuild_table_with_shared_cache(table: Table) -> Table {
+    let table_uuid = table.metadata().uuid();
+    let object_cache = shared_object_cache(table.file_io(), table_uuid);
+    table.with_object_cache(object_cache)
 }
