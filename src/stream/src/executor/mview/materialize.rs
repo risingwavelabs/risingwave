@@ -515,7 +515,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                                 data_types.clone(),
                                             )
                                         } else {
-                                            tracing::warn!("DBG: use into_chunk_with_key");
                                             // We only hit this branch for TTL-ed tables for now.
                                             // Assert stream key is a superset of pk.
                                             debug_assert!(
