@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use anyhow::{anyhow, bail};
 use risingwave_common::catalog::{Field, Schema};
@@ -76,7 +76,7 @@ impl FallibleRule<Logical> for TableFunctionToInternalGetChannelDeltaStatsRule {
 
 impl TableFunctionToInternalGetChannelDeltaStatsRule {
     fn build_plan(
-        ctx: Rc<OptimizerContext>,
+        ctx: Arc<OptimizerContext>,
         table_function: &crate::expr::TableFunction,
     ) -> anyhow::Result<PlanRef> {
         let fields = vec![

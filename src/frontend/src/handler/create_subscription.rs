@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -86,7 +86,7 @@ pub async fn handle_create_subscription(
         return Ok(resp);
     };
     let subscription_catalog = {
-        let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
+        let context = Arc::new(OptimizerContext::from_handler_args(handle_args));
         create_subscription_catalog(&session, context, stmt)?
     };
 

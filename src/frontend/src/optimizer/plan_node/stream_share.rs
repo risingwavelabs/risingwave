@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
+use std::sync::{Arc, Mutex};
 
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::PbStreamNode;
@@ -41,7 +41,7 @@ pub struct StreamShare {
 impl StreamShare {
     pub fn new(core: generic::Share<PlanRef>) -> Self {
         let base = {
-            let input = core.input.borrow();
+            let input = core.input.lock().unwrap();
             let dist = input.distribution().clone();
             // Filter executor won't change the append-only behavior of the stream.
             PlanBase::new_stream_with_core(
@@ -59,7 +59,7 @@ impl StreamShare {
 
     pub fn new_from_input(input: PlanRef) -> Self {
         let core = generic::Share {
-            input: RefCell::new(input),
+            input: Arc::new(Mutex::new(input)),
         };
         Self::new(core)
     }
@@ -73,7 +73,7 @@ impl Distill for StreamShare {
 
 impl PlanTreeNodeUnary<Stream> for StreamShare {
     fn input(&self) -> PlanRef {
-        self.core.input.borrow().clone()
+        self.core.input.lock().unwrap().clone()
     }
 
     fn clone_with_input(&self, _input: PlanRef) -> Self {

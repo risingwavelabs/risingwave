@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::hash::Hash;
+use std::sync::{Arc, Mutex};
 
 use risingwave_common::catalog::Schema;
 
@@ -21,43 +21,51 @@ use super::{GenericPlanNode, GenericPlanRef};
 use crate::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
 pub struct Share<PlanRef> {
-    pub input: RefCell<PlanRef>,
+    pub input: Arc<Mutex<PlanRef>>,
 }
+
+impl<P: PartialEq> PartialEq for Share<P> {
+    fn eq(&self, other: &Self) -> bool {
+        *self.input.lock().unwrap() == *other.input.lock().unwrap()
+    }
+}
+
+impl<P: Eq> Eq for Share<P> {}
 
 impl<P: Hash> Hash for Share<P> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.input.borrow().hash(state);
+        self.input.lock().unwrap().hash(state);
     }
 }
 
 impl<PlanRef: GenericPlanRef> Share<PlanRef> {
     pub fn new(input: PlanRef) -> Self {
         Self {
-            input: RefCell::new(input),
+            input: Arc::new(Mutex::new(input)),
         }
     }
 
     pub fn replace_input(&self, plan: PlanRef) {
-        *self.input.borrow_mut() = plan;
+        *self.input.lock().unwrap() = plan;
     }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
     fn schema(&self) -> Schema {
-        self.input.borrow().schema().clone()
+        self.input.lock().unwrap().schema().clone()
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        Some(self.input.borrow().stream_key()?.to_vec())
+        Some(self.input.lock().unwrap().stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        self.input.borrow().ctx()
+        self.input.lock().unwrap().ctx()
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        self.input.borrow().functional_dependency().clone()
+        self.input.lock().unwrap().functional_dependency().clone()
     }
 }

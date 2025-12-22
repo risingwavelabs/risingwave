@@ -13,11 +13,9 @@
 // limitations under the License.
 
 use core::fmt::Formatter;
-use std::cell::{Cell, RefCell, RefMut};
 use std::collections::HashMap;
-use std::marker::PhantomData;
-use std::rc::Rc;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicI32, AtomicU32, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
@@ -33,8 +31,6 @@ use crate::utils::{OverwriteOptions, WithOptions};
 
 const RESERVED_ID_NUM: u16 = 10000;
 
-type PhantomUnsend = PhantomData<Rc<()>>;
-
 pub struct OptimizerContext {
     session_ctx: Arc<SessionImpl>,
     /// The original SQL string, used for debugging.
@@ -44,32 +40,30 @@ pub struct OptimizerContext {
     /// Explain options
     explain_options: ExplainOptions,
     /// Store the trace of optimizer
-    optimizer_trace: RefCell<Vec<String>>,
+    optimizer_trace: Mutex<Vec<String>>,
     /// Store the optimized logical plan of optimizer
-    logical_explain: RefCell<Option<String>>,
+    logical_explain: Mutex<Option<String>>,
     /// Store options or properties from the `with` clause
     with_options: WithOptions,
     /// Store the Session Timezone and whether it was used.
-    session_timezone: RefCell<SessionTimezone>,
+    session_timezone: Mutex<SessionTimezone>,
     /// Total number of optimization rules have been applied.
-    total_rule_applied: RefCell<usize>,
+    total_rule_applied: Mutex<usize>,
     /// Store the configs can be overwritten in with clause
     /// if not specified, use the value from session variable.
     overwrite_options: OverwriteOptions,
     /// Store the mapping between `share_id` and the corresponding
     /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
-    rcte_cache: RefCell<HashMap<ShareId, PlanRef>>,
+    rcte_cache: Mutex<HashMap<ShareId, PlanRef>>,
 
     /// Last assigned plan node ID.
-    last_plan_node_id: Cell<i32>,
+    last_plan_node_id: AtomicI32,
     /// Last assigned correlated ID.
-    last_correlated_id: Cell<u32>,
+    last_correlated_id: AtomicU32,
     /// Last assigned expr display ID.
-    last_expr_display_id: Cell<usize>,
+    last_expr_display_id: AtomicUsize,
     /// Last assigned watermark group ID.
-    last_watermark_group_id: Cell<u32>,
-
-    _phantom: PhantomUnsend,
+    last_watermark_group_id: AtomicU32,
 }
 
 pub(in crate::optimizer) struct LastAssignedIds {
@@ -79,7 +73,7 @@ pub(in crate::optimizer) struct LastAssignedIds {
     last_watermark_group_id: u32,
 }
 
-pub type OptimizerContextRef = Rc<OptimizerContext>;
+pub type OptimizerContextRef = Arc<OptimizerContext>;
 
 impl OptimizerContext {
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`], with empty
@@ -90,7 +84,7 @@ impl OptimizerContext {
 
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
     pub fn new(mut handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
-        let session_timezone = RefCell::new(SessionTimezone::new(
+        let session_timezone = Mutex::new(SessionTimezone::new(
             handler_args.session.config().timezone(),
         ));
         let overwrite_options = OverwriteOptions::new(&mut handler_args);
@@ -99,20 +93,18 @@ impl OptimizerContext {
             sql: handler_args.sql,
             normalized_sql: handler_args.normalized_sql,
             explain_options,
-            optimizer_trace: RefCell::new(vec![]),
-            logical_explain: RefCell::new(None),
+            optimizer_trace: Mutex::new(vec![]),
+            logical_explain: Mutex::new(None),
             with_options: handler_args.with_options,
             session_timezone,
-            total_rule_applied: RefCell::new(0),
+            total_rule_applied: Mutex::new(0),
             overwrite_options,
-            rcte_cache: RefCell::new(HashMap::new()),
+            rcte_cache: Mutex::new(HashMap::new()),
 
-            last_plan_node_id: Cell::new(RESERVED_ID_NUM.into()),
-            last_correlated_id: Cell::new(0),
-            last_expr_display_id: Cell::new(RESERVED_ID_NUM.into()),
-            last_watermark_group_id: Cell::new(RESERVED_ID_NUM.into()),
-
-            _phantom: Default::default(),
+            last_plan_node_id: AtomicI32::new(RESERVED_ID_NUM.into()),
+            last_correlated_id: AtomicU32::new(0),
+            last_expr_display_id: AtomicUsize::new(RESERVED_ID_NUM.into()),
+            last_watermark_group_id: AtomicU32::new(RESERVED_ID_NUM.into()),
         }
     }
 
@@ -125,75 +117,73 @@ impl OptimizerContext {
             sql: Arc::from(""),
             normalized_sql: "".to_owned(),
             explain_options: ExplainOptions::default(),
-            optimizer_trace: RefCell::new(vec![]),
-            logical_explain: RefCell::new(None),
+            optimizer_trace: Mutex::new(vec![]),
+            logical_explain: Mutex::new(None),
             with_options: Default::default(),
-            session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
-            total_rule_applied: RefCell::new(0),
+            session_timezone: Mutex::new(SessionTimezone::new("UTC".into())),
+            total_rule_applied: Mutex::new(0),
             overwrite_options: OverwriteOptions::default(),
-            rcte_cache: RefCell::new(HashMap::new()),
+            rcte_cache: Mutex::new(HashMap::new()),
 
-            last_plan_node_id: Cell::new(0),
-            last_correlated_id: Cell::new(0),
-            last_expr_display_id: Cell::new(0),
-            last_watermark_group_id: Cell::new(0),
-
-            _phantom: Default::default(),
+            last_plan_node_id: AtomicI32::new(0),
+            last_correlated_id: AtomicU32::new(0),
+            last_expr_display_id: AtomicUsize::new(0),
+            last_watermark_group_id: AtomicU32::new(0),
         }
         .into()
     }
 
     pub fn next_plan_node_id(&self) -> PlanNodeId {
-        self.last_plan_node_id.update(|id| id + 1);
-        PlanNodeId(self.last_plan_node_id.get())
+        let id = self.last_plan_node_id.fetch_add(1, Ordering::Relaxed);
+        PlanNodeId(id + 1)
     }
 
     pub fn next_correlated_id(&self) -> CorrelatedId {
-        self.last_correlated_id.update(|id| id + 1);
-        self.last_correlated_id.get()
+        self.last_correlated_id.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     pub fn next_expr_display_id(&self) -> usize {
-        self.last_expr_display_id.update(|id| id + 1);
-        self.last_expr_display_id.get()
+        self.last_expr_display_id.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     pub fn next_watermark_group_id(&self) -> WatermarkGroupId {
-        self.last_watermark_group_id.update(|id| id + 1);
-        self.last_watermark_group_id.get()
+        self.last_watermark_group_id.fetch_add(1, Ordering::Relaxed) + 1
     }
 
     pub(in crate::optimizer) fn backup_elem_ids(&self) -> LastAssignedIds {
         LastAssignedIds {
-            last_plan_node_id: self.last_plan_node_id.get(),
-            last_correlated_id: self.last_correlated_id.get(),
-            last_expr_display_id: self.last_expr_display_id.get(),
-            last_watermark_group_id: self.last_watermark_group_id.get(),
+            last_plan_node_id: self.last_plan_node_id.load(Ordering::Relaxed),
+            last_correlated_id: self.last_correlated_id.load(Ordering::Relaxed),
+            last_expr_display_id: self.last_expr_display_id.load(Ordering::Relaxed),
+            last_watermark_group_id: self.last_watermark_group_id.load(Ordering::Relaxed),
         }
     }
 
     /// This should only be called in [`crate::optimizer::plan_node::reorganize_elements_id`].
     pub(in crate::optimizer) fn reset_elem_ids(&self) {
-        self.last_plan_node_id.set(0);
-        self.last_correlated_id.set(0);
-        self.last_expr_display_id.set(0);
-        self.last_watermark_group_id.set(0);
+        self.last_plan_node_id.store(0, Ordering::Relaxed);
+        self.last_correlated_id.store(0, Ordering::Relaxed);
+        self.last_expr_display_id.store(0, Ordering::Relaxed);
+        self.last_watermark_group_id.store(0, Ordering::Relaxed);
     }
 
     pub(in crate::optimizer) fn restore_elem_ids(&self, backup: LastAssignedIds) {
-        self.last_plan_node_id.set(backup.last_plan_node_id);
-        self.last_correlated_id.set(backup.last_correlated_id);
-        self.last_expr_display_id.set(backup.last_expr_display_id);
+        self.last_plan_node_id
+            .store(backup.last_plan_node_id, Ordering::Relaxed);
+        self.last_correlated_id
+            .store(backup.last_correlated_id, Ordering::Relaxed);
+        self.last_expr_display_id
+            .store(backup.last_expr_display_id, Ordering::Relaxed);
         self.last_watermark_group_id
-            .set(backup.last_watermark_group_id);
+            .store(backup.last_watermark_group_id, Ordering::Relaxed);
     }
 
     pub fn add_rule_applied(&self, num: usize) {
-        *self.total_rule_applied.borrow_mut() += num;
+        *self.total_rule_applied.lock().unwrap() += num;
     }
 
     pub fn total_rule_applied(&self) -> usize {
-        *self.total_rule_applied.borrow()
+        *self.total_rule_applied.lock().unwrap()
     }
 
     pub fn is_explain_verbose(&self) -> bool {
@@ -210,10 +200,10 @@ impl OptimizerContext {
 
     pub fn trace(&self, str: impl Into<String>) {
         // If explain type is logical, do not store the trace for any optimizations beyond logical.
-        if self.is_explain_logical() && self.logical_explain.borrow().is_some() {
+        if self.is_explain_logical() && self.logical_explain.lock().unwrap().is_some() {
             return;
         }
-        let mut optimizer_trace = self.optimizer_trace.borrow_mut();
+        let mut optimizer_trace = self.optimizer_trace.lock().unwrap();
         let string = str.into();
         tracing::info!(target: "explain_trace", "\n{}", string);
         optimizer_trace.push(string);
@@ -237,16 +227,16 @@ impl OptimizerContext {
     pub fn may_store_explain_logical(&self, plan: &LogicalPlanRef) {
         if self.is_explain_logical() {
             let str = self.explain_plan_impl(plan);
-            *self.logical_explain.borrow_mut() = Some(str);
+            *self.logical_explain.lock().unwrap() = Some(str);
         }
     }
 
     pub fn take_logical(&self) -> Option<String> {
-        self.logical_explain.borrow_mut().take()
+        self.logical_explain.lock().unwrap().take()
     }
 
     pub fn take_trace(&self) -> Vec<String> {
-        self.optimizer_trace.borrow_mut().drain(..).collect()
+        self.optimizer_trace.lock().unwrap().drain(..).collect()
     }
 
     pub fn with_options(&self) -> &WithOptions {
@@ -271,20 +261,20 @@ impl OptimizerContext {
         &self.normalized_sql
     }
 
-    pub fn session_timezone(&self) -> RefMut<'_, SessionTimezone> {
-        self.session_timezone.borrow_mut()
+    pub fn session_timezone(&self) -> MutexGuard<'_, SessionTimezone> {
+        self.session_timezone.lock().unwrap()
     }
 
     pub fn get_session_timezone(&self) -> String {
-        self.session_timezone.borrow().timezone()
+        self.session_timezone.lock().unwrap().timezone()
     }
 
     pub fn get_rcte_cache_plan(&self, id: &ShareId) -> Option<PlanRef> {
-        self.rcte_cache.borrow().get(id).cloned()
+        self.rcte_cache.lock().unwrap().get(id).cloned()
     }
 
     pub fn insert_rcte_cache_plan(&self, id: ShareId, plan: PlanRef) {
-        self.rcte_cache.borrow_mut().insert(id, plan);
+        self.rcte_cache.lock().unwrap().insert(id, plan);
     }
 }
 
@@ -296,8 +286,8 @@ impl std::fmt::Debug for OptimizerContext {
             self.sql,
             self.explain_options,
             self.with_options,
-            self.last_plan_node_id.get(),
-            self.last_correlated_id.get(),
+            self.last_plan_node_id.load(Ordering::Relaxed),
+            self.last_correlated_id.load(Ordering::Relaxed),
         )
     }
 }

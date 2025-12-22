@@ -32,7 +32,7 @@ use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
 use std::ops::Deref;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use downcast_rs::{Downcast, impl_downcast};
 use dyn_clone::DynClone;
@@ -246,7 +246,7 @@ impl_downcast!(StreamPlanNode);
 // and we currently need a manual implementation of `PartialEq` for `PlanRef`.
 #[allow(clippy::derived_hash_with_manual_eq)]
 #[derive(Debug, Eq, Hash)]
-pub struct PlanRef<C: ConventionMarker>(Rc<C::PlanRefDyn>);
+pub struct PlanRef<C: ConventionMarker>(Arc<C::PlanRefDyn>);
 
 impl<C: ConventionMarker> Clone for PlanRef<C> {
     fn clone(&self) -> Self {
@@ -277,19 +277,19 @@ impl<C: ConventionMarker> Deref for PlanRef<C> {
 
 impl<T: LogicalPlanNode> From<T> for PlanRef<Logical> {
     fn from(value: T) -> Self {
-        PlanRef(Rc::new(value) as _)
+        PlanRef(Arc::new(value) as _)
     }
 }
 
 impl<T: StreamPlanNode> From<T> for PlanRef<Stream> {
     fn from(value: T) -> Self {
-        PlanRef(Rc::new(value) as _)
+        PlanRef(Arc::new(value) as _)
     }
 }
 
 impl<T: BatchPlanNode> From<T> for PlanRef<Batch> {
     fn from(value: T) -> Self {
-        PlanRef(Rc::new(value) as _)
+        PlanRef(Arc::new(value) as _)
     }
 }
 

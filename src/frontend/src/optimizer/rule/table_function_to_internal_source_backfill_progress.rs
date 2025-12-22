@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::bail;
@@ -56,7 +55,7 @@ impl FallibleRule<Logical> for TableFunctionToInternalSourceBackfillProgressRule
 
 impl TableFunctionToInternalSourceBackfillProgressRule {
     fn build_plan(
-        ctx: Rc<OptimizerContext>,
+        ctx: Arc<OptimizerContext>,
         backfilling_tables: Vec<Arc<TableCatalog>>,
     ) -> anyhow::Result<PlanRef> {
         if backfilling_tables.is_empty() {
@@ -82,7 +81,7 @@ impl TableFunctionToInternalSourceBackfillProgressRule {
         Ok(LogicalUnion::new(true, all_progress).into())
     }
 
-    fn build_scan(ctx: Rc<OptimizerContext>, table: Arc<TableCatalog>) -> LogicalScan {
+    fn build_scan(ctx: Arc<OptimizerContext>, table: Arc<TableCatalog>) -> LogicalScan {
         LogicalScan::create(table, ctx, None)
     }
 
