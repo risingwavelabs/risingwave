@@ -37,8 +37,9 @@ use crate::optimizer::rule::{ApplyResult, FallibleRule};
 /// It will return the progress of the source backfills,
 /// partitioned by the backfill node's fragment id and partition id.
 pub struct TableFunctionToInternalSourceBackfillProgressRule {}
+#[async_trait::async_trait]
 impl FallibleRule<Logical> for TableFunctionToInternalSourceBackfillProgressRule {
-    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
+    async fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         if logical_table_function.table_function.function_type
             != TableFunctionType::InternalSourceBackfillProgress

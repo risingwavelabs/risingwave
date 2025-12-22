@@ -327,7 +327,7 @@ async fn gen_batch_query_plan(
 
     let logical = planner.plan(bound)?;
     let schema = logical.schema();
-    let optimized_logical = logical.gen_optimized_logical_plan_for_batch()?;
+    let optimized_logical = logical.gen_optimized_logical_plan_for_batch().await?;
 
     #[cfg(feature = "datafusion")]
     {
@@ -350,7 +350,7 @@ async fn gen_batch_query_plan(
         }
     }
 
-    let batch_plan = optimized_logical.gen_batch_plan()?;
+    let batch_plan = optimized_logical.gen_batch_plan().await?;
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan.clone());
@@ -375,8 +375,8 @@ async fn gen_batch_query_plan(
 
     let physical = match query_mode {
         QueryMode::Auto => unreachable!(),
-        QueryMode::Local => batch_plan.gen_batch_local_plan()?,
-        QueryMode::Distributed => batch_plan.gen_batch_distributed_plan()?,
+        QueryMode::Local => batch_plan.gen_batch_local_plan().await?,
+        QueryMode::Distributed => batch_plan.gen_batch_distributed_plan().await?,
     };
 
     let result = RwBatchQueryPlanResult {

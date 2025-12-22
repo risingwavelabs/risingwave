@@ -989,7 +989,7 @@ impl ExprRewriter for ShiftInputRefRewriter {
 }
 
 impl IndexSelectionRule {
-    pub fn create() -> BoxedRule {
-        Box::new(IndexSelectionRule {})
+    pub fn apply_to_plan(&self, plan: PlanRef) -> Option<PlanRef> {
+        <Self as Rule<Logical>>::apply(self, plan)
     }
 }

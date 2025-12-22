@@ -383,18 +383,20 @@ pub(crate) async fn gen_create_index_plan(
             }
         };
 
-        let vector_index_write = input.gen_vector_index_plan(
-            index_table_name.clone(),
-            index_database_id,
-            index_schema_id,
-            definition,
-            retention_seconds,
-            PbVectorIndexInfo {
-                dimension: dimension.expect("should be set for vector index") as _,
-                config: Some(vector_index_config),
-                distance_type: distance_type as _,
-            },
-        )?;
+        let vector_index_write = input
+            .gen_vector_index_plan(
+                index_table_name.clone(),
+                index_database_id,
+                index_schema_id,
+                definition,
+                retention_seconds,
+                PbVectorIndexInfo {
+                    dimension: dimension.expect("should be set for vector index") as _,
+                    config: Some(vector_index_config),
+                    distance_type: distance_type as _,
+                },
+            )
+            .await?;
         let index_table = vector_index_write.table().clone();
         let plan: PlanRef = vector_index_write.into();
         (plan, index_table)
@@ -415,7 +417,8 @@ pub(crate) async fn gen_create_index_plan(
             } else {
                 distributed_columns_expr.len()
             },
-        )?;
+        )
+        .await?;
         let index_table = materialize.table().clone();
         let plan: PlanRef = materialize.into();
         (plan, index_table)
@@ -603,7 +606,7 @@ fn assemble_input(
 
 /// Note: distributed by columns must be a prefix of index columns, so we just use
 /// `distributed_by_columns_len` to represent distributed by columns
-fn assemble_materialize(
+async fn assemble_materialize(
     database_id: DatabaseId,
     schema_id: SchemaId,
     table_catalog: Arc<TableCatalog>,
@@ -628,13 +631,15 @@ fn assemble_materialize(
     let definition = context.normalized_sql().to_owned();
     let retention_seconds = table_catalog.retention_seconds.and_then(NonZeroU32::new);
 
-    input.gen_index_plan(
-        index_name,
-        database_id,
-        schema_id,
-        definition,
-        retention_seconds,
-    )
+    input
+        .gen_index_plan(
+            index_name,
+            database_id,
+            schema_id,
+            definition,
+            retention_seconds,
+        )
+        .await
 }
 
 pub async fn handle_create_index(

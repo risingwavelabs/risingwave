@@ -94,11 +94,11 @@ pub async fn gen_create_mv_plan(
 ) -> Result<(PlanRef, TableCatalog)> {
     let mut binder = Binder::new_for_stream(session);
     let bound = binder.bind_query(&query).await?;
-    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
+    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode).await
 }
 
 /// Generate create MV plan from a bound query
-pub fn gen_create_mv_plan_bound(
+pub async fn gen_create_mv_plan_bound(
     session: &SessionImpl,
     context: OptimizerContextRef,
     query: BoundQuery,
@@ -131,13 +131,15 @@ pub fn gen_create_mv_plan_bound(
         }
         plan_root.set_out_names(col_names)?;
     }
-    let materialize = plan_root.gen_materialize_plan(
-        database_id,
-        schema_id,
-        table_name,
-        definition,
-        emit_on_window_close,
-    )?;
+    let materialize = plan_root
+        .gen_materialize_plan(
+            database_id,
+            schema_id,
+            table_name,
+            definition,
+            emit_on_window_close,
+        )
+        .await?;
 
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
@@ -372,7 +374,7 @@ It only indicates the physical clustering of the data, which may improve the per
     let session = context.session_ctx().as_ref();
 
     let (plan, table) =
-        gen_create_mv_plan_bound(session, context.clone(), query, name, columns, emit_mode)?;
+        gen_create_mv_plan_bound(session, context.clone(), query, name, columns, emit_mode).await?;
 
     let backfill_order = plan_backfill_order(
         session,

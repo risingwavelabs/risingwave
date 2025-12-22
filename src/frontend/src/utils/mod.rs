@@ -17,7 +17,6 @@ pub use pretty_serde::PrettySerde;
 mod column_index_mapping;
 use std::any::Any;
 use std::hash::{Hash, Hasher};
-use std::sync::LazyLock;
 
 pub use column_index_mapping::*;
 mod condition;
@@ -28,7 +27,6 @@ pub(crate) use connected_components::*;
 mod stream_graph_formatter;
 pub use stream_graph_formatter::*;
 mod with_options;
-use tokio::runtime::Runtime;
 pub use with_options::*;
 mod rewrite_index;
 pub use rewrite_index::*;
@@ -40,14 +38,6 @@ pub use group_by::*;
 pub use overwrite_options::*;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
-
-pub static FRONTEND_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .thread_name("rw-frontend")
-        .enable_all()
-        .build()
-        .expect("failed to build frontend runtime")
-});
 
 /// Substitute `InputRef` with corresponding `ExprImpl`.
 pub struct Substitute {

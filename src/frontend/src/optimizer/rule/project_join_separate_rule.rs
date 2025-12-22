@@ -16,11 +16,7 @@ use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::*;
 pub struct ProjectJoinSeparateRule {}
 
-impl ProjectJoinSeparateRule {
-    pub fn create() -> BoxedRule {
-        Box::new(Self {})
-    }
-}
+impl ProjectJoinSeparateRule {}
 
 impl Rule<Logical> for ProjectJoinSeparateRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {

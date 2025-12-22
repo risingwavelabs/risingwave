@@ -17,6 +17,7 @@
 use std::convert::Infallible;
 use std::ops::FromResidual;
 
+use async_trait::async_trait;
 use thiserror_ext::AsReport;
 
 use super::PlanRef;
@@ -85,6 +86,7 @@ use InfallibleRule as Rule;
 /// unrecoverable error that stops further optimization.
 ///
 /// An [`InfallibleRule`] is always a [`FallibleRule`].
+#[async_trait]
 pub trait FallibleRule<C: ConventionMarker>: Send + Sync + Description {
     /// Apply the rule to the plan node, which may return an unrecoverable error.
     ///
@@ -92,14 +94,15 @@ pub trait FallibleRule<C: ConventionMarker>: Send + Sync + Description {
     /// - Returns `ApplyResult::NotApplicable` if it's not applicable. The optimizer may try other rules.
     /// - Returns `ApplyResult::Err` if an unrecoverable error occurred. The optimizer should stop applying
     ///   other rules and report the error to the user.
-    fn apply(&self, plan: PlanRef<C>) -> ApplyResult<PlanRef<C>>;
+    async fn apply(&self, plan: PlanRef<C>) -> ApplyResult<PlanRef<C>>;
 }
 
+#[async_trait]
 impl<C: ConventionMarker, R> FallibleRule<C> for R
 where
     R: InfallibleRule<C>,
 {
-    fn apply(&self, plan: PlanRef<C>) -> ApplyResult<PlanRef<C>> {
+    async fn apply(&self, plan: PlanRef<C>) -> ApplyResult<PlanRef<C>> {
         match InfallibleRule::apply(self, plan) {
             Some(plan) => ApplyResult::Ok(plan),
             None => ApplyResult::NotApplicable,

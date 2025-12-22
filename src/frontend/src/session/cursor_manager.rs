@@ -225,6 +225,67 @@ enum State {
     Invalid,
 }
 
+enum SubscriptionPlanState {
+    InitLogStoreQuery,
+    Fetch {
+        from_snapshot: bool,
+        rw_timestamp: u64,
+    },
+    Invalid,
+}
+
+struct SubscriptionPlanSnapshot {
+    dependent_table_id: TableId,
+    seek_pk_row: Option<Row>,
+    state: SubscriptionPlanState,
+}
+
+impl SubscriptionPlanSnapshot {
+    async fn gen_batch_plan_result(
+        self,
+        handler_args: HandlerArgs,
+    ) -> Result<RwBatchQueryPlanResult> {
+        match self.state {
+            // Only used to return generated plans, so rw_timestamp are meaningless
+            SubscriptionPlanState::InitLogStoreQuery => {
+                SubscriptionCursor::init_batch_plan_for_subscription_cursor(
+                    Some(0),
+                    self.dependent_table_id,
+                    handler_args,
+                    self.seek_pk_row,
+                )
+                .await
+            }
+            SubscriptionPlanState::Fetch {
+                from_snapshot,
+                rw_timestamp,
+            } => {
+                if from_snapshot {
+                    SubscriptionCursor::init_batch_plan_for_subscription_cursor(
+                        None,
+                        self.dependent_table_id,
+                        handler_args,
+                        self.seek_pk_row,
+                    )
+                    .await
+                } else {
+                    SubscriptionCursor::init_batch_plan_for_subscription_cursor(
+                        Some(rw_timestamp),
+                        self.dependent_table_id,
+                        handler_args,
+                        self.seek_pk_row,
+                    )
+                    .await
+                }
+            }
+            SubscriptionPlanState::Invalid => Err(ErrorCode::InternalError(
+                "Cursor is in invalid state. Please close and re-create the cursor.".to_owned(),
+            )
+            .into()),
+        }
+    }
+}
+
 impl Display for State {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -717,47 +778,36 @@ impl SubscriptionCursor {
         Ok((new_epochs.get(0).cloned(), new_epochs.get(1).cloned()))
     }
 
-    pub fn gen_batch_plan_result(
+    pub async fn gen_batch_plan_result(
         &self,
         handler_args: HandlerArgs,
     ) -> Result<RwBatchQueryPlanResult> {
-        match self.state {
-            // Only used to return generated plans, so rw_timestamp are meaningless
-            State::InitLogStoreQuery { .. } => Self::init_batch_plan_for_subscription_cursor(
-                Some(0),
-                self.dependent_table_id,
-                handler_args,
-                self.seek_pk_row.clone(),
-            ),
+        self.plan_snapshot()
+            .gen_batch_plan_result(handler_args)
+            .await
+    }
+
+    fn plan_snapshot(&self) -> SubscriptionPlanSnapshot {
+        let state = match &self.state {
+            State::InitLogStoreQuery { .. } => SubscriptionPlanState::InitLogStoreQuery,
             State::Fetch {
                 from_snapshot,
                 rw_timestamp,
                 ..
-            } => {
-                if from_snapshot {
-                    Self::init_batch_plan_for_subscription_cursor(
-                        None,
-                        self.dependent_table_id,
-                        handler_args,
-                        self.seek_pk_row.clone(),
-                    )
-                } else {
-                    Self::init_batch_plan_for_subscription_cursor(
-                        Some(rw_timestamp),
-                        self.dependent_table_id,
-                        handler_args,
-                        self.seek_pk_row.clone(),
-                    )
-                }
-            }
-            State::Invalid => Err(ErrorCode::InternalError(
-                "Cursor is in invalid state. Please close and re-create the cursor.".to_owned(),
-            )
-            .into()),
+            } => SubscriptionPlanState::Fetch {
+                from_snapshot: *from_snapshot,
+                rw_timestamp: *rw_timestamp,
+            },
+            State::Invalid => SubscriptionPlanState::Invalid,
+        };
+        SubscriptionPlanSnapshot {
+            dependent_table_id: self.dependent_table_id,
+            seek_pk_row: self.seek_pk_row.clone(),
+            state,
         }
     }
 
-    fn init_batch_plan_for_subscription_cursor(
+    async fn init_batch_plan_for_subscription_cursor(
         rw_timestamp: Option<u64>,
         dependent_table_id: TableId,
         handler_args: HandlerArgs,
@@ -786,6 +836,7 @@ impl SubscriptionCursor {
             version_id,
             seek_pk_row,
         )
+        .await
     }
 
     async fn initiate_query(
@@ -802,7 +853,8 @@ impl SubscriptionCursor {
             dependent_table_id,
             handler_args.clone(),
             seek_pk_row,
-        )?;
+        )
+        .await?;
         let plan_fragmenter_result = gen_batch_plan_fragmenter(&handler_args.session, plan_result)?;
         let (chunk_stream, _) =
             create_chunk_stream_for_cursor(handler_args.session, plan_fragmenter_result).await?;
@@ -860,7 +912,7 @@ impl SubscriptionCursor {
         descs
     }
 
-    pub fn create_batch_plan_for_cursor(
+    pub async fn create_batch_plan_for_cursor(
         table_catalog: Arc<TableCatalog>,
         session: &SessionImpl,
         context: OptimizerContextRef,
@@ -992,12 +1044,13 @@ impl SubscriptionCursor {
             out_names,
         );
         let schema = plan_root.schema();
-        let (batch_log_seq_scan, query_mode) = match session.config().query_mode() {
+        let query_mode = session.config().query_mode();
+        let (batch_log_seq_scan, query_mode) = match query_mode {
             QueryMode::Auto | QueryMode::Local => {
-                (plan_root.gen_batch_local_plan()?, QueryMode::Local)
+                (plan_root.gen_batch_local_plan().await?, QueryMode::Local)
             }
             QueryMode::Distributed => (
-                plan_root.gen_batch_distributed_plan()?,
+                plan_root.gen_batch_distributed_plan().await?,
                 QueryMode::Distributed,
             ),
         };
@@ -1203,13 +1256,18 @@ impl CursorManager {
         cursor_name: &str,
         handler_args: HandlerArgs,
     ) -> Result<RwBatchQueryPlanResult> {
-        match self.cursor_map.lock().await.get(cursor_name).ok_or_else(|| {
-            ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name))
-        })? {
-            Cursor::Subscription(cursor) => {
-                cursor.gen_batch_plan_result(handler_args.clone())
-            },
-            Cursor::Query(_) => Err(ErrorCode::InternalError("The plan of the cursor is the same as the query statement of the as when it was created.".to_owned()).into()),
-        }
+        let snapshot = {
+            let guard = self.cursor_map.lock().await;
+            match guard.get(cursor_name).ok_or_else(|| {
+                ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name))
+            })? {
+                Cursor::Subscription(cursor) => cursor.plan_snapshot(),
+                Cursor::Query(_) => {
+                    return Err(ErrorCode::InternalError("The plan of the cursor is the same as the query statement of the as when it was created.".to_owned()).into());
+                }
+            }
+        };
+
+        snapshot.gen_batch_plan_result(handler_args).await
     }
 }

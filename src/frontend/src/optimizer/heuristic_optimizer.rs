@@ -16,7 +16,7 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::fmt;
 
-use itertools::Itertools;
+use async_recursion::async_recursion;
 
 use super::ApplyResult;
 #[cfg(debug_assertions)]
@@ -50,9 +50,9 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
         }
     }
 
-    fn optimize_node(&mut self, mut plan: PlanRef<C>) -> Result<PlanRef<C>> {
+    async fn optimize_node(&mut self, mut plan: PlanRef<C>) -> Result<PlanRef<C>> {
         for rule in self.rules {
-            match rule.apply(plan.clone()) {
+            match rule.apply(plan.clone()).await {
                 ApplyResult::Ok(applied) => {
                     #[cfg(debug_assertions)]
                     Self::check_equivalent_plan(rule.description(), &plan, &applied);
@@ -67,13 +67,12 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
         Ok(plan)
     }
 
-    fn optimize_inputs(&mut self, plan: PlanRef<C>) -> Result<PlanRef<C>> {
+    async fn optimize_inputs(&mut self, plan: PlanRef<C>) -> Result<PlanRef<C>> {
         let pre_applied = self.stats.total_applied();
-        let inputs: Vec<_> = plan
-            .inputs()
-            .into_iter()
-            .map(|sub_tree| self.optimize(sub_tree))
-            .try_collect()?;
+        let mut inputs = Vec::with_capacity(plan.inputs().len());
+        for sub_tree in plan.inputs() {
+            inputs.push(self.optimize(sub_tree).await?);
+        }
 
         Ok(if pre_applied != self.stats.total_applied() {
             plan.clone_root_with_inputs(&inputs)
@@ -82,15 +81,16 @@ impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
         })
     }
 
-    pub fn optimize(&mut self, mut plan: PlanRef<C>) -> Result<PlanRef<C>> {
+    #[async_recursion]
+    pub async fn optimize(&mut self, mut plan: PlanRef<C>) -> Result<PlanRef<C>> {
         match self.apply_order {
             ApplyOrder::TopDown => {
-                plan = self.optimize_node(plan)?;
-                self.optimize_inputs(plan)
+                plan = self.optimize_node(plan).await?;
+                self.optimize_inputs(plan).await
             }
             ApplyOrder::BottomUp => {
-                plan = self.optimize_inputs(plan)?;
-                self.optimize_node(plan)
+                plan = self.optimize_inputs(plan).await?;
+                self.optimize_node(plan).await
             }
         }
     }

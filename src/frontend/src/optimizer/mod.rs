@@ -304,26 +304,32 @@ impl LogicalPlanRoot {
     }
 
     /// Apply logical optimization to the plan for stream.
-    pub fn gen_optimized_logical_plan_for_stream(mut self) -> Result<LogicalPlanRoot> {
-        self.plan = LogicalOptimizer::gen_optimized_logical_plan_for_stream(self.plan.clone())?;
+    pub async fn gen_optimized_logical_plan_for_stream(mut self) -> Result<LogicalPlanRoot> {
+        self.plan =
+            LogicalOptimizer::gen_optimized_logical_plan_for_stream(self.plan.clone()).await?;
         Ok(self)
     }
 
     /// Apply logical optimization to the plan for batch.
-    pub fn gen_optimized_logical_plan_for_batch(self) -> Result<BatchOptimizedLogicalPlanRoot> {
-        let plan = LogicalOptimizer::gen_optimized_logical_plan_for_batch(self.plan.clone())?;
+    pub async fn gen_optimized_logical_plan_for_batch(
+        self,
+    ) -> Result<BatchOptimizedLogicalPlanRoot> {
+        let plan =
+            LogicalOptimizer::gen_optimized_logical_plan_for_batch(self.plan.clone()).await?;
         Ok(self.into_phase(plan))
     }
 
-    pub fn gen_batch_plan(self) -> Result<BatchPlanRoot> {
-        self.gen_optimized_logical_plan_for_batch()?
+    pub async fn gen_batch_plan(self) -> Result<BatchPlanRoot> {
+        self.gen_optimized_logical_plan_for_batch()
+            .await?
             .gen_batch_plan()
+            .await
     }
 }
 
 impl BatchOptimizedLogicalPlanRoot {
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
-    pub fn gen_batch_plan(self) -> Result<BatchPlanRoot> {
+    pub async fn gen_batch_plan(self) -> Result<BatchPlanRoot> {
         if TemporalJoinValidator::exist_dangling_temporal_scan(self.plan.clone()) {
             return Err(ErrorCode::NotSupported(
                 "do not support temporal join for batch queries".to_owned(),
@@ -351,11 +357,13 @@ impl BatchOptimizedLogicalPlanRoot {
             ctx.trace(plan.explain_to_string());
         }
 
-        plan = plan.optimize_by_rules(&OptimizationStage::<Batch>::new(
-            "Merge BatchProject",
-            vec![BatchProjectMergeRule::create()],
-            ApplyOrder::BottomUp,
-        ))?;
+        plan = plan
+            .optimize_by_rules(&OptimizationStage::<Batch>::new(
+                "Merge BatchProject",
+                vec![BatchProjectMergeRule::create()],
+                ApplyOrder::BottomUp,
+            ))
+            .await?;
 
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
@@ -391,7 +399,7 @@ impl BatchOptimizedLogicalPlanRoot {
 
 impl BatchPlanRoot {
     /// Optimize and generate a batch query plan for distributed execution.
-    pub fn gen_batch_distributed_plan(mut self) -> Result<BatchPlanRef> {
+    pub async fn gen_batch_distributed_plan(mut self) -> Result<BatchPlanRef> {
         self.required_dist = RequiredDist::single();
         let mut plan = self.plan;
 
@@ -415,31 +423,37 @@ impl BatchPlanRoot {
         }
 
         // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Push Limit To Scan",
-            vec![BatchPushLimitToScanRule::create()],
-            ApplyOrder::BottomUp,
-        ))?;
+        let plan = plan
+            .optimize_by_rules(&OptimizationStage::new(
+                "Push Limit To Scan",
+                vec![BatchPushLimitToScanRule::create()],
+                ApplyOrder::BottomUp,
+            ))
+            .await?;
 
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Iceberg Count Star",
-            vec![BatchIcebergCountStar::create()],
-            ApplyOrder::TopDown,
-        ))?;
+        let plan = plan
+            .optimize_by_rules(&OptimizationStage::new(
+                "Iceberg Count Star",
+                vec![BatchIcebergCountStar::create()],
+                ApplyOrder::TopDown,
+            ))
+            .await?;
 
         // For iceberg scan, we do iceberg predicate pushdown
         // BatchFilter -> BatchIcebergScan
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Iceberg Predicate Pushdown",
-            vec![BatchIcebergPredicatePushDownRule::create()],
-            ApplyOrder::BottomUp,
-        ))?;
+        let plan = plan
+            .optimize_by_rules(&OptimizationStage::new(
+                "Iceberg Predicate Pushdown",
+                vec![BatchIcebergPredicatePushDownRule::create()],
+                ApplyOrder::BottomUp,
+            ))
+            .await?;
 
         Ok(plan)
     }
 
     /// Optimize and generate a batch query plan for local execution.
-    pub fn gen_batch_local_plan(self) -> Result<BatchPlanRef> {
+    pub async fn gen_batch_local_plan(self) -> Result<BatchPlanRef> {
         let mut plan = self.plan;
 
         // Convert to local plan node
@@ -469,24 +483,28 @@ impl BatchPlanRoot {
         }
 
         // Both two phase limit and topn could generate limit on top of the scan, so we push limit here.
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Push Limit To Scan",
-            vec![BatchPushLimitToScanRule::create()],
-            ApplyOrder::BottomUp,
-        ))?;
+        let plan = plan
+            .optimize_by_rules(&OptimizationStage::new(
+                "Push Limit To Scan",
+                vec![BatchPushLimitToScanRule::create()],
+                ApplyOrder::BottomUp,
+            ))
+            .await?;
 
-        let plan = plan.optimize_by_rules(&OptimizationStage::new(
-            "Iceberg Count Star",
-            vec![BatchIcebergCountStar::create()],
-            ApplyOrder::TopDown,
-        ))?;
+        let plan = plan
+            .optimize_by_rules(&OptimizationStage::new(
+                "Iceberg Count Star",
+                vec![BatchIcebergCountStar::create()],
+                ApplyOrder::TopDown,
+            ))
+            .await?;
         Ok(plan)
     }
 }
 
 impl LogicalPlanRoot {
     /// Generate optimized stream plan
-    fn gen_optimized_stream_plan(
+    async fn gen_optimized_stream_plan(
         self,
         emit_on_window_close: bool,
         allow_snapshot_backfill: bool,
@@ -499,9 +517,10 @@ impl LogicalPlanRoot {
             BackfillType::Backfill
         };
         self.gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type)
+            .await
     }
 
-    fn gen_optimized_stream_plan_inner(
+    async fn gen_optimized_stream_plan_inner(
         self,
         emit_on_window_close: bool,
         backfill_type: BackfillType,
@@ -509,7 +528,9 @@ impl LogicalPlanRoot {
         let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
-        let optimized_plan = self.gen_stream_plan(emit_on_window_close, backfill_type)?;
+        let optimized_plan = self
+            .gen_stream_plan(emit_on_window_close, backfill_type)
+            .await?;
 
         let mut plan = optimized_plan
             .plan
@@ -518,29 +539,34 @@ impl LogicalPlanRoot {
                 "Merge StreamProject",
                 vec![StreamProjectMergeRule::create()],
                 ApplyOrder::BottomUp,
-            ))?;
+            ))
+            .await?;
 
         if ctx
             .session_ctx()
             .config()
             .streaming_separate_consecutive_join()
         {
-            plan = plan.optimize_by_rules(&OptimizationStage::new(
-                "Separate consecutive StreamHashJoin by no-shuffle StreamExchange",
-                vec![SeparateConsecutiveJoinRule::create()],
-                ApplyOrder::BottomUp,
-            ))?;
+            plan = plan
+                .optimize_by_rules(&OptimizationStage::new(
+                    "Separate consecutive StreamHashJoin by no-shuffle StreamExchange",
+                    vec![SeparateConsecutiveJoinRule::create()],
+                    ApplyOrder::BottomUp,
+                ))
+                .await?;
         }
 
         // Add Logstore for Unaligned join
         // Apply this BEFORE delta join rule, because delta join removes
         // the join
         if ctx.session_ctx().config().streaming_enable_unaligned_join() {
-            plan = plan.optimize_by_rules(&OptimizationStage::new(
-                "Add Logstore for Unaligned join",
-                vec![AddLogstoreRule::create()],
-                ApplyOrder::BottomUp,
-            ))?;
+            plan = plan
+                .optimize_by_rules(&OptimizationStage::new(
+                    "Add Logstore for Unaligned join",
+                    vec![AddLogstoreRule::create()],
+                    ApplyOrder::BottomUp,
+                ))
+                .await?;
         }
 
         if ctx.session_ctx().config().streaming_enable_delta_join()
@@ -548,11 +574,13 @@ impl LogicalPlanRoot {
         {
             // TODO: make it a logical optimization.
             // Rewrite joins with index to delta join
-            plan = plan.optimize_by_rules(&OptimizationStage::new(
-                "To IndexDeltaJoin",
-                vec![IndexDeltaJoinRule::create()],
-                ApplyOrder::BottomUp,
-            ))?;
+            plan = plan
+                .optimize_by_rules(&OptimizationStage::new(
+                    "To IndexDeltaJoin",
+                    vec![IndexDeltaJoinRule::create()],
+                    ApplyOrder::BottomUp,
+                ))
+                .await?;
         }
         // Inline session timezone
         plan = inline_session_timezone_in_exprs(ctx.clone(), plan)?;
@@ -597,7 +625,7 @@ impl LogicalPlanRoot {
     }
 
     /// Generate create index or create materialize view plan.
-    fn gen_stream_plan(
+    async fn gen_stream_plan(
         self,
         emit_on_window_close: bool,
         backfill_type: BackfillType,
@@ -619,7 +647,7 @@ impl LogicalPlanRoot {
                         If you intend to proceed, force to enable it with: `set rw_streaming_allow_jsonb_in_stream_key to true`".to_owned(),
                     ).into());
                 }
-                let mut optimized_plan = self.gen_optimized_logical_plan_for_stream()?;
+                let mut optimized_plan = self.gen_optimized_logical_plan_for_stream().await?;
                 let (plan, out_col_change) = {
                     let (plan, out_col_change) = optimized_plan
                         .plan
@@ -691,7 +719,7 @@ impl LogicalPlanRoot {
     }
 
     /// Optimize and generate a create table plan.
-    pub fn gen_table_plan(
+    pub async fn gen_table_plan(
         self,
         context: OptimizerContextRef,
         table_name: String,
@@ -715,7 +743,7 @@ impl LogicalPlanRoot {
         }: CreateTableProps,
     ) -> Result<StreamMaterialize> {
         // Snapshot backfill is not allowed for create table
-        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
+        let stream_plan = self.gen_optimized_stream_plan(false, false).await?;
 
         assert!(!pk_column_ids.is_empty() || row_id_index.is_some());
 
@@ -988,7 +1016,7 @@ impl LogicalPlanRoot {
     }
 
     /// Optimize and generate a create materialized view plan.
-    pub fn gen_materialize_plan(
+    pub async fn gen_materialize_plan(
         self,
         database_id: DatabaseId,
         schema_id: SchemaId,
@@ -997,7 +1025,9 @@ impl LogicalPlanRoot {
         emit_on_window_close: bool,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
-        let stream_plan = self.gen_optimized_stream_plan(emit_on_window_close, true)?;
+        let stream_plan = self
+            .gen_optimized_stream_plan(emit_on_window_close, true)
+            .await?;
         StreamMaterialize::create(
             stream_plan,
             mv_name,
@@ -1011,7 +1041,7 @@ impl LogicalPlanRoot {
     }
 
     /// Optimize and generate a create index plan.
-    pub fn gen_index_plan(
+    pub async fn gen_index_plan(
         self,
         index_name: String,
         database_id: DatabaseId,
@@ -1020,7 +1050,7 @@ impl LogicalPlanRoot {
         retention_seconds: Option<NonZeroU32>,
     ) -> Result<StreamMaterialize> {
         let cardinality = self.compute_cardinality();
-        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
+        let stream_plan = self.gen_optimized_stream_plan(false, false).await?;
 
         StreamMaterialize::create(
             stream_plan,
@@ -1034,7 +1064,7 @@ impl LogicalPlanRoot {
         )
     }
 
-    pub fn gen_vector_index_plan(
+    pub async fn gen_vector_index_plan(
         self,
         index_name: String,
         database_id: DatabaseId,
@@ -1044,7 +1074,7 @@ impl LogicalPlanRoot {
         vector_index_info: PbVectorIndexInfo,
     ) -> Result<StreamVectorIndexWrite> {
         let cardinality = self.compute_cardinality();
-        let stream_plan = self.gen_optimized_stream_plan(false, false)?;
+        let stream_plan = self.gen_optimized_stream_plan(false, false).await?;
 
         StreamVectorIndexWrite::create(
             stream_plan,
@@ -1060,7 +1090,7 @@ impl LogicalPlanRoot {
 
     /// Optimize and generate a create sink plan.
     #[allow(clippy::too_many_arguments)]
-    pub fn gen_sink_plan(
+    pub async fn gen_sink_plan(
         self,
         sink_name: String,
         definition: String,
@@ -1094,8 +1124,9 @@ impl LogicalPlanRoot {
             ))
             .into());
         }
-        let stream_plan =
-            self.gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type)?;
+        let stream_plan = self
+            .gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type)
+            .await?;
         let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
             let columns = t.columns_without_rw_timestamp();
             stream_plan.target_columns_to_plan_mapping(&columns, user_specified_columns)

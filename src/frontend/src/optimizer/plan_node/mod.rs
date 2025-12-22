@@ -67,7 +67,7 @@ pub trait ConventionMarker: 'static + Sized + Clone + Debug + Eq + PartialEq + H
     /// The extra fields in the [`PlanBase`] of this convention.
     type Extra: 'static + Eq + Hash + Clone + Debug;
     type ShareNode: ShareNode<Self>;
-    type PlanRefDyn: PlanNodeCommon<Self> + Eq + Hash + ?Sized;
+    type PlanRefDyn: PlanNodeCommon<Self> + Eq + Hash + Send + Sync + ?Sized;
     type PlanNodeType;
 
     fn as_share(plan: &Self::PlanRefDyn) -> Option<&Self::ShareNode>;

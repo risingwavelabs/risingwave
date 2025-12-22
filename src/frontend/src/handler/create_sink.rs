@@ -389,20 +389,22 @@ pub async fn gen_sink_plan(
         }
     }
 
-    let sink_plan = plan_root.gen_sink_plan(
-        sink_table_name,
-        definition,
-        resolved_with_options,
-        emit_on_window_close,
-        db_name.to_owned(),
-        sink_from_table_name,
-        format_desc,
-        without_backfill,
-        target_table_catalog.clone(),
-        partition_info,
-        user_specified_columns,
-        auto_refresh_schema_from_table,
-    )?;
+    let sink_plan = plan_root
+        .gen_sink_plan(
+            sink_table_name,
+            definition,
+            resolved_with_options,
+            emit_on_window_close,
+            db_name.to_owned(),
+            sink_from_table_name,
+            format_desc,
+            without_backfill,
+            target_table_catalog.clone(),
+            partition_info,
+            user_specified_columns,
+            auto_refresh_schema_from_table,
+        )
+        .await?;
 
     let sink_desc = sink_plan.sink_desc().clone();
 

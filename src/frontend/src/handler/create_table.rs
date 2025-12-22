@@ -541,7 +541,8 @@ pub(crate) async fn gen_create_table_plan_with_source(
         source.clone(),
         col_id_gen.into_version(),
         props,
-    )?;
+    )
+    .await?;
 
     Ok((plan, Some(source), table))
 }
@@ -628,10 +629,10 @@ pub(crate) async fn gen_create_table_plan_without_source(
         version,
     };
 
-    gen_table_plan_inner(context.into(), schema_name, table_name, info, props)
+    gen_table_plan_inner(context.into(), schema_name, table_name, info, props).await
 }
 
-fn gen_table_plan_with_source(
+async fn gen_table_plan_with_source(
     context: OptimizerContextRef,
     schema_name: Option<String>,
     source_catalog: SourceCatalog,
@@ -649,7 +650,7 @@ fn gen_table_plan_with_source(
         version,
     };
 
-    gen_table_plan_inner(context, schema_name, table_name, info, props)
+    gen_table_plan_inner(context, schema_name, table_name, info, props).await
 }
 
 /// On-conflict behavior either from user input or existing table catalog.
@@ -737,7 +738,7 @@ pub struct CreateTableProps {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn gen_table_plan_inner(
+async fn gen_table_plan_inner(
     context: OptimizerContextRef,
     schema_name: Option<String>,
     table_name: String,
@@ -811,8 +812,9 @@ fn gen_table_plan_inner(
         }
     }
 
-    let materialize =
-        plan_root.gen_table_plan(context, table_name, database_id, schema_id, info, props)?;
+    let materialize = plan_root
+        .gen_table_plan(context, table_name, database_id, schema_id, info, props)
+        .await?;
 
     let mut table = materialize.table().clone();
     table.owner = session.user_id();
@@ -930,28 +932,30 @@ pub(crate) async fn gen_create_table_plan_for_cdc_table(
     );
 
     let cdc_table_id = build_cdc_table_id(source.id, &external_table_name);
-    let materialize = plan_root.gen_table_plan(
-        context,
-        resolved_table_name,
-        database_id,
-        schema_id,
-        CreateTableInfo {
-            columns,
-            pk_column_ids,
-            row_id_index: None,
-            watermark_descs: vec![],
-            source_catalog: Some((*source).clone()),
-            version: col_id_gen.into_version(),
-        },
-        CreateTableProps {
-            definition,
-            append_only: false,
-            on_conflict: on_conflict.into(),
-            with_version_columns,
-            webhook_info: None,
-            engine,
-        },
-    )?;
+    let materialize = plan_root
+        .gen_table_plan(
+            context,
+            resolved_table_name,
+            database_id,
+            schema_id,
+            CreateTableInfo {
+                columns,
+                pk_column_ids,
+                row_id_index: None,
+                watermark_descs: vec![],
+                source_catalog: Some((*source).clone()),
+                version: col_id_gen.into_version(),
+            },
+            CreateTableProps {
+                definition,
+                append_only: false,
+                on_conflict: on_conflict.into(),
+                with_version_columns,
+                webhook_info: None,
+                engine,
+            },
+        )
+        .await?;
 
     let mut table = materialize.table().clone();
     table.owner = session.user_id();

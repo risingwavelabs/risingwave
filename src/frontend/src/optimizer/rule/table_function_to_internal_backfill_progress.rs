@@ -39,8 +39,9 @@ use crate::utils::{Condition, GroupBy};
 /// into a plan graph which will scan the state tables of backfill nodes.
 /// It will return the progress of the backfills, partitioned by the backfill node's fragment id.
 pub struct TableFunctionToInternalBackfillProgressRule {}
+#[async_trait::async_trait]
 impl FallibleRule<Logical> for TableFunctionToInternalBackfillProgressRule {
-    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
+    async fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         if logical_table_function.table_function.function_type
             != TableFunctionType::InternalBackfillProgress

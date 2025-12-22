@@ -34,7 +34,6 @@ use crate::catalog::ColumnId;
 use crate::catalog::index_catalog::{IndexType, TableIndex, VectorIndex};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
-use crate::optimizer::ApplyResult;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::plan_node_meta::AnyPlanNodeMeta;
@@ -589,8 +588,8 @@ impl ToBatch for LogicalScan {
                 .config()
                 .enable_index_selection()
         {
-            let index_selection_rule = IndexSelectionRule::create();
-            if let ApplyResult::Ok(applied) = index_selection_rule.apply(new.clone().into()) {
+            let index_selection_rule = IndexSelectionRule {};
+            if let Some(applied) = index_selection_rule.apply_to_plan(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
                     return required_order.enforce_if_not_satisfies(scan.to_batch()?);

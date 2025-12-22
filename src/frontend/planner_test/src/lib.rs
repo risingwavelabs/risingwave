@@ -422,7 +422,7 @@ impl TestCase {
                         HandlerArgs::new(session.clone(), &stmt, sql.clone())?,
                         explain_options,
                     );
-                    let ret = self.apply_query(&stmt, context.into())?;
+                    let ret = self.apply_query(&stmt, context.into()).await?;
                     if do_check_result {
                         check_result(self, &ret)?;
                     }
@@ -599,7 +599,7 @@ impl TestCase {
         Ok(result)
     }
 
-    fn apply_query(
+    async fn apply_query(
         &self,
         stmt: &Statement,
         context: OptimizerContextRef,
@@ -609,7 +609,7 @@ impl TestCase {
 
         let bound = {
             let mut binder = Binder::new_for_batch(&session);
-            match binder.bind(stmt.clone()) {
+            match binder.bind(stmt.clone()).await {
                 Ok(bound) => bound,
                 Err(err) => {
                     ret.binder_error = Some(err.to_report_string_pretty());
@@ -641,7 +641,7 @@ impl TestCase {
         {
             let plan_root = plan_root.clone();
             let optimized_logical_plan_for_batch =
-                match plan_root.gen_optimized_logical_plan_for_batch() {
+                match plan_root.gen_optimized_logical_plan_for_batch().await {
                     Ok(optimized_logical_plan_for_batch) => optimized_logical_plan_for_batch,
                     Err(err) => {
                         ret.optimizer_error = Some(err.to_report_string_pretty());
@@ -666,7 +666,7 @@ impl TestCase {
         {
             let plan_root = plan_root.clone();
             let optimized_logical_plan_for_stream =
-                match plan_root.gen_optimized_logical_plan_for_stream() {
+                match plan_root.gen_optimized_logical_plan_for_stream().await {
                     Ok(optimized_logical_plan_for_stream) => optimized_logical_plan_for_stream,
                     Err(err) => {
                         ret.optimizer_error = Some(err.to_report_string_pretty());
@@ -690,8 +690,8 @@ impl TestCase {
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
                 let plan_root = plan_root.clone();
-                let batch_plan = match plan_root.gen_batch_plan() {
-                    Ok(batch_plan) => match batch_plan.gen_batch_distributed_plan() {
+                let batch_plan = match plan_root.gen_batch_plan().await {
+                    Ok(batch_plan) => match batch_plan.gen_batch_distributed_plan().await {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
                             ret.batch_error = Some(err.to_report_string_pretty());
@@ -723,8 +723,8 @@ impl TestCase {
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
                 let plan_root = plan_root.clone();
-                let batch_plan = match plan_root.gen_batch_plan() {
-                    Ok(batch_plan) => match batch_plan.gen_batch_local_plan() {
+                let batch_plan = match plan_root.gen_batch_plan().await {
+                    Ok(batch_plan) => match batch_plan.gen_batch_local_plan().await {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
                             ret.batch_error = Some(err.to_report_string_pretty());
@@ -751,8 +751,8 @@ impl TestCase {
                 || self.expected_outputs.contains(&TestType::BatchError)
             {
                 let plan_root = plan_root.clone();
-                let batch_plan = match plan_root.gen_batch_plan() {
-                    Ok(batch_plan) => match batch_plan.gen_batch_distributed_plan() {
+                let batch_plan = match plan_root.gen_batch_plan().await {
+                    Ok(batch_plan) => match batch_plan.gen_batch_distributed_plan().await {
                         Ok(batch_plan) => batch_plan,
                         Err(err) => {
                             ret.batch_error = Some(err.to_report_string_pretty());
@@ -823,7 +823,9 @@ impl TestCase {
                     ObjectName(vec!["test".into()]),
                     vec![],
                     Some(emit_mode),
-                ) {
+                )
+                .await
+                {
                     Ok(r) => r,
                     Err(err) => {
                         *ret_error_str = Some(err.to_report_string_pretty());
@@ -870,20 +872,23 @@ impl TestCase {
                 // let options = WithOptionsSecResolved::without_secrets(options);
                 let options = WithOptionsSecResolved::without_secrets(options);
                 let format_desc = (&options).try_into().unwrap();
-                match plan_root.gen_sink_plan(
-                    sink_name.to_owned(),
-                    format!("CREATE SINK {sink_name} AS {}", stmt),
-                    options,
-                    false,
-                    "test_db".into(),
-                    "test_table".into(),
-                    format_desc,
-                    false,
-                    None,
-                    None,
-                    false,
-                    None,
-                ) {
+                match plan_root
+                    .gen_sink_plan(
+                        sink_name.to_owned(),
+                        format!("CREATE SINK {sink_name} AS {}", stmt),
+                        options,
+                        false,
+                        "test_db".into(),
+                        "test_table".into(),
+                        format_desc,
+                        false,
+                        None,
+                        None,
+                        false,
+                        None,
+                    )
+                    .await
+                {
                     Ok(sink_plan) => {
                         ret.sink_plan = Some(explain_plan(&sink_plan.into()));
                         break 'sink;

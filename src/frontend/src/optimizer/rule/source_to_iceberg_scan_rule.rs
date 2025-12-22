@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_trait::async_trait;
 use risingwave_common::catalog::{
     ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
 };
@@ -27,11 +28,12 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{Logical, LogicalIcebergScan, LogicalJoin, LogicalSource};
 use crate::optimizer::rule::{ApplyResult, FallibleRule};
-use crate::utils::{Condition, FRONTEND_RUNTIME};
+use crate::utils::Condition;
 
 pub struct SourceToIcebergScanRule {}
+#[async_trait]
 impl FallibleRule<Logical> for SourceToIcebergScanRule {
-    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
+    async fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
         let source: &LogicalSource = match plan.as_logical_source() {
             Some(s) => s,
             None => return ApplyResult::NotApplicable,
@@ -64,9 +66,7 @@ impl FallibleRule<Logical> for SourceToIcebergScanRule {
                 let timezone = plan.ctx().get_session_timezone();
                 let time_travel_info = to_iceberg_time_travel_as_of(&source.core.as_of, &timezone)?;
                 let delete_parameters: IcebergDeleteParameters =
-                    tokio::task::block_in_place(|| {
-                        FRONTEND_RUNTIME.block_on(s.get_delete_parameters(time_travel_info))
-                    })?;
+                    s.get_delete_parameters(time_travel_info).await?;
                 // data file scan
                 let mut data_iceberg_scan: PlanRef = LogicalIcebergScan::new(
                     source,

@@ -126,7 +126,7 @@ impl Rule<Logical> for ApplyJoinTransposeRule {
         // ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule.
         // As this rule will be applied until we reach the fixed point, if the join has output indices, apply ProjectJoinSeparateRule first and return is safety.
         if !join.output_indices_are_trivial() {
-            let new_apply_right = crate::optimizer::rule::ProjectJoinSeparateRule::create()
+            let new_apply_right = crate::optimizer::rule::ProjectJoinSeparateRule {}
                 .apply(join.clone().into())
                 .unwrap();
             return Some(apply.clone_with_inputs(&[apply_left, new_apply_right]));
