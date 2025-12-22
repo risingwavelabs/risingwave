@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-/// Default threshold for switching from XOR16 filter to block-based XOR16 filter.
-/// When key count exceeds this value, block-based filter is used for better memory efficiency.
-pub const DEFAULT_MAX_KV_COUNT_FOR_XOR16: u64 = 256 * 1024;
+use risingwave_common::config::meta::default::compaction_config;
 
 /// Determines whether the key count is large enough to warrant using a block-based filter.
 ///
@@ -25,6 +23,6 @@ pub const DEFAULT_MAX_KV_COUNT_FOR_XOR16: u64 = 256 * 1024;
 /// # Returns
 /// `true` if `kv_count` exceeds the threshold, indicating block-based filter should be used
 pub fn is_kv_count_too_large_for_xor16(kv_count: u64, max_kv_count: Option<u64>) -> bool {
-    let threshold = max_kv_count.unwrap_or(DEFAULT_MAX_KV_COUNT_FOR_XOR16);
+    let threshold = max_kv_count.unwrap_or(compaction_config::DEFAULT_MAX_KV_COUNT_FOR_XOR16);
     kv_count > threshold
 }
