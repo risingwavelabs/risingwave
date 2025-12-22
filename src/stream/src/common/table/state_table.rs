@@ -144,6 +144,37 @@ impl VnodeStatistics {
         }
         false
     }
+
+    fn pruned_key_range(
+        &self,
+        start: &Bound<Bytes>,
+        end: &Bound<Bytes>,
+    ) -> Option<(Bound<Bytes>, Bound<Bytes>)> {
+        if self.can_prune_range(start, end) {
+            return None;
+        }
+        let new_start = if let Some(min) = &self.min_key {
+            match start {
+                Included(s) if s <= min => Included(min.clone()),
+                Excluded(s) if s < min => Included(min.clone()),
+                _ => start.clone(),
+            }
+        } else {
+            start.clone()
+        };
+
+        let new_end = if let Some(max) = &self.max_key {
+            match end {
+                Included(e) if e >= max => Included(max.clone()),
+                Excluded(e) if e > max => Included(max.clone()),
+                _ => end.clone(),
+            }
+        } else {
+            end.clone()
+        };
+
+        Some((new_start, new_end))
+    }
 }
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
@@ -645,7 +676,6 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             && let Some(enable_vnode_key_pruning) = self.enable_vnode_key_pruning
             && enable_vnode_key_pruning
         {
-            warn!(table_id=%self.table_catalog.id, "enable_vnode_key_pruning is incompatible with preload_all_rows, disabling vnode key pruning");
             false
         } else {
             self.enable_vnode_key_pruning.unwrap_or(false)
@@ -1684,22 +1714,28 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             m.iter_count.inc();
         }
         // Check if we can prune the entire range using vnode statistics
-        if let Some(stats) = &self.vnode_stats
+        let (pruned_start, pruned_end) = if let Some(stats) = &self.vnode_stats
             && let Some(vnode_stat) = stats.get(&vnode)
-            && vnode_stat.can_prune_range(&start, &end)
         {
-            if let Some(m) = &self.metrics {
-                m.iter_vnode_pruned_count.inc();
+            match vnode_stat.pruned_key_range(&start, &end) {
+                Some((new_start, new_end)) => (new_start, new_end),
+                None => {
+                    if let Some(m) = &self.metrics {
+                        m.iter_vnode_pruned_count.inc();
+                    }
+                    return Ok(futures::future::Either::Left(futures::stream::empty()));
+                }
             }
-            return Ok(futures::future::Either::Left(futures::stream::empty()));
-        }
+        } else {
+            (start, end)
+        };
 
         if let Some(rows) = &self.all_rows {
             return Ok(futures::future::Either::Right(
                 futures::future::Either::Left(futures::stream::iter(
                     rows.get(&vnode)
                         .expect("covered vnode")
-                        .range((start, end))
+                        .range((pruned_start, pruned_end))
                         .map(move |(key, value)| {
                             Ok((K::from_vnode_bytes(vnode, key), value.clone()))
                         }),
@@ -1716,7 +1752,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         Ok(futures::future::Either::Right(
             futures::future::Either::Right(deserialize_keyed_row_stream(
                 self.state_store
-                    .iter(prefixed_range_with_vnode((start, end), vnode), read_options)
+                    .iter(
+                        prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
+                        read_options,
+                    )
                     .await?,
                 &*self.row_serde,
             )),
@@ -1734,22 +1773,28 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             m.iter_count.inc();
         }
         // Check if we can prune the entire range using vnode statistics
-        if let Some(stats) = &self.vnode_stats
+        let (pruned_start, pruned_end) = if let Some(stats) = &self.vnode_stats
             && let Some(vnode_stat) = stats.get(&vnode)
-            && vnode_stat.can_prune_range(&start, &end)
         {
-            if let Some(m) = &self.metrics {
-                m.iter_vnode_pruned_count.inc();
+            match vnode_stat.pruned_key_range(&start, &end) {
+                Some((new_start, new_end)) => (new_start, new_end),
+                None => {
+                    if let Some(m) = &self.metrics {
+                        m.iter_vnode_pruned_count.inc();
+                    }
+                    return Ok(futures::future::Either::Left(futures::stream::empty()));
+                }
             }
-            return Ok(futures::future::Either::Left(futures::stream::empty()));
-        }
+        } else {
+            (start, end)
+        };
 
         if let Some(rows) = &self.all_rows {
             return Ok(futures::future::Either::Right(
                 futures::future::Either::Left(futures::stream::iter(
                     rows.get(&vnode)
                         .expect("covered vnode")
-                        .range((start, end))
+                        .range((pruned_start, pruned_end))
                         .rev()
                         .map(move |(key, value)| {
                             Ok((K::from_vnode_bytes(vnode, key), value.clone()))
@@ -1767,7 +1812,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         Ok(futures::future::Either::Right(
             futures::future::Either::Right(deserialize_keyed_row_stream(
                 self.state_store
-                    .rev_iter(prefixed_range_with_vnode((start, end), vnode), read_options)
+                    .rev_iter(
+                        prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
+                        read_options,
+                    )
                     .await?,
                 &*self.row_serde,
             )),

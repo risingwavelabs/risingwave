@@ -2071,3 +2071,298 @@ async fn test_state_table_with_vnode_stats() {
         2
     );
 }
+
+#[tokio::test]
+async fn test_state_table_pruned_key_range_with_two_pk_columns() {
+    use risingwave_common::config::MetricLevel;
+
+    use crate::common::table::state_table::StateTableBuilder;
+    use crate::executor::monitor::streaming_stats::global_streaming_metrics;
+    use crate::task::{ActorId, FragmentId};
+
+    const TEST_TABLE_ID: TableId = TableId::new(234);
+    let test_env = prepare_hummock_test_env().await;
+
+    // Create a table with two primary key columns
+    let column_descs = vec![
+        ColumnDesc::unnamed(ColumnId::from(0), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(1), DataType::Int32),
+        ColumnDesc::unnamed(ColumnId::from(2), DataType::Int32),
+    ];
+    let order_types = vec![OrderType::ascending(), OrderType::ascending()];
+    let pk_index = vec![0_usize, 1_usize];
+    let read_prefix_len_hint = 0;
+    let table = gen_pbtable(
+        TEST_TABLE_ID,
+        column_descs.clone(),
+        order_types.clone(),
+        pk_index.clone(),
+        read_prefix_len_hint,
+    );
+
+    test_env.register_table(table.clone()).await;
+
+    let metrics = global_streaming_metrics(MetricLevel::Debug).new_state_table_metrics(
+        TEST_TABLE_ID,
+        ActorId::new(2),
+        FragmentId::new(2),
+    );
+
+    let vnode_bitmap = {
+        let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
+        for i in 0..VirtualNode::COUNT_FOR_TEST {
+            builder.set(i, true);
+        }
+        builder.finish()
+    };
+    let mut state_table: StateTable<HummockStorage> = StateTableBuilder::new(
+        &table,
+        test_env.storage.clone(),
+        Some(Arc::new(vnode_bitmap)),
+    )
+    .enable_vnode_key_pruning(true)
+    .with_metrics(metrics)
+    .forbid_preload_all_rows()
+    .build()
+    .await;
+
+    let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.init_epoch(epoch).await.unwrap();
+
+    // Insert rows with two-column PKs
+    // (1, 10), (1, 20), (1, 30)
+    // (5, 50), (5, 60)
+    // (9, 90)
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(10_i32.into()),
+        Some(100_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(20_i32.into()),
+        Some(200_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(1_i32.into()),
+        Some(30_i32.into()),
+        Some(300_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(5_i32.into()),
+        Some(50_i32.into()),
+        Some(500_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(5_i32.into()),
+        Some(60_i32.into()),
+        Some(600_i32.into()),
+    ]));
+    state_table.insert(OwnedRow::new(vec![
+        Some(9_i32.into()),
+        Some(90_i32.into()),
+        Some(900_i32.into()),
+    ]));
+
+    // Commit to establish vnode stats
+    epoch.inc_for_test();
+    test_env
+        .storage
+        .start_epoch(epoch.curr, HashSet::from_iter([TEST_TABLE_ID]));
+    state_table.commit_for_test(epoch).await.unwrap();
+
+    // Test 1: Full range scan should find all 6 rows
+    let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+        std::ops::Bound::Unbounded,
+        std::ops::Bound::Unbounded,
+    );
+    let it = state_table
+        .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
+        .await
+        .unwrap();
+    pin_mut!(it);
+    let mut count = 0;
+    while let Some(_) = it.next().await {
+        count += 1;
+    }
+    assert_eq!(count, 6);
+
+    // Test 2: Range before min key (1, 10) should be pruned
+    let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+        std::ops::Bound::Excluded(OwnedRow::new(vec![Some((-10_i32).into()), Some(0_i32.into())])),
+        std::ops::Bound::Excluded(OwnedRow::new(vec![Some(0_i32.into()), Some(99_i32.into())])),
+    );
+    let it = state_table
+        .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
+        .await
+        .unwrap();
+    pin_mut!(it);
+    assert!(it.next().await.is_none());
+    assert_eq!(
+        state_table.metrics().unwrap().iter_vnode_pruned_count.get(),
+        1
+    );
+
+    // Test 3: Range after max key (9, 90) should be pruned
+    let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+        std::ops::Bound::Included(OwnedRow::new(vec![Some(100_i32.into()), Some(0_i32.into())])),
+        std::ops::Bound::Included(OwnedRow::new(vec![Some(200_i32.into()), Some(0_i32.into())])),
+    );
+    let it = state_table
+        .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
+        .await
+        .unwrap();
+    pin_mut!(it);
+    assert!(it.next().await.is_none());
+    assert_eq!(
+        state_table.metrics().unwrap().iter_vnode_pruned_count.get(),
+        2
+    );
+
+    // Test 4: Range that extends before min key gets narrowed
+    // Range: [-100, 50] should be narrowed to [min_key, 50] and return rows (1,10), (1,20), (1,30), (5,50)
+    let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+        std::ops::Bound::Excluded(OwnedRow::new(vec![Some((-100_i32).into()), Some(0_i32.into())])),
+        std::ops::Bound::Included(OwnedRow::new(vec![Some(5_i32.into()), Some(50_i32.into())])),
+    );
+    let it = state_table
+        .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
+        .await
+        .unwrap();
+    pin_mut!(it);
+    let mut count = 0;
+    while let Some(row) = it.next().await {
+        let row = row.unwrap();
+        count += 1;
+        // Verify we're getting the expected rows
+        match count {
+            1 => assert_eq!(
+                row.as_ref(),
+                &OwnedRow::new(vec![
+                    Some(1_i32.into()),
+                    Some(10_i32.into()),
+                    Some(100_i32.into())
+                ])
+            ),
+            2 => assert_eq!(
+                row.as_ref(),
+                &OwnedRow::new(vec![
+                    Some(1_i32.into()),
+                    Some(20_i32.into()),
+                    Some(200_i32.into())
+                ])
+            ),
+            3 => assert_eq!(
+                row.as_ref(),
+                &OwnedRow::new(vec![
+                    Some(1_i32.into()),
+                    Some(30_i32.into()),
+                    Some(300_i32.into())
+                ])
+            ),
+            4 => assert_eq!(
+                row.as_ref(),
+                &OwnedRow::new(vec![
+                    Some(5_i32.into()),
+                    Some(50_i32.into()),
+                    Some(500_i32.into())
+                ])
+            ),
+            _ => panic!("Unexpected row"),
+        }
+    }
+    assert_eq!(count, 4);
+
+    // Test 5: Range that extends after max key gets narrowed
+    // Range: [5, 1000] should be narrowed to [5, max_key] and return rows (5,50), (5,60), (9,90)
+    let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+        std::ops::Bound::Included(OwnedRow::new(vec![Some(5_i32.into()), Some(0_i32.into())])),
+        std::ops::Bound::Included(OwnedRow::new(vec![Some(1000_i32.into()), Some(0_i32.into())])),
+    );
+    let it = state_table
+        .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
+        .await
+        .unwrap();
+    pin_mut!(it);
+    let mut count = 0;
+    while let Some(row) = it.next().await {
+        let row = row.unwrap();
+        count += 1;
+        match count {
+            1 => assert_eq!(
+                row.as_ref(),
+                &OwnedRow::new(vec![
+                    Some(5_i32.into()),
+                    Some(50_i32.into()),
+                    Some(500_i32.into())
+                ])
+            ),
+            2 => assert_eq!(
+                row.as_ref(),
+                &OwnedRow::new(vec![
+                    Some(5_i32.into()),
+                    Some(60_i32.into()),
+                    Some(600_i32.into())
+                ])
+            ),
+            3 => assert_eq!(
+                row.as_ref(),
+                &OwnedRow::new(vec![
+                    Some(9_i32.into()),
+                    Some(90_i32.into()),
+                    Some(900_i32.into())
+                ])
+            ),
+            _ => panic!("Unexpected row"),
+        }
+    }
+    assert_eq!(count, 3);
+
+    // Test 6: Range within bounds returns correct rows
+    // Range: [(1, 15), (5, 55)] should return (1,20), (1,30), (5,50)
+    let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
+        std::ops::Bound::Excluded(OwnedRow::new(vec![Some(1_i32.into()), Some(15_i32.into())])),
+        std::ops::Bound::Included(OwnedRow::new(vec![Some(5_i32.into()), Some(55_i32.into())])),
+    );
+    let it = state_table
+        .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
+        .await
+        .unwrap();
+    pin_mut!(it);
+    let mut count = 0;
+    while let Some(row) = it.next().await {
+        let row = row.unwrap();
+        count += 1;
+        match count {
+            1 => assert_eq!(
+                row.as_ref(),
+                &OwnedRow::new(vec![
+                    Some(1_i32.into()),
+                    Some(20_i32.into()),
+                    Some(200_i32.into())
+                ])
+            ),
+            2 => assert_eq!(
+                row.as_ref(),
+                &OwnedRow::new(vec![
+                    Some(1_i32.into()),
+                    Some(30_i32.into()),
+                    Some(300_i32.into())
+                ])
+            ),
+            3 => assert_eq!(
+                row.as_ref(),
+                &OwnedRow::new(vec![
+                    Some(5_i32.into()),
+                    Some(50_i32.into()),
+                    Some(500_i32.into())
+                ])
+            ),
+            _ => panic!("Unexpected row"),
+        }
+    }
+    assert_eq!(count, 3);
+}
