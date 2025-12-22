@@ -691,6 +691,7 @@ where
     }
 
     /// Create state table from table catalog and store.
+    #[allow(clippy::too_many_arguments)]
     async fn from_table_catalog_inner(
         table_catalog: &Table,
         store: S,
