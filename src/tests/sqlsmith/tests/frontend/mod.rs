@@ -185,7 +185,7 @@ async fn test_stream_query(
     Ok(())
 }
 
-fn run_batch_query(
+async fn run_batch_query(
     session: Arc<SessionImpl>,
     context: OptimizerContextRef,
     stmt: Statement,
@@ -195,6 +195,7 @@ fn run_batch_query(
     let mut binder = Binder::new_for_batch(&session);
     let bound = binder
         .bind(stmt)
+        .await
         .map_err(|e| Failed::from(format!("Failed to bind:\nReason:\n{}", e.as_report())))?;
     let mut planner = Planner::new_for_batch(context);
     let plan_root = planner.plan(bound).map_err(|e| {
@@ -203,7 +204,7 @@ fn run_batch_query(
             e.as_report()
         ))
     })?;
-    let batch_plan = plan_root.gen_batch_plan().map_err(|e| {
+    let batch_plan = plan_root.gen_batch_plan().await.map_err(|e| {
         Failed::from(format!(
             "Failed to generate batch plan:\nReason:\n{}",
             e.as_report()
@@ -218,7 +219,7 @@ fn run_batch_query(
     Ok(())
 }
 
-fn test_batch_query(
+async fn test_batch_query(
     session: Arc<SessionImpl>,
     tables: Vec<Table>,
     seed: u64,
@@ -243,7 +244,7 @@ fn test_batch_query(
 
     match stmt {
         Statement::Query(_) => {
-            let result = run_batch_query(session, context, stmt);
+            let result = run_batch_query(session, context, stmt).await;
             validate_result(result)?;
             Ok(())
         }
@@ -315,7 +316,12 @@ pub fn run() {
                     tables,
                     setup_sql,
                 } = &*env;
-                test_batch_query(session.clone(), tables.clone(), i, setup_sql)?;
+                build_runtime().block_on(test_batch_query(
+                    session.clone(),
+                    tables.clone(),
+                    i,
+                    setup_sql,
+                ))?;
                 let test_stream_query =
                     test_stream_query(session.clone(), tables.clone(), i, setup_sql);
                 build_runtime().block_on(test_stream_query)?;
