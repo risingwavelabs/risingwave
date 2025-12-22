@@ -48,6 +48,11 @@ pub struct MaterializeCache {
 type CacheValue = Option<CompactedRow>;
 type ChangeBuffer = crate::common::change_buffer::ChangeBuffer<Vec<u8>, OwnedRow>;
 
+/// Check whether the given row is below the committed watermark. If so, we may want to treat
+/// them as non-existent. This extra step is necessary for TTL-ed tables because:
+///
+/// - the storage may clean expired rows asynchronously
+/// - an expired row may still be in the cache while we expect a consistent view
 fn row_below_committed_watermark<S: StateStore, SD: ValueRowSerde>(
     row_serde: &BasicSerde,
     table: &StateTableInner<S, SD>,
@@ -357,25 +362,11 @@ impl MaterializeCache {
             }
 
             let row_serde = self.row_serde.clone();
-            let committed_watermark = table.get_committed_watermark().cloned();
-            let clean_watermark_index = table.clean_watermark_index;
             futures.push(async move {
                 let key_row = table.pk_serde().deserialize(key).unwrap();
                 let row = table.get_row(key_row).await?.map(CompactedRow::from);
                 let row = match row {
-                    Some(row)
-                        if committed_watermark.is_some() && clean_watermark_index.is_some() =>
-                    {
-                        let committed_watermark = committed_watermark.as_ref().unwrap();
-                        let clean_watermark_index = clean_watermark_index.unwrap();
-                        let deserialized = row_serde.deserializer.deserialize(row.row.clone())?;
-                        let below = cmp_datum(
-                            deserialized.datum_at(clean_watermark_index),
-                            Some(committed_watermark.as_scalar_ref_impl()),
-                            OrderType::ascending(),
-                        ) == std::cmp::Ordering::Less;
-                        (!below).then_some(row)
-                    }
+                    Some(row) if row_below_committed_watermark(&row_serde, table, &row)? => None,
                     other => other,
                 };
                 StreamExecutorResult::Ok((key.to_vec(), row))
