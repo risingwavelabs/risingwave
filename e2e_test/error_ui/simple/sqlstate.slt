@@ -1,6 +1,4 @@
-# SQLSTATE coverage tests (for the error codes we already support, plus 3D000).
-#
-# Requires sqllogictest v0.29.0+ for `statement error (<SQLSTATE>)` syntax.
+# SQLSTATE coverage tests for supported error codes.
 
 # Duplicate object -> 42710.
 statement ok
@@ -19,6 +17,6 @@ drop table if exists sqlstate_slt_no_such;
 statement error (42704)
 drop table sqlstate_slt_no_such;
 
-# Invalid catalog name -> 3D000.
+# Invalid catalog name (database) -> 3D000.
 statement error (3D000)
 set database to sqlstate_missing_db;
