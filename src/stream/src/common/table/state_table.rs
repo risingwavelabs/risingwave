@@ -1334,7 +1334,7 @@ where
             .expect("watermark serde should be initialized to commit watermark");
 
         let watermark_suffix =
-            serialize_pk(row::once(Some(watermark.clone())), &watermark_serializer);
+            serialize_pk(row::once(Some(watermark.clone())), watermark_serializer);
         let vnode_watermark = VnodeWatermark::new(
             self.vnodes().clone(),
             Bytes::copy_from_slice(watermark_suffix.as_ref()),
