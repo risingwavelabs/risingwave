@@ -801,7 +801,7 @@ impl IcebergCommon {
 
 /// Get a globally shared object cache keyed by table UUID to avoid reuse after drop & recreate.
 pub(crate) fn shared_object_cache(
-    file_io: &iceberg::io::FileIO,
+    init_object_cache: Arc<ObjectCache>,
     table_uuid: Uuid,
 ) -> Arc<ObjectCache> {
     static CACHE: OnceLock<Mutex<HashMap<Uuid, Arc<ObjectCache>>>> = OnceLock::new();
@@ -811,12 +811,12 @@ pub(crate) fn shared_object_cache(
 
     guard
         .entry(table_uuid)
-        .or_insert_with(|| Arc::new(ObjectCache::new(file_io.clone())))
+        .or_insert_with(|| init_object_cache)
         .clone()
 }
 
 pub fn rebuild_table_with_shared_cache(table: Table) -> Table {
     let table_uuid = table.metadata().uuid();
-    let object_cache = shared_object_cache(table.file_io(), table_uuid);
-    table.with_object_cache(object_cache)
+    let init_object_cache = table.object_cache();
+    table.with_object_cache(shared_object_cache(init_object_cache, table_uuid))
 }
