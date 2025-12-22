@@ -928,7 +928,7 @@ async fn show_all_sub_cursors_impl(
             state: "".to_owned(),
             idle_duration_ms: 0,
             info: Some(format!(
-                "Failed to show cursor from worker {worker_id} due to: {err_msg}"
+                "Failed to show subscription cursor from worker {worker_id} due to: {err_msg}"
             )),
         }]
     }
