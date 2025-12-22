@@ -27,24 +27,24 @@ impl Binder {
     /// Specifically,
     /// - `(table).struct_col.fields` -> `(bound_struct_col, fields)`
     /// - Otherwise, `expr` corresponds to a column. `(expr).fields` -> `(bound_expr, fields)`
-    fn extract_struct_column(
+    async fn extract_struct_column(
         &mut self,
         expr: &Expr,
         field_idents: &[Ident],
     ) -> Result<(ExprImpl, Vec<Ident>)> {
-        let d = self.bind_expr(expr)?;
+        let d = self.bind_expr(expr).await?;
         Ok((d, field_idents.to_vec()))
     }
 
     /// Binds wildcard field column, e.g. `(table.v1).*` or `(table).v1.*`.
     ///
     /// Returns a vector of `Field(expr, int)` expressions and aliases.
-    pub fn bind_wildcard_field_column(
+    pub async fn bind_wildcard_field_column(
         &mut self,
         expr: &Expr,
         prefix: &[Ident],
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
-        let (expr, idents) = self.extract_struct_column(expr, prefix)?;
+        let (expr, idents) = self.extract_struct_column(expr, prefix).await?;
         let fields = Self::bind_field("".to_owned(), expr, &idents, true)?;
         let (exprs, names) = fields.into_iter().map(|(e, s)| (e, Some(s))).unzip();
         Ok((exprs, names))
@@ -53,8 +53,12 @@ impl Binder {
     /// Binds single field column, e.g. `(table.v1).v2` or `(table).v1.v2`.
     ///
     /// Returns a `Field(expr, int)` expression.
-    pub fn bind_single_field_column(&mut self, expr: &Expr, idents: &[Ident]) -> Result<ExprImpl> {
-        let (expr, idents) = self.extract_struct_column(expr, idents)?;
+    pub async fn bind_single_field_column(
+        &mut self,
+        expr: &Expr,
+        idents: &[Ident],
+    ) -> Result<ExprImpl> {
+        let (expr, idents) = self.extract_struct_column(expr, idents).await?;
         let exprs = Self::bind_field("".to_owned(), expr, &idents, false)?;
         Ok(exprs[0].clone().0)
     }

@@ -31,11 +31,10 @@ use thiserror_ext::AsReport;
 use tokio_postgres::types::Type as TokioPgType;
 
 use super::{ErrorCode, Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
-use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::BindError;
-use crate::utils::FRONTEND_RUNTIME;
 
 const INLINE_ARG_LEN: usize = 6;
 const CDC_SOURCE_ARG_LEN: usize = 2;
@@ -82,7 +81,7 @@ impl TableFunction {
 
     /// A special table function which would be transformed into `LogicalFileScan` by `TableFunctionToFileScanRule` in the optimizer.
     /// select * from `file_scan`('parquet', 's3', region, ak, sk, location)
-    pub fn new_file_scan(mut args: Vec<ExprImpl>) -> RwResult<Self> {
+    pub async fn new_file_scan(mut args: Vec<ExprImpl>) -> RwResult<Self> {
         let return_type = {
             // arguments:
             // file format e.g. parquet
@@ -222,18 +221,12 @@ impl TableFunction {
                     }
                 };
                 let files = if input_file_location.ends_with('/') {
-                    let files = tokio::task::block_in_place(|| {
-                        FRONTEND_RUNTIME.block_on(async {
-                            let files = list_data_directory(
-                                op.clone(),
-                                input_file_location.clone(),
-                                &file_scan_backend,
-                            )
-                            .await?;
-
-                            Ok::<Vec<String>, anyhow::Error>(files)
-                        })
-                    })?;
+                    let files = list_data_directory(
+                        op.clone(),
+                        input_file_location.clone(),
+                        &file_scan_backend,
+                    )
+                    .await?;
                     if files.is_empty() {
                         return Err(BindError(
                             "file_scan function only accepts non-empty directory".to_owned(),
@@ -245,30 +238,23 @@ impl TableFunction {
                 } else {
                     None
                 };
-                let schema = tokio::task::block_in_place(|| {
-                    FRONTEND_RUNTIME.block_on(async {
-                        let location = match files.as_ref() {
-                            Some(files) => files[0].clone(),
-                            None => input_file_location.clone(),
-                        };
-                        let (_, file_name) =
-                            extract_bucket_and_file_name(&location, &file_scan_backend)?;
+                let location = match files.as_ref() {
+                    Some(files) => files[0].clone(),
+                    None => input_file_location.clone(),
+                };
+                let (_, file_name) = extract_bucket_and_file_name(&location, &file_scan_backend)?;
 
-                        let fields = get_parquet_fields(op, file_name).await?;
+                let fields = get_parquet_fields(op, file_name).await?;
 
-                        let mut rw_types = vec![];
-                        for field in &fields {
-                            rw_types.push((
-                                field.name().clone(),
-                                IcebergArrowConvert.type_from_field(field)?,
-                            ));
-                        }
+                let mut rw_types = vec![];
+                for field in &fields {
+                    rw_types.push((
+                        field.name().clone(),
+                        IcebergArrowConvert.type_from_field(field)?,
+                    ));
+                }
 
-                        Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
-                            StructType::new(rw_types),
-                        ))
-                    })
-                })?;
+                let schema = DataType::Struct(StructType::new(rw_types));
 
                 if let Some(files) = files {
                     // if the file location is a directory, we need to remove the last argument and add all files in the directory as arguments
@@ -298,7 +284,7 @@ impl TableFunction {
     }
 
     fn handle_postgres_or_mysql_query_args(
-        catalog_reader: &CatalogReadGuard,
+        catalog_reader: &CatalogReader,
         db_name: &str,
         schema_path: SchemaPath<'_>,
         args: Vec<ExprImpl>,
@@ -315,9 +301,13 @@ impl TableFunction {
             }
             CDC_SOURCE_ARG_LEN => {
                 let source_name = expr_impl_to_string_fn(&args[0])?;
-                let source_catalog = catalog_reader
-                    .get_source_by_name(db_name, schema_path, &source_name)?
-                    .0;
+                let source_catalog = {
+                    let catalog = catalog_reader.read_guard();
+                    catalog
+                        .get_source_by_name(db_name, schema_path, &source_name)?
+                        .0
+                        .clone()
+                };
                 if !source_catalog
                     .connector_name()
                     .eq_ignore_ascii_case(expect_connector_name)
@@ -349,8 +339,8 @@ impl TableFunction {
         Ok(cast_args)
     }
 
-    pub fn new_postgres_query(
-        catalog_reader: &CatalogReadGuard,
+    pub async fn new_postgres_query(
+        catalog_reader: &CatalogReader,
         db_name: &str,
         schema_path: SchemaPath<'_>,
         args: Vec<ExprImpl>,
@@ -377,68 +367,63 @@ impl TableFunction {
 
         #[cfg(not(madsim))]
         {
-            let schema = tokio::task::block_in_place(|| {
-                FRONTEND_RUNTIME.block_on(async {
-                    let mut conf = tokio_postgres::Config::new();
-                    let (client, connection) = conf
-                        .host(&evaled_args[0])
-                        .port(evaled_args[1].parse().map_err(|_| {
-                            ErrorCode::InvalidParameterValue(format!(
-                                "port number: {}",
-                                evaled_args[1]
-                            ))
-                        })?)
-                        .user(&evaled_args[2])
-                        .password(evaled_args[3].clone())
-                        .dbname(&evaled_args[4])
-                        .connect(tokio_postgres::NoTls)
-                        .await?;
+            let mut conf = tokio_postgres::Config::new();
+            let (client, connection) = conf
+                .host(&evaled_args[0])
+                .port(evaled_args[1].parse().map_err(|_| {
+                    ErrorCode::InvalidParameterValue(format!("port number: {}", evaled_args[1]))
+                })?)
+                .user(&evaled_args[2])
+                .password(evaled_args[3].clone())
+                .dbname(&evaled_args[4])
+                .connect(tokio_postgres::NoTls)
+                .await
+                .context("failed to connect to postgres in binder")?;
 
-                    tokio::spawn(async move {
-                        if let Err(e) = connection.await {
-                            tracing::error!(
-                                "mysql_query_executor: connection error: {:?}",
-                                e.as_report()
-                            );
-                        }
-                    });
+            tokio::spawn(async move {
+                if let Err(e) = connection.await {
+                    tracing::error!(
+                        "mysql_query_executor: connection error: {:?}",
+                        e.as_report()
+                    );
+                }
+            });
 
-                    let statement = client.prepare(evaled_args[5].as_str()).await?;
+            let statement = client
+                .prepare(evaled_args[5].as_str())
+                .await
+                .context("failed to prepare postgres_query in binder")?;
 
-                    let mut rw_types = vec![];
-                    for column in statement.columns() {
-                        let name = column.name().to_owned();
-                        let data_type = match *column.type_() {
-                            TokioPgType::BOOL => DataType::Boolean,
-                            TokioPgType::INT2 => DataType::Int16,
-                            TokioPgType::INT4 => DataType::Int32,
-                            TokioPgType::INT8 => DataType::Int64,
-                            TokioPgType::FLOAT4 => DataType::Float32,
-                            TokioPgType::FLOAT8 => DataType::Float64,
-                            TokioPgType::NUMERIC => DataType::Decimal,
-                            TokioPgType::DATE => DataType::Date,
-                            TokioPgType::TIME => DataType::Time,
-                            TokioPgType::TIMESTAMP => DataType::Timestamp,
-                            TokioPgType::TIMESTAMPTZ => DataType::Timestamptz,
-                            TokioPgType::TEXT | TokioPgType::VARCHAR => DataType::Varchar,
-                            TokioPgType::INTERVAL => DataType::Interval,
-                            TokioPgType::JSONB => DataType::Jsonb,
-                            TokioPgType::BYTEA => DataType::Bytea,
-                            _ => {
-                                return Err(crate::error::ErrorCode::BindError(format!(
-                                    "unsupported column type: {}",
-                                    column.type_()
-                                ))
-                                .into());
-                            }
-                        };
-                        rw_types.push((name, data_type));
+            let mut rw_types = vec![];
+            for column in statement.columns() {
+                let name = column.name().to_owned();
+                let data_type = match *column.type_() {
+                    TokioPgType::BOOL => DataType::Boolean,
+                    TokioPgType::INT2 => DataType::Int16,
+                    TokioPgType::INT4 => DataType::Int32,
+                    TokioPgType::INT8 => DataType::Int64,
+                    TokioPgType::FLOAT4 => DataType::Float32,
+                    TokioPgType::FLOAT8 => DataType::Float64,
+                    TokioPgType::NUMERIC => DataType::Decimal,
+                    TokioPgType::DATE => DataType::Date,
+                    TokioPgType::TIME => DataType::Time,
+                    TokioPgType::TIMESTAMP => DataType::Timestamp,
+                    TokioPgType::TIMESTAMPTZ => DataType::Timestamptz,
+                    TokioPgType::TEXT | TokioPgType::VARCHAR => DataType::Varchar,
+                    TokioPgType::INTERVAL => DataType::Interval,
+                    TokioPgType::JSONB => DataType::Jsonb,
+                    TokioPgType::BYTEA => DataType::Bytea,
+                    _ => {
+                        return Err(crate::error::ErrorCode::BindError(format!(
+                            "unsupported column type: {}",
+                            column.type_()
+                        ))
+                        .into());
                     }
-                    Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
-                        StructType::new(rw_types),
-                    ))
-                })
-            })?;
+                };
+                rw_types.push((name, data_type));
+            }
+            let schema = DataType::Struct(StructType::new(rw_types));
 
             Ok(TableFunction {
                 args,
@@ -449,8 +434,8 @@ impl TableFunction {
         }
     }
 
-    pub fn new_mysql_query(
-        catalog_reader: &CatalogReadGuard,
+    pub async fn new_mysql_query(
+        catalog_reader: &CatalogReader,
         db_name: &str,
         schema_path: SchemaPath<'_>,
         args: Vec<ExprImpl>,
@@ -477,114 +462,107 @@ impl TableFunction {
 
         #[cfg(not(madsim))]
         {
-            let schema = tokio::task::block_in_place(|| {
-                FRONTEND_RUNTIME.block_on(async {
-                    let database_opts: mysql_async::Opts = {
-                        let port = evaled_args[1]
-                            .parse::<u16>()
-                            .context("failed to parse port")?;
-                        mysql_async::OptsBuilder::default()
-                            .ip_or_hostname(evaled_args[0].clone())
-                            .tcp_port(port)
-                            .user(Some(evaled_args[2].clone()))
-                            .pass(Some(evaled_args[3].clone()))
-                            .db_name(Some(evaled_args[4].clone()))
-                            .into()
-                    };
+            let database_opts: mysql_async::Opts = {
+                let port = evaled_args[1]
+                    .parse::<u16>()
+                    .context("failed to parse port")?;
+                mysql_async::OptsBuilder::default()
+                    .ip_or_hostname(evaled_args[0].clone())
+                    .tcp_port(port)
+                    .user(Some(evaled_args[2].clone()))
+                    .pass(Some(evaled_args[3].clone()))
+                    .db_name(Some(evaled_args[4].clone()))
+                    .into()
+            };
 
-                    let pool = mysql_async::Pool::new(database_opts);
-                    let mut conn = pool
-                        .get_conn()
-                        .await
-                        .context("failed to connect to mysql in binder")?;
+            let pool = mysql_async::Pool::new(database_opts);
+            let mut conn = pool
+                .get_conn()
+                .await
+                .context("failed to connect to mysql in binder")?;
 
-                    let query = evaled_args[5].clone();
-                    let statement = conn
-                        .prep(query)
-                        .await
-                        .context("failed to prepare mysql_query in binder")?;
+            let query = evaled_args[5].clone();
+            let statement = conn
+                .prep(query)
+                .await
+                .context("failed to prepare mysql_query in binder")?;
 
-                    let mut rw_types = vec![];
-                    #[allow(clippy::never_loop)]
-                    for column in statement.columns() {
-                        let name = column.name_str().to_string();
-                        let data_type = match column.column_type() {
-                            // Boolean types
-                            MySqlColumnType::MYSQL_TYPE_BIT if column.column_length() == 1 => {
-                                DataType::Boolean
-                            }
-
-                            // Numeric types
-                            // NOTE(kwannoel): Although `bool/boolean` is a synonym of TINY(1) in MySQL,
-                            // we treat it as Int16 here. It is better to be straightforward in our conversion.
-                            MySqlColumnType::MYSQL_TYPE_TINY => DataType::Int16,
-                            MySqlColumnType::MYSQL_TYPE_SHORT => DataType::Int16,
-                            MySqlColumnType::MYSQL_TYPE_INT24 => DataType::Int32,
-                            MySqlColumnType::MYSQL_TYPE_LONG => DataType::Int32,
-                            MySqlColumnType::MYSQL_TYPE_LONGLONG => DataType::Int64,
-                            MySqlColumnType::MYSQL_TYPE_FLOAT => DataType::Float32,
-                            MySqlColumnType::MYSQL_TYPE_DOUBLE => DataType::Float64,
-                            MySqlColumnType::MYSQL_TYPE_NEWDECIMAL => DataType::Decimal,
-                            MySqlColumnType::MYSQL_TYPE_DECIMAL => DataType::Decimal,
-
-                            // Date time types
-                            MySqlColumnType::MYSQL_TYPE_YEAR => DataType::Int32,
-                            MySqlColumnType::MYSQL_TYPE_DATE => DataType::Date,
-                            MySqlColumnType::MYSQL_TYPE_NEWDATE => DataType::Date,
-                            MySqlColumnType::MYSQL_TYPE_TIME => DataType::Time,
-                            MySqlColumnType::MYSQL_TYPE_TIME2 => DataType::Time,
-                            MySqlColumnType::MYSQL_TYPE_DATETIME => DataType::Timestamp,
-                            MySqlColumnType::MYSQL_TYPE_DATETIME2 => DataType::Timestamp,
-                            MySqlColumnType::MYSQL_TYPE_TIMESTAMP => DataType::Timestamptz,
-                            MySqlColumnType::MYSQL_TYPE_TIMESTAMP2 => DataType::Timestamptz,
-
-                            // String types
-                            MySqlColumnType::MYSQL_TYPE_VARCHAR => DataType::Varchar,
-                            // mysql_async does not have explicit `varbinary` and `binary` types,
-                            // we need to check the `ColumnFlags` to distinguish them.
-                            MySqlColumnType::MYSQL_TYPE_STRING
-                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => {
-                                if column
-                                    .flags()
-                                    .contains(mysql_common::constants::ColumnFlags::BINARY_FLAG)
-                                {
-                                    DataType::Bytea
-                                } else {
-                                    DataType::Varchar
-                                }
-                            }
-
-                            // JSON types
-                            MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,
-
-                            // Binary types
-                            MySqlColumnType::MYSQL_TYPE_BIT
-                            | MySqlColumnType::MYSQL_TYPE_BLOB
-                            | MySqlColumnType::MYSQL_TYPE_TINY_BLOB
-                            | MySqlColumnType::MYSQL_TYPE_MEDIUM_BLOB
-                            | MySqlColumnType::MYSQL_TYPE_LONG_BLOB => DataType::Bytea,
-
-                            MySqlColumnType::MYSQL_TYPE_UNKNOWN
-                            | MySqlColumnType::MYSQL_TYPE_TYPED_ARRAY
-                            | MySqlColumnType::MYSQL_TYPE_ENUM
-                            | MySqlColumnType::MYSQL_TYPE_SET
-                            | MySqlColumnType::MYSQL_TYPE_GEOMETRY
-                            | MySqlColumnType::MYSQL_TYPE_VECTOR
-                            | MySqlColumnType::MYSQL_TYPE_NULL => {
-                                return Err(crate::error::ErrorCode::BindError(format!(
-                                    "unsupported column type: {:?}",
-                                    column.column_type()
-                                ))
-                                .into());
-                            }
-                        };
-                        rw_types.push((name, data_type));
+            let mut rw_types = vec![];
+            #[allow(clippy::never_loop)]
+            for column in statement.columns() {
+                let name = column.name_str().to_string();
+                let data_type = match column.column_type() {
+                    // Boolean types
+                    MySqlColumnType::MYSQL_TYPE_BIT if column.column_length() == 1 => {
+                        DataType::Boolean
                     }
-                    Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
-                        StructType::new(rw_types),
-                    ))
-                })
-            })?;
+
+                    // Numeric types
+                    // NOTE(kwannoel): Although `bool/boolean` is a synonym of TINY(1) in MySQL,
+                    // we treat it as Int16 here. It is better to be straightforward in our conversion.
+                    MySqlColumnType::MYSQL_TYPE_TINY => DataType::Int16,
+                    MySqlColumnType::MYSQL_TYPE_SHORT => DataType::Int16,
+                    MySqlColumnType::MYSQL_TYPE_INT24 => DataType::Int32,
+                    MySqlColumnType::MYSQL_TYPE_LONG => DataType::Int32,
+                    MySqlColumnType::MYSQL_TYPE_LONGLONG => DataType::Int64,
+                    MySqlColumnType::MYSQL_TYPE_FLOAT => DataType::Float32,
+                    MySqlColumnType::MYSQL_TYPE_DOUBLE => DataType::Float64,
+                    MySqlColumnType::MYSQL_TYPE_NEWDECIMAL => DataType::Decimal,
+                    MySqlColumnType::MYSQL_TYPE_DECIMAL => DataType::Decimal,
+
+                    // Date time types
+                    MySqlColumnType::MYSQL_TYPE_YEAR => DataType::Int32,
+                    MySqlColumnType::MYSQL_TYPE_DATE => DataType::Date,
+                    MySqlColumnType::MYSQL_TYPE_NEWDATE => DataType::Date,
+                    MySqlColumnType::MYSQL_TYPE_TIME => DataType::Time,
+                    MySqlColumnType::MYSQL_TYPE_TIME2 => DataType::Time,
+                    MySqlColumnType::MYSQL_TYPE_DATETIME => DataType::Timestamp,
+                    MySqlColumnType::MYSQL_TYPE_DATETIME2 => DataType::Timestamp,
+                    MySqlColumnType::MYSQL_TYPE_TIMESTAMP => DataType::Timestamptz,
+                    MySqlColumnType::MYSQL_TYPE_TIMESTAMP2 => DataType::Timestamptz,
+
+                    // String types
+                    MySqlColumnType::MYSQL_TYPE_VARCHAR => DataType::Varchar,
+                    // mysql_async does not have explicit `varbinary` and `binary` types,
+                    // we need to check the `ColumnFlags` to distinguish them.
+                    MySqlColumnType::MYSQL_TYPE_STRING | MySqlColumnType::MYSQL_TYPE_VAR_STRING => {
+                        if column
+                            .flags()
+                            .contains(mysql_common::constants::ColumnFlags::BINARY_FLAG)
+                        {
+                            DataType::Bytea
+                        } else {
+                            DataType::Varchar
+                        }
+                    }
+
+                    // JSON types
+                    MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,
+
+                    // Binary types
+                    MySqlColumnType::MYSQL_TYPE_BIT
+                    | MySqlColumnType::MYSQL_TYPE_BLOB
+                    | MySqlColumnType::MYSQL_TYPE_TINY_BLOB
+                    | MySqlColumnType::MYSQL_TYPE_MEDIUM_BLOB
+                    | MySqlColumnType::MYSQL_TYPE_LONG_BLOB => DataType::Bytea,
+
+                    MySqlColumnType::MYSQL_TYPE_UNKNOWN
+                    | MySqlColumnType::MYSQL_TYPE_TYPED_ARRAY
+                    | MySqlColumnType::MYSQL_TYPE_ENUM
+                    | MySqlColumnType::MYSQL_TYPE_SET
+                    | MySqlColumnType::MYSQL_TYPE_GEOMETRY
+                    | MySqlColumnType::MYSQL_TYPE_VECTOR
+                    | MySqlColumnType::MYSQL_TYPE_NULL => {
+                        return Err(crate::error::ErrorCode::BindError(format!(
+                            "unsupported column type: {:?}",
+                            column.column_type()
+                        ))
+                        .into());
+                    }
+                };
+                rw_types.push((name, data_type));
+            }
+            let schema = DataType::Struct(StructType::new(rw_types));
 
             Ok(TableFunction {
                 args,

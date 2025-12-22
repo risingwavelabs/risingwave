@@ -84,7 +84,7 @@ pub(super) fn get_column_names(
 }
 
 /// Bind and generate create MV plan, return plan and mv table info.
-pub fn gen_create_mv_plan(
+pub async fn gen_create_mv_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     query: Query,
@@ -93,7 +93,7 @@ pub fn gen_create_mv_plan(
     emit_mode: Option<EmitMode>,
 ) -> Result<(PlanRef, TableCatalog)> {
     let mut binder = Binder::new_for_stream(session);
-    let bound = binder.bind_query(&query)?;
+    let bound = binder.bind_query(&query).await?;
     gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
 }
 
@@ -164,7 +164,7 @@ pub async fn handle_create_mv(
 ) -> Result<RwPgResponse> {
     let (dependent_relations, dependent_udfs, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
-        let bound_query = binder.bind_query(&query)?;
+        let bound_query = binder.bind_query(&query).await?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),

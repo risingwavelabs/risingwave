@@ -55,7 +55,7 @@ impl Binder {
 
     /// Bind window function calls according to PostgreSQL syntax.
     /// See <https://www.postgresql.org/docs/current/sql-expressions.html#SYNTAX-WINDOW-FUNCTIONS> for syntax detail.
-    pub(super) fn bind_window_function(
+    pub(super) async fn bind_window_function(
         &mut self,
         kind: WindowFuncKind,
         args: Vec<ExprImpl>,
@@ -107,18 +107,15 @@ impl Binder {
             bail_not_implemented!("`FILTER` is not supported yet");
         }
 
-        let partition_by = window
-            .partition_by
-            .iter()
-            .map(|arg| self.bind_expr_inner(arg))
-            .try_collect()?;
-        let order_by = OrderBy::new(
-            window
-                .order_by
-                .iter()
-                .map(|order_by_expr| self.bind_order_by_expr(order_by_expr))
-                .collect::<Result<_>>()?,
-        );
+        let mut partition_by = Vec::with_capacity(window.partition_by.len());
+        for arg in &window.partition_by {
+            partition_by.push(self.bind_expr_inner(arg).await?);
+        }
+        let mut order_exprs = Vec::with_capacity(window.order_by.len());
+        for order_by_expr in &window.order_by {
+            order_exprs.push(self.bind_order_by_expr(order_by_expr).await?);
+        }
+        let order_by = OrderBy::new(order_exprs);
         let frame = if let Some(frame) = &window.window_frame {
             let exclusion = if let Some(exclusion) = frame.exclusion {
                 match exclusion {
@@ -138,7 +135,9 @@ impl Binder {
             let bounds = match &frame.units {
                 WindowFrameUnits::Rows => {
                     let (start, end) = must_match!(&frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
-                    let (start, end) = self.bind_window_frame_usize_bounds(start, end.as_ref())?;
+                    let (start, end) = self
+                        .bind_window_frame_usize_bounds(start, end.as_ref())
+                        .await?;
                     FrameBounds::Rows(RowsFrameBounds { start, end })
                 }
                 unit @ (WindowFrameUnits::Range | WindowFrameUnits::Session) => {
@@ -186,11 +185,13 @@ impl Binder {
 
                     if unit == &WindowFrameUnits::Range {
                         let (start, end) = must_match!(&frame.bounds, WindowFrameBounds::Bounds { start, end } => (start, end));
-                        let (start, end) = self.bind_window_frame_scalar_impl_bounds(
-                            start,
-                            end.as_ref(),
-                            &offset_data_type,
-                        )?;
+                        let (start, end) = self
+                            .bind_window_frame_scalar_impl_bounds(
+                                start,
+                                end.as_ref(),
+                                &offset_data_type,
+                            )
+                            .await?;
                         FrameBounds::Range(RangeFrameBounds {
                             order_data_type,
                             order_type,
@@ -200,8 +201,9 @@ impl Binder {
                         })
                     } else {
                         let gap = must_match!(&frame.bounds, WindowFrameBounds::Gap(gap) => gap);
-                        let gap_value =
-                            self.bind_window_frame_bound_offset(gap, &offset_data_type)?;
+                        let gap_value = self
+                            .bind_window_frame_bound_offset(gap, &offset_data_type)
+                            .await?;
                         FrameBounds::Session(SessionFrameBounds {
                             order_data_type,
                             order_type,
@@ -228,79 +230,123 @@ impl Binder {
         Ok(WindowFunction::new(kind, args, ignore_nulls, partition_by, order_by, frame)?.into())
     }
 
-    fn bind_window_frame_usize_bounds(
+    async fn bind_window_frame_usize_bounds(
         &mut self,
         start: &WindowFrameBound,
         end: Option<&WindowFrameBound>,
     ) -> Result<(FrameBound<usize>, FrameBound<usize>)> {
-        let mut convert_offset = |offset: &ast::Expr| -> Result<usize> {
-            let offset = self
-                .bind_window_frame_bound_offset(offset, &DataType::Int64)?
-                .into_int64();
-            if offset < 0 {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "offset in window frame bounds must be non-negative".to_owned(),
-                )
-                .into());
+        let start = match start {
+            WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+            WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+            WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+            WindowFrameBound::Preceding(Some(offset)) => {
+                let offset = self
+                    .bind_window_frame_bound_offset(offset.as_ref(), &DataType::Int64)
+                    .await?
+                    .into_int64();
+                if offset < 0 {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "offset in window frame bounds must be non-negative".to_owned(),
+                    )
+                    .into());
+                }
+                FrameBound::Preceding(offset as usize)
             }
-            Ok(offset as usize)
+            WindowFrameBound::Following(Some(offset)) => {
+                let offset = self
+                    .bind_window_frame_bound_offset(offset, &DataType::Int64)
+                    .await?
+                    .into_int64();
+                if offset < 0 {
+                    return Err(ErrorCode::InvalidInputSyntax(
+                        "offset in window frame bounds must be non-negative".to_owned(),
+                    )
+                    .into());
+                }
+                FrameBound::Following(offset as usize)
+            }
         };
-        let mut convert_bound = |bound: &WindowFrameBound| -> Result<FrameBound<usize>> {
-            Ok(match bound {
+        let end = match end {
+            Some(end_bound) => match end_bound {
                 WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
                 WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
-                WindowFrameBound::Preceding(Some(offset)) => {
-                    FrameBound::Preceding(convert_offset(offset.as_ref())?)
-                }
                 WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
-                WindowFrameBound::Following(Some(offset)) => {
-                    FrameBound::Following(convert_offset(offset)?)
+                WindowFrameBound::Preceding(Some(offset)) => {
+                    let offset = self
+                        .bind_window_frame_bound_offset(offset.as_ref(), &DataType::Int64)
+                        .await?
+                        .into_int64();
+                    if offset < 0 {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "offset in window frame bounds must be non-negative".to_owned(),
+                        )
+                        .into());
+                    }
+                    FrameBound::Preceding(offset as usize)
                 }
-            })
-        };
-        let start = convert_bound(start)?;
-        let end = if let Some(end_bound) = end {
-            convert_bound(end_bound)?
-        } else {
-            FrameBound::CurrentRow
+                WindowFrameBound::Following(Some(offset)) => {
+                    let offset = self
+                        .bind_window_frame_bound_offset(offset, &DataType::Int64)
+                        .await?
+                        .into_int64();
+                    if offset < 0 {
+                        return Err(ErrorCode::InvalidInputSyntax(
+                            "offset in window frame bounds must be non-negative".to_owned(),
+                        )
+                        .into());
+                    }
+                    FrameBound::Following(offset as usize)
+                }
+            },
+            None => FrameBound::CurrentRow,
         };
         Ok((start, end))
     }
 
-    fn bind_window_frame_scalar_impl_bounds(
+    async fn bind_window_frame_scalar_impl_bounds(
         &mut self,
         start: &WindowFrameBound,
         end: Option<&WindowFrameBound>,
         offset_data_type: &DataType,
     ) -> Result<(FrameBound<ScalarImpl>, FrameBound<ScalarImpl>)> {
-        let mut convert_bound = |bound: &WindowFrameBound| -> Result<FrameBound<_>> {
-            Ok(match bound {
+        let start = match start {
+            WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
+            WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
+            WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
+            WindowFrameBound::Preceding(Some(offset)) => FrameBound::Preceding(
+                self.bind_window_frame_bound_offset(offset, offset_data_type)
+                    .await?,
+            ),
+            WindowFrameBound::Following(Some(offset)) => FrameBound::Following(
+                self.bind_window_frame_bound_offset(offset, offset_data_type)
+                    .await?,
+            ),
+        };
+        let end = match end {
+            Some(end_bound) => match end_bound {
                 WindowFrameBound::CurrentRow => FrameBound::CurrentRow,
                 WindowFrameBound::Preceding(None) => FrameBound::UnboundedPreceding,
-                WindowFrameBound::Preceding(Some(offset)) => FrameBound::Preceding(
-                    self.bind_window_frame_bound_offset(offset, offset_data_type)?,
-                ),
                 WindowFrameBound::Following(None) => FrameBound::UnboundedFollowing,
-                WindowFrameBound::Following(Some(offset)) => FrameBound::Following(
-                    self.bind_window_frame_bound_offset(offset, offset_data_type)?,
+                WindowFrameBound::Preceding(Some(offset)) => FrameBound::Preceding(
+                    self.bind_window_frame_bound_offset(offset, offset_data_type)
+                        .await?,
                 ),
-            })
-        };
-        let start = convert_bound(start)?;
-        let end = if let Some(end_bound) = end {
-            convert_bound(end_bound)?
-        } else {
-            FrameBound::CurrentRow
+                WindowFrameBound::Following(Some(offset)) => FrameBound::Following(
+                    self.bind_window_frame_bound_offset(offset, offset_data_type)
+                        .await?,
+                ),
+            },
+            None => FrameBound::CurrentRow,
         };
         Ok((start, end))
     }
 
-    fn bind_window_frame_bound_offset(
+    async fn bind_window_frame_bound_offset(
         &mut self,
         offset: &ast::Expr,
         cast_to: &DataType,
     ) -> Result<ScalarImpl> {
-        let mut offset = self.bind_expr(offset)?;
+        let mut offset = self.bind_expr(offset).await?;
         if !offset.is_const() {
             return Err(ErrorCode::InvalidInputSyntax(
                 "offset/gap in window frame bounds must be constant".to_owned(),

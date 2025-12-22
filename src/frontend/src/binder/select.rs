@@ -199,9 +199,9 @@ impl BoundDistinct {
 }
 
 impl Binder {
-    pub(super) fn bind_select(&mut self, select: &Select) -> Result<BoundSelect> {
+    pub(super) async fn bind_select(&mut self, select: &Select) -> Result<BoundSelect> {
         // Bind FROM clause.
-        let from = self.bind_vec_table_with_joins(&select.from)?;
+        let from = self.bind_vec_table_with_joins(&select.from).await?;
 
         // Bind WINDOW clause early - store named window definitions for window function resolution
         let mut named_windows = HashMap::new();
@@ -221,23 +221,20 @@ impl Binder {
         self.context.named_windows = named_windows.clone();
 
         // Bind SELECT clause.
-        let (select_items, aliases) = self.bind_select_list(&select.projection)?;
+        let (select_items, aliases) = self.bind_select_list(&select.projection).await?;
         let out_name_to_index = Self::build_name_to_index(aliases.iter().filter_map(Clone::clone));
 
         // Bind DISTINCT ON.
-        let distinct =
-            self.bind_distinct_on(&select.distinct, &out_name_to_index, &select_items)?;
+        let distinct = self
+            .bind_distinct_on(&select.distinct, &out_name_to_index, &select_items)
+            .await?;
 
         // Bind WHERE clause.
         self.context.clause = Some(Clause::Where);
-        let selection = select
-            .selection
-            .as_ref()
-            .map(|expr| {
-                self.bind_expr(expr)
-                    .and_then(|expr| expr.enforce_bool_clause("WHERE"))
-            })
-            .transpose()?;
+        let selection = match select.selection.as_ref() {
+            Some(expr) => Some(self.bind_expr(expr).await?.enforce_bool_clause("WHERE")?),
+            None => None,
+        };
         self.context.clause = None;
 
         // Bind GROUP BY clause.
@@ -247,27 +244,36 @@ impl Binder {
         let group_by = if select.group_by.len() == 1
             && let Expr::GroupingSets(grouping_sets) = &select.group_by[0]
         {
-            GroupBy::GroupingSets(self.bind_grouping_items_expr_in_select(
-                grouping_sets.clone(),
-                &out_name_to_index,
-                &select_items,
-            )?)
+            GroupBy::GroupingSets(
+                self.bind_grouping_items_expr_in_select(
+                    grouping_sets.clone(),
+                    &out_name_to_index,
+                    &select_items,
+                )
+                .await?,
+            )
         } else if select.group_by.len() == 1
             && let Expr::Rollup(rollup) = &select.group_by[0]
         {
-            GroupBy::Rollup(self.bind_grouping_items_expr_in_select(
-                rollup.clone(),
-                &out_name_to_index,
-                &select_items,
-            )?)
+            GroupBy::Rollup(
+                self.bind_grouping_items_expr_in_select(
+                    rollup.clone(),
+                    &out_name_to_index,
+                    &select_items,
+                )
+                .await?,
+            )
         } else if select.group_by.len() == 1
             && let Expr::Cube(cube) = &select.group_by[0]
         {
-            GroupBy::Cube(self.bind_grouping_items_expr_in_select(
-                cube.clone(),
-                &out_name_to_index,
-                &select_items,
-            )?)
+            GroupBy::Cube(
+                self.bind_grouping_items_expr_in_select(
+                    cube.clone(),
+                    &out_name_to_index,
+                    &select_items,
+                )
+                .await?,
+            )
         } else {
             if select.group_by.iter().any(|expr| {
                 matches!(expr, Expr::GroupingSets(_))
@@ -279,28 +285,25 @@ impl Binder {
                 )
                 .into());
             }
-            GroupBy::GroupKey(
-                select
-                    .group_by
-                    .iter()
-                    .map(|expr| {
+            GroupBy::GroupKey({
+                let mut group_keys = Vec::with_capacity(select.group_by.len());
+                for expr in &select.group_by {
+                    group_keys.push(
                         self.bind_group_by_expr_in_select(expr, &out_name_to_index, &select_items)
-                    })
-                    .try_collect()?,
-            )
+                            .await?,
+                    );
+                }
+                group_keys
+            })
         };
         self.context.clause = None;
 
         // Bind HAVING clause.
         self.context.clause = Some(Clause::Having);
-        let having = select
-            .having
-            .as_ref()
-            .map(|expr| {
-                self.bind_expr(expr)
-                    .and_then(|expr| expr.enforce_bool_clause("HAVING"))
-            })
-            .transpose()?;
+        let having = match select.having.as_ref() {
+            Some(expr) => Some(self.bind_expr(expr).await?.enforce_bool_clause("HAVING")?),
+            None => None,
+        };
         self.context.clause = None;
 
         // Store field from `ExprImpl` to support binding `field_desc` in `subquery`.
@@ -337,7 +340,7 @@ impl Binder {
         })
     }
 
-    pub fn bind_select_list(
+    pub async fn bind_select_list(
         &mut self,
         select_items: &[SelectItem],
     ) -> Result<(Vec<ExprImpl>, Vec<Option<String>>)> {
@@ -347,20 +350,20 @@ impl Binder {
             match item {
                 SelectItem::UnnamedExpr(expr) => {
                     let alias = derive_alias(expr);
-                    let bound = self.bind_expr(expr)?;
+                    let bound = self.bind_expr(expr).await?;
                     select_list.push(bound);
                     aliases.push(alias);
                 }
                 SelectItem::ExprWithAlias { expr, alias } => {
                     check_column_name_not_reserved(&alias.real_value())?;
 
-                    let expr = self.bind_expr(expr)?;
+                    let expr = self.bind_expr(expr).await?;
                     select_list.push(expr);
                     aliases.push(Some(alias.real_value()));
                 }
                 SelectItem::QualifiedWildcard(obj_name, except) => {
                     let table_name = &obj_name.0.last().unwrap().real_value();
-                    let except_indices = self.generate_except_indices(except.as_deref())?;
+                    let except_indices = self.generate_except_indices(except.as_deref()).await?;
                     let (begin, end) = self.context.range_of.get(table_name).ok_or_else(|| {
                         ErrorCode::ItemNotFound(format!("relation \"{}\"", table_name))
                     })?;
@@ -373,7 +376,7 @@ impl Binder {
                     aliases.extend(names);
                 }
                 SelectItem::ExprQualifiedWildcard(expr, prefix) => {
-                    let (exprs, names) = self.bind_wildcard_field_column(expr, prefix)?;
+                    let (exprs, names) = self.bind_wildcard_field_column(expr, prefix).await?;
                     select_list.extend(exprs);
                     aliases.extend(names);
                 }
@@ -392,7 +395,7 @@ impl Binder {
                     select_list.extend(exprs);
                     aliases.extend(names);
 
-                    let except_indices = self.generate_except_indices(except.as_deref())?;
+                    let except_indices = self.generate_except_indices(except.as_deref()).await?;
 
                     // Bind columns that are not in groups
                     let (exprs, names) =
@@ -444,7 +447,7 @@ impl Binder {
     ///
     /// * `name_to_index` - output column name -> index. Ambiguous (duplicate) output names are
     ///   marked with `usize::MAX`.
-    fn bind_group_by_expr_in_select(
+    async fn bind_group_by_expr_in_select(
         &mut self,
         expr: &Expr,
         name_to_index: &HashMap<String, usize>,
@@ -454,7 +457,7 @@ impl Binder {
             Expr::Identifier(ident) => Some(ident.real_value()),
             _ => None,
         };
-        match self.bind_expr(expr) {
+        match self.bind_expr(expr).await {
             Ok(ExprImpl::Literal(lit)) => match lit.get_data() {
                 Some(ScalarImpl::Int32(idx)) => idx
                     .saturating_sub(1)
@@ -484,7 +487,7 @@ impl Binder {
         }
     }
 
-    fn bind_grouping_items_expr_in_select(
+    async fn bind_grouping_items_expr_in_select(
         &mut self,
         grouping_items: Vec<Vec<Expr>>,
         name_to_index: &HashMap<String, usize>,
@@ -498,7 +501,7 @@ impl Binder {
                     Expr::Identifier(ident) => Some(ident.real_value()),
                     _ => None,
                 };
-                let expr_impl = match self.bind_expr(&expr) {
+                let expr_impl = match self.bind_expr(&expr).await {
                     Ok(ExprImpl::Literal(lit)) => match lit.get_data() {
                         Some(ScalarImpl::Int32(idx)) => idx
                             .saturating_sub(1)
@@ -536,11 +539,11 @@ impl Binder {
         Ok(result)
     }
 
-    pub fn bind_returning_list(
+    pub async fn bind_returning_list(
         &mut self,
         returning_items: Vec<SelectItem>,
     ) -> Result<(Vec<ExprImpl>, Vec<Field>)> {
-        let (returning_list, aliases) = self.bind_select_list(&returning_items)?;
+        let (returning_list, aliases) = self.bind_select_list(&returning_items).await?;
         if returning_list
             .iter()
             .any(|expr| expr.has_agg_call() || expr.has_window_function())
@@ -623,7 +626,7 @@ impl Binder {
     ///
     /// * `name_to_index` - output column name -> index. Ambiguous (duplicate) output names are
     ///   marked with `usize::MAX`.
-    fn bind_distinct_on(
+    async fn bind_distinct_on(
         &mut self,
         distinct: &Distinct,
         name_to_index: &HashMap<String, usize>,
@@ -663,7 +666,7 @@ impl Binder {
                                 .into());
                             }
                         },
-                        expr => self.bind_expr(expr)?,
+                        expr => self.bind_expr(expr).await?,
                     };
                     bound_exprs.push(expr_impl);
                 }
@@ -672,11 +675,11 @@ impl Binder {
         })
     }
 
-    fn generate_except_indices(&mut self, except: Option<&[Expr]>) -> Result<HashSet<usize>> {
+    async fn generate_except_indices(&mut self, except: Option<&[Expr]>) -> Result<HashSet<usize>> {
         let mut except_indices: HashSet<usize> = HashSet::new();
         if let Some(exprs) = except {
             for expr in exprs {
-                let bound = self.bind_expr(expr)?;
+                let bound = self.bind_expr(expr).await?;
                 match bound {
                     ExprImpl::InputRef(inner) => {
                         if !except_indices.insert(inner.index) {

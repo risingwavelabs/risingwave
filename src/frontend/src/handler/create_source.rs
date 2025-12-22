@@ -13,8 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::rc::Rc;
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 
 use anyhow::{Context, anyhow};
 use either::Either;
@@ -672,7 +671,7 @@ pub(crate) async fn bind_source_pk(
     Ok(res)
 }
 
-pub(super) fn bind_source_watermark(
+pub(super) async fn bind_source_watermark(
     session: &SessionImpl,
     name: String,
     source_watermarks: Vec<SourceWatermark>,
@@ -681,28 +680,26 @@ pub(super) fn bind_source_watermark(
     let mut binder = Binder::new_for_ddl(session);
     binder.bind_columns_to_context(name.clone(), column_catalogs)?;
 
-    let watermark_descs = source_watermarks
-        .into_iter()
-        .map(|source_watermark| {
-            let col_name = source_watermark.column.real_value();
-            let watermark_idx = binder.get_column_binding_index(name.clone(), &col_name)?;
+    let mut watermark_descs = Vec::with_capacity(source_watermarks.len());
+    for source_watermark in source_watermarks {
+        let col_name = source_watermark.column.real_value();
+        let watermark_idx = binder.get_column_binding_index(name.clone(), &col_name)?;
 
-            let expr = binder.bind_expr(&source_watermark.expr)?;
-            let watermark_col_type = column_catalogs[watermark_idx].data_type();
-            let watermark_expr_type = &expr.return_type();
-            if watermark_col_type != watermark_expr_type {
-                Err(RwError::from(ErrorCode::BindError(
-                    format!("The return value type of the watermark expression must be identical to the watermark column data type. Current data type of watermark return value: `{}`, column `{}`",watermark_expr_type, watermark_col_type),
-                )))
-            } else {
-                let expr_proto = expr.to_expr_proto();
-                Ok::<_, RwError>(WatermarkDesc {
-                    watermark_idx: watermark_idx as u32,
-                    expr: Some(expr_proto),
-                })
-            }
-        })
-        .try_collect()?;
+        let expr = binder.bind_expr(&source_watermark.expr).await?;
+        let watermark_col_type = column_catalogs[watermark_idx].data_type();
+        let watermark_expr_type = &expr.return_type();
+        if watermark_col_type != watermark_expr_type {
+            return Err(RwError::from(ErrorCode::BindError(format!(
+                "The return value type of the watermark expression must be identical to the watermark column data type. Current data type of watermark return value: `{}`, column `{}`",
+                watermark_expr_type, watermark_col_type
+            ))));
+        }
+        let expr_proto = expr.to_expr_proto();
+        watermark_descs.push(WatermarkDesc {
+            watermark_idx: watermark_idx as u32,
+            expr: Some(expr_proto),
+        });
+    }
     Ok(watermark_descs)
 }
 
@@ -1027,7 +1024,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
     let watermark_descs =
-        bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
+        bind_source_watermark(session, source_name.clone(), source_watermarks, &columns).await?;
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
 
@@ -1048,7 +1045,8 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         // TODO(st1page): pass the ref
         sql_columns_defs,
         &pk_col_ids,
-    )?;
+    )
+    .await?;
     check_format_encode(&with_properties, row_id_index, &columns)?;
 
     let definition = handler_args.normalized_sql.clone();
@@ -1195,7 +1193,7 @@ pub(super) fn generate_stream_graph_for_source(
 ) -> Result<PbStreamFragmentGraph> {
     let context = OptimizerContext::from_handler_args(handler_args);
     let source_node = LogicalSource::with_catalog(
-        Rc::new(source_catalog),
+        Arc::new(source_catalog),
         SourceNodeKind::CreateSharedSource,
         context.into(),
         None,

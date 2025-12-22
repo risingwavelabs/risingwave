@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
@@ -63,7 +63,7 @@ impl LogicalIcebergScan {
         }
     }
 
-    pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
+    pub fn source_catalog(&self) -> Option<Arc<SourceCatalog>> {
         self.core.catalog.clone()
     }
 

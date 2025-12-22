@@ -12,10 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::sync::Arc;
 
+use async_recursion::async_recursion;
+use parking_lot::RwLock;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
@@ -152,25 +153,26 @@ impl Binder {
     /// stack and create a new context, because it may be a subquery.
     ///
     /// After finishing binding, we pop the previous context from the stack.
-    pub fn bind_query(&mut self, query: &Query) -> Result<BoundQuery> {
+    pub async fn bind_query(&mut self, query: &Query) -> Result<BoundQuery> {
         self.push_context();
-        let result = self.bind_query_inner(query);
+        let result = self.bind_query_inner(query).await;
         self.pop_context()?;
         result
     }
 
     /// Bind a [`Query`] for view.
     /// TODO: support `SECURITY INVOKER` for view.
-    pub fn bind_query_for_view(&mut self, query: &Query) -> Result<BoundQuery> {
+    pub async fn bind_query_for_view(&mut self, query: &Query) -> Result<BoundQuery> {
         self.push_context();
         self.context.disable_security_invoker = true;
-        let result = self.bind_query_inner(query);
+        let result = self.bind_query_inner(query).await;
         self.pop_context()?;
         result
     }
 
     /// Bind a [`Query`] using the current [`BindContext`](super::BindContext).
-    pub(super) fn bind_query_inner(
+    #[async_recursion]
+    pub(super) async fn bind_query_inner(
         &mut self,
         Query {
             with,
@@ -200,7 +202,10 @@ impl Binder {
             (Some(limit), None) => Some(limit.clone()),
             (Some(_), Some(_)) => unreachable!(), // parse error
         };
-        let limit_expr = limit.map(|expr| self.bind_expr(&expr)).transpose()?;
+        let limit_expr = match limit {
+            Some(expr) => Some(self.bind_expr(&expr).await?),
+            None => None,
+        };
         let limit = if let Some(limit_expr) = limit_expr {
             // wrong type error is handled here
             let limit_cast_to_bigint = limit_expr.cast_assign(&DataType::Int64).map_err(|_| {
@@ -249,24 +254,25 @@ impl Binder {
             .map(|v| v as u64);
 
         if let Some(with) = with {
-            self.bind_with(with)?;
+            self.bind_with(with).await?;
         }
-        let body = self.bind_set_expr(body)?;
+        let body = self.bind_set_expr(body).await?;
         let name_to_index =
             Self::build_name_to_index(body.schema().fields().iter().map(|f| f.name.clone()));
         let mut extra_order_exprs = vec![];
         let visible_output_num = body.schema().len();
-        let order = order_by
-            .iter()
-            .map(|order_by_expr| {
+        let mut order = Vec::with_capacity(order_by.len());
+        for order_by_expr in order_by {
+            order.push(
                 self.bind_order_by_expr_in_query(
                     order_by_expr,
                     &name_to_index,
                     &mut extra_order_exprs,
                     visible_output_num,
                 )
-            })
-            .collect::<Result<_>>()?;
+                .await?,
+            );
+        }
         Ok(BoundQuery {
             body,
             order,
@@ -301,7 +307,7 @@ impl Binder {
     /// * `name_to_index` - visible output column name -> index. Ambiguous (duplicate) output names
     ///   are marked with `usize::MAX`.
     /// * `visible_output_num` - the number of all visible output columns, including duplicates.
-    fn bind_order_by_expr_in_query(
+    async fn bind_order_by_expr_in_query(
         &mut self,
         OrderByExpr {
             expr,
@@ -337,14 +343,15 @@ impl Binder {
                 }
             },
             expr => {
-                extra_order_exprs.push(self.bind_expr(expr)?);
+                extra_order_exprs.push(self.bind_expr(expr).await?);
                 visible_output_num + extra_order_exprs.len() - 1
             }
         };
         Ok(ColumnOrder::new(column_index, order_type))
     }
 
-    fn bind_with(&mut self, with: &With) -> Result<()> {
+    #[async_recursion]
+    async fn bind_with(&mut self, with: &With) -> Result<()> {
         for cte_table in &with.cte_tables {
             // note that the new `share_id` for the rcte is generated here
             let share_id = self.next_share_id();
@@ -365,7 +372,7 @@ impl Binder {
                         .context
                         .cte_to_relation
                         .entry(table_name)
-                        .insert_entry(Rc::new(RefCell::new(BindingCte {
+                        .insert_entry(Arc::new(RwLock::new(BindingCte {
                             share_id,
                             state: BindingCteState::Init,
                             alias: alias.clone(),
@@ -373,7 +380,7 @@ impl Binder {
                         .get()
                         .clone();
 
-                    self.bind_rcte(with, entry, left, right, all)?;
+                    self.bind_rcte(with, entry, left, right, all).await?;
                 } else {
                     return Err(ErrorCode::BindError(
                         "RECURSIVE CTE only support query".to_owned(),
@@ -383,10 +390,10 @@ impl Binder {
             } else {
                 match cte_inner {
                     CteInner::Query(query) => {
-                        let bound_query = self.bind_query(query)?;
+                        let bound_query = self.bind_query(query).await?;
                         self.context.cte_to_relation.insert(
                             table_name,
-                            Rc::new(RefCell::new(BindingCte {
+                            Arc::new(RwLock::new(BindingCte {
                                 share_id,
                                 state: BindingCteState::Bound {
                                     query: either::Either::Left(bound_query),
@@ -397,12 +404,13 @@ impl Binder {
                     }
                     CteInner::ChangeLog(from_table_name) => {
                         self.push_context();
-                        let from_table_relation =
-                            self.bind_relation_by_name(from_table_name, None, None, true)?;
+                        let from_table_relation = self
+                            .bind_relation_by_name(from_table_name, None, None, true)
+                            .await?;
                         self.pop_context()?;
                         self.context.cte_to_relation.insert(
                             table_name,
-                            Rc::new(RefCell::new(BindingCte {
+                            Arc::new(RwLock::new(BindingCte {
                                 share_id,
                                 state: BindingCteState::ChangeLog {
                                     table: from_table_relation,
@@ -476,38 +484,39 @@ impl Binder {
         Ok((*all, corresponding, left, right, with.as_ref()))
     }
 
-    fn bind_rcte(
+    #[async_recursion]
+    async fn bind_rcte(
         &mut self,
         with: Option<&With>,
-        entry: Rc<RefCell<BindingCte>>,
+        entry: Arc<RwLock<BindingCte>>,
         left: &SetExpr,
         right: &SetExpr,
         all: bool,
     ) -> Result<()> {
         self.push_context();
-        let result = self.bind_rcte_inner(with, entry, left, right, all);
+        let result = self.bind_rcte_inner(with, entry, left, right, all).await;
         self.pop_context()?;
         result
     }
 
-    fn bind_rcte_inner(
+    async fn bind_rcte_inner(
         &mut self,
         with: Option<&With>,
-        entry: Rc<RefCell<BindingCte>>,
+        entry: Arc<RwLock<BindingCte>>,
         left: &SetExpr,
         right: &SetExpr,
         all: bool,
     ) -> Result<()> {
         if let Some(with) = with {
-            self.bind_with(with)?;
+            self.bind_with(with).await?;
         }
 
         // We assume `left` is the base term, otherwise the implementation may be very hard.
         // The behavior is the same as PostgreSQL's.
         // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
-        let mut base = self.bind_set_expr(left)?;
+        let mut base = self.bind_set_expr(left).await?;
 
-        entry.borrow_mut().state = BindingCteState::BaseResolved { base: base.clone() };
+        entry.write().state = BindingCteState::BaseResolved { base: base.clone() };
 
         // Reset context for right side, but keep `cte_to_relation`.
         let new_context = std::mem::take(&mut self.context);
@@ -516,7 +525,7 @@ impl Binder {
             .clone_from(&new_context.cte_to_relation);
         self.context.disable_security_invoker = new_context.disable_security_invoker;
         // bind the rest of the recursive cte
-        let mut recursive = self.bind_set_expr(right)?;
+        let mut recursive = self.bind_set_expr(right).await?;
         // Reset context for the set operation.
         self.context = Default::default();
         self.context.cte_to_relation = new_context.cte_to_relation;
@@ -532,7 +541,7 @@ impl Binder {
             schema,
         };
 
-        entry.borrow_mut().state = BindingCteState::Bound {
+        entry.write().state = BindingCteState::Bound {
             query: either::Either::Right(recursive_union),
         };
 

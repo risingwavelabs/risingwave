@@ -41,9 +41,9 @@ impl Binder {
             &self.search_path,
             &self.auth_context.user_name,
         );
+        let catalog = self.catalog.read_guard();
         let (sink_catalog, _) =
-            self.catalog
-                .get_any_sink_by_name(&self.db_name, search_path, &sink_name)?;
+            catalog.get_any_sink_by_name(&self.db_name, search_path, &sink_name)?;
         Ok(BoundSink {
             sink_catalog: sink_catalog.clone(),
         })
@@ -58,9 +58,8 @@ impl Binder {
             &self.search_path,
             &self.auth_context.user_name,
         );
-        let (view_catalog, _) =
-            self.catalog
-                .get_view_by_name(&self.db_name, search_path, &view_name)?;
+        let catalog = self.catalog.read_guard();
+        let (view_catalog, _) = catalog.get_view_by_name(&self.db_name, search_path, &view_name)?;
         Ok(BoundView {
             view_catalog: view_catalog.clone(),
         })

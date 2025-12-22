@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::batch_plan::SourceNode;
@@ -55,7 +55,7 @@ impl BatchSource {
         self.schema().names_str()
     }
 
-    pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
+    pub fn source_catalog(&self) -> Option<Arc<SourceCatalog>> {
         self.core.catalog.clone()
     }
 

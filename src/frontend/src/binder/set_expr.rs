@@ -15,6 +15,7 @@
 use std::borrow::Cow;
 use std::collections::HashMap;
 
+use async_recursion::async_recursion;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Schema;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
@@ -317,11 +318,14 @@ impl Binder {
         Ok((corresponding_mapping_l, corresponding_mapping_r))
     }
 
-    pub(super) fn bind_set_expr(&mut self, set_expr: &SetExpr) -> Result<BoundSetExpr> {
+    #[async_recursion]
+    pub(super) async fn bind_set_expr(&mut self, set_expr: &SetExpr) -> Result<BoundSetExpr> {
         match set_expr {
-            SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(s)?))),
-            SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v, None)?))),
-            SetExpr::Query(q) => Ok(BoundSetExpr::Query(Box::new(self.bind_query(q)?))),
+            SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(s).await?))),
+            SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(
+                self.bind_values(v, None).await?,
+            ))),
+            SetExpr::Query(q) => Ok(BoundSetExpr::Query(Box::new(self.bind_query(q).await?))),
             SetExpr::SetOperation {
                 op,
                 all,
@@ -331,7 +335,7 @@ impl Binder {
             } => {
                 match op {
                     SetOperator::Union | SetOperator::Intersect | SetOperator::Except => {
-                        let mut left = self.bind_set_expr(left)?;
+                        let mut left = self.bind_set_expr(left).await?;
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
                         self.context
@@ -339,7 +343,7 @@ impl Binder {
                             .clone_from(&new_context.cte_to_relation);
                         self.context.disable_security_invoker =
                             new_context.disable_security_invoker;
-                        let mut right = self.bind_set_expr(right)?;
+                        let mut right = self.bind_set_expr(right).await?;
 
                         let corresponding_col_indices = if corresponding.is_corresponding() {
                             Some(Self::corresponding(self, &left, &right, corresponding, op)?)

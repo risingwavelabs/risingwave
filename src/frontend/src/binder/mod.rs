@@ -67,13 +67,12 @@ pub use statement::BoundStatement;
 pub use update::{BoundUpdate, UpdateProject};
 pub use values::BoundValues;
 
-use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::catalog_service::{CatalogReadGuard, CatalogReader};
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogResult, DatabaseId, ViewId};
 use crate::error::ErrorCode;
 use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
-use crate::user::user_service::UserInfoReadGuard;
+use crate::user::user_service::{UserInfoReadGuard, UserInfoReader};
 
 pub type ShareId = usize;
 
@@ -92,8 +91,8 @@ enum BindFor {
 /// `Binder` binds the identifiers in AST to columns in relations
 pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
-    catalog: CatalogReadGuard,
-    user: UserInfoReadGuard,
+    catalog: CatalogReader,
+    user: UserInfoReader,
     db_name: String,
     database_id: DatabaseId,
     session_id: SessionId,
@@ -238,8 +237,8 @@ impl ParameterTypes {
 impl Binder {
     fn new(session: &SessionImpl, bind_for: BindFor) -> Binder {
         Binder {
-            catalog: session.env().catalog_reader().read_guard(),
-            user: session.env().user_info_reader().read_guard(),
+            catalog: session.env().catalog_reader().clone(),
+            user: session.env().user_info_reader().clone(),
             db_name: session.database(),
             database_id: session.database_id(),
             session_id: session.id(),
@@ -304,9 +303,17 @@ impl Binder {
         matches!(self.bind_for, BindFor::Ddl)
     }
 
+    fn catalog(&self) -> CatalogReadGuard {
+        self.catalog.read_guard()
+    }
+
+    fn user(&self) -> UserInfoReadGuard {
+        self.user.read_guard()
+    }
+
     /// Bind a [`Statement`].
-    pub fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
-        self.bind_statement(stmt)
+    pub async fn bind(&mut self, stmt: Statement) -> Result<BoundStatement> {
+        self.bind_statement(stmt).await
     }
 
     pub fn export_param_types(&self) -> Result<Vec<DataType>> {
@@ -417,12 +424,15 @@ impl Binder {
         id
     }
 
-    fn first_valid_schema(&self) -> CatalogResult<&SchemaCatalog> {
-        self.catalog.first_valid_schema(
-            &self.db_name,
-            &self.search_path,
-            &self.auth_context.user_name,
-        )
+    fn first_valid_schema(&self) -> CatalogResult<String> {
+        let catalog = self.catalog();
+        catalog
+            .first_valid_schema(
+                &self.db_name,
+                &self.search_path,
+                &self.auth_context.user_name,
+            )
+            .map(|schema| schema.name().to_owned())
     }
 
     fn bind_schema_path<'a>(&'a self, schema_name: Option<&'a str>) -> SchemaPath<'a> {

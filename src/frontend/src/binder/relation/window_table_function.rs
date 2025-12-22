@@ -14,7 +14,6 @@
 
 use std::str::FromStr;
 
-use itertools::Itertools;
 use risingwave_common::catalog::Field;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::{FunctionArg, TableAlias};
@@ -68,7 +67,7 @@ const ERROR_2ND_ARG_EXPR: &str = "The 2st arg of window table function should be
 const ERROR_2ND_ARG_TYPE: &str = "The 2st arg of window table function should be a column of type timestamp with time zone, timestamp or date.";
 
 impl Binder {
-    pub(super) fn bind_window_table_function(
+    pub(super) async fn bind_window_table_function(
         &mut self,
         alias: Option<&TableAlias>,
         kind: WindowTableFunctionKind,
@@ -78,9 +77,13 @@ impl Binder {
 
         self.push_context();
 
-        let (base, table_name) = self.bind_relation_by_function_arg(args.next(), ERROR_1ST_ARG)?;
+        let (base, table_name) = self
+            .bind_relation_by_function_arg(args.next(), ERROR_1ST_ARG)
+            .await?;
 
-        let time_col = self.bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)?;
+        let time_col = self
+            .bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)
+            .await?;
 
         let Some(output_type) = DataType::window_of(&time_col.data_type) else {
             return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_owned()).into());
@@ -114,10 +117,10 @@ impl Binder {
         self.bind_table_to_context(columns, table_name, alias)?;
 
         // Other arguments are validated in `plan_window_table_function`
-        let exprs: Vec<_> = args
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
+        let mut exprs = Vec::new();
+        for arg in args {
+            exprs.extend(self.bind_function_arg(arg).await?);
+        }
         Ok(BoundWindowTableFunction {
             input: base,
             time_col: *time_col,

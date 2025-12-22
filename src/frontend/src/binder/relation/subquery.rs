@@ -35,13 +35,13 @@ impl Binder {
     /// [`BindContext`](crate::binder::BindContext) for it.
     ///
     /// After finishing binding, we update the current context with the output of the subquery.
-    pub(super) fn bind_subquery_relation(
+    pub(super) async fn bind_subquery_relation(
         &mut self,
         query: &Query,
         alias: Option<&TableAlias>,
         lateral: bool,
     ) -> Result<BoundSubquery> {
-        let query = self.bind_query(query)?;
+        let query = self.bind_query(query).await?;
         let sub_query_id = self.next_subquery_id();
 
         self.bind_table_to_context(

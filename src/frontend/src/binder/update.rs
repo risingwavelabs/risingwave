@@ -122,7 +122,7 @@ fn get_col_referenced_by_generated_pk(table_catalog: &TableCatalog) -> Result<Fi
 }
 
 impl Binder {
-    pub(super) fn bind_update(
+    pub(super) async fn bind_update(
         &mut self,
         name: ObjectName,
         assignments: Vec<Assignment>,
@@ -157,7 +157,10 @@ impl Binder {
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
         let cols_refed_by_generated_pk = get_col_referenced_by_generated_pk(table_catalog)?;
 
-        let selection = selection.map(|expr| self.bind_expr(&expr)).transpose()?;
+        let selection = match selection {
+            Some(expr) => Some(self.bind_expr(&expr).await?),
+            None => None,
+        };
 
         let mut exprs = Vec::new();
         let mut projects = HashMap::new();
@@ -172,10 +175,10 @@ impl Binder {
         }
 
         for Assignment { id, value } in assignments {
-            let ids: Vec<_> = id
-                .iter()
-                .map(|id| self.bind_expr(&Expr::Identifier(id.clone())))
-                .try_collect()?;
+            let mut ids = Vec::with_capacity(id.len());
+            for ident in &id {
+                ids.push(self.bind_expr(&Expr::Identifier(ident.clone())).await?);
+            }
 
             match (ids.as_slice(), value) {
                 // `SET col1 = DEFAULT`, `SET (col1, col2, ...) = DEFAULT`
@@ -194,7 +197,10 @@ impl Binder {
 
                 // `SET col1 = expr`
                 ([id], AssignmentValue::Expr(expr)) => {
-                    let expr = self.bind_expr(&expr)?.cast_assign(&id.return_type())?;
+                    let expr = self
+                        .bind_expr(&expr)
+                        .await?
+                        .cast_assign(&id.return_type())?;
                     exprs.push(expr);
                     record!(id, UpdateProject::Simple(exprs.len() - 1));
                 }
@@ -205,14 +211,19 @@ impl Binder {
                     }
 
                     for (id, value) in ids.iter().zip_eq_fast(values) {
-                        let expr = self.bind_expr(&value)?.cast_assign(&id.return_type())?;
+                        let expr = self
+                            .bind_expr(&value)
+                            .await?
+                            .cast_assign(&id.return_type())?;
                         exprs.push(expr);
                         record!(id, UpdateProject::Simple(exprs.len() - 1));
                     }
                 }
                 // `SET (col1, col2, ...) = (SELECT ...)`
                 (ids, AssignmentValue::Expr(Expr::Subquery(subquery))) => {
-                    let expr = self.bind_subquery_expr(&subquery, SubqueryKind::UpdateSet)?;
+                    let expr = self
+                        .bind_subquery_expr(&subquery, SubqueryKind::UpdateSet)
+                        .await?;
 
                     if expr.return_type().as_struct().len() != ids.len() {
                         bail_bind_error!("number of columns does not match number of values");
@@ -271,7 +282,7 @@ impl Binder {
             }
         }
 
-        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
+        let (returning_list, fields) = self.bind_returning_list(returning_items).await?;
         let returning = !returning_list.is_empty();
 
         Ok(BoundUpdate {

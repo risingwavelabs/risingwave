@@ -255,7 +255,9 @@ pub async fn gen_sink_plan(
         let mut binder = Binder::new_for_stream(session);
         let auto_refresh_schema_from_table = if let Some((from_name, true)) = &direct_sink_from_name
         {
-            let from_relation = binder.bind_relation_by_name(from_name, None, None, true)?;
+            let from_relation = binder
+                .bind_relation_by_name(from_name, None, None, true)
+                .await?;
             if let Relation::BaseTable(table) = from_relation {
                 if table.table_catalog.table_type != TableType::Table {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -286,7 +288,7 @@ pub async fn gen_sink_plan(
             None
         };
 
-        let bound = binder.bind_query(&query)?;
+        let bound = binder.bind_query(&query).await?;
 
         (
             binder.included_relations().clone(),

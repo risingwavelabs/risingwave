@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::ops::Deref;
 
+use async_recursion::async_recursion;
 use either::Either;
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
@@ -411,7 +411,8 @@ impl Binder {
     /// - a table/source/materialized view
     /// - a reference to a CTE
     /// - a logical view
-    pub fn bind_relation_by_name(
+    #[async_recursion]
+    pub async fn bind_relation_by_name(
         &mut self,
         name: &ObjectName,
         alias: Option<&TableAlias>,
@@ -445,7 +446,7 @@ impl Binder {
                 share_id,
                 state: cte_state,
                 alias: mut original_alias,
-            } = item.deref().borrow().clone();
+            } = item.read().clone();
 
             // The original CTE alias ought to be its table name.
             debug_assert_eq!(original_alias.name.real_value(), table_name);
@@ -502,11 +503,12 @@ impl Binder {
                 as_of,
                 false,
             )
+            .await
         }
     }
 
     // Bind a relation provided a function arg.
-    fn bind_relation_by_function_arg(
+    async fn bind_relation_by_function_arg(
         &mut self,
         arg: Option<&FunctionArg>,
         err_msg: &str,
@@ -521,20 +523,24 @@ impl Binder {
         }?;
 
         Ok((
-            self.bind_relation_by_name(&table_name, None, None, true)?,
+            self.bind_relation_by_name(&table_name, None, None, true)
+                .await?,
             table_name,
         ))
     }
 
     // Bind column provided a function arg.
-    fn bind_column_by_function_args(
+    async fn bind_column_by_function_args(
         &mut self,
         arg: Option<&FunctionArg>,
         err_msg: &str,
     ) -> Result<Box<InputRef>> {
         if let Some(time_col_arg) = arg
-            && let Some(ExprImpl::InputRef(time_col)) =
-                self.bind_function_arg(time_col_arg)?.into_iter().next()
+            && let Some(ExprImpl::InputRef(time_col)) = self
+                .bind_function_arg(time_col_arg)
+                .await?
+                .into_iter()
+                .next()
         {
             Ok(time_col)
         } else {
@@ -543,7 +549,7 @@ impl Binder {
     }
 
     /// `rw_table(table_id[,schema_name])` which queries internal table
-    fn bind_internal_table(
+    async fn bind_internal_table(
         &mut self,
         args: &[FunctionArg],
         alias: Option<&TableAlias>,
@@ -567,14 +573,22 @@ impl Binder {
 
         let schema = args.get(1).map(|arg| arg.to_string());
 
-        let table_name = self.catalog.get_table_name_by_id(table_id)?;
+        let table_name = {
+            let catalog = self.catalog();
+            catalog.get_table_name_by_id(table_id)?
+        };
         self.bind_catalog_relation_by_name(None, schema.as_deref(), &table_name, alias, None, false)
+            .await
     }
 
-    pub(super) fn bind_table_factor(&mut self, table_factor: &TableFactor) -> Result<Relation> {
+    pub(super) async fn bind_table_factor(
+        &mut self,
+        table_factor: &TableFactor,
+    ) -> Result<Relation> {
         match table_factor {
             TableFactor::Table { name, alias, as_of } => {
                 self.bind_relation_by_name(name, alias.as_ref(), as_of.as_ref(), true)
+                    .await
             }
             TableFactor::TableFunction {
                 name,
@@ -583,7 +597,9 @@ impl Binder {
                 with_ordinality,
             } => {
                 self.try_mark_lateral_as_visible();
-                let result = self.bind_table_function(name, alias.as_ref(), args, *with_ordinality);
+                let result = self
+                    .bind_table_function(name, alias.as_ref(), args, *with_ordinality)
+                    .await;
                 self.try_mark_lateral_as_invisible();
                 result
             }
@@ -597,8 +613,9 @@ impl Binder {
                     self.try_mark_lateral_as_visible();
 
                     // Bind lateral subquery here.
-                    let bound_subquery =
-                        self.bind_subquery_relation(subquery, alias.as_ref(), true)?;
+                    let bound_subquery = self
+                        .bind_subquery_relation(subquery, alias.as_ref(), true)
+                        .await?;
 
                     // Mark the lateral context as invisible once again.
                     self.try_mark_lateral_as_invisible();
@@ -606,15 +623,16 @@ impl Binder {
                 } else {
                     // Non-lateral subqueries to not have access to the join-tree context.
                     self.push_lateral_context();
-                    let bound_subquery =
-                        self.bind_subquery_relation(subquery, alias.as_ref(), false)?;
+                    let bound_subquery = self
+                        .bind_subquery_relation(subquery, alias.as_ref(), false)
+                        .await?;
                     self.pop_and_merge_lateral_context()?;
                     Ok(Relation::Subquery(Box::new(bound_subquery)))
                 }
             }
             TableFactor::NestedJoin(table_with_joins) => {
                 self.push_lateral_context();
-                let bound_join = self.bind_table_with_joins(table_with_joins)?;
+                let bound_join = self.bind_table_with_joins(table_with_joins).await?;
                 self.pop_and_merge_lateral_context()?;
                 Ok(bound_join)
             }

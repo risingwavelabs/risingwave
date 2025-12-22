@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_recursion::async_recursion;
 use risingwave_pb::plan_common::JoinType;
 use risingwave_sqlparser::ast::{
     BinaryOperator, Expr, Ident, JoinConstraint, JoinOperator, TableFactor, TableWithJoins, Value,
@@ -40,7 +41,7 @@ impl RewriteExprsRecursive for BoundJoin {
 }
 
 impl Binder {
-    pub(crate) fn bind_vec_table_with_joins(
+    pub(crate) async fn bind_vec_table_with_joins(
         &mut self,
         from: &[TableWithJoins],
     ) -> Result<Option<Relation>> {
@@ -50,11 +51,11 @@ impl Binder {
             None => return Ok(None),
         };
         self.push_lateral_context();
-        let mut root = self.bind_table_with_joins(first)?;
+        let mut root = self.bind_table_with_joins(first).await?;
         self.pop_and_merge_lateral_context()?;
         for t in from_iter {
             self.push_lateral_context();
-            let right = self.bind_table_with_joins(t)?;
+            let right = self.bind_table_with_joins(t).await?;
             self.pop_and_merge_lateral_context()?;
 
             let is_lateral = match &right {
@@ -82,8 +83,12 @@ impl Binder {
         Ok(Some(root))
     }
 
-    pub(crate) fn bind_table_with_joins(&mut self, table: &TableWithJoins) -> Result<Relation> {
-        let mut root = self.bind_table_factor(&table.relation)?;
+    #[async_recursion]
+    pub(crate) async fn bind_table_with_joins(
+        &mut self,
+        table: &TableWithJoins,
+    ) -> Result<Relation> {
+        let mut root = self.bind_table_factor(&table.relation).await?;
         for join in &table.joins {
             let (constraint, join_type) = match &join.join_operator {
                 JoinOperator::Inner(constraint) => (constraint, JoinType::Inner),
@@ -102,12 +107,15 @@ impl Binder {
                 JoinConstraint::Using(_) | JoinConstraint::Natural
             ) {
                 let option_rel: Option<Relation>;
-                (cond, option_rel) =
-                    self.bind_join_constraint(constraint, Some(&join.relation), join_type)?;
+                (cond, option_rel) = self
+                    .bind_join_constraint(constraint, Some(&join.relation), join_type)
+                    .await?;
                 right = option_rel.unwrap();
             } else {
-                right = self.bind_table_factor(&join.relation)?;
-                (cond, _) = self.bind_join_constraint(constraint, None, join_type)?;
+                right = self.bind_table_factor(&join.relation).await?;
+                (cond, _) = self
+                    .bind_join_constraint(constraint, None, join_type)
+                    .await?;
             }
 
             let is_lateral = match &right {
@@ -144,7 +152,7 @@ impl Binder {
         Ok(root)
     }
 
-    fn bind_join_constraint(
+    async fn bind_join_constraint(
         &mut self,
         constraint: &JoinConstraint,
         table_factor: Option<&TableFactor>,
@@ -159,7 +167,7 @@ impl Binder {
                 // Bind this table factor to an empty context
                 self.push_lateral_context();
                 let table_factor = table_factor.unwrap();
-                let relation = self.bind_table_factor(table_factor)?;
+                let relation = self.bind_table_factor(table_factor).await?;
 
                 let using_columns = match c {
                     JoinConstraint::Natural => None,
@@ -236,7 +244,7 @@ impl Binder {
                 self.pop_and_merge_lateral_context()?;
                 // Bind the expression first, before allowing disambiguation of the columns involved
                 // in the join
-                let expr = self.bind_expr(&binary_expr)?;
+                let expr = self.bind_expr(&binary_expr).await?;
                 for (l, r) in col_indices {
                     let non_nullable = match join_type {
                         JoinType::LeftOuter | JoinType::Inner => Some(l),
@@ -251,9 +259,8 @@ impl Binder {
             JoinConstraint::On(expr) => {
                 let clause = self.context.clause;
                 self.context.clause = Some(Clause::JoinOn);
-                let bound_expr: ExprImpl = self
-                    .bind_expr(expr)
-                    .and_then(|expr| expr.enforce_bool_clause("JOIN ON"))?;
+                let bound_expr: ExprImpl =
+                    self.bind_expr(expr).await?.enforce_bool_clause("JOIN ON")?;
                 self.context.clause = clause;
                 (bound_expr, None)
             }

@@ -65,7 +65,7 @@ impl BoundStatement {
 }
 
 impl Binder {
-    pub(super) fn bind_statement(&mut self, stmt: Statement) -> Result<BoundStatement> {
+    pub(super) async fn bind_statement(&mut self, stmt: Statement) -> Result<BoundStatement> {
         match stmt {
             Statement::Insert {
                 table_name,
@@ -73,7 +73,8 @@ impl Binder {
                 source,
                 returning,
             } => Ok(BoundStatement::Insert(
-                self.bind_insert(table_name, columns, *source, returning)?
+                self.bind_insert(table_name, columns, *source, returning)
+                    .await?
                     .into(),
             )),
 
@@ -82,7 +83,9 @@ impl Binder {
                 selection,
                 returning,
             } => Ok(BoundStatement::Delete(
-                self.bind_delete(table_name, selection, returning)?.into(),
+                self.bind_delete(table_name, selection, returning)
+                    .await?
+                    .into(),
             )),
 
             Statement::Update {
@@ -91,15 +94,16 @@ impl Binder {
                 selection,
                 returning,
             } => Ok(BoundStatement::Update(
-                self.bind_update(table_name, assignments, selection, returning)?
+                self.bind_update(table_name, assignments, selection, returning)
+                    .await?
                     .into(),
             )),
 
-            Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(&q)?.into())),
+            Statement::Query(q) => Ok(BoundStatement::Query(self.bind_query(&q).await?.into())),
 
             Statement::DeclareCursor { stmt } => match stmt.declare_cursor {
                 DeclareCursor::Query(body) => {
-                    let query = self.bind_query(&body)?;
+                    let query = self.bind_query(&body).await?;
                     Ok(BoundStatement::DeclareCursor(
                         BoundDeclareCursor {
                             cursor_name: stmt.cursor_name,
@@ -131,7 +135,7 @@ impl Binder {
                 emit_mode,
                 with_options,
             } => {
-                let query = self.bind_query(&query)?;
+                let query = self.bind_query(&query).await?;
                 let create_view = BoundCreateView::new(
                     or_replace,
                     materialized,

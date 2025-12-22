@@ -108,7 +108,7 @@ pub async fn handle_alter_mv(
 
     let (dependent_relations, dependent_udfs, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
-        let bound_query = binder.bind_query(&new_query)?;
+        let bound_query = binder.bind_query(&new_query).await?;
         (
             binder.included_relations().clone(),
             binder.included_udfs().clone(),

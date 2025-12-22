@@ -26,7 +26,7 @@ impl Binder {
     ///
     /// Different from a query-level `ORDER BY` ([`Self::bind_order_by_expr_in_query`]),
     /// output-column names or numbers are not allowed here.
-    pub(super) fn bind_order_by_expr(
+    pub(super) async fn bind_order_by_expr(
         &mut self,
         OrderByExpr {
             expr,
@@ -35,7 +35,7 @@ impl Binder {
         }: &OrderByExpr,
     ) -> Result<BoundOrderByExpr> {
         let order_type = OrderType::from_bools(*asc, *nulls_first);
-        let expr = self.bind_expr_inner(expr)?;
+        let expr = self.bind_expr_inner(expr).await?;
         Ok(BoundOrderByExpr { expr, order_type })
     }
 }

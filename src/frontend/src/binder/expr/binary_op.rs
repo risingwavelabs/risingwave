@@ -21,13 +21,13 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall};
 
 impl Binder {
-    pub(super) fn bind_binary_op(
+    pub(super) async fn bind_binary_op(
         &mut self,
         left: &Expr,
         op: &BinaryOperator,
         mut right: &Expr,
     ) -> Result<ExprImpl> {
-        let bound_left = self.bind_expr_inner(left)?;
+        let bound_left = self.bind_expr_inner(left).await?;
 
         let mut func_types = vec![];
 
@@ -43,7 +43,7 @@ impl Binder {
             right => right,
         };
 
-        let bound_right = self.bind_expr_inner(right)?;
+        let bound_right = self.bind_expr_inner(right).await?;
 
         if let BinaryOperator::Custom(name) = &op
             && matches!(name.as_str(), "@?" | "@@")

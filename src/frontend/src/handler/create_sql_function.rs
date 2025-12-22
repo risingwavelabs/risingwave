@@ -142,7 +142,7 @@ pub async fn handle_create_sql_function(
             .map(|ty| Literal::new(None, ty.clone()).into() /* NULL */)
             .collect();
 
-        let expr = binder.bind_sql_udf_inner(&body, &arg_names, args)?;
+        let expr = binder.bind_sql_udf_inner(&body, &arg_names, args).await?;
 
         // Check if the return type mismatches
         if expr.return_type() != return_type {

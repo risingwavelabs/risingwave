@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
@@ -66,7 +66,7 @@ pub struct LogicalSource {
 
 impl LogicalSource {
     pub fn new(
-        source_catalog: Option<Rc<SourceCatalog>>,
+        source_catalog: Option<Arc<SourceCatalog>>,
         column_catalog: Vec<ColumnCatalog>,
         row_id_index: Option<usize>,
         kind: SourceNodeKind,
@@ -106,7 +106,7 @@ impl LogicalSource {
     }
 
     pub fn with_catalog(
-        source_catalog: Rc<SourceCatalog>,
+        source_catalog: Arc<SourceCatalog>,
         kind: SourceNodeKind,
         ctx: OptimizerContextRef,
         as_of: Option<AsOf>,
@@ -225,7 +225,7 @@ impl LogicalSource {
         Ok(list_plan)
     }
 
-    pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
+    pub fn source_catalog(&self) -> Option<Arc<SourceCatalog>> {
         self.core.catalog.clone()
     }
 

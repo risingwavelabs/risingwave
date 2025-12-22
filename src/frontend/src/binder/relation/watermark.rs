@@ -49,7 +49,7 @@ pub(super) fn is_watermark_func(func_name: &str) -> bool {
 }
 
 impl Binder {
-    pub(super) fn bind_watermark(
+    pub(super) async fn bind_watermark(
         &mut self,
         alias: Option<&TableAlias>,
         args: &[FunctionArg],
@@ -58,9 +58,13 @@ impl Binder {
 
         self.push_context();
 
-        let (base, table_name) = self.bind_relation_by_function_arg(args.next(), ERROR_1ST_ARG)?;
+        let (base, table_name) = self
+            .bind_relation_by_function_arg(args.next(), ERROR_1ST_ARG)
+            .await?;
 
-        let time_col = self.bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)?;
+        let time_col = self
+            .bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)
+            .await?;
 
         if DataType::window_of(&time_col.data_type).is_none() {
             return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_owned()).into());
@@ -79,10 +83,10 @@ impl Binder {
         self.bind_table_to_context(columns, table_name, alias)?;
 
         // Other arguments are validated in `plan_watermark`
-        let exprs: Vec<_> = args
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
+        let mut exprs = Vec::new();
+        for arg in args {
+            exprs.extend(self.bind_function_arg(arg).await?);
+        }
         Ok(BoundWatermark {
             input: base,
             time_col: *time_col,

@@ -33,7 +33,7 @@ impl Binder {
     /// functions, or scalar functions.
     ///
     /// `with_ordinality` is only supported for the `TableFunction` case now.
-    pub(super) fn bind_table_function(
+    pub(super) async fn bind_table_function(
         &mut self,
         name: &ObjectName,
         alias: Option<&TableAlias>,
@@ -50,7 +50,7 @@ impl Binder {
                         func_name
                     );
                 }
-                return self.bind_internal_table(args, alias);
+                return self.bind_internal_table(args, alias).await;
             }
         }
         // window table functions (tumble/hop)
@@ -63,7 +63,7 @@ impl Binder {
                 .into());
             }
             return Ok(Relation::WindowTableFunction(Box::new(
-                self.bind_window_table_function(alias, kind, args)?,
+                self.bind_window_table_function(alias, kind, args).await?,
             )));
         }
         // gap_fill
@@ -75,7 +75,7 @@ impl Binder {
                 .into());
             }
             return Ok(Relation::GapFill(Box::new(
-                self.bind_gap_fill(alias, args)?,
+                self.bind_gap_fill(alias, args).await?,
             )));
         }
         // watermark
@@ -87,21 +87,23 @@ impl Binder {
                 .into());
             }
             return Ok(Relation::Watermark(Box::new(
-                self.bind_watermark(alias, args)?,
+                self.bind_watermark(alias, args).await?,
             )));
         };
 
         self.push_context();
         let mut clause = Some(Clause::From);
         std::mem::swap(&mut self.context.clause, &mut clause);
-        let func = self.bind_function(&Function {
-            scalar_as_agg: false,
-            name: name.clone(),
-            arg_list: FunctionArgList::args_only(args.to_vec()),
-            over: None,
-            filter: None,
-            within_group: None,
-        });
+        let func = self
+            .bind_function(&Function {
+                scalar_as_agg: false,
+                name: name.clone(),
+                arg_list: FunctionArgList::args_only(args.to_vec()),
+                over: None,
+                filter: None,
+                within_group: None,
+            })
+            .await;
         self.context.clause = clause;
         self.pop_context()?;
         let func = func?;

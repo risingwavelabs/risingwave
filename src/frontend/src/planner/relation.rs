@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 use std::ops::Deref;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use either::Either;
 use itertools::Itertools;
@@ -196,7 +196,7 @@ impl Planner {
                             })
                             .collect_vec();
                         let logical_source = LogicalSource::with_catalog(
-                            Rc::new(source_catalog.deref().clone()),
+                            Arc::new(source_catalog.deref().clone()),
                             SourceNodeKind::CreateMViewOrBatch,
                             self.ctx(),
                             as_of,
@@ -264,7 +264,7 @@ source: {:?}",
                 }
             }
             Ok(LogicalSource::with_catalog(
-                Rc::new(source.catalog),
+                Arc::new(source.catalog),
                 SourceNodeKind::CreateMViewOrBatch,
                 self.ctx(),
                 as_of,

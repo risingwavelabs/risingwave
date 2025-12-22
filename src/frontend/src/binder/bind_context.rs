@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cell::RefCell;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::rc::Rc;
+use std::sync::Arc;
 
 use either::Either;
+use parking_lot::RwLock;
 use parse_display::Display;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
@@ -156,7 +156,7 @@ pub struct BindContext {
     pub column_group_context: ColumnGroupContext,
     /// Map the cte's name to its binding state.
     /// The `ShareId` in `BindingCte` of the value is used to help the planner identify the share plan.
-    pub cte_to_relation: HashMap<String, Rc<RefCell<BindingCte>>>,
+    pub cte_to_relation: HashMap<String, Arc<RwLock<BindingCte>>>,
     /// Current lambda functions's arguments
     pub lambda_args: Option<HashMap<String, (usize, DataType)>>,
     /// Whether the security invoker is set, currently only used for views.

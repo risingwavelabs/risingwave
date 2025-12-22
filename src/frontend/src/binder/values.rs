@@ -91,7 +91,7 @@ impl Binder {
     /// Bind [`Values`] with given `expected_types`. If no types are expected, a compatible type for
     /// all rows will be used.
     /// If values are shorter than expected, `NULL`s will be filled.
-    pub(super) fn bind_values(
+    pub(super) async fn bind_values(
         &mut self,
         values: &Values,
         expected_types: Option<&[DataType]>,
@@ -100,10 +100,14 @@ impl Binder {
 
         self.context.clause = Some(Clause::Values);
         let vec2d = &values.0;
-        let mut bound = vec2d
-            .iter()
-            .map(|vec| vec.iter().map(|expr| self.bind_expr(expr)).collect())
-            .collect::<Result<Vec<Vec<_>>>>()?;
+        let mut bound = Vec::with_capacity(vec2d.len());
+        for row in vec2d {
+            let mut bound_row = Vec::with_capacity(row.len());
+            for expr in row {
+                bound_row.push(self.bind_expr(expr).await?);
+            }
+            bound.push(bound_row);
+        }
         self.context.clause = None;
 
         let num_columns = bound[0].len();

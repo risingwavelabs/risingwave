@@ -68,7 +68,7 @@ pub async fn handle_create_as(
     // Generate catalog descs from query
     let mut columns: Vec<_> = {
         let mut binder = Binder::new_for_batch(&session);
-        let bound = binder.bind(Statement::Query(query.clone()))?;
+        let bound = binder.bind(Statement::Query(query.clone())).await?;
         if let BoundStatement::Query(query) = bound {
             // Create ColumnCatelog by Field
             query
@@ -129,7 +129,8 @@ pub async fn handle_create_as(
                 webhook_info: None,
                 engine,
             },
-        )?;
+        )
+        .await?;
         let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
         (graph, None, table)

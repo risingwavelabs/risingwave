@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc};
@@ -59,7 +59,7 @@ impl From<generic::CdcScan> for PlanRef {
 impl LogicalCdcScan {
     pub fn create(
         table_name: String, // explain-only
-        cdc_table_desc: Rc<CdcTableDesc>,
+        cdc_table_desc: Arc<CdcTableDesc>,
         ctx: OptimizerContextRef,
         options: CdcScanOptions,
     ) -> Self {

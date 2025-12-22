@@ -133,7 +133,7 @@ impl ExprVisitor for IndexColumnExprValidator {
     }
 }
 
-pub(crate) fn gen_create_index_plan(
+pub(crate) async fn gen_create_index_plan(
     session: &SessionImpl,
     context: OptimizerContextRef,
     schema_name: String,
@@ -244,7 +244,7 @@ pub(crate) fn gen_create_index_plan(
             .into());
         }
         let order_type = OrderType::from_bools(column.asc, column.nulls_first);
-        let expr_impl = binder.bind_expr(&column.expr)?;
+        let expr_impl = binder.bind_expr(&column.expr).await?;
         // Do constant folding and timezone transportation on expressions so that batch queries can match it in the same form.
         let mut const_eval = ConstEvalRewriter { error: None };
         let expr_impl = const_eval.rewrite_expr(expr_impl);
@@ -281,8 +281,9 @@ pub(crate) fn gen_create_index_plan(
             .collect_vec();
     } else {
         for column in include {
-            let expr_impl =
-                binder.bind_expr(&risingwave_sqlparser::ast::Expr::Identifier(column))?;
+            let expr_impl = binder
+                .bind_expr(&risingwave_sqlparser::ast::Expr::Identifier(column))
+                .await?;
             include_columns_expr.push(expr_impl);
         }
     };
@@ -295,7 +296,7 @@ pub(crate) fn gen_create_index_plan(
     }
 
     for column in distributed_by {
-        let expr_impl = binder.bind_expr(&column)?;
+        let expr_impl = binder.bind_expr(&column).await?;
         distributed_columns_expr.push(expr_impl);
     }
 
@@ -674,7 +675,8 @@ pub async fn handle_create_index(
             columns,
             include,
             distributed_by,
-        )?;
+        )
+        .await?;
         let graph = build_graph(plan, Some(GraphJobType::Index))?;
 
         (graph, index_table, index)

@@ -78,7 +78,7 @@ macro_rules! reject_syntax {
 }
 
 impl Binder {
-    pub(in crate::binder) fn bind_function(
+    pub(in crate::binder) async fn bind_function(
         &mut self,
         Function {
             scalar_as_agg,
@@ -140,22 +140,22 @@ impl Binder {
 
         // special binding logic for `array_transform` and `map_filter`
         if func_name == "array_transform" || func_name == "map_filter" {
-            return self.validate_and_bind_special_function_params(
-                &func_name,
-                *scalar_as_agg,
-                arg_list,
-                within_group.as_deref(),
-                filter.as_deref(),
-                over.as_ref(),
-            );
+            return self
+                .validate_and_bind_special_function_params(
+                    &func_name,
+                    *scalar_as_agg,
+                    arg_list,
+                    within_group.as_deref(),
+                    filter.as_deref(),
+                    over.as_ref(),
+                )
+                .await;
         }
 
-        let mut args: Vec<_> = arg_list
-            .args
-            .iter()
-            .map(|arg| self.bind_function_arg(arg))
-            .flatten_ok()
-            .try_collect()?;
+        let mut args = Vec::new();
+        for arg in &arg_list.args {
+            args.extend(self.bind_function_arg(arg).await?);
+        }
 
         let mut referred_udfs = HashSet::new();
 
@@ -168,12 +168,18 @@ impl Binder {
                 .map(|(i, expr)| InputRef::new(i, DataType::list(expr.return_type())).into())
                 .collect_vec();
             let schema_path = self.bind_schema_path(schema_name.as_deref());
-            let scalar_func_expr = if let Ok((func, _)) = self.catalog.get_function_by_name_inputs(
-                &self.db_name,
-                schema_path,
-                &func_name,
-                &mut array_args,
-            ) {
+            let scalar_func = {
+                let catalog = self.catalog();
+                catalog
+                    .get_function_by_name_inputs(
+                        &self.db_name,
+                        schema_path,
+                        &func_name,
+                        &mut array_args,
+                    )
+                    .map(|(func, _)| func.clone())
+            };
+            let scalar_func_expr = if let Ok(func) = scalar_func {
                 // record the dependency upon the UDF
                 referred_udfs.insert(func.id);
                 self.check_privilege(
@@ -189,7 +195,7 @@ impl Binder {
                 }
 
                 if func.language == "sql" {
-                    self.bind_sql_udf(func.clone(), array_args)?
+                    self.bind_sql_udf(func.clone(), array_args).await?
                 } else {
                     UserDefinedFunction::new(func.clone(), array_args).into()
                 }
@@ -217,12 +223,12 @@ impl Binder {
 
         let schema_path = self.bind_schema_path(schema_name.as_deref());
         let udf = if wrapped_agg_type.is_none()
-            && let Ok((func, _)) = self.catalog.get_function_by_name_inputs(
-                &self.db_name,
-                schema_path,
-                &func_name,
-                &mut args,
-            ) {
+            && let Ok(func) = {
+                let catalog = self.catalog();
+                catalog
+                    .get_function_by_name_inputs(&self.db_name, schema_path, &func_name, &mut args)
+                    .map(|(func, _)| func.clone())
+            } {
             // record the dependency upon the UDF
             referred_udfs.insert(func.id);
             self.check_privilege(
@@ -274,13 +280,9 @@ impl Binder {
             } else {
                 bail_not_implemented!(issue = 8961, "Unrecognized window function: {}", func_name);
             };
-            return self.bind_window_function(
-                kind,
-                args,
-                arg_list.ignore_nulls,
-                filter.as_deref(),
-                over,
-            );
+            return self
+                .bind_window_function(kind, args, arg_list.ignore_nulls, filter.as_deref(), over)
+                .await;
         }
 
         // now it's an aggregate/scalar/table function call
@@ -295,14 +297,16 @@ impl Binder {
                 arg_list.variadic,
                 "`VARIADIC` is not allowed in aggregate function call"
             );
-            return self.bind_aggregate_function(
-                agg_type,
-                arg_list.distinct,
-                args,
-                &arg_list.order_by,
-                within_group.as_deref(),
-                filter.as_deref(),
-            );
+            return self
+                .bind_aggregate_function(
+                    agg_type,
+                    arg_list.distinct,
+                    args,
+                    &arg_list.order_by,
+                    within_group.as_deref(),
+                    filter.as_deref(),
+                )
+                .await;
         }
 
         // now it's a scalar/table function call
@@ -332,7 +336,7 @@ impl Binder {
                     "`VARIADIC` is not allowed in table function call"
                 );
                 self.ensure_table_function_allowed()?;
-                return Ok(TableFunction::new_file_scan(args)?.into());
+                return Ok(TableFunction::new_file_scan(args).await?.into());
             }
             // `postgres_query` table function
             if func_name.eq("postgres_query") {
@@ -347,6 +351,7 @@ impl Binder {
                     self.bind_schema_path(schema_name.as_deref()),
                     args,
                 )
+                .await
                 .context("postgres_query error")?
                 .into());
             }
@@ -363,6 +368,7 @@ impl Binder {
                     self.bind_schema_path(schema_name.as_deref()),
                     args,
                 )
+                .await
                 .context("mysql_query error")?
                 .into());
             }
@@ -404,7 +410,7 @@ impl Binder {
                 );
                 self.ensure_table_function_allowed()?;
                 if udf.language == "sql" {
-                    return self.bind_sql_udf(udf.clone(), args);
+                    return self.bind_sql_udf(udf.clone(), args).await;
                 }
                 return Ok(TableFunction::new_user_defined(udf.clone(), args).into());
             }
@@ -427,7 +433,7 @@ impl Binder {
                 "`VARIADIC` is not allowed in user-defined function call"
             );
             if udf.language == "sql" {
-                return self.bind_sql_udf(udf.clone(), args);
+                return self.bind_sql_udf(udf.clone(), args).await;
             }
             return Ok(UserDefinedFunction::new(udf.clone(), args).into());
         }
@@ -435,7 +441,7 @@ impl Binder {
         self.bind_builtin_scalar_function(&func_name, args, arg_list.variadic)
     }
 
-    fn validate_and_bind_special_function_params(
+    async fn validate_and_bind_special_function_params(
         &mut self,
         func_name: &str,
         scalar_as_agg: bool,
@@ -472,13 +478,13 @@ impl Binder {
             func_name
         );
         if func_name == "array_transform" {
-            self.bind_array_transform(&arg_list.args)
+            self.bind_array_transform(&arg_list.args).await
         } else {
-            self.bind_map_filter(&arg_list.args)
+            self.bind_map_filter(&arg_list.args).await
         }
     }
 
-    fn bind_array_transform(&mut self, args: &[FunctionArg]) -> Result<ExprImpl> {
+    async fn bind_array_transform(&mut self, args: &[FunctionArg]) -> Result<ExprImpl> {
         let [array, lambda] = args else {
             return Err(ErrorCode::BindError(format!(
                 "`array_transform` expect two inputs `array` and `lambda`, but {} were given",
@@ -487,7 +493,7 @@ impl Binder {
             .into());
         };
 
-        let bound_array = self.bind_function_arg(array)?;
+        let bound_array = self.bind_function_arg(array).await?;
         let [bound_array] = <[ExprImpl; 1]>::try_from(bound_array).map_err(|bound_array| -> RwError {
             ErrorCode::BindError(format!("The `array` argument for `array_transform` should be bound to one argument, but {} were got", bound_array.len()))
                 .into()
@@ -522,7 +528,9 @@ impl Binder {
             .into()
         })?;
 
-        let bound_lambda = self.bind_unary_lambda_function(inner_ty, lambda_arg, *lambda_body)?;
+        let bound_lambda = self
+            .bind_unary_lambda_function(inner_ty, lambda_arg, *lambda_body)
+            .await?;
 
         let lambda_ret_type = bound_lambda.return_type();
         let transform_ret_type = DataType::list(lambda_ret_type);
@@ -537,7 +545,7 @@ impl Binder {
         )))
     }
 
-    fn bind_unary_lambda_function(
+    async fn bind_unary_lambda_function(
         &mut self,
         input_ty: DataType,
         arg: Ident,
@@ -545,13 +553,13 @@ impl Binder {
     ) -> Result<ExprImpl> {
         let lambda_args = HashMap::from([(arg.real_value(), (0usize, input_ty))]);
         let orig_lambda_args = self.context.lambda_args.replace(lambda_args);
-        let body = self.bind_expr_inner(&body)?;
+        let body = self.bind_expr_inner(&body).await?;
         self.context.lambda_args = orig_lambda_args;
 
         Ok(body)
     }
 
-    fn bind_map_filter(&mut self, args: &[FunctionArg]) -> Result<ExprImpl> {
+    async fn bind_map_filter(&mut self, args: &[FunctionArg]) -> Result<ExprImpl> {
         let [input, lambda] = args else {
             return Err(ErrorCode::BindError(format!(
                 "`map_filter` requires two arguments (input_map and lambda), got {}",
@@ -560,7 +568,7 @@ impl Binder {
             .into());
         };
 
-        let bound_input = self.bind_function_arg(input)?;
+        let bound_input = self.bind_function_arg(input).await?;
         let [bound_input] = <[ExprImpl; 1]>::try_from(bound_input).map_err(|e| {
             ErrorCode::BindError(format!(
                 "Input argument should resolve to single expression, got {}",
@@ -595,13 +603,15 @@ impl Binder {
             ))
         })?;
 
-        let bound_lambda = self.bind_binary_lambda_function(
-            key_arg,
-            key_type.clone(),
-            value_arg,
-            value_type.clone(),
-            *lambda_body,
-        )?;
+        let bound_lambda = self
+            .bind_binary_lambda_function(
+                key_arg,
+                key_type.clone(),
+                value_arg,
+                value_type.clone(),
+                *lambda_body,
+            )
+            .await?;
 
         let lambda_ret_type = bound_lambda.return_type();
         if lambda_ret_type != DataType::Boolean {
@@ -625,7 +635,7 @@ impl Binder {
         )))
     }
 
-    fn bind_binary_lambda_function(
+    async fn bind_binary_lambda_function(
         &mut self,
         first_arg: Ident,
         first_ty: DataType,
@@ -639,7 +649,7 @@ impl Binder {
         ]);
 
         let orig_ctx = self.context.lambda_args.replace(lambda_args);
-        let bound_body = self.bind_expr_inner(&body)?;
+        let bound_body = self.bind_expr_inner(&body).await?;
         self.context.lambda_args = orig_ctx;
 
         Ok(bound_body)
@@ -693,7 +703,7 @@ impl Binder {
         }
     }
 
-    pub fn bind_sql_udf_inner(
+    pub async fn bind_sql_udf_inner(
         &mut self,
         body: &str,
         arg_names: &[String],
@@ -729,14 +739,14 @@ impl Binder {
             .into());
         };
 
-        let bind_result = self.bind_expr(&expr);
+        let bind_result = self.bind_expr(&expr).await;
         // Restore arguments information for subsequent binding.
         self.context.sql_udf_arguments = stashed_arguments;
 
         bind_result
     }
 
-    fn bind_sql_udf(
+    async fn bind_sql_udf(
         &mut self,
         func: Arc<FunctionCatalog>,
         args: Vec<ExprImpl>,
@@ -747,15 +757,15 @@ impl Binder {
             );
         };
 
-        self.bind_sql_udf_inner(body, &func.arg_names, args)
+        self.bind_sql_udf_inner(body, &func.arg_names, args).await
     }
 
-    pub(in crate::binder) fn bind_function_expr_arg(
+    pub(in crate::binder) async fn bind_function_expr_arg(
         &mut self,
         arg_expr: &FunctionArgExpr,
     ) -> Result<Vec<ExprImpl>> {
         match arg_expr {
-            FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr)?]),
+            FunctionArgExpr::Expr(expr) => Ok(vec![self.bind_expr_inner(expr).await?]),
             FunctionArgExpr::QualifiedWildcard(_, _)
             | FunctionArgExpr::ExprQualifiedWildcard(_, _) => Err(ErrorCode::InvalidInputSyntax(
                 format!("unexpected wildcard {}", arg_expr),
@@ -766,12 +776,12 @@ impl Binder {
         }
     }
 
-    pub(in crate::binder) fn bind_function_arg(
+    pub(in crate::binder) async fn bind_function_arg(
         &mut self,
         arg: &FunctionArg,
     ) -> Result<Vec<ExprImpl>> {
         match arg {
-            FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr),
+            FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr).await,
             FunctionArg::Named { .. } => todo!(),
         }
     }

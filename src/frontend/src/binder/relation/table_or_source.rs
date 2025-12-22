@@ -70,7 +70,7 @@ impl BoundSource {
 }
 
 impl Binder {
-    pub fn bind_catalog_relation_by_object_name(
+    pub async fn bind_catalog_relation_by_object_name(
         &mut self,
         object_name: &ObjectName,
         bind_creating_relations: bool,
@@ -85,10 +85,11 @@ impl Binder {
             None,
             bind_creating_relations,
         )
+        .await
     }
 
     /// Binds table or source, or logical view according to what we get from the catalog.
-    pub fn bind_catalog_relation_by_name(
+    pub async fn bind_catalog_relation_by_name(
         &mut self,
         db_name: Option<&str>,
         schema_name: Option<&str>,
@@ -115,7 +116,8 @@ impl Binder {
 
         // check db_name if exists first
         if let Some(db_name) = db_name {
-            let _ = self.catalog.get_database_by_name(db_name)?;
+            let catalog = self.catalog();
+            let _ = catalog.get_database_by_name(db_name)?;
         }
 
         // start to bind
@@ -125,16 +127,20 @@ impl Binder {
                     let db_name = db_name.unwrap_or(&self.db_name).to_owned();
                     let schema_path = SchemaPath::Name(schema_name);
                     if is_system_schema(schema_name) {
-                        if let Ok(sys_table_catalog) =
-                            self.catalog
+                        if let Ok(sys_table_catalog) = {
+                            let catalog = self.catalog();
+                            catalog
                                 .get_sys_table_by_name(&db_name, schema_name, table_name)
-                        {
-                            resolve_sys_table_relation(sys_table_catalog)
-                        } else if let Ok((view_catalog, _)) =
-                            self.catalog
+                                .map(|sys_table_catalog| sys_table_catalog.clone())
+                        } {
+                            resolve_sys_table_relation(&sys_table_catalog)
+                        } else if let Ok(view_catalog) = {
+                            let catalog = self.catalog();
+                            catalog
                                 .get_view_by_name(&db_name, schema_path, table_name)
-                        {
-                            self.resolve_view_relation(&view_catalog.clone())?
+                                .map(|(view_catalog, _)| view_catalog.clone())
+                        } {
+                            self.resolve_view_relation(&view_catalog).await?
                         } else {
                             bail_not_implemented!(
                                 issue = 1695,
@@ -153,29 +159,32 @@ impl Binder {
                     // don't care about the database and schema
                     {
                         self.resolve_source_relation(&source_catalog.clone(), as_of, true)?
-                    } else if let Ok((table_catalog, schema_name)) = self
-                        .catalog
-                        .get_any_table_by_name(&db_name, schema_path, table_name)
-                        && (bind_creating_relations
-                            || table_catalog.is_internal_table()
-                            || table_catalog.is_created())
+                    } else if let Ok((table_catalog, schema_name)) = {
+                        let catalog = self.catalog();
+                        catalog
+                            .get_any_table_by_name(&db_name, schema_path, table_name)
+                            .map(|(table_catalog, schema_name)| {
+                                (table_catalog.clone(), schema_name.to_owned())
+                            })
+                    } && (bind_creating_relations
+                        || table_catalog.is_internal_table()
+                        || table_catalog.is_created())
                     {
-                        self.resolve_table_relation(
-                            table_catalog.clone(),
-                            &db_name,
-                            schema_name,
-                            as_of,
-                        )?
-                    } else if let Ok((source_catalog, _)) =
-                        self.catalog
+                        self.resolve_table_relation(table_catalog, &db_name, &schema_name, as_of)?
+                    } else if let Ok(source_catalog) = {
+                        let catalog = self.catalog();
+                        catalog
                             .get_source_by_name(&db_name, schema_path, table_name)
-                    {
-                        self.resolve_source_relation(&source_catalog.clone(), as_of, false)?
-                    } else if let Ok((view_catalog, _)) =
-                        self.catalog
+                            .map(|(source_catalog, _)| source_catalog.clone())
+                    } {
+                        self.resolve_source_relation(&source_catalog, as_of, false)?
+                    } else if let Ok(view_catalog) = {
+                        let catalog = self.catalog();
+                        catalog
                             .get_view_by_name(&db_name, schema_path, table_name)
-                    {
-                        self.resolve_view_relation(&view_catalog.clone())?
+                            .map(|(view_catalog, _)| view_catalog.clone())
+                    } {
+                        self.resolve_view_relation(&view_catalog).await?
                     } else if let Some(table_catalog) =
                         self.staging_catalog_manager.get_table(table_name)
                     {
@@ -190,80 +199,100 @@ impl Binder {
                         return Err(CatalogError::not_found("table or source", table_name).into());
                     }
                 }
-                None => (|| {
+                None => {
                     // If schema is not specified, db must be unspecified.
                     // So we should always use current database here.
                     assert!(db_name.is_none());
                     let db_name = self.db_name.clone();
                     let user_name = self.auth_context.user_name.clone();
+                    let mut found: Option<(Relation, Vec<(bool, Field)>)> = None;
 
-                    for path in self.search_path.path() {
-                        if is_system_schema(path)
-                            && let Ok(sys_table_catalog) = self
-                                .catalog
-                                .get_sys_table_by_name(&db_name, path, table_name)
-                        {
-                            return Ok(resolve_sys_table_relation(sys_table_catalog));
-                        } else {
-                            let schema_name = if path == USER_NAME_WILD_CARD {
-                                &user_name
-                            } else {
-                                &path.clone()
-                            };
-
-                            if let Ok(schema) =
-                                self.catalog.get_schema_by_name(&db_name, schema_name)
-                            {
-                                if let Some(source_catalog) =
-                                    self.temporary_source_manager.get_source(table_name)
-                                // don't care about the database and schema
-                                {
-                                    return self.resolve_source_relation(
-                                        &source_catalog.clone(),
-                                        as_of,
-                                        true,
-                                    );
-                                } else if let Some(table_catalog) =
-                                    schema.get_any_table_by_name(table_name)
-                                    && (bind_creating_relations
-                                        || table_catalog.is_internal_table()
-                                        || table_catalog.is_created())
-                                {
-                                    return self.resolve_table_relation(
-                                        table_catalog.clone(),
-                                        &db_name,
-                                        schema_name,
-                                        as_of,
-                                    );
-                                } else if let Some(source_catalog) =
-                                    schema.get_source_by_name(table_name)
-                                {
-                                    return self.resolve_source_relation(
-                                        &source_catalog.clone(),
-                                        as_of,
-                                        false,
-                                    );
-                                } else if let Some(view_catalog) =
-                                    schema.get_view_by_name(table_name)
-                                {
-                                    return self.resolve_view_relation(&view_catalog.clone());
-                                } else if let Some(table_catalog) =
-                                    self.staging_catalog_manager.get_table(table_name)
-                                {
-                                    // don't care about the database and schema
-                                    return self.resolve_table_relation(
-                                        table_catalog.clone().into(),
-                                        &db_name,
-                                        schema_name,
-                                        as_of,
-                                    );
-                                }
+                    let search_paths: Vec<String> =
+                        self.search_path.path().iter().cloned().collect();
+                    for path in search_paths {
+                        if is_system_schema(&path)
+                            && let Ok(sys_table_catalog) = {
+                                let catalog = self.catalog();
+                                catalog
+                                    .get_sys_table_by_name(&db_name, &path, table_name)
+                                    .map(|sys_table_catalog| sys_table_catalog.clone())
                             }
+                        {
+                            found = Some(resolve_sys_table_relation(&sys_table_catalog));
+                            break;
+                        }
+
+                        let schema_name = if path == USER_NAME_WILD_CARD {
+                            user_name.as_str()
+                        } else {
+                            path.as_str()
+                        };
+
+                        if let Some(source_catalog) =
+                            self.temporary_source_manager.get_source(table_name)
+                        // don't care about the database and schema
+                        {
+                            found = Some(self.resolve_source_relation(
+                                &source_catalog.clone(),
+                                as_of,
+                                true,
+                            )?);
+                            break;
+                        }
+
+                        let (table_catalog, source_catalog, view_catalog) = {
+                            let catalog = self.catalog();
+                            if let Ok(schema) = catalog.get_schema_by_name(&db_name, schema_name) {
+                                (
+                                    schema.get_any_table_by_name(table_name).cloned(),
+                                    schema.get_source_by_name(table_name).cloned(),
+                                    schema.get_view_by_name(table_name).cloned(),
+                                )
+                            } else {
+                                (None, None, None)
+                            }
+                        };
+
+                        if let Some(table_catalog) = table_catalog
+                            && (bind_creating_relations
+                                || table_catalog.is_internal_table()
+                                || table_catalog.is_created())
+                        {
+                            found = Some(self.resolve_table_relation(
+                                table_catalog,
+                                &db_name,
+                                schema_name,
+                                as_of,
+                            )?);
+                            break;
+                        } else if let Some(source_catalog) = source_catalog {
+                            found = Some(self.resolve_source_relation(
+                                &source_catalog,
+                                as_of,
+                                false,
+                            )?);
+                            break;
+                        } else if let Some(view_catalog) = view_catalog {
+                            found = Some(self.resolve_view_relation(&view_catalog).await?);
+                            break;
+                        } else if let Some(table_catalog) =
+                            self.staging_catalog_manager.get_table(table_name)
+                        {
+                            // don't care about the database and schema
+                            found = Some(self.resolve_table_relation(
+                                table_catalog.clone().into(),
+                                &db_name,
+                                schema_name,
+                                as_of,
+                            )?);
+                            break;
                         }
                     }
 
-                    Err(CatalogError::not_found("table or source", table_name).into())
-                })()?,
+                    found.ok_or_else(|| {
+                        RwError::from(CatalogError::not_found("table or source", table_name))
+                    })?
+                }
             }
         };
 
@@ -294,7 +323,7 @@ impl Binder {
                     ))
                     .into());
                 }
-                if let Some(user) = self.user.get_user_by_name(&self.auth_context.user_name) {
+                if let Some(user) = self.user().get_user_by_name(&self.auth_context.user_name) {
                     if user.is_super || user.id == item.owner {
                         return Ok(());
                     }
@@ -306,7 +335,10 @@ impl Binder {
                     if self.database_id != database_id
                         && !user.has_privilege(database_id, AclMode::Connect)
                     {
-                        let db_name = self.catalog.get_database_by_id(database_id)?.name.clone();
+                        let db_name = {
+                            let catalog = self.catalog();
+                            catalog.get_database_by_id(database_id)?.name.clone()
+                        };
 
                         return Err(PermissionDenied(format!(
                             "permission denied for database \"{db_name}\""
@@ -393,7 +425,7 @@ impl Binder {
         ))
     }
 
-    fn resolve_view_relation(
+    async fn resolve_view_relation(
         &mut self,
         view_catalog: &ViewCatalog,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
@@ -418,7 +450,7 @@ impl Binder {
         else {
             unreachable!("a view should contain a query statement");
         };
-        let query = self.bind_query_for_view(&query).map_err(|e| {
+        let query = self.bind_query_for_view(&query).await.map_err(|e| {
             ErrorCode::BindError(format!(
                 "failed to bind view {}, sql: {}\nerror: {}",
                 view_catalog.name,
@@ -465,7 +497,8 @@ impl Binder {
         schema_name: &str,
         table_id: TableId,
     ) -> Result<Vec<Arc<IndexCatalog>>> {
-        let schema = self.catalog.get_schema_by_name(db_name, schema_name)?;
+        let catalog = self.catalog();
+        let schema = catalog.get_schema_by_name(db_name, schema_name)?;
         assert!(
             schema.get_table_by_id(table_id).is_some() || table_id.is_placeholder(),
             "table {table_id} not found in {db_name}.{schema_name}"
@@ -481,9 +514,9 @@ impl Binder {
     ) -> Result<BoundBaseTable> {
         let db_name = &self.db_name;
         let schema_path = self.bind_schema_path(schema_name);
+        let catalog = self.catalog();
         let (table_catalog, schema_name) =
-            self.catalog
-                .get_created_table_by_name(db_name, schema_path, table_name)?;
+            catalog.get_created_table_by_name(db_name, schema_path, table_name)?;
         let table_catalog = table_catalog.clone();
 
         let table_id = table_catalog.id();

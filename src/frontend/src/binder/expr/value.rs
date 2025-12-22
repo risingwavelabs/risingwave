@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use async_recursion::async_recursion;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::{
     DataType, DateTimeField, Decimal, Interval, MapType, ScalarImpl, StructType,
@@ -115,30 +116,30 @@ impl Binder {
     }
 
     /// `ARRAY[...]` is represented as an function call at the binder stage.
-    pub(super) fn bind_array(&mut self, exprs: &[Expr]) -> Result<ExprImpl> {
+    pub(super) async fn bind_array(&mut self, exprs: &[Expr]) -> Result<ExprImpl> {
         if exprs.is_empty() {
             return Err(ErrorCode::BindError("cannot determine type of empty array\nHINT:  Explicitly cast to the desired type, for example ARRAY[]::integer[].".into()).into());
         }
-        let mut exprs = exprs
-            .iter()
-            .map(|e| self.bind_expr_inner(e))
-            .collect::<Result<Vec<ExprImpl>>>()?;
-        let element_type = align_types(exprs.iter_mut())?;
+        let mut bound = Vec::with_capacity(exprs.len());
+        for expr in exprs {
+            bound.push(self.bind_expr_inner(expr).await?);
+        }
+        let element_type = align_types(bound.iter_mut())?;
         let expr: ExprImpl =
-            FunctionCall::new_unchecked(ExprType::Array, exprs, DataType::list(element_type))
+            FunctionCall::new_unchecked(ExprType::Array, bound, DataType::list(element_type))
                 .into();
         Ok(expr)
     }
 
-    pub(super) fn bind_map(&mut self, entries: &[(Expr, Expr)]) -> Result<ExprImpl> {
+    pub(super) async fn bind_map(&mut self, entries: &[(Expr, Expr)]) -> Result<ExprImpl> {
         if entries.is_empty() {
             return Err(ErrorCode::BindError("cannot determine type of empty map\nHINT:  Explicitly cast to the desired type, for example MAP{}::map(int,int).".into()).into());
         }
         let mut keys = Vec::with_capacity(entries.len());
         let mut values = Vec::with_capacity(entries.len());
         for (k, v) in entries {
-            keys.push(self.bind_expr_inner(k)?);
-            values.push(self.bind_expr_inner(v)?);
+            keys.push(self.bind_expr_inner(k).await?);
+            values.push(self.bind_expr_inner(v).await?);
         }
         let key_type = align_types(keys.iter_mut())?;
         let value_type = align_types(values.iter_mut())?;
@@ -162,26 +163,28 @@ impl Binder {
         Ok(expr)
     }
 
-    pub(super) fn bind_array_cast(
+    #[async_recursion]
+    pub(super) async fn bind_array_cast(
         &mut self,
         exprs: &[Expr],
         element_type: &DataType,
     ) -> Result<ExprImpl> {
-        let exprs = exprs
-            .iter()
-            .map(|e| self.bind_cast_inner(e, element_type))
-            .collect::<Result<Vec<ExprImpl>>>()?;
+        let mut bound = Vec::with_capacity(exprs.len());
+        for expr in exprs {
+            bound.push(self.bind_cast_inner(expr, element_type).await?);
+        }
 
         let expr: ExprImpl = FunctionCall::new_unchecked(
             ExprType::Array,
-            exprs,
+            bound,
             DataType::list(element_type.clone()),
         )
         .into();
         Ok(expr)
     }
 
-    pub(super) fn bind_map_cast(
+    #[async_recursion]
+    pub(super) async fn bind_map_cast(
         &mut self,
         entries: &[(Expr, Expr)],
         map_type: &MapType,
@@ -189,8 +192,8 @@ impl Binder {
         let mut keys = Vec::with_capacity(entries.len());
         let mut values = Vec::with_capacity(entries.len());
         for (k, v) in entries {
-            keys.push(self.bind_cast_inner(k, map_type.key())?);
-            values.push(self.bind_cast_inner(v, map_type.value())?);
+            keys.push(self.bind_cast_inner(k, map_type.key()).await?);
+            values.push(self.bind_cast_inner(v, map_type.value()).await?);
         }
 
         let keys: ExprImpl = FunctionCall::new_unchecked(
@@ -215,18 +218,18 @@ impl Binder {
         Ok(expr)
     }
 
-    pub(super) fn bind_index(&mut self, obj: &Expr, index: &Expr) -> Result<ExprImpl> {
-        let obj = self.bind_expr_inner(obj)?;
+    pub(super) async fn bind_index(&mut self, obj: &Expr, index: &Expr) -> Result<ExprImpl> {
+        let obj = self.bind_expr_inner(obj).await?;
         match obj.return_type() {
             DataType::List(l) => Ok(FunctionCall::new_unchecked(
                 ExprType::ArrayAccess,
-                vec![obj, self.bind_expr_inner(index)?],
+                vec![obj, self.bind_expr_inner(index).await?],
                 l.into_elem(),
             )
             .into()),
             DataType::Map(m) => Ok(FunctionCall::new_unchecked(
                 ExprType::MapAccess,
-                vec![obj, self.bind_expr_inner(index)?],
+                vec![obj, self.bind_expr_inner(index).await?],
                 m.value().clone(),
             )
             .into()),
@@ -238,17 +241,18 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_array_range_index(
+    pub(super) async fn bind_array_range_index(
         &mut self,
         obj: &Expr,
         start: Option<&Expr>,
         end: Option<&Expr>,
     ) -> Result<ExprImpl> {
-        let obj = self.bind_expr_inner(obj)?;
+        let obj = self.bind_expr_inner(obj).await?;
         let start = match start {
             None => ExprImpl::literal_int(1),
             Some(expr) => self
-                .bind_expr_inner(expr)?
+                .bind_expr_inner(expr)
+                .await?
                 .cast_implicit(&DataType::Int32)?,
         };
         // Don't worry, the backend implementation will stop iterating once it encounters the end
@@ -256,7 +260,8 @@ impl Binder {
         let end = match end {
             None => ExprImpl::literal_int(i32::MAX),
             Some(expr) => self
-                .bind_expr_inner(expr)?
+                .bind_expr_inner(expr)
+                .await?
                 .cast_implicit(&DataType::Int32)?,
         };
         match obj.return_type() {
@@ -275,13 +280,13 @@ impl Binder {
     }
 
     /// `Row(...)` is represented as an function call at the binder stage.
-    pub(super) fn bind_row(&mut self, exprs: &[Expr]) -> Result<ExprImpl> {
-        let exprs = exprs
-            .iter()
-            .map(|e| self.bind_expr_inner(e))
-            .collect::<Result<Vec<ExprImpl>>>()?;
-        let data_type = StructType::row_expr_type(exprs.iter().map(|e| e.return_type())).into();
-        let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, exprs, data_type).into();
+    pub(super) async fn bind_row(&mut self, exprs: &[Expr]) -> Result<ExprImpl> {
+        let mut bound = Vec::with_capacity(exprs.len());
+        for expr in exprs {
+            bound.push(self.bind_expr_inner(expr).await?);
+        }
+        let data_type = StructType::row_expr_type(bound.iter().map(|e| e.return_type())).into();
+        let expr: ExprImpl = FunctionCall::new_unchecked(ExprType::Row, bound, data_type).into();
         Ok(expr)
     }
 }

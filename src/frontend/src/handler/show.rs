@@ -51,12 +51,14 @@ use crate::session::{SessionImpl, WorkerProcessId};
 use crate::user::has_access_to_object;
 use crate::user::user_catalog::UserCatalog;
 
-pub fn get_columns_from_table(
+pub async fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
     let mut binder = Binder::new_for_system(session);
-    let relation = binder.bind_relation_by_name(&table_name, None, None, false)?;
+    let relation = binder
+        .bind_relation_by_name(&table_name, None, None, false)
+        .await?;
     let column_catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
         Relation::BaseTable(t) => t.table_catalog.columns.clone(),
@@ -97,12 +99,14 @@ pub fn get_columns_from_view(
         .collect())
 }
 
-pub fn get_indexes_from_table(
+pub async fn get_indexes_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<Arc<IndexCatalog>>> {
     let mut binder = Binder::new_for_system(session);
-    let relation = binder.bind_relation_by_name(&table_name, None, None, false)?;
+    let relation = binder
+        .bind_relation_by_name(&table_name, None, None, false)
+        .await?;
     let indexes = match relation {
         Relation::BaseTable(t) => t.table_indexes,
         _ => {
@@ -611,6 +615,7 @@ pub async fn handle_show_object(
         }
         ShowObject::Columns { table } => {
             let Ok(columns) = get_columns_from_table(&session, table.clone())
+                .await
                 .or(get_columns_from_sink(&session, table.clone()))
                 .or(get_columns_from_view(&session, table.clone()))
             else {
@@ -626,7 +631,7 @@ pub async fn handle_show_object(
                 .into());
         }
         ShowObject::Indexes { table } => {
-            let indexes = get_indexes_from_table(&session, table)?;
+            let indexes = get_indexes_from_table(&session, table).await?;
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
                 .rows(indexes.into_iter().map(ShowIndexRow::from))

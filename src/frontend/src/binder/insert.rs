@@ -99,7 +99,7 @@ impl RewriteExprsRecursive for BoundInsert {
 }
 
 impl Binder {
-    pub(super) fn bind_insert(
+    pub(super) async fn bind_insert(
         &mut self,
         name: ObjectName,
         cols_to_insert_by_user: Vec<Ident>,
@@ -170,7 +170,7 @@ impl Binder {
             }
         };
 
-        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
+        let (returning_list, fields) = self.bind_returning_list(returning_items).await?;
         let is_returning = !returning_list.is_empty();
 
         let (mut col_indices_to_insert, default_column_indices) = get_col_indices_to_insert(
@@ -225,7 +225,7 @@ impl Binder {
 
         let bound_column_nums = match source.as_simple_values() {
             None => {
-                bound_query = self.bind_query(&source)?;
+                bound_query = self.bind_query(&source).await?;
                 let actual_types = bound_query.data_types();
                 let type_match = expected_types == actual_types;
                 cast_exprs = if all_nullable && type_match {
@@ -253,7 +253,7 @@ impl Binder {
                     .first()
                     .expect("values list should not be empty")
                     .len();
-                let mut values = self.bind_values(values, Some(&expected_types))?;
+                let mut values = self.bind_values(values, Some(&expected_types)).await?;
                 // let mut bound_values = values.clone();
 
                 if !all_nullable {

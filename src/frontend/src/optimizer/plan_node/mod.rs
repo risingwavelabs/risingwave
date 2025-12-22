@@ -205,13 +205,13 @@ pub trait PlanNodeCommon<C: ConventionMarker> = PlanTreeNode<C>
 /// `dyn PlanNode`
 ///
 /// We split the trait into lots of sub-trait so that we can easily use macro to impl them.
-pub trait StreamPlanNode: PlanNodeCommon<Stream> + TryToStreamPb {}
+pub trait StreamPlanNode: PlanNodeCommon<Stream> + TryToStreamPb + Send + Sync {}
 pub trait BatchPlanNode:
-    PlanNodeCommon<Batch> + ToDistributedBatch + ToLocalBatch + TryToBatchPb
+    PlanNodeCommon<Batch> + ToDistributedBatch + ToLocalBatch + TryToBatchPb + Send + Sync
 {
 }
 pub trait LogicalPlanNode:
-    PlanNodeCommon<Logical> + ColPrunable + PredicatePushdown + ToBatch + ToStream
+    PlanNodeCommon<Logical> + ColPrunable + PredicatePushdown + ToBatch + ToStream + Send + Sync
 {
 }
 

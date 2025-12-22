@@ -32,7 +32,7 @@ pub struct BoundGapFill {
 }
 
 impl Binder {
-    pub(super) fn bind_gap_fill(
+    pub(super) async fn bind_gap_fill(
         &mut self,
         alias: Option<&TableAlias>,
         args: &[FunctionArg],
@@ -48,15 +48,19 @@ impl Binder {
 
         self.push_context();
 
-        let (input, table_name) = self.bind_relation_by_function_arg(
-            args_iter.next(),
-            "The 1st arg of GAP_FILL should be a table name",
-        )?;
+        let (input, table_name) = self
+            .bind_relation_by_function_arg(
+                args_iter.next(),
+                "The 1st arg of GAP_FILL should be a table name",
+            )
+            .await?;
 
-        let time_col = self.bind_column_by_function_args(
-            args_iter.next(),
-            "The 2nd arg of GAP_FILL should be a column name",
-        )?;
+        let time_col = self
+            .bind_column_by_function_args(
+                args_iter.next(),
+                "The 2nd arg of GAP_FILL should be a column name",
+            )
+            .await?;
 
         if !matches!(
             time_col.data_type,
@@ -70,7 +74,7 @@ impl Binder {
         }
 
         let interval_arg = args_iter.next().unwrap();
-        let interval_exprs = self.bind_function_arg(interval_arg)?;
+        let interval_exprs = self.bind_function_arg(interval_arg).await?;
         let interval = interval_exprs.into_iter().exactly_one().map_err(|_| {
             ErrorCode::BindError("The 3rd arg of GAP_FILL should be a single expression".to_owned())
         })?;
@@ -121,7 +125,7 @@ impl Binder {
                         .into());
                     }
 
-                    let arg_exprs = self.bind_function_arg(&func.arg_list.args[0])?;
+                    let arg_exprs = self.bind_function_arg(&func.arg_list.args[0]).await?;
                     let arg_expr = arg_exprs.into_iter().exactly_one().map_err(|_| {
                         ErrorCode::BindError(
                             "Fill strategy argument should be a single expression".to_owned(),

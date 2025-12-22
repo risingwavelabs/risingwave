@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::{bail, bail_not_implemented};
 use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types};
@@ -46,7 +45,7 @@ impl Binder {
         Ok(())
     }
 
-    pub(super) fn bind_aggregate_function(
+    pub(super) async fn bind_aggregate_function(
         &mut self,
         agg_type: AggType,
         distinct: bool,
@@ -58,9 +57,11 @@ impl Binder {
         self.ensure_aggregate_allowed()?;
 
         let (direct_args, args, order_by) = if matches!(agg_type, agg_types::ordered_set!()) {
-            self.bind_ordered_set_agg(&agg_type, distinct, args, order_by, within_group)?
+            self.bind_ordered_set_agg(&agg_type, distinct, args, order_by, within_group)
+                .await?
         } else {
-            self.bind_normal_agg(&agg_type, distinct, args, order_by, within_group)?
+            self.bind_normal_agg(&agg_type, distinct, args, order_by, within_group)
+                .await?
         };
 
         let filter = match filter {
@@ -69,7 +70,8 @@ impl Binder {
                 std::mem::swap(&mut self.context.clause, &mut clause);
                 let expr = self
                     .bind_expr_inner(filter)
-                    .and_then(|expr| expr.enforce_bool_clause("FILTER"))?;
+                    .await?
+                    .enforce_bool_clause("FILTER")?;
                 self.context.clause = clause;
                 if expr.has_subquery() {
                     bail_not_implemented!("subquery in filter clause");
@@ -95,7 +97,7 @@ impl Binder {
         )?)))
     }
 
-    fn bind_ordered_set_agg(
+    async fn bind_ordered_set_agg(
         &mut self,
         kind: &AggType,
         distinct: bool,
@@ -132,9 +134,10 @@ impl Binder {
         })?;
 
         let mut direct_args = args;
-        let mut args =
-            self.bind_function_expr_arg(&FunctionArgExpr::Expr(within_group.expr.clone()))?;
-        let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group)?]);
+        let mut args = self
+            .bind_function_expr_arg(&FunctionArgExpr::Expr(within_group.expr.clone()))
+            .await?;
+        let order_by = OrderBy::new(vec![self.bind_order_by_expr(within_group).await?]);
 
         // check signature and do implicit cast
         match (kind, direct_args.len(), args.as_mut_slice()) {
@@ -205,7 +208,7 @@ impl Binder {
         ))
     }
 
-    fn bind_normal_agg(
+    async fn bind_normal_agg(
         &mut self,
         kind: &AggType,
         distinct: bool,
@@ -232,12 +235,11 @@ impl Binder {
             .into());
         }
 
-        let order_by = OrderBy::new(
-            order_by
-                .iter()
-                .map(|e| self.bind_order_by_expr(e))
-                .try_collect()?,
-        );
+        let mut order_exprs = Vec::with_capacity(order_by.len());
+        for e in order_by {
+            order_exprs.push(self.bind_order_by_expr(e).await?);
+        }
+        let order_by = OrderBy::new(order_exprs);
 
         if distinct {
             if matches!(

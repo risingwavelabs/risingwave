@@ -65,7 +65,7 @@ impl RewriteExprsRecursive for BoundDelete {
 }
 
 impl Binder {
-    pub(super) fn bind_delete(
+    pub(super) async fn bind_delete(
         &mut self,
         name: ObjectName,
         selection: Option<Expr>,
@@ -96,17 +96,19 @@ impl Binder {
         let owner = table_catalog.owner;
         let table_version_id = table_catalog.version_id().expect("table must be versioned");
 
-        let (returning_list, fields) = self.bind_returning_list(returning_items)?;
+        let (returning_list, fields) = self.bind_returning_list(returning_items).await?;
         let returning = !returning_list.is_empty();
+        let selection = match selection {
+            Some(expr) => Some(self.bind_expr(&expr).await?.enforce_bool_clause("WHERE")?),
+            None => None,
+        };
         let delete = BoundDelete {
             table_id,
             table_version_id,
             table_name,
             owner,
             table,
-            selection: selection
-                .map(|expr| self.bind_expr(&expr)?.enforce_bool_clause("WHERE"))
-                .transpose()?,
+            selection,
             returning_list,
             returning_schema: if returning {
                 Some(Schema { fields })

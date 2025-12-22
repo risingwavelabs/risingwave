@@ -163,13 +163,16 @@ pub async fn do_handle_explain(
                         columns,
                         emit_mode,
                         ..
-                    } => gen_create_mv_plan(&session, context, *query, name, columns, emit_mode)
-                        .map(|(plan, table)| {
-                            (
-                                PlanToExplain::Rw(PhysicalPlanRef::Stream(plan)),
-                                Some(table),
-                            )
-                        }),
+                    } => {
+                        gen_create_mv_plan(&session, context, *query, name, columns, emit_mode)
+                            .await
+                    }
+                    .map(|(plan, table)| {
+                        (
+                            PlanToExplain::Rw(PhysicalPlanRef::Stream(plan)),
+                            Some(table),
+                        )
+                    }),
                     Statement::CreateView {
                         materialized: false,
                         ..
@@ -208,6 +211,7 @@ pub async fn do_handle_explain(
                             include,
                             distributed_by,
                         )
+                        .await
                     }
                     .map(|(plan, index_table, _index)| {
                         (
@@ -221,7 +225,7 @@ pub async fn do_handle_explain(
                     | Statement::Delete { .. }
                     | Statement::Update { .. }
                     | Statement::Query { .. } => {
-                        match gen_batch_plan_by_statement(&session, context, stmt)? {
+                        match gen_batch_plan_by_statement(&session, context, stmt).await? {
                             BatchPlanChoice::Rw(plan_result) => Ok((
                                 PlanToExplain::Rw(PhysicalPlanRef::Batch(plan_result.plan)),
                                 None,

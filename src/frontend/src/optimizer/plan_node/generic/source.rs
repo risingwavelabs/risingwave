@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use educe::Educe;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema};
@@ -49,7 +49,7 @@ pub enum SourceNodeKind {
 #[educe(PartialEq, Eq, Hash)]
 pub struct Source {
     /// If there is an external stream source, `catalog` will be `Some`. Otherwise, it is `None`.
-    pub catalog: Option<Rc<SourceCatalog>>,
+    pub catalog: Option<Arc<SourceCatalog>>,
 
     // NOTE: Here we store `column_catalog` and `row_id_index`
     // because they are needed when `catalog` is None.

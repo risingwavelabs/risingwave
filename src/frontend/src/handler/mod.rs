@@ -488,7 +488,7 @@ pub async fn handle(
             DescribeKind::Fragments => {
                 describe::handle_describe_fragments(handler_args, name).await
             }
-            DescribeKind::Plain => describe::handle_describe(handler_args, name),
+            DescribeKind::Plain => describe::handle_describe(handler_args, name).await,
         },
         Statement::DescribeFragment { fragment_id } => {
             describe::handle_describe_fragment(handler_args, fragment_id.into()).await

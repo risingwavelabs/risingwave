@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
+use std::sync::Arc;
 
 use risingwave_connector::source::ConnectorProperties;
 
@@ -38,7 +38,7 @@ impl DistributedDmlVisitor {
         visitor.visit(plan)
     }
 
-    fn is_iceberg_source(source_catalog: &Rc<SourceCatalog>) -> bool {
+    fn is_iceberg_source(source_catalog: &Arc<SourceCatalog>) -> bool {
         let property = ConnectorProperties::extract(source_catalog.with_properties.clone(), false);
         if let Ok(property) = property {
             matches!(property, ConnectorProperties::Iceberg(_))

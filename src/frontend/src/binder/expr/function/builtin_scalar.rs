@@ -495,7 +495,7 @@ impl Binder {
                 ("current_schema", guard_by_len(|binder, []| {
                     Ok(binder
                         .first_valid_schema()
-                        .map(|schema| ExprImpl::literal_varchar(schema.name()))
+                        .map(ExprImpl::literal_varchar)
                         .unwrap_or_else(|_| ExprImpl::literal_null(DataType::Varchar)))
                 })),
                 ("current_schemas", raw(|binder, mut inputs| {
@@ -526,14 +526,14 @@ impl Binder {
                     };
 
                     let mut schema_names = vec![];
+                    let catalog = binder.catalog();
                     for path in paths {
                         let mut schema_name = path;
                         if schema_name == USER_NAME_WILD_CARD {
                             schema_name = &binder.auth_context.user_name;
                         }
 
-                        if binder
-                            .catalog
+                        if catalog
                             .get_schema_by_name(&binder.db_name, schema_name)
                             .is_ok()
                         {

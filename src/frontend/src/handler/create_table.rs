@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::rc::Rc;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -238,7 +237,7 @@ fn check_generated_column_constraints(
 
 /// Binds constraints that can be only specified in column definitions,
 /// currently generated columns and default columns.
-pub fn bind_sql_column_constraints(
+pub async fn bind_sql_column_constraints(
     session: &SessionImpl,
     table_name: String,
     column_catalogs: &mut [ColumnCatalog],
@@ -276,11 +275,12 @@ pub fn bind_sql_column_constraints(
                 ColumnOption::GeneratedColumns(expr) => {
                     binder.set_clause(Some(Clause::GeneratedColumn));
 
-                    let expr_impl = binder.bind_expr(expr).with_context(|| {
-                        format!(
-                            "fail to bind expression in generated column \"{}\"",
-                            column.name.real_value()
-                        )
+                    let expr_impl = binder.bind_expr(expr).await.map_err(|err| {
+                        ErrorCode::BindError(format!(
+                            "fail to bind expression in generated column \"{}\": {}",
+                            column.name.real_value(),
+                            err.as_report()
+                        ))
                     })?;
 
                     check_generated_column_constraints(
@@ -301,7 +301,8 @@ pub fn bind_sql_column_constraints(
                 }
                 ColumnOption::DefaultValue(expr) => {
                     let expr_impl = binder
-                        .bind_expr(expr)?
+                        .bind_expr(expr)
+                        .await?
                         .cast_assign(column_catalogs[idx].data_type())?;
 
                     // Rewrite expressions to evaluate a snapshot value, used for missing values in the case of
@@ -548,7 +549,7 @@ pub(crate) async fn gen_create_table_plan_with_source(
 /// `gen_create_table_plan` generates the plan for creating a table without an external stream
 /// source.
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn gen_create_table_plan(
+pub(crate) async fn gen_create_table_plan(
     context: OptimizerContext,
     table_name: ObjectName,
     column_defs: Vec<ColumnDef>,
@@ -578,10 +579,11 @@ pub(crate) fn gen_create_table_plan(
         col_id_gen.into_version(),
         props,
     )
+    .await
 }
 
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn gen_create_table_plan_without_source(
+pub(crate) async fn gen_create_table_plan_without_source(
     context: OptimizerContext,
     table_name: ObjectName,
     columns: Vec<ColumnCatalog>,
@@ -601,7 +603,8 @@ pub(crate) fn gen_create_table_plan_without_source(
         table_name.real_value(),
         source_watermarks,
         &columns,
-    )?;
+    )
+    .await?;
 
     bind_sql_column_constraints(
         context.session_ctx(),
@@ -609,7 +612,8 @@ pub(crate) fn gen_create_table_plan_without_source(
         &mut columns,
         &column_defs,
         &pk_column_ids,
-    )?;
+    )
+    .await?;
     let session = context.session_ctx().clone();
 
     let db_name = &session.database();
@@ -757,7 +761,7 @@ fn gen_table_plan_inner(
     let retention_seconds = context.with_options().retention_seconds();
 
     let source_node: LogicalPlanRef = LogicalSource::new(
-        source_catalog.clone().map(Rc::new),
+        source_catalog.clone().map(Arc::new),
         columns.clone(),
         row_id_index,
         SourceNodeKind::CreateTable,
@@ -820,7 +824,7 @@ fn gen_table_plan_inner(
 /// In replace workflow, the `table_id` is the id of the table to be replaced
 /// in create table workflow, the `table_id` is a placeholder will be filled in the Meta
 #[allow(clippy::too_many_arguments)]
-pub(crate) fn gen_create_table_plan_for_cdc_table(
+pub(crate) async fn gen_create_table_plan_for_cdc_table(
     context: OptimizerContextRef,
     source: Arc<SourceCatalog>,
     external_table_name: String,
@@ -864,7 +868,8 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         &mut columns,
         &column_defs,
         &pk_column_ids,
-    )?;
+    )
+    .await?;
 
     let definition = context.normalized_sql().to_owned();
 
@@ -909,7 +914,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 
     let logical_scan = LogicalCdcScan::create(
         external_table_name.clone(),
-        Rc::new(cdc_table_desc),
+        Arc::new(cdc_table_desc),
         context.clone(),
         options,
     );
@@ -1086,9 +1091,10 @@ pub(super) async fn handle_create_table_plan(
         &include_column_options,
         &cdc_table_info,
     )?;
-    let webhook_info = webhook_info
-        .map(|info| bind_webhook_info(&handler_args.session, &column_defs, info))
-        .transpose()?;
+    let webhook_info = match webhook_info {
+        Some(info) => Some(bind_webhook_info(&handler_args.session, &column_defs, info).await?),
+        None => None,
+    };
 
     let props = CreateTableProps {
         definition: handler_args.normalized_sql.clone(),
@@ -1133,7 +1139,8 @@ pub(super) async fn handle_create_table_plan(
                 source_watermarks,
                 props,
                 false,
-            )?;
+            )
+            .await?;
 
             ((plan, None, table), TableJobType::General, None)
         }
@@ -1229,7 +1236,8 @@ pub(super) async fn handle_create_table_plan(
                 schema_id,
                 TableId::placeholder(),
                 engine,
-            )?;
+            )
+            .await?;
 
             (
                 (plan, None, table),
@@ -2424,7 +2432,8 @@ pub async fn generate_stream_graph_for_replace_table(
                 source_watermarks,
                 props,
                 true,
-            )?;
+            )
+            .await?;
             ((plan, None, table), TableJobType::General)
         }
         (None, Some(cdc_table)) => {
@@ -2462,7 +2471,8 @@ pub async fn generate_stream_graph_for_replace_table(
                 original_catalog.schema_id,
                 original_catalog.id(),
                 engine,
-            )?;
+            )
+            .await?;
 
             ((plan, None, table), TableJobType::SharedCdcSource)
         }
@@ -2523,7 +2533,7 @@ fn get_source_and_resolved_table_name(
 }
 
 // validate the webhook_info and also bind the webhook_info to protobuf
-fn bind_webhook_info(
+async fn bind_webhook_info(
     session: &Arc<SessionImpl>,
     columns_defs: &[ColumnDef],
     webhook_info: WebhookSourceInfo,
@@ -2570,7 +2580,7 @@ fn bind_webhook_info(
         secret_name,
     };
     let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
-    let expr = binder.bind_expr(&signature_expr)?;
+    let expr = binder.bind_expr(&signature_expr).await?;
 
     // validate expr, ensuring it is SECURE_COMPARE()
     if expr.as_function_call().is_none()

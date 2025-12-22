@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
 use std::str::FromStr;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use educe::Educe;
@@ -45,7 +45,7 @@ pub struct CdcScan {
     /// Include `output_col_idx` and columns required in `predicate`
     pub output_col_idx: Vec<usize>,
     /// Descriptor of the external table for CDC
-    pub cdc_table_desc: Rc<CdcTableDesc>,
+    pub cdc_table_desc: Arc<CdcTableDesc>,
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
     pub ctx: OptimizerContextRef,
@@ -185,7 +185,7 @@ impl CdcScan {
     pub(crate) fn new(
         table_name: String,
         output_col_idx: Vec<usize>, // the column index in the table
-        cdc_table_desc: Rc<CdcTableDesc>,
+        cdc_table_desc: Arc<CdcTableDesc>,
         ctx: OptimizerContextRef,
         options: CdcScanOptions,
     ) -> Self {

@@ -107,13 +107,13 @@ pub async fn handle_parse(
         | Statement::Insert { .. }
         | Statement::Delete { .. }
         | Statement::Update { .. } => {
-            query::handle_parse_for_batch(handler_args, statement, specified_param_types)
+            query::handle_parse_for_batch(handler_args, statement, specified_param_types).await
         }
         Statement::FetchCursor { .. } => {
             fetch_cursor::handle_parse(handler_args, statement, specified_param_types).await
         }
         Statement::DeclareCursor { .. } => {
-            query::handle_parse_for_batch(handler_args, statement, specified_param_types)
+            query::handle_parse_for_batch(handler_args, statement, specified_param_types).await
         }
         Statement::CreateView {
             query,
@@ -125,7 +125,8 @@ pub async fn handle_parse(
                     handler_args,
                     statement,
                     specified_param_types,
-                );
+                )
+                .await;
             }
             if have_parameter_in_query(query) {
                 bail_not_implemented!("CREATE VIEW with parameters");
