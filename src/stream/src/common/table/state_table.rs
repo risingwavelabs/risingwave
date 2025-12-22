@@ -353,7 +353,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                 .iter(memcomparable_range_with_vnode.clone(), read_options.clone())
                 .await?;
             if let Some(item) = iter.try_next().await? {
-                stats.min_key = Some(Bytes::copy_from_slice(item.0.user_key.table_key.as_ref()));
+                let (key_vnode, key_without_vnode) = item.0.user_key.table_key.split_vnode();
+                assert_eq!(vnode, key_vnode);
+                stats.min_key = Some(Bytes::copy_from_slice(key_without_vnode));
             }
 
             // Get max key via reverse iteration
@@ -362,7 +364,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                 .rev_iter(memcomparable_range_with_vnode, read_options)
                 .await?;
             if let Some(item) = rev_iter.try_next().await? {
-                stats.max_key = Some(Bytes::copy_from_slice(item.0.user_key.table_key.as_ref()));
+                let (key_vnode, key_without_vnode) = item.0.user_key.table_key.split_vnode();
+                assert_eq!(vnode, key_vnode);
+                stats.max_key = Some(Bytes::copy_from_slice(key_without_vnode));
             }
 
             stats_map.insert(vnode, stats);
