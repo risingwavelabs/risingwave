@@ -328,10 +328,8 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             return Ok(());
         }
 
-        // No need to maintain vnode_stats if all_rows are present
-        if self.all_rows.is_some() {
-            return Ok(());
-        }
+        // vnode stats must be disabled when all rows are preloaded
+        assert!(self.all_rows.is_none());
 
         let start_time = Instant::now();
         let mut stats_map = HashMap::new();
@@ -541,7 +539,7 @@ pub struct StateTableBuilder<'a, S, SD, const IS_REPLICATED: bool, PreloadAllRow
     op_consistency_level: Option<StateTableOpConsistencyLevel>,
     output_column_ids: Option<Vec<ColumnId>>,
     preload_all_rows: PreloadAllRow,
-    enable_vnode_stats: Option<bool>,
+    enable_vnode_key_pruning: Option<bool>,
     metrics: Option<StateTableMetrics>,
 
     _serde: PhantomData<SD>,
@@ -558,7 +556,7 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             op_consistency_level: None,
             output_column_ids: None,
             preload_all_rows: (),
-            enable_vnode_stats: None,
+            enable_vnode_key_pruning: None,
             metrics: None,
             _serde: Default::default(),
         }
@@ -575,7 +573,7 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             op_consistency_level: self.op_consistency_level,
             output_column_ids: self.output_column_ids,
             preload_all_rows,
-            enable_vnode_stats: self.enable_vnode_stats,
+            enable_vnode_key_pruning: self.enable_vnode_key_pruning,
             metrics: self.metrics,
             _serde: Default::default(),
         }
@@ -619,8 +617,8 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAll
         self
     }
 
-    pub fn enable_vnode_stats(mut self, enable: bool) -> Self {
-        self.enable_vnode_stats = Some(enable);
+    pub fn enable_vnode_key_pruning(mut self, enable: bool) -> Self {
+        self.enable_vnode_key_pruning = Some(enable);
         self
     }
 
@@ -642,6 +640,17 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
             warn!(table_id=%self.table_catalog.id, e=%e.as_report(), "table configured to preload rows to memory but disabled by license");
             preload_all_rows = false;
         }
+
+        let should_enable_vnode_key_pruning = if preload_all_rows
+            && let Some(enable_vnode_key_pruning) = self.enable_vnode_key_pruning
+            && enable_vnode_key_pruning
+        {
+            warn!(table_id=%self.table_catalog.id, "enable_vnode_key_pruning is incompatible with preload_all_rows, disabling vnode key pruning");
+            false
+        } else {
+            self.enable_vnode_key_pruning.unwrap_or(false)
+        };
+
         StateTableInner::from_table_catalog_inner(
             self.table_catalog,
             self.store,
@@ -650,7 +659,7 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
                 .unwrap_or(StateTableOpConsistencyLevel::ConsistentOldValue),
             self.output_column_ids.unwrap_or_default(),
             preload_all_rows,
-            self.enable_vnode_stats.unwrap_or(false),
+            should_enable_vnode_key_pruning,
             self.metrics,
         )
         .await
@@ -703,7 +712,7 @@ where
         op_consistency_level: StateTableOpConsistencyLevel,
         output_column_ids: Vec<ColumnId>,
         preload_all_rows: bool,
-        enable_vnode_stats: bool,
+        enable_vnode_key_pruning: bool,
         metrics: Option<StateTableMetrics>,
     ) -> Self {
         let table_id = table_catalog.id;
@@ -926,7 +935,8 @@ where
                 row_serde,
                 pk_serde: pk_serde.clone(),
                 table_id,
-                vnode_stats: enable_vnode_stats.then(HashMap::new),
+                // Need to maintain vnode min/max key stats when vnode key pruning is enabled
+                vnode_stats: enable_vnode_key_pruning.then(HashMap::new),
                 metrics,
             },
             store,
@@ -1095,13 +1105,14 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         if let Some(m) = &self.metrics {
             m.get_count.inc();
         }
-        let (vnode, key) = key_bytes.split_vnode_bytes();
         if let Some(rows) = &self.all_rows {
+            let (vnode, key) = key_bytes.split_vnode_bytes();
             return Ok(rows.get(&vnode).expect("covered vnode").get(&key).cloned());
         }
 
         // Try to prune using vnode statistics
         if let Some(stats) = &self.vnode_stats
+            && let (vnode, key) = key_bytes.split_vnode_bytes()
             && let Some(vnode_stat) = stats.get(&vnode)
             && vnode_stat.can_prune(&key)
         {
@@ -1135,13 +1146,14 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         if let Some(m) = &self.metrics {
             m.get_count.inc();
         }
-        let (vnode, key) = key_bytes.split_vnode_bytes();
         if let Some(rows) = &self.all_rows {
+            let (vnode, key) = key_bytes.split_vnode_bytes();
             return Ok(rows.get(&vnode).expect("covered vnode").contains_key(&key));
         }
 
         // Try to prune using vnode statistics
         if let Some(stats) = &self.vnode_stats
+            && let (vnode, key) = key_bytes.split_vnode_bytes()
             && let Some(vnode_stat) = stats.get(&vnode)
             && vnode_stat.can_prune(&key)
         {
