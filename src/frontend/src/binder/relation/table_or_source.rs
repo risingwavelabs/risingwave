@@ -131,7 +131,7 @@ impl Binder {
                             let catalog = self.catalog();
                             catalog
                                 .get_sys_table_by_name(&db_name, schema_name, table_name)
-                                .map(|sys_table_catalog| sys_table_catalog.clone())
+                                .cloned()
                         } {
                             resolve_sys_table_relation(&sys_table_catalog)
                         } else if let Ok(view_catalog) = {
@@ -207,15 +207,14 @@ impl Binder {
                     let user_name = self.auth_context.user_name.clone();
                     let mut found: Option<(Relation, Vec<(bool, Field)>)> = None;
 
-                    let search_paths: Vec<String> =
-                        self.search_path.path().iter().cloned().collect();
+                    let search_paths: Vec<String> = self.search_path.path().to_vec();
                     for path in search_paths {
                         if is_system_schema(&path)
                             && let Ok(sys_table_catalog) = {
                                 let catalog = self.catalog();
                                 catalog
                                     .get_sys_table_by_name(&db_name, &path, table_name)
-                                    .map(|sys_table_catalog| sys_table_catalog.clone())
+                                    .cloned()
                             }
                         {
                             found = Some(resolve_sys_table_relation(&sys_table_catalog));

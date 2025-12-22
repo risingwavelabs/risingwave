@@ -235,7 +235,7 @@ impl Binder {
                 ObjectCheckItem::new(func.owner, AclMode::Execute, func.name.clone(), func.id),
                 self.database_id,
             )?;
-            Some(func.clone())
+            Some(func)
         } else {
             None
         };

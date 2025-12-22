@@ -432,7 +432,7 @@ impl Binder {
                 &self.search_path,
                 &self.auth_context.user_name,
             )
-            .map(|schema| schema.name().to_owned())
+            .map(|schema| schema.name())
     }
 
     fn bind_schema_path<'a>(&'a self, schema_name: Option<&'a str>) -> SchemaPath<'a> {
@@ -479,7 +479,7 @@ mod tests {
             "WITH RECURSIVE t1 AS (SELECT 1 AS a UNION ALL SELECT a + 1 FROM t1 WHERE a < 10) SELECT * FROM t1",
         ).unwrap().into_iter().next().unwrap();
         let mut binder = mock_binder();
-        let bound = binder.bind(stmt).unwrap();
+        let bound = binder.bind(stmt).await.unwrap();
 
         let expected = expect![[r#"
             Query(
@@ -818,7 +818,7 @@ mod tests {
         parse_expected.assert_eq(&format!("{:#?}", stmt));
 
         let mut binder = mock_binder();
-        let bound = binder.bind(stmt).unwrap();
+        let bound = binder.bind(stmt).await.unwrap();
 
         let expected = expect![[r#"
             Query(

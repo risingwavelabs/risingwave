@@ -127,13 +127,13 @@ mod test {
     use crate::binder::BoundStatement;
     use crate::binder::test_utils::{mock_binder, mock_binder_with_param_types};
 
-    fn create_expect_bound(sql: &str) -> BoundStatement {
+    async fn create_expect_bound(sql: &str) -> BoundStatement {
         let mut binder = mock_binder();
         let stmt = parse_sql_statements(sql).unwrap().remove(0);
-        binder.bind(stmt).unwrap()
+        binder.bind(stmt).await.unwrap()
     }
 
-    fn create_actual_bound(
+    async fn create_actual_bound(
         sql: &str,
         param_types: Vec<Option<DataType>>,
         params: Vec<Option<Bytes>>,
@@ -141,7 +141,7 @@ mod test {
     ) -> BoundStatement {
         let mut binder = mock_binder_with_param_types(param_types);
         let stmt = parse_sql_statements(sql).unwrap().remove(0);
-        let bound = binder.bind(stmt).unwrap();
+        let bound = binder.bind(stmt).await.unwrap();
         bound.bind_parameter(params, param_formats).unwrap().0
     }
 
@@ -153,78 +153,84 @@ mod test {
     #[tokio::test]
     async fn basic_select() {
         expect_actual_eq(
-            create_expect_bound("select 1::int4"),
+            create_expect_bound("select 1::int4").await,
             create_actual_bound(
                 "select $1::int4",
                 vec![],
                 vec![Some("1".into())],
                 vec![Format::Text],
-            ),
+            )
+            .await,
         );
     }
 
     #[tokio::test]
     async fn basic_value() {
         expect_actual_eq(
-            create_expect_bound("values(1::int4)"),
+            create_expect_bound("values(1::int4)").await,
             create_actual_bound(
                 "values($1::int4)",
                 vec![],
                 vec![Some("1".into())],
                 vec![Format::Text],
-            ),
+            )
+            .await,
         );
     }
 
     #[tokio::test]
     async fn default_type() {
         expect_actual_eq(
-            create_expect_bound("select '1'"),
+            create_expect_bound("select '1'").await,
             create_actual_bound(
                 "select $1",
                 vec![],
                 vec![Some("1".into())],
                 vec![Format::Text],
-            ),
+            )
+            .await,
         );
     }
 
     #[tokio::test]
     async fn cast_after_specific() {
         expect_actual_eq(
-            create_expect_bound("select 1::varchar"),
+            create_expect_bound("select 1::varchar").await,
             create_actual_bound(
                 "select $1::varchar",
                 vec![Some(DataType::Int32)],
                 vec![Some("1".into())],
                 vec![Format::Text],
-            ),
+            )
+            .await,
         );
     }
 
     #[tokio::test]
     async fn infer_case() {
         expect_actual_eq(
-            create_expect_bound("select 1,1::INT4"),
+            create_expect_bound("select 1,1::INT4").await,
             create_actual_bound(
                 "select $1,$1::INT4",
                 vec![],
                 vec![Some("1".into())],
                 vec![Format::Text],
-            ),
+            )
+            .await,
         );
     }
 
     #[tokio::test]
     async fn subquery() {
         expect_actual_eq(
-            create_expect_bound("select (select '1')"),
+            create_expect_bound("select (select '1')").await,
             create_actual_bound(
                 "select (select $1)",
                 vec![],
                 vec![Some("1".into())],
                 vec![Format::Text],
-            ),
+            )
+            .await,
         );
     }
 }
