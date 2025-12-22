@@ -154,8 +154,11 @@ impl Configuration {
     /// so table scan will use `no_shuffle`.
     pub fn for_scale_no_shuffle() -> Self {
         let mut conf = Self::for_scale();
-        conf.per_session_queries =
-            vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into()].into();
+        conf.per_session_queries = vec![
+            "SET STREAMING_USE_ARRANGEMENT_BACKFILL = false;".into(),
+            "SET STREAMING_USE_SNAPSHOT_BACKFILL = false;".into(),
+        ]
+        .into();
         conf
     }
 
