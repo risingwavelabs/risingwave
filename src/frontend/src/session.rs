@@ -1770,12 +1770,7 @@ impl Session for SessionImpl {
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
     ) -> Result<Portal> {
-        Ok(handle_bind(
-            prepare_statement,
-            params,
-            param_formats,
-            result_formats,
-        )?)
+        handle_bind(prepare_statement, params, param_formats, result_formats)
     }
 
     async fn execute(self: Arc<Self>, portal: Portal) -> Result<PgResponse<PgResponseStream>> {
@@ -1823,7 +1818,7 @@ impl Session for SessionImpl {
     }
 
     fn set_config(&self, key: &str, value: String) -> Result<String> {
-        Self::set_config(self, key, value).map_err(Into::into)
+        Self::set_config(self, key, value)
     }
 
     async fn next_notice(self: &Arc<Self>) -> String {
