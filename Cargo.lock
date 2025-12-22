@@ -4,12 +4,51 @@ version = 4
 
 [[package]]
 name = "adbc_core"
-version = "0.17.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c00daa298739db8f033952bdf3c67ccbcf2ccee9652df7eb4c7cd3397a7646d"
+checksum = "1a38cdcc3e43dc645038c2b6339dd98610c48ae593cc67839452e6670fa09f27"
 dependencies = [
- "arrow-array 54.3.1",
- "arrow-schema 54.3.1",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
+]
+
+[[package]]
+name = "adbc_driver_manager"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75c8a313f30eb7d90584eda8760037c746a1827297100b64704b30f3f6cbd203"
+dependencies = [
+ "adbc_core",
+ "adbc_ffi",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
+ "libloading 0.8.9",
+ "toml 0.9.8",
+]
+
+[[package]]
+name = "adbc_ffi"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d36274376fdc4849cf47a78f3baeef4ae1654ef703dc3148d91adde3336c11"
+dependencies = [
+ "adbc_core",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
+]
+
+[[package]]
+name = "adbc_snowflake"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66bd090599dae80c96bb6e52615e5c1d7d97cc2e622be162c62dce6e18f7f88f"
+dependencies = [
+ "adbc_core",
+ "adbc_driver_manager",
+ "adbc_ffi",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
+ "url",
 ]
 
 [[package]]
@@ -576,9 +615,6 @@ name = "arrow-schema"
 version = "54.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cfaf5e440be44db5413b75b72c2a87c1f8f0627117d110264048f2969b99e9"
-dependencies = [
- "bitflags 2.10.0",
-]
 
 [[package]]
 name = "arrow-schema"
@@ -2392,7 +2428,7 @@ checksum = "c688fc74432808e3eb684cae8830a86be1d66a2bd58e1f248ed0960a590baf6f"
 dependencies = [
  "glob",
  "libc",
- "libloading",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -6948,7 +6984,7 @@ dependencies = [
  "combine",
  "java-locator",
  "jni-sys",
- "libloading",
+ "libloading 0.7.4",
  "log",
  "thiserror 1.0.63",
  "walkdir",
@@ -7253,6 +7289,16 @@ checksum = "b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f"
 dependencies = [
  "cfg-if",
  "winapi",
+]
+
+[[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -7589,7 +7635,7 @@ dependencies = [
  "spin 0.9.8",
  "tokio",
  "tokio-util",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tracing",
  "tracing-subscriber",
 ]
@@ -11192,7 +11238,7 @@ dependencies = [
  "tinyvec",
  "tokio-retry",
  "tokio-util",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -11451,6 +11497,7 @@ name = "risingwave_connector"
 version = "2.8.0-alpha"
 dependencies = [
  "adbc_core",
+ "adbc_snowflake",
  "anyhow",
  "apache-avro 0.16.0",
  "assert_matches",
@@ -11903,7 +11950,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -12138,7 +12185,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -12533,7 +12580,7 @@ dependencies = [
  "serde_with",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tracing",
  "workspace-hack",
 ]
@@ -12651,6 +12698,7 @@ dependencies = [
  "moka",
  "multimap 0.10.0",
  "parking_lot 0.12.5",
+ "paste",
  "pin-project",
  "pretty_assertions",
  "prometheus",
@@ -15311,9 +15359,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.9.6"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae2a4cf385da23d1d53bc15cdfa5c2109e93d8d362393c801e87da2f72f0e201"
+checksum = "f0dc8b1fb61449e27716ec0e1bdf0f6b8f3e8f6b05391e8497b8b6d7804ea6d8"
 dependencies = [
  "indexmap 2.12.0",
  "serde_core",
