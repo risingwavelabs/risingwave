@@ -51,6 +51,7 @@ use iceberg::{Catalog, NamespaceIdent, TableCreation, TableIdent};
 use itertools::Itertools;
 use parquet::file::properties::WriterProperties;
 use prometheus::monitored_general_writer::MonitoredGeneralWriterBuilder;
+use prost::Message;
 use regex::Regex;
 use risingwave_common::array::arrow::arrow_array_iceberg::{Int32Array, RecordBatch};
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
@@ -68,6 +69,9 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use risingwave_pb::iceberg_commit_metadata::{
+    AddColumnsOp, IcebergCommitMetadata, SinkSchemaChange, sink_schema_change,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
@@ -98,43 +102,21 @@ use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_s
 
 pub const ICEBERG_SINK: &str = "iceberg";
 
+/// Magic number for new Protobuf-based commit metadata format.
+/// Old format (before schema change support) has no magic number.
+/// Format: [b'I', b'C', b'E', b'1'] = "ICE1"
+const ICEBERG_METADATA_MAGIC: &[u8; 4] = b"ICE1";
+
 // ============ Helper functions for schema change ============
 
-/// Serialize `add_columns` information to bytes for storage in metadata
-fn serialize_add_columns(fields: Vec<Field>) -> Result<Vec<u8>> {
-    use prost::Message;
-    use risingwave_pb::plan_common::PbField;
-
-    // Convert Fields to protobuf format
-    let pb_fields: Vec<PbField> = fields.iter().map(|f| f.to_prost()).collect();
-
-    // Use protobuf encoding
-    let mut buf = Vec::new();
-    for pb_field in pb_fields {
-        pb_field
-            .encode_length_delimited(&mut buf)
-            .context("Failed to encode add_columns")
-            .map_err(SinkError::Iceberg)?;
-    }
-    Ok(buf)
+/// Convert Field to Protobuf Field for metadata serialization
+fn field_to_pb_field(field: &Field) -> risingwave_pb::plan_common::PbField {
+    field.to_prost()
 }
 
-/// Deserialize `add_columns` information from bytes
-fn deserialize_add_columns(mut bytes: &[u8]) -> Result<Vec<Field>> {
-    use prost::Message;
-    use risingwave_pb::plan_common::PbField;
-
-    let mut pb_fields = Vec::new();
-    while !bytes.is_empty() {
-        let pb_field = PbField::decode_length_delimited(&mut bytes)
-            .context("Failed to decode add_columns")
-            .map_err(SinkError::Iceberg)?;
-        pb_fields.push(pb_field);
-    }
-
-    // Convert protobuf format back to Fields
-    let fields: Vec<Field> = pb_fields.iter().map(Field::from_prost).collect();
-    Ok(fields)
+/// Convert Protobuf Field to Field for metadata deserialization
+fn pb_field_to_field(pb_field: &risingwave_pb::plan_common::PbField) -> Field {
+    Field::from_prost(pb_field)
 }
 
 pub const ICEBERG_COW_BRANCH: &str = "ingestion";
@@ -2015,43 +1997,46 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
             }
         };
 
+        // Serialize write_results to bytes
         let mut write_results_bytes = Vec::new();
-
-        // Serialize write_results if present
         if let Some(write_results) = write_results {
-            for each_parallelism_write_result in write_results {
-                let each_parallelism_write_result_bytes: Vec<u8> =
-                    each_parallelism_write_result.try_into()?;
-                write_results_bytes.push(each_parallelism_write_result_bytes);
+            for write_result in write_results {
+                let bytes: Vec<u8> = write_result.try_into()?;
+                write_results_bytes.push(bytes);
             }
         }
 
-        // Serialize snapshot_id if present
-        if let Some(snapshot_id) = snapshot_id {
-            let snapshot_id_bytes: Vec<u8> = snapshot_id.to_le_bytes().to_vec();
-            write_results_bytes.push(snapshot_id_bytes);
-        }
+        // Construct schema_change if add_columns is present
+        let schema_change = add_columns.map(|fields| SinkSchemaChange {
+            original_schema: vec![], // Current stage: not passing original schema
+            op: Some(sink_schema_change::Op::AddColumns(AddColumnsOp {
+                fields: fields.iter().map(field_to_pb_field).collect(),
+            })),
+        });
 
-        // Add flag byte to indicate whether add_columns is present
-        // Format: [flag_byte, write_results..., snapshot_id (if has data), add_columns (if flag=1)]
-        let flag_byte: Vec<u8> = vec![if has_schema_change { 1u8 } else { 0u8 }];
+        // Construct Protobuf message
+        let pb_metadata = IcebergCommitMetadata {
+            write_results: write_results_bytes,
+            snapshot_id,
+            schema_change,
+        };
+
+        // Serialize to protobuf bytes
+        let pb_bytes = pb_metadata.encode_to_vec();
+
+        // Prepend magic number
+        let mut result = Vec::with_capacity(ICEBERG_METADATA_MAGIC.len() + pb_bytes.len());
+        result.extend_from_slice(ICEBERG_METADATA_MAGIC);
+        result.extend_from_slice(&pb_bytes);
+
         tracing::debug!(
-            "flag_byte: {:?}, has_schema_change: {}",
-            flag_byte,
+            "Serialized commit metadata: {} bytes (magic: 4, protobuf: {}), has_schema_change: {}",
+            result.len(),
+            pb_bytes.len(),
             has_schema_change
         );
 
-        // Insert flag at the beginning
-        write_results_bytes.insert(0, flag_byte);
-
-        // Serialize and append add_columns if present
-        if let Some(add_columns) = add_columns {
-            let add_columns_bytes = serialize_add_columns(add_columns)?;
-            write_results_bytes.push(add_columns_bytes);
-        }
-
-        let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(write_results_bytes);
-        Ok(pre_commit_metadata_bytes)
+        Ok(result)
     }
 
     async fn commit(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()> {
@@ -2116,46 +2101,102 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
 }
 
 impl IcebergSinkCommitter {
+    /// Parse commit metadata with backward compatibility
+    ///
+    /// Metadata format:
+    ///
+    /// ```text
+    /// // Legacy format (no schema change support):
+    /// [write_result_json, write_result_json, ..., snapshot_id_i64]
+    ///
+    /// // New format (with schema change support):
+    /// [MAGIC_NUMBER, protobuf_bytes]
+    ///  ↑ 4 bytes "ICE1"  ↑ IcebergCommitMetadata (write_results, snapshot_id, schema_change)
+    /// ```
     fn parse_commit_metadata(commit_metadata: Vec<u8>) -> Result<ParsedCommitMetadata> {
+        // Check for magic number to detect new format
+        if commit_metadata.len() >= 4 && &commit_metadata[0..4] == ICEBERG_METADATA_MAGIC {
+            // New format: Magic number + Protobuf
+            tracing::debug!("Parsing new format commit metadata (with magic number)");
+            Self::parse_new_format_metadata(&commit_metadata[4..])
+        } else {
+            // Legacy format: JSON array [write_results..., snapshot_id]
+            tracing::info!("Parsing legacy format commit metadata (without magic number)");
+            Self::parse_legacy_format_metadata(commit_metadata)
+        }
+    }
+
+    /// Parse new Protobuf-based format metadata
+    fn parse_new_format_metadata(pb_bytes: &[u8]) -> Result<ParsedCommitMetadata> {
+        let pb_metadata = IcebergCommitMetadata::decode(pb_bytes)
+            .context("Failed to decode IcebergCommitMetadata")
+            .map_err(SinkError::Iceberg)?;
+
+        // Parse write_results
+        let write_results = pb_metadata
+            .write_results
+            .into_iter()
+            .map(IcebergCommitResult::try_from_serialized_bytes)
+            .collect::<Result<Vec<_>>>()?;
+
+        // Parse snapshot_id (optional in new format)
+        let snapshot_id = pb_metadata.snapshot_id;
+
+        // Parse schema_change
+        let add_columns = pb_metadata.schema_change.and_then(|sc| match sc.op {
+            Some(sink_schema_change::Op::AddColumns(add_op)) => Some(
+                add_op
+                    .fields
+                    .iter()
+                    .map(pb_field_to_field)
+                    .collect::<Vec<_>>(),
+            ),
+            Some(sink_schema_change::Op::DropColumns(_)) => {
+                // Current stage: not handling drop columns
+                // todo: handle drop columns when we support it
+                tracing::warn!("DropColumns operation found but not handled in current stage");
+                None
+            }
+            None => None,
+        });
+
+        Ok(ParsedCommitMetadata {
+            add_columns,
+            write_results,
+            snapshot_id,
+        })
+    }
+
+    /// Parse legacy format metadata (backward compatibility)
+    /// Legacy format: [`write_results`..., `snapshot_id`] (no flag byte, no schema change)
+    fn parse_legacy_format_metadata(commit_metadata: Vec<u8>) -> Result<ParsedCommitMetadata> {
         let mut payload = deserialize_metadata(commit_metadata);
         if payload.is_empty() {
             return Err(SinkError::Iceberg(anyhow!(
-                "Invalid commit metadata: missing flag byte"
+                "Invalid commit metadata: empty payload"
             )));
         }
 
-        let flag_byte = payload.remove(0);
-        let has_schema_change = flag_byte.get(0).copied().unwrap_or(0) == 1;
+        // Last element is snapshot_id
+        let snapshot_id_bytes = payload.pop().ok_or_else(|| {
+            SinkError::Iceberg(anyhow!("Invalid commit metadata: missing snapshot_id"))
+        })?;
+        let snapshot_id = i64::from_le_bytes(
+            snapshot_id_bytes
+                .try_into()
+                .map_err(|_| SinkError::Iceberg(anyhow!("Invalid snapshot id bytes")))?,
+        );
 
-        let add_columns = if has_schema_change {
-            let add_columns_bytes = payload.pop().ok_or_else(|| {
-                SinkError::Iceberg(anyhow!(
-                    "Schema change flag set but metadata is missing column definitions"
-                ))
-            })?;
-            Some(deserialize_add_columns(&add_columns_bytes)?)
-        } else {
-            None
-        };
-
-        let snapshot_id = if payload.is_empty() {
-            None
-        } else {
-            let snapshot_id_bytes = payload.pop().unwrap();
-            Some(i64::from_le_bytes(snapshot_id_bytes.try_into().map_err(
-                |_| SinkError::Iceberg(anyhow!("Invalid snapshot id bytes")),
-            )?))
-        };
-
+        // Remaining elements are write_results
         let write_results = payload
             .into_iter()
             .map(IcebergCommitResult::try_from_serialized_bytes)
             .collect::<Result<Vec<_>>>()?;
 
         Ok(ParsedCommitMetadata {
-            add_columns,
+            add_columns: None, // Legacy format doesn't support schema change
             write_results,
-            snapshot_id,
+            snapshot_id: Some(snapshot_id),
         })
     }
 
@@ -2760,11 +2801,7 @@ pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) 
     Ok(())
 }
 
-pub fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
-    serde_json::to_vec(&metadata).unwrap()
-}
-
-pub fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
+fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     serde_json::from_slice(&bytes).unwrap()
 }
 
@@ -3292,5 +3329,54 @@ mod test {
         assert_eq!(iceberg_config.trigger_snapshot_count, Some(10));
         assert_eq!(iceberg_config.target_file_size_mb, Some(256));
         assert_eq!(iceberg_config.compaction_type, Some(CompactionType::Full));
+    }
+
+    #[test]
+    fn test_metadata_format_compatibility() {
+        use prost::Message;
+
+        use super::*;
+
+        // Test data: valid IcebergCommitResult JSON
+        let write_result_json =
+            br#"{"schema_id":1,"partition_spec_id":0,"data_files":[]}"#.to_vec();
+        let snapshot_id: i64 = 12345;
+
+        // Test 1: Legacy format (no magic number, no schema change)
+        let legacy_metadata = {
+            let payloads = vec![
+                write_result_json.clone(),
+                snapshot_id.to_le_bytes().to_vec(),
+            ];
+            serde_json::to_vec(&payloads).unwrap()
+        };
+
+        let parsed = IcebergSinkCommitter::parse_commit_metadata(legacy_metadata).unwrap();
+        assert_eq!(parsed.snapshot_id, Some(snapshot_id));
+        assert_eq!(parsed.write_results.len(), 1);
+        assert!(parsed.add_columns.is_none());
+
+        // Test 2: New format (with magic number + protobuf + schema change)
+        let new_metadata = {
+            let pb_metadata = IcebergCommitMetadata {
+                write_results: vec![write_result_json],
+                snapshot_id: Some(snapshot_id),
+                schema_change: Some(SinkSchemaChange {
+                    original_schema: vec![],
+                    op: Some(sink_schema_change::Op::AddColumns(AddColumnsOp {
+                        fields: vec![Field::with_name(DataType::Int32, "new_col").to_prost()],
+                    })),
+                }),
+            };
+            let mut result = ICEBERG_METADATA_MAGIC.to_vec();
+            result.extend_from_slice(&pb_metadata.encode_to_vec());
+            result
+        };
+
+        let parsed = IcebergSinkCommitter::parse_commit_metadata(new_metadata).unwrap();
+        assert_eq!(parsed.snapshot_id, Some(snapshot_id));
+        assert_eq!(parsed.write_results.len(), 1);
+        assert!(parsed.add_columns.is_some());
+        assert_eq!(parsed.add_columns.unwrap()[0].name, "new_col");
     }
 }
