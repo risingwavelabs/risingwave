@@ -19,10 +19,10 @@ use std::sync::Arc;
 use async_recursion::async_recursion;
 use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::config::{MetricLevel, StreamingConfig, merge_streaming_config_section};
-use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::id::{ExecutorId, GlobalOperatorId};
@@ -43,7 +43,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
+    SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -108,33 +108,6 @@ impl StreamActorManager {
         }
     }
 
-    async fn create_snapshot_backfill_input(
-        &self,
-        upstream_node: &StreamNode,
-        actor_context: &ActorContextRef,
-        local_barrier_manager: &LocalBarrierManager,
-        chunk_size: usize,
-    ) -> StreamResult<MergeExecutorInput> {
-        let info = Self::get_executor_info(
-            upstream_node,
-            Self::get_executor_id(actor_context, upstream_node),
-        );
-
-        let upstream_merge = must_match!(upstream_node.get_node_body().unwrap(), NodeBody::Merge(upstream_merge) => {
-            upstream_merge
-        });
-
-        MergeExecutorBuilder::new_input(
-            local_barrier_manager.clone(),
-            self.streaming_metrics.clone(),
-            actor_context.clone(),
-            info,
-            upstream_merge,
-            chunk_size,
-        )
-        .await
-    }
-
     async fn create_snapshot_backfill_node(
         &self,
         stream_node: &StreamNode,
@@ -146,14 +119,25 @@ impl StreamActorManager {
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
         let chunk_size = actor_context.config.developer.chunk_size;
-        let upstream = self
-            .create_snapshot_backfill_input(
-                upstream_node,
-                actor_context,
-                local_barrier_manager,
-                chunk_size,
-            )
-            .await?;
+
+        let info = Self::get_executor_info(
+            upstream_node,
+            Self::get_executor_id(actor_context, upstream_node),
+        );
+
+        let NodeBody::Merge(upstream_merge) = upstream_node.get_node_body()? else {
+            bail!("expect Merge as input of SnapshotBackfill");
+        };
+
+        let upstream = MergeExecutorBuilder::new_input(
+            local_barrier_manager.clone(),
+            self.streaming_metrics.clone(),
+            actor_context.clone(),
+            info,
+            upstream_merge,
+            chunk_size,
+        )
+        .await?;
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
 
@@ -231,22 +215,6 @@ impl StreamActorManager {
         subtasks: &mut Vec<SubtaskHandle>,
         local_barrier_manager: &LocalBarrierManager,
     ) -> StreamResult<Executor> {
-        if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
-            && let Ok(StreamScanType::SnapshotBackfill) = stream_scan.get_stream_scan_type()
-        {
-            return dispatch_state_store!(env.state_store(), store, {
-                self.create_snapshot_backfill_node(
-                    node,
-                    stream_scan,
-                    actor_context,
-                    vnode_bitmap,
-                    local_barrier_manager,
-                    store,
-                )
-                .await
-            });
-        }
-
         // The "stateful" here means that the executor may issue read operations to the state store
         // massively and continuously. Used to decide whether to apply the optimization of subtasks.
         fn is_stateful_executor(stream_node: &StreamNode) -> bool {
@@ -265,38 +233,58 @@ impl StreamActorManager {
         }
         let is_stateful = is_stateful_executor(node);
 
-        // Create the input executor before creating itself
-        let mut input = Vec::with_capacity(node.input.iter().len());
-        for input_stream_node in &node.input {
-            input.push(
-                self.create_nodes_inner(
-                    fragment_id,
-                    input_stream_node,
-                    env.clone(),
-                    store.clone(),
+        let executor = if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
+            && let Ok(StreamScanType::SnapshotBackfill) = stream_scan.get_stream_scan_type()
+        {
+            dispatch_state_store!(env.state_store(), store, {
+                self.create_snapshot_backfill_node(
+                    node,
+                    stream_scan,
                     actor_context,
-                    vnode_bitmap.clone(),
-                    has_stateful || is_stateful,
-                    subtasks,
+                    vnode_bitmap,
                     local_barrier_manager,
+                    store,
                 )
-                .await?,
-            );
-        }
+                .await
+            })?
+        } else {
+            // Create the input executor before creating itself
+            let mut input = Vec::with_capacity(node.input.iter().len());
+            for input_stream_node in &node.input {
+                input.push(
+                    self.create_nodes_inner(
+                        fragment_id,
+                        input_stream_node,
+                        env.clone(),
+                        store.clone(),
+                        actor_context,
+                        vnode_bitmap.clone(),
+                        has_stateful || is_stateful,
+                        subtasks,
+                        local_barrier_manager,
+                    )
+                    .await?,
+                );
+            }
 
-        self.generate_executor_from_inputs(
-            fragment_id,
-            node,
-            env,
-            store,
+            self.generate_executor_from_inputs(
+                fragment_id,
+                node,
+                env,
+                store,
+                actor_context,
+                vnode_bitmap,
+                local_barrier_manager,
+                input,
+            )
+            .await?
+        };
+        Ok(Self::wrap_executor(
+            executor,
             actor_context,
-            vnode_bitmap,
             has_stateful || is_stateful,
             subtasks,
-            local_barrier_manager,
-            input,
-        )
-        .await
+        ))
     }
 
     #[expect(clippy::too_many_arguments)]
@@ -308,8 +296,6 @@ impl StreamActorManager {
         store: impl StateStore,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-        has_stateful: bool,
-        subtasks: &mut Vec<SubtaskHandle>,
         local_barrier_manager: &LocalBarrierManager,
         input: Vec<Executor>,
     ) -> StreamResult<Executor> {
@@ -346,26 +332,30 @@ impl StreamActorManager {
             config: actor_context.config.clone(),
         };
 
-        let executor = create_executor(executor_params, node, store).await?;
+        create_executor(executor_params, node, store).await
+    }
 
+    fn wrap_executor(
+        executor: Executor,
+        actor_context: &ActorContextRef,
+        has_stateful: bool,
+        subtasks: &mut Vec<SubtaskHandle>,
+    ) -> Executor {
+        let info = executor.info().clone();
         // Wrap the executor for debug purpose.
         let wrapped = WrapperExecutor::new(executor, actor_context.clone());
         let executor = (info, wrapped).into();
 
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
-        let executor = if has_stateful {
+        if has_stateful {
             // TODO(bugen): subtask does not work with tracing spans.
             // let (subtask, executor) = subtask::wrap(executor, actor_context.id);
             // subtasks.push(subtask);
             // executor.boxed()
 
             let _ = subtasks;
-            executor
-        } else {
-            executor
-        };
-
-        Ok(executor)
+        }
+        executor
     }
 
     /// Create a chain(tree) of nodes and return the head executor.
