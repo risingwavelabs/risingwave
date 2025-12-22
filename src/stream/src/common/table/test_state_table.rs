@@ -1876,7 +1876,7 @@ async fn test_state_table_with_vnode_stats() {
         test_env.storage.clone(),
         Some(Arc::new(vnode_bitmap)),
     )
-    .enable_vnode_stats(true)
+    .enable_vnode_key_pruning(true)
     .with_metrics(metrics)
     .forbid_preload_all_rows()
     .build()
