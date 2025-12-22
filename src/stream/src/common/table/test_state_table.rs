@@ -1829,9 +1829,10 @@ async fn test_non_pk_prefix_watermark_read() {
 
 #[tokio::test]
 async fn test_state_table_with_vnode_stats() {
+    use risingwave_common::config::MetricLevel;
+
     use crate::common::table::state_table::StateTableBuilder;
     use crate::executor::monitor::streaming_stats::global_streaming_metrics;
-    use risingwave_common::config::MetricLevel;
     use crate::task::{ActorId, FragmentId};
 
     const TEST_TABLE_ID: TableId = TableId::new(233);
@@ -1856,8 +1857,11 @@ async fn test_state_table_with_vnode_stats() {
     test_env.register_table(table.clone()).await;
 
     // Attach metrics to verify vnode pruning effectiveness
-    let metrics = global_streaming_metrics(MetricLevel::Debug)
-        .new_state_table_metrics(TEST_TABLE_ID, ActorId::new(1), FragmentId::new(1));
+    let metrics = global_streaming_metrics(MetricLevel::Debug).new_state_table_metrics(
+        TEST_TABLE_ID,
+        ActorId::new(1),
+        FragmentId::new(1),
+    );
 
     // Build state table with vnode stats enabled
     let vnode_bitmap = {
@@ -1872,7 +1876,7 @@ async fn test_state_table_with_vnode_stats() {
         test_env.storage.clone(),
         Some(Arc::new(vnode_bitmap)),
     )
-    .with_enable_vnode_stats(true)
+    .enable_vnode_stats(true)
     .with_metrics(metrics)
     .forbid_preload_all_rows()
     .build()
@@ -1959,7 +1963,10 @@ async fn test_state_table_with_vnode_stats() {
     assert_eq!(row0, None);
 
     // gets above should be pruned by vnode stats
-    assert_eq!(state_table.metrics().unwrap().get_vnode_pruned_count.get(), 1);
+    assert_eq!(
+        state_table.metrics().unwrap().get_vnode_pruned_count.get(),
+        1
+    );
 
     // Key 10 is greater than max key (9)
     let row10 = state_table
@@ -1969,7 +1976,10 @@ async fn test_state_table_with_vnode_stats() {
     assert_eq!(row10, None);
 
     // Both gets above should be pruned by vnode stats
-    assert_eq!(state_table.metrics().unwrap().get_vnode_pruned_count.get(), 2);
+    assert_eq!(
+        state_table.metrics().unwrap().get_vnode_pruned_count.get(),
+        2
+    );
 
     // Test update and delete operations
     state_table.delete(OwnedRow::new(vec![
@@ -2043,7 +2053,10 @@ async fn test_state_table_with_vnode_stats() {
         .unwrap();
     pin_mut!(pruned_iter);
     assert!(pruned_iter.next().await.is_none());
-    assert_eq!(state_table.metrics().unwrap().iter_vnode_pruned_count.get(), 1);
+    assert_eq!(
+        state_table.metrics().unwrap().iter_vnode_pruned_count.get(),
+        1
+    );
 
     // iteration over another pruned prefix should immediately return empty and increment metric
     let pruned_prefix = OwnedRow::new(vec![Some(10_i32.into())]);
@@ -2053,5 +2066,8 @@ async fn test_state_table_with_vnode_stats() {
         .unwrap();
     pin_mut!(pruned_iter);
     assert!(pruned_iter.next().await.is_none());
-    assert_eq!(state_table.metrics().unwrap().iter_vnode_pruned_count.get(), 2);
+    assert_eq!(
+        state_table.metrics().unwrap().iter_vnode_pruned_count.get(),
+        2
+    );
 }

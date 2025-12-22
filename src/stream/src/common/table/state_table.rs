@@ -113,10 +113,14 @@ impl VnodeStatistics {
     }
 
     fn can_prune(&self, key: &Bytes) -> bool {
-        if let Some(min) = &self.min_key && key < min{
+        if let Some(min) = &self.min_key
+            && key < min
+        {
             return true;
         }
-        if let Some(max) = &self.max_key && key > max {
+        if let Some(max) = &self.max_key
+            && key > max
+        {
             return true;
         }
         false
@@ -611,7 +615,7 @@ impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAll
         self
     }
 
-    pub fn with_enable_vnode_stats(mut self, enable: bool) -> Self {
+    pub fn enable_vnode_stats(mut self, enable: bool) -> Self {
         self.enable_vnode_stats = Some(enable);
         self
     }
