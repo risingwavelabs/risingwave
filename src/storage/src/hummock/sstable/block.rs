@@ -548,7 +548,7 @@ impl BlockBuilder {
     }
 
     /// Core implementation that accepts pre-encoded key.
-    /// This is used by both `add` and `add_encoded` to avoid code duplication.
+    /// This is used by both `add` and `add_for_test` to avoid code duplication.
     fn add_encoded_impl(&mut self, key: &[u8], value: &[u8]) {
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
