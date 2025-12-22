@@ -47,7 +47,7 @@ use crate::connector_common::common::DISABLE_DEFAULT_CREDENTIAL;
 use crate::connector_common::iceberg::storage_catalog::StorageCatalogConfig;
 use crate::deserialize_optional_bool_from_string;
 use crate::enforce_secret::EnforceSecret;
-use crate::error::{ConnectorError, ConnectorResult};
+use crate::error::ConnectorResult;
 
 #[serde_as]
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, WithOptions)]
@@ -795,7 +795,7 @@ impl IcebergCommon {
             .load_table(&table_id)
             .await
             .map(rebuild_table_with_shared_cache)
-            .map_err(Into::<ConnectorError>::into)
+            .map_err(Into::into)
     }
 }
 
