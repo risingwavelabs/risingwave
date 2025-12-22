@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use std::hash::Hash;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
+use parking_lot::RwLock;
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
@@ -23,12 +24,12 @@ use crate::optimizer::property::FunctionalDependencySet;
 
 #[derive(Debug, Clone)]
 pub struct Share<PlanRef> {
-    pub input: Arc<Mutex<PlanRef>>,
+    pub input: Arc<RwLock<PlanRef>>,
 }
 
 impl<P: PartialEq> PartialEq for Share<P> {
     fn eq(&self, other: &Self) -> bool {
-        *self.input.lock().unwrap() == *other.input.lock().unwrap()
+        *self.input.read() == *other.input.read()
     }
 }
 
@@ -36,36 +37,36 @@ impl<P: Eq> Eq for Share<P> {}
 
 impl<P: Hash> Hash for Share<P> {
     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.input.lock().unwrap().hash(state);
+        self.input.read().hash(state);
     }
 }
 
 impl<PlanRef: GenericPlanRef> Share<PlanRef> {
     pub fn new(input: PlanRef) -> Self {
         Self {
-            input: Arc::new(Mutex::new(input)),
+            input: Arc::new(RwLock::new(input)),
         }
     }
 
     pub fn replace_input(&self, plan: PlanRef) {
-        *self.input.lock().unwrap() = plan;
+        *self.input.write() = plan;
     }
 }
 
 impl<PlanRef: GenericPlanRef> GenericPlanNode for Share<PlanRef> {
     fn schema(&self) -> Schema {
-        self.input.lock().unwrap().schema().clone()
+        self.input.read().schema().clone()
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        Some(self.input.lock().unwrap().stream_key()?.to_vec())
+        Some(self.input.read().stream_key()?.to_vec())
     }
 
     fn ctx(&self) -> OptimizerContextRef {
-        self.input.lock().unwrap().ctx()
+        self.input.read().ctx()
     }
 
     fn functional_dependency(&self) -> FunctionalDependencySet {
-        self.input.lock().unwrap().functional_dependency().clone()
+        self.input.read().functional_dependency().clone()
     }
 }

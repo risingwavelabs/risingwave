@@ -72,7 +72,7 @@ impl LogicalShare {
 
 impl PlanTreeNodeUnary<Logical> for LogicalShare {
     fn input(&self) -> PlanRef {
-        self.core.input.lock().unwrap().clone()
+        self.core.input.read().clone()
     }
 
     fn clone_with_input(&self, _input: PlanRef) -> Self {
@@ -97,7 +97,7 @@ impl ShareNode<Logical> for LogicalShare {
     }
 
     fn replace_input(&self, plan: PlanRef) {
-        *self.core.input.lock().unwrap() = plan;
+        *self.core.input.write() = plan;
     }
 }
 
