@@ -192,6 +192,9 @@ pub struct MetaOpts {
     /// Schedule `tombstone_reclaim_compaction` for all compaction groups with this interval.
     pub periodic_tombstone_reclaim_compaction_interval_sec: u64,
 
+    /// Schedule `small_file_compaction` for all compaction groups with this interval.
+    pub periodic_small_file_compaction_interval_sec: u64,
+
     /// Schedule `periodic_scheduling_compaction_group_split_interval_sec` for all compaction groups with this interval.
     pub periodic_scheduling_compaction_group_split_interval_sec: u64,
 
@@ -340,6 +343,7 @@ impl MetaOpts {
             telemetry_enabled: false,
             periodic_ttl_reclaim_compaction_interval_sec: 60,
             periodic_tombstone_reclaim_compaction_interval_sec: 60,
+            periodic_small_file_compaction_interval_sec: 600,
             periodic_scheduling_compaction_group_split_interval_sec: 60,
             compact_task_table_size_partition_threshold_low: 128 * 1024 * 1024,
             compact_task_table_size_partition_threshold_high: 512 * 1024 * 1024,

@@ -17,6 +17,7 @@ mod emergency_compaction_picker;
 mod intra_compaction_picker;
 mod manual_compaction_picker;
 mod min_overlap_compaction_picker;
+mod small_file_compaction_picker;
 mod space_reclaim_compaction_picker;
 mod tier_compaction_picker;
 mod tombstone_reclaim_compaction_picker;
@@ -33,6 +34,7 @@ pub use intra_compaction_picker::IntraCompactionPicker;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
 use risingwave_hummock_sdk::level::{InputLevel, Levels};
+pub use small_file_compaction_picker::{SmallFileCompactionPicker, SmallFilePickerState};
 pub use space_reclaim_compaction_picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};
 pub use tier_compaction_picker::TierCompactionPicker;
 pub use tombstone_reclaim_compaction_picker::{

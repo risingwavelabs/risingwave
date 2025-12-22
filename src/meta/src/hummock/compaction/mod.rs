@@ -161,19 +161,30 @@ impl CompactStatus {
     }
 }
 
+/// Calculate the target file size for a given level based on the compaction config.
+/// This is used to determine the desired output file size for compaction tasks.
+pub fn calculate_target_file_size(
+    compaction_config: &CompactionConfig,
+    base_level: usize,
+    target_level: usize,
+) -> u64 {
+    if target_level == 0 {
+        compaction_config.target_file_size_base
+    } else {
+        assert!(target_level >= base_level);
+        let step = (target_level - base_level) / 2;
+        compaction_config.target_file_size_base << step
+    }
+}
+
 pub fn create_compaction_task(
     compaction_config: &CompactionConfig,
     input: CompactionInput,
     base_level: usize,
     compaction_task_type: compact_task::TaskType,
 ) -> CompactionTask {
-    let target_file_size = if input.target_level == 0 {
-        compaction_config.target_file_size_base
-    } else {
-        assert!(input.target_level >= base_level);
-        let step = (input.target_level - base_level) / 2;
-        compaction_config.target_file_size_base << step
-    };
+    let target_file_size =
+        calculate_target_file_size(compaction_config, base_level, input.target_level);
 
     CompactionTask {
         compression_algorithm: get_compression_algorithm(
