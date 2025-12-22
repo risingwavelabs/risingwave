@@ -33,6 +33,7 @@ pub struct Delete<PlanRef: Eq + Hash> {
     pub table_name: String, // explain-only
     pub table_id: TableId,
     pub table_version_id: TableVersionId,
+    pub pk_indices: Vec<usize>,
     pub input: PlanRef,
     pub returning: bool,
 }
@@ -46,6 +47,7 @@ impl<PlanRef: GenericPlanRef> Delete<PlanRef> {
             table_name: self.table_name.clone(),
             table_id: self.table_id,
             table_version_id: self.table_version_id,
+            pk_indices: self.pk_indices.clone(),
             input,
             returning: self.returning,
         }
@@ -92,12 +94,14 @@ impl<PlanRef: Eq + Hash> Delete<PlanRef> {
         table_name: String,
         table_id: TableId,
         table_version_id: TableVersionId,
+        pk_indices: Vec<usize>,
         returning: bool,
     ) -> Self {
         Self {
             table_name,
             table_id,
             table_version_id,
+            pk_indices,
             input,
             returning,
         }

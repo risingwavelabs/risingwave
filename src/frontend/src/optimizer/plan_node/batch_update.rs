@@ -99,6 +99,7 @@ impl ToBatchPb for BatchUpdate {
             returning: self.core.returning,
             old_exprs,
             new_exprs,
+            upsert: self.base.ctx().session_ctx().config().upsert_dml(),
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }
