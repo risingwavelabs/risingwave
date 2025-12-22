@@ -19,7 +19,7 @@ use std::time::SystemTime;
 use bytes::{Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, user_key};
+use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, TABLE_PREFIX_LEN, user_key};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
@@ -379,7 +379,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.filter_builder
                 .add_key(extract_key, table_id.as_raw_id());
         }
-        self.block_builder.add(full_key, self.raw_value.as_ref());
+        // Use pre-encoded key to avoid redundant encoding
+        self.block_builder.add(
+            table_id,
+            &self.raw_key[TABLE_PREFIX_LEN..],
+            self.raw_value.as_ref(),
+        );
         self.block_metas.last_mut().unwrap().total_key_count += 1;
         if !is_new_user_key || value.is_delete() {
             self.block_metas.last_mut().unwrap().stale_key_count += 1;

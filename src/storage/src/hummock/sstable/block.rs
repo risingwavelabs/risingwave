@@ -502,11 +502,11 @@ impl BlockBuilder {
         }
     }
 
-    pub fn add_for_test(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
-        self.add(full_key, value);
-    }
-
-    /// Appends a kv pair to the block.
+    /// Appends a kv pair to the block using pre-encoded key.
+    ///
+    /// This method accepts a pre-encoded key (`table_key` + `epoch`, without `table_id`)
+    /// to avoid redundant encoding operations. This is useful when the caller
+    /// has already encoded the full key and wants to reuse it.
     ///
     /// NOTE: Key must be added in ASCEND order.
     ///
@@ -518,8 +518,20 @@ impl BlockBuilder {
     ///
     /// # Panics
     ///
-    /// Panic if key is not added in ASCEND order.
-    pub fn add(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
+    /// Panic if key is not added in ASCEND order or `table_id` mismatch.
+    pub fn add(&mut self, table_id: TableId, encoded_key_without_table_id: &[u8], value: &[u8]) {
+        match self.table_id {
+            Some(current_table_id) => assert_eq!(current_table_id, table_id),
+            None => self.table_id = Some(table_id),
+        }
+        #[cfg(debug_assertions)]
+        self.debug_valid();
+
+        // Call the core implementation with the pre-encoded key
+        self.add_encoded_impl(encoded_key_without_table_id, value);
+    }
+
+    pub fn add_for_test(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
         let input_table_id = full_key.user_key.table_id;
         match self.table_id {
             Some(current_table_id) => assert_eq!(current_table_id, input_table_id),
@@ -530,18 +542,19 @@ impl BlockBuilder {
 
         let mut key: BytesMut = Default::default();
         full_key.encode_into_without_table_id(&mut key);
+
+        // Call the core implementation with encoded key
+        self.add_encoded_impl(&key, value);
+    }
+
+    /// Core implementation that accepts pre-encoded key.
+    /// This is used by both `add` and `add_encoded` to avoid code duplication.
+    fn add_encoded_impl(&mut self, key: &[u8], value: &[u8]) {
         if self.entry_count > 0 {
             debug_assert!(!key.is_empty());
             debug_assert_eq!(
-                KeyComparator::compare_encoded_full_key(&self.last_key[..], &key[..]),
+                KeyComparator::compare_encoded_full_key(&self.last_key[..], key),
                 Ordering::Less,
-                "epoch: {}, table key: {}",
-                full_key.epoch_with_gap.pure_epoch(),
-                u64::from_be_bytes(
-                    full_key.user_key.table_key.as_ref()[0..8]
-                        .try_into()
-                        .unwrap()
-                ),
             );
         }
         // Update restart point if needed and calculate diff key.
@@ -578,9 +591,9 @@ impl BlockBuilder {
                 });
             }
 
-            key.as_ref()
+            key
         } else {
-            bytes_diff_below_max_key_length(&self.last_key, &key[..])
+            bytes_diff_below_max_key_length(&self.last_key, key)
         };
 
         let prefix = KeyPrefix::new_without_len(
@@ -595,7 +608,7 @@ impl BlockBuilder {
         self.buf.put_slice(value);
 
         self.last_key.clear();
-        self.last_key.extend_from_slice(&key);
+        self.last_key.extend_from_slice(key);
         self.entry_count += 1;
     }
 
