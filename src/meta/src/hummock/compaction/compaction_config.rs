@@ -90,6 +90,7 @@ impl CompactionConfigBuilder {
                 enable_optimize_l0_interval_selection: Some(
                     compaction_config::enable_optimize_l0_interval_selection(),
                 ),
+                max_kv_count_for_xor16: compaction_config::max_kv_count_for_xor16(),
             },
         }
     }
@@ -129,6 +130,7 @@ impl CompactionConfigBuilder {
             ))
             .level0_stop_write_threshold_max_size(Some(opt.level0_stop_write_threshold_max_size))
             .enable_optimize_l0_interval_selection(Some(opt.enable_optimize_l0_interval_selection))
+            .max_kv_count_for_xor16(opt.max_kv_count_for_xor16)
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -198,4 +200,5 @@ builder_field! {
     level0_stop_write_threshold_max_sst_count: Option<u32>,
     level0_stop_write_threshold_max_size: Option<u64>,
     enable_optimize_l0_interval_selection: Option<bool>,
+    max_kv_count_for_xor16: Option<u64>,
 }

@@ -62,8 +62,8 @@ use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFacto
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult,
-    SstableBuilderOptions, SstableStoreRef,
+    CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
+    SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 pub struct CompactorRunner {
@@ -89,14 +89,7 @@ impl CompactorRunner {
         };
 
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
-        let kv_count = task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|sst| sst.total_key_count)
-            .sum::<u64>() as usize;
-        let use_block_based_filter =
-            BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count) || task.target_level > 0;
+        let use_block_based_filter = task.should_use_block_based_filter();
 
         let key_range = KeyRange {
             left: task.splits[split_index].left.clone(),
