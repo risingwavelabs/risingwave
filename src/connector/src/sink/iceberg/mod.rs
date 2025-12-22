@@ -69,9 +69,8 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use risingwave_pb::iceberg_commit_metadata::{
-    AddColumnsOp, IcebergCommitMetadata, SinkSchemaChange, sink_schema_change,
-};
+use risingwave_pb::iceberg_commit_metadata::IcebergCommitMetadata;
+use risingwave_pb::stream_plan::{AddColumnsOp, SinkSchemaChange, sink_schema_change};
 use serde::{Deserialize, Serialize};
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};

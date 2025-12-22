@@ -2,43 +2,10 @@ syntax = "proto3";
 
 package iceberg_commit_metadata;
 
-import "plan_common.proto";
+import "stream_plan.proto";
 
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
-
-// Schema change operation for sink
-message SinkSchemaChange {
-  // Original schema before this change (optional, can be empty)
-  // Used for validation and conflict detection
-  // For current stage, this can be left empty
-  repeated plan_common.Field original_schema = 1;
-
-  // Schema change operation (mutually exclusive)
-  oneof op {
-    // Add new columns to the schema
-    AddColumnsOp add_columns = 2;
-    
-    // Drop columns from the schema
-    DropColumnsOp drop_columns = 3;
-    
-    // Future operations can be added here...
-    // RenameColumnsOp rename_columns = 4;
-    // AlterColumnTypeOp alter_column_type = 5;
-  }
-}
-
-// Add columns operation
-message AddColumnsOp {
-  // Columns to add
-  repeated plan_common.Field fields = 1;
-}
-
-// Drop columns operation
-message DropColumnsOp {
-  // Column names to drop
-  repeated string column_names = 1;
-}
 
 // Iceberg sink commit metadata
 // Used for coordinating iceberg sink commits with schema change support
@@ -53,6 +20,5 @@ message IcebergCommitMetadata {
 
   // Schema change information
   // None if no schema change
-  optional SinkSchemaChange schema_change = 3;
-
+  optional stream_plan.SinkSchemaChange schema_change = 3;
 }

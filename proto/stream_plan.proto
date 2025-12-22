@@ -1285,3 +1285,36 @@ message StreamFragmentGraph {
   // The backfill order strategy for the fragments.
   BackfillOrder backfill_order = 8;
 }
+
+// Schema change operation for sink
+message SinkSchemaChange {
+  // Original schema before this change (optional, can be empty)
+  // Used for validation and conflict detection
+  // For current stage, this can be left empty
+  repeated plan_common.Field original_schema = 1;
+
+  // Schema change operation (mutually exclusive)
+  oneof op {
+    // Add new columns to the schema
+    AddColumnsOp add_columns = 2;
+
+    // Drop columns from the schema
+    DropColumnsOp drop_columns = 3;
+
+    // Future operations can be added here...
+    // RenameColumnsOp rename_columns = 4;
+    // AlterColumnTypeOp alter_column_type = 5;
+  }
+}
+
+// Add columns operation
+message AddColumnsOp {
+  // Columns to add
+  repeated plan_common.Field fields = 1;
+}
+
+// Drop columns operation
+message DropColumnsOp {
+  // Column names to drop
+  repeated string column_names = 1;
+}
