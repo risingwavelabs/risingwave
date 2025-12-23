@@ -35,6 +35,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::source::{PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation};
@@ -44,7 +45,7 @@ use risingwave_pb::stream_service::inject_barrier_request::{
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     CreatePartialGraphRequest, PbCreatePartialGraphRequest, PbInitRequest,
-    RemovePartialGraphRequest, ResetDatabaseRequest,
+    RemovePartialGraphRequest, ResetPartialGraphRequest,
 };
 use risingwave_pb::stream_service::{
     BarrierCompleteResponse, InjectBarrierRequest, StreamingControlStreamRequest,
@@ -63,7 +64,7 @@ use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
-use crate::barrier::edge_builder::FragmentEdgeBuildResult;
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
     SubscriberType,
@@ -82,21 +83,31 @@ use crate::stream::cdc::{
 use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
 use crate::{MetaError, MetaResult};
 
-fn to_partial_graph_id(job_id: Option<JobId>) -> u32 {
-    job_id
+pub(super) fn to_partial_graph_id(
+    database_id: DatabaseId,
+    creating_job_id: Option<JobId>,
+) -> PartialGraphId {
+    let raw_job_id = creating_job_id
         .map(|job_id| {
             assert_ne!(job_id, u32::MAX);
             job_id.as_raw_id()
         })
-        .unwrap_or(u32::MAX)
+        .unwrap_or(u32::MAX);
+    (((database_id.as_raw_id() as u64) << 32) | (raw_job_id as u64)).into()
 }
 
-pub(super) fn from_partial_graph_id(partial_graph_id: u32) -> Option<JobId> {
-    if partial_graph_id == u32::MAX {
+pub(super) fn from_partial_graph_id(
+    partial_graph_id: PartialGraphId,
+) -> (DatabaseId, Option<JobId>) {
+    let id = partial_graph_id.as_raw_id();
+    let database_id = (id >> 32) as u32;
+    let raw_creating_job_id = (id & ((1 << 32) - 1)) as u32;
+    let creating_job_id = if raw_creating_job_id == u32::MAX {
         None
     } else {
-        Some(JobId::new(partial_graph_id))
-    }
+        Some(JobId::new(raw_creating_job_id))
+    };
+    (database_id.into(), creating_job_id)
 }
 
 struct ControlStreamNode {
@@ -507,14 +518,12 @@ impl ControlStreamManager {
     ) -> impl Iterator<Item = PbCreatePartialGraphRequest> {
         initial_inflight_infos.flat_map(|(database_id, creating_job_ids)| {
             [PbCreatePartialGraphRequest {
-                partial_graph_id: to_partial_graph_id(None),
-                database_id,
+                partial_graph_id: to_partial_graph_id(database_id, None),
             }]
             .into_iter()
             .chain(
                 creating_job_ids.map(move |job_id| PbCreatePartialGraphRequest {
-                    partial_graph_id: to_partial_graph_id(Some(job_id)),
-                    database_id,
+                    partial_graph_id: to_partial_graph_id(database_id, Some(job_id)),
                 }),
             )
         })
@@ -557,9 +566,14 @@ impl DatabaseInitialBarrierCollector {
         (&self.database_state, &self.creating_streaming_job_controls)
     }
 
+    pub(super) fn creating_job_ids(&self) -> impl Iterator<Item = JobId> {
+        self.creating_streaming_job_controls.keys().copied()
+    }
+
     pub(super) fn collect_resp(&mut self, resp: BarrierCompleteResponse) {
-        assert_eq!(self.database_id, resp.database_id);
-        if let Some(creating_job_id) = from_partial_graph_id(resp.partial_graph_id) {
+        let (database_id, creating_job_id) = from_partial_graph_id(resp.partial_graph_id);
+        assert_eq!(self.database_id, database_id);
+        if let Some(creating_job_id) = creating_job_id {
             assert!(
                 !self
                     .creating_streaming_job_controls
@@ -604,7 +618,6 @@ impl ControlStreamManager {
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
         state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         fragment_relations: &FragmentDownstreamRelation,
-        edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<JobId, String>,
@@ -612,6 +625,7 @@ impl ControlStreamManager {
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
+        injected_creating_jobs: &mut HashSet<JobId>,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
         self.add_partial_graph(database_id, None);
         fn collect_source_splits(
@@ -859,6 +873,24 @@ impl ControlStreamManager {
                 .try_collect::<_, _, MetaError>()
         }?;
 
+        let mut builder = FragmentEdgeBuilder::new(
+            database_jobs.values().flat_map(|job| {
+                job.fragment_infos()
+                    .map(|info| (info, to_partial_graph_id(database_id, None)))
+                    .chain(ongoing_snapshot_backfill_jobs.iter().flat_map(
+                        |(job_id, (fragments, ..))| {
+                            let partial_graph_id = to_partial_graph_id(database_id, Some(*job_id));
+                            fragments
+                                .values()
+                                .map(move |fragment| (fragment, partial_graph_id))
+                        },
+                    ))
+            }),
+            self,
+        );
+        builder.add_relations(fragment_relations);
+        let mut edges = builder.build();
+
         let node_to_collect = {
             let new_actors =
                 edges.collect_actors_to_create(database_jobs.values().flat_map(move |job| {
@@ -938,6 +970,9 @@ impl ControlStreamManager {
                 false,
             );
 
+            // add the job_id to `injected_creating_jobs` before it attempts to call `CreatingStreamingJobControl::recover`,
+            // which may create a new partial graph in CN.
+            injected_creating_jobs.insert(job_id);
             creating_streaming_job_controls.insert(
                 job_id,
                 CreatingStreamingJobControl::recover(
@@ -1017,7 +1052,7 @@ impl ControlStreamManager {
             "inject_barrier_err"
         ));
 
-        let partial_graph_id = to_partial_graph_id(creating_job_id);
+        let partial_graph_id = to_partial_graph_id(database_id, creating_job_id);
 
         for worker_id in node_actors.keys() {
             if let Some((_, worker_state)) = self.workers.get(worker_id)
@@ -1061,7 +1096,6 @@ impl ControlStreamManager {
                                     InjectBarrierRequest {
                                         request_id: Uuid::new_v4().to_string(),
                                         barrier: Some(barrier),
-                                        database_id,
                                         actor_ids_to_collect,
                                         table_ids_to_sync: table_ids_to_sync.clone(),
                                         partial_graph_id,
@@ -1141,7 +1175,7 @@ impl ControlStreamManager {
         database_id: DatabaseId,
         creating_job_id: Option<JobId>,
     ) {
-        let partial_graph_id = to_partial_graph_id(creating_job_id);
+        let partial_graph_id = to_partial_graph_id(database_id, creating_job_id);
         self.connected_workers().for_each(|(_, node)| {
             if node
                 .handle
@@ -1150,7 +1184,6 @@ impl ControlStreamManager {
                     request: Some(
                         streaming_control_stream_request::Request::CreatePartialGraph(
                             CreatePartialGraphRequest {
-                                database_id,
                                 partial_graph_id,
                             },
                         ),
@@ -1171,7 +1204,7 @@ impl ControlStreamManager {
         }
         let partial_graph_ids = creating_job_ids
             .into_iter()
-            .map(|job_id| to_partial_graph_id(Some(job_id)))
+            .map(|job_id| to_partial_graph_id(database_id, Some(job_id)))
             .collect_vec();
         self.connected_workers().for_each(|(_, node)| {
             if node.handle
@@ -1181,7 +1214,6 @@ impl ControlStreamManager {
                         streaming_control_stream_request::Request::RemovePartialGraph(
                             RemovePartialGraphRequest {
                                 partial_graph_ids: partial_graph_ids.clone(),
-                                database_id,
                             },
                         ),
                     ),
@@ -1193,9 +1225,10 @@ impl ControlStreamManager {
         })
     }
 
-    pub(super) fn reset_database(
+    pub(super) fn reset_partial_graph(
         &mut self,
         database_id: DatabaseId,
+        creating_job_ids: Option<JobId>,
         reset_request_id: u32,
     ) -> HashSet<WorkerId> {
         self.connected_workers()
@@ -1204,12 +1237,17 @@ impl ControlStreamManager {
                     .handle
                     .request_sender
                     .send(StreamingControlStreamRequest {
-                        request: Some(streaming_control_stream_request::Request::ResetDatabase(
-                            ResetDatabaseRequest {
-                                database_id,
-                                reset_request_id,
-                            },
-                        )),
+                        request: Some(
+                            streaming_control_stream_request::Request::ResetPartialGraph(
+                                ResetPartialGraphRequest {
+                                    reset_request_id,
+                                    partial_graph_id: to_partial_graph_id(
+                                        database_id,
+                                        creating_job_ids,
+                                    ),
+                                },
+                            ),
+                        ),
                     })
                     .is_err()
                 {
@@ -1292,4 +1330,23 @@ pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
             s
         });
     anyhow!(concat).into()
+}
+
+#[cfg(test)]
+mod test_partial_graph_id {
+    use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
+
+    #[test]
+    fn test_partial_graph_id_conversion() {
+        let database_id = 233.into();
+        let job_id = 233.into();
+        assert_eq!(
+            (database_id, None),
+            from_partial_graph_id(to_partial_graph_id(database_id, None))
+        );
+        assert_eq!(
+            (database_id, Some(job_id)),
+            from_partial_graph_id(to_partial_graph_id(database_id, Some(job_id)))
+        );
+    }
 }

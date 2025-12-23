@@ -18,7 +18,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
-use risingwave_pb::id::SubscriberId;
+use risingwave_pb::id::{PartialGraphId, SubscriberId};
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use tracing::warn;
@@ -36,6 +36,7 @@ struct FragmentInfo {
     distribution_type: DistributionType,
     actors: HashMap<ActorId, Option<Bitmap>>,
     actor_location: HashMap<ActorId, HostAddress>,
+    partial_graph_id: PartialGraphId,
 }
 
 #[derive(Debug)]
@@ -106,11 +107,11 @@ pub(super) struct FragmentEdgeBuilder {
 
 impl FragmentEdgeBuilder {
     pub(super) fn new(
-        fragment_infos: impl Iterator<Item = &InflightFragmentInfo>,
+        fragment_infos: impl Iterator<Item = (&InflightFragmentInfo, PartialGraphId)>,
         control_stream_manager: &ControlStreamManager,
     ) -> Self {
         let mut fragments = HashMap::new();
-        for info in fragment_infos {
+        for (info, partial_graph_id) in fragment_infos {
             fragments
                 .try_insert(info.fragment_id, {
                     let (actors, actor_location) = info
@@ -127,6 +128,7 @@ impl FragmentEdgeBuilder {
                         distribution_type: info.distribution_type,
                         actors,
                         actor_location,
+                        partial_graph_id,
                     }
                 })
                 .expect("non-duplicate");
@@ -154,10 +156,20 @@ impl FragmentEdgeBuilder {
         fragment_id: FragmentId,
         downstream: &DownstreamFragmentRelation,
     ) {
-        let fragment = &self
-            .fragments
-            .get(&fragment_id)
-            .unwrap_or_else(|| panic!("cannot find {}", fragment_id));
+        let Some(fragment) = &self.fragments.get(&fragment_id) else {
+            if self
+                .fragments
+                .contains_key(&downstream.downstream_fragment_id)
+            {
+                panic!(
+                    "cannot find fragment {} with downstream {:?}",
+                    fragment_id, downstream
+                )
+            } else {
+                // ignore fragment relation with both upstream and downstream not in the set of fragments
+                return;
+            }
+        };
         let downstream_fragment = &self.fragments[&downstream.downstream_fragment_id];
         let dispatchers = compose_dispatchers(
             fragment.distribution_type,
@@ -187,6 +199,7 @@ impl FragmentEdgeBuilder {
                         ActorInfo {
                             actor_id,
                             host: Some(actor_location.clone()),
+                            partial_graph_id: fragment.partial_graph_id,
                         },
                     );
             }
