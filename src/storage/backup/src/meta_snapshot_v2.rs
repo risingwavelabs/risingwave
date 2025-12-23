@@ -67,7 +67,8 @@ macro_rules! for_all_metadata_models_v2 {
             {user_default_privilege, risingwave_meta_model::user_default_privilege},
             {fragment_splits, risingwave_meta_model::fragment_splits},
             {pending_sink_state, risingwave_meta_model::pending_sink_state},
-            {refresh_jobs, risingwave_meta_model::refresh_job}
+            {refresh_jobs, risingwave_meta_model::refresh_job},
+            {hummock_table_change_logs, risingwave_meta_model::hummock_table_change_log}
         }
     };
 }

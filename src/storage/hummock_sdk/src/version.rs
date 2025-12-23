@@ -220,6 +220,8 @@ pub struct HummockVersionCommon<T, L = T> {
     #[deprecated]
     pub(crate) max_committed_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
+    // TODO(ZW): remove the field
+    // #[deprecated]
     pub table_change_log: HashMap<TableId, TableChangeLogCommon<L>>,
     pub state_table_info: HummockVersionStateTableInfo,
     pub vector_indexes: HashMap<TableId, VectorIndex>,

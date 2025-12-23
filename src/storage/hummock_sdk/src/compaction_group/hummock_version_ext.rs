@@ -475,7 +475,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
     pub fn apply_version_delta(
         &mut self,
         version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
-    ) {
+    ) -> HashMap<TableId, Option<StateTableInfo>> {
         assert_eq!(self.id, version_delta.prev_id);
 
         let (changed_table_info, mut is_commit_epoch) = self.state_table_info.apply_delta(
@@ -735,6 +735,8 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             &version_delta.vector_index_delta,
             &version_delta.removed_table_ids,
         );
+
+        changed_table_info
     }
 
     pub fn apply_change_log_delta<T: Clone>(

@@ -1,0 +1,66 @@
+use sea_orm_migration::prelude::*;
+
+use crate::utils::ColumnDefExt;
+
+#[derive(DeriveMigrationName)]
+pub struct Migration;
+
+#[async_trait::async_trait]
+impl MigrationTrait for Migration {
+    async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .create_table(
+                Table::create()
+                    .table(HummockTableChangeLog::Table)
+                    .if_not_exists()
+                    .col(
+                        ColumnDef::new(HummockTableChangeLog::TableId)
+                            .integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(HummockTableChangeLog::CheckPointEpoch)
+                            .big_integer()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(HummockTableChangeLog::NonCheckpointEpochs)
+                            .json_binary()
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(HummockTableChangeLog::NewValueSst)
+                            .rw_binary(manager)
+                            .not_null(),
+                    )
+                    .col(
+                        ColumnDef::new(HummockTableChangeLog::OldValueSst)
+                            .rw_binary(manager)
+                            .not_null(),
+                    )
+                    .primary_key(
+                        Index::create()
+                            .col(HummockTableChangeLog::TableId)
+                            .col(HummockTableChangeLog::CheckPointEpoch),
+                    )
+                    .to_owned(),
+            )
+            .await
+    }
+
+    async fn down(&self, manager: &SchemaManager) -> Result<(), DbErr> {
+        manager
+            .drop_table(Table::drop().table(HummockTableChangeLog::Table).to_owned())
+            .await
+    }
+}
+
+#[derive(DeriveIden)]
+enum HummockTableChangeLog {
+    Table,
+    TableId,
+    CheckPointEpoch,
+    NonCheckpointEpochs,
+    NewValueSst,
+    OldValueSst,
+}
