@@ -313,6 +313,9 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
     // 4. int32 <-> bool is explicit
     // 5. timestamp/timestamptz -> time is assign
     // 6. int2/int4/int8 -> int256 is implicit and int256 -> float8 is explicit
+    //
+    // Remember to update test cases including `pg_cast.slt.part` and `test_func_sig_map` when
+    // changing this table.
     use DataTypeName::*;
     const CAST_TABLE: &[(&str, DataTypeName)] = &[
         // 123456789ABCDEFG
