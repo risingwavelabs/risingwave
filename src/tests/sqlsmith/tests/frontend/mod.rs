@@ -210,7 +210,7 @@ async fn run_batch_query(
             e.as_report()
         ))
     })?;
-    batch_plan.gen_batch_distributed_plan().map_err(|e| {
+    batch_plan.gen_batch_distributed_plan().await.map_err(|e| {
         Failed::from(format!(
             "Failed to generate batch distributed plan:\nReason:\n{}",
             e.as_report()
