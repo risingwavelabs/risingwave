@@ -54,51 +54,9 @@ impl TopNOnIndexRule {
         logical_scan: LogicalScan,
         required_order: &Order,
     ) -> Option<PlanRef> {
-        let output_len = logical_scan.output_col_idx().len();
-        let scan_for_index = if logical_scan.output_col_idx() == logical_scan.required_col_idx() {
-            logical_scan
-        } else {
-            // `required_col_idx` is built by appending predicate columns to `output_col_idx`,
-            // so `output_col_idx` is always a prefix of `required_col_idx`.
-            logical_scan.clone_with_output_indices(logical_scan.required_col_idx().clone())
-        };
-        let scan_predicates = scan_for_index.predicate();
-        let output_col_map = scan_for_index
-            .output_col_idx()
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(id, col)| (col, id))
-            .collect::<BTreeMap<_, _>>();
-        let input_refs = scan_predicates.get_eq_const_input_refs();
-        let prefix = input_refs
-            .into_iter()
-            .flat_map(|input_ref| {
-                output_col_map
-                    .get(&input_ref.index)
-                    .into_iter()
-                    .flat_map(|&output_idx| {
-                        [
-                            ColumnOrder {
-                                column_index: output_idx,
-                                order_type: OrderType::ascending_nulls_first(),
-                            },
-                            ColumnOrder {
-                                column_index: output_idx,
-                                order_type: OrderType::ascending_nulls_last(),
-                            },
-                            ColumnOrder {
-                                column_index: output_idx,
-                                order_type: OrderType::descending_nulls_first(),
-                            },
-                            ColumnOrder {
-                                column_index: output_idx,
-                                order_type: OrderType::descending_nulls_last(),
-                            },
-                        ]
-                    })
-            })
-            .collect();
+        let (scan_for_index, output_len, _output_col_map, prefix) =
+            Self::prepare_scan_for_predicate(logical_scan);
+        let scan_output_len = scan_for_index.output_col_idx().len();
         let order_satisfied_index =
             scan_for_index.indexes_satisfy_order_with_prefix(required_order, &prefix);
         let mut longest_prefix: Option<Order> = None;
@@ -107,13 +65,13 @@ impl TopNOnIndexRule {
             if prefix.len() >= longest_prefix.as_ref().map_or(0, |p| p.len()) {
                 longest_prefix = Some(prefix.clone());
                 if let Some(index_scan) = scan_for_index.to_index_scan_if_index_covered(index) {
-                    let top_n =
-                        logical_top_n.clone_with_input_and_prefix(index_scan.into(), prefix);
-                    selected_index = Some(if scan_for_index.output_col_idx().len() == output_len {
-                        top_n.into()
-                    } else {
-                        LogicalProject::with_out_col_idx(top_n.into(), 0..output_len).into()
-                    });
+                    selected_index = Some(Self::finish_top_n(
+                        logical_top_n,
+                        index_scan.into(),
+                        prefix,
+                        output_len,
+                        scan_output_len,
+                    ));
                 }
             }
         }
@@ -126,51 +84,9 @@ impl TopNOnIndexRule {
         logical_scan: LogicalScan,
         order: &Order,
     ) -> Option<PlanRef> {
-        let output_len = logical_scan.output_col_idx().len();
-        let scan_for_pk = if logical_scan.output_col_idx() == logical_scan.required_col_idx() {
-            logical_scan
-        } else {
-            // `required_col_idx` is built by appending predicate columns to `output_col_idx`,
-            // so `output_col_idx` is always a prefix of `required_col_idx`.
-            logical_scan.clone_with_output_indices(logical_scan.required_col_idx().clone())
-        };
-        let scan_predicates = scan_for_pk.predicate();
-        let output_col_map = scan_for_pk
-            .output_col_idx()
-            .iter()
-            .cloned()
-            .enumerate()
-            .map(|(id, col)| (col, id))
-            .collect::<BTreeMap<_, _>>();
-        let input_refs = scan_predicates.get_eq_const_input_refs();
-        let prefix: HashSet<ColumnOrder> = input_refs
-            .into_iter()
-            .flat_map(|input_ref| {
-                output_col_map
-                    .get(&input_ref.index)
-                    .into_iter()
-                    .flat_map(|&output_idx| {
-                        [
-                            ColumnOrder {
-                                column_index: output_idx,
-                                order_type: OrderType::ascending_nulls_first(),
-                            },
-                            ColumnOrder {
-                                column_index: output_idx,
-                                order_type: OrderType::ascending_nulls_last(),
-                            },
-                            ColumnOrder {
-                                column_index: output_idx,
-                                order_type: OrderType::descending_nulls_first(),
-                            },
-                            ColumnOrder {
-                                column_index: output_idx,
-                                order_type: OrderType::descending_nulls_last(),
-                            },
-                        ]
-                    })
-            })
-            .collect();
+        let (scan_for_pk, output_len, output_col_map, prefix) =
+            Self::prepare_scan_for_predicate(logical_scan);
+        let scan_output_len = scan_for_pk.output_col_idx().len();
         let unmatched_idx = output_col_map.len();
         let primary_key = scan_for_pk.primary_key();
         let primary_key_order = Order {
@@ -208,12 +124,80 @@ impl TopNOnIndexRule {
         if !remaining_orders.satisfies(order) {
             return None;
         }
-        let top_n =
-            logical_top_n.clone_with_input_and_prefix(scan_for_pk.clone().into(), fixed_prefix);
-        Some(if scan_for_pk.output_col_idx().len() == output_len {
+        Some(Self::finish_top_n(
+            logical_top_n,
+            scan_for_pk.into(),
+            fixed_prefix,
+            output_len,
+            scan_output_len,
+        ))
+    }
+
+    fn prepare_scan_for_predicate(
+        logical_scan: LogicalScan,
+    ) -> (
+        LogicalScan,
+        usize,
+        BTreeMap<usize, usize>,
+        HashSet<ColumnOrder>,
+    ) {
+        let output_len = logical_scan.output_col_idx().len();
+        let scan = if logical_scan.output_col_idx() == logical_scan.required_col_idx() {
+            logical_scan
+        } else {
+            // `required_col_idx` is built by appending predicate columns to `output_col_idx`,
+            // so `output_col_idx` is always a prefix of `required_col_idx`.
+            logical_scan.clone_with_output_indices(logical_scan.required_col_idx().clone())
+        };
+        let output_col_map = Self::output_col_map(&scan);
+        let prefix = Self::build_eq_const_prefix(&scan, &output_col_map);
+        (scan, output_len, output_col_map, prefix)
+    }
+
+    fn output_col_map(scan: &LogicalScan) -> BTreeMap<usize, usize> {
+        scan.output_col_idx()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(id, col)| (col, id))
+            .collect()
+    }
+
+    fn build_eq_const_prefix(
+        scan: &LogicalScan,
+        output_col_map: &BTreeMap<usize, usize>,
+    ) -> HashSet<ColumnOrder> {
+        let input_refs = scan.predicate().get_eq_const_input_refs();
+        input_refs
+            .into_iter()
+            .flat_map(|input_ref| {
+                output_col_map
+                    .get(&input_ref.index)
+                    .into_iter()
+                    .flat_map(|&output_idx| {
+                        OrderType::all()
+                            .into_iter()
+                            .map(move |order_type| ColumnOrder {
+                                column_index: output_idx,
+                                order_type,
+                            })
+                    })
+            })
+            .collect()
+    }
+
+    fn finish_top_n(
+        logical_top_n: &LogicalTopN,
+        input: PlanRef,
+        prefix: Order,
+        output_len: usize,
+        scan_output_len: usize,
+    ) -> PlanRef {
+        let top_n = logical_top_n.clone_with_input_and_prefix(input, prefix);
+        if scan_output_len == output_len {
             top_n.into()
         } else {
             LogicalProject::with_out_col_idx(top_n.into(), 0..output_len).into()
-        })
+        }
     }
 }
