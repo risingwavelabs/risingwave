@@ -16,6 +16,7 @@ use core::time::Duration;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use async_recursion::async_recursion;
 use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
@@ -32,18 +33,21 @@ use risingwave_pb::stream_plan::{self, StreamNode, StreamScanNode, StreamScanTyp
 use risingwave_pb::stream_service::inject_barrier_request::BuildActorInfo;
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::BatchTable;
-use risingwave_storage::{StateStore, dispatch_state_store};
+use risingwave_storage::{StateStore, StateStoreImpl, dispatch_state_store};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 
+use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
+use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
-    Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
+    Actor, ActorContext, ActorContextRef, AnyDispatchExecutor, DispatchExecutor, Execute, Executor,
+    ExecutorInfo, SnapshotBackfillExecutor, StreamExecutorError, SyncLogStoreDispatchConfig,
+    SyncLogStoreDispatchExecutor, SyncedKvLogStoreMetrics, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -426,7 +430,7 @@ impl StreamActorManager {
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         actor_config: Arc<StreamingConfig>,
-    ) -> StreamResult<Actor<DispatchExecutor>> {
+    ) -> StreamResult<Actor<AnyDispatchExecutor>> {
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
@@ -438,6 +442,63 @@ impl StreamActorManager {
         );
         let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
         let expr_context = actor.expr_context.clone().unwrap();
+        let chunk_size = actor_context.config.developer.chunk_size;
+        let log_store_metrics = SyncedKvLogStoreMetrics::new(
+            &actor_context.streaming_metrics,
+            actor_context.id,
+            fragment_id,
+            "sync_log_store_dispatch",
+            "sync_log_store_dispatch",
+        );
+        let (node, sync_log_store_args) = match node.get_node_body()? {
+            NodeBody::SyncLogStore(sync) => {
+                let sync = sync.clone();
+                let [input] = node.input.as_slice() else {
+                    bail!("SyncLogStore should be at fragment exit and have exactly 1 input");
+                };
+                let input = input.clone();
+
+                let table = sync
+                    .log_store_table
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("missing log_store_table in SyncLogStoreNode"))?
+                    .clone();
+
+                #[allow(deprecated)]
+                let pause_duration_ms = sync.pause_duration_ms.map_or(
+                    actor_context
+                        .config
+                        .developer
+                        .sync_log_store_pause_duration_ms,
+                    |v| v as usize,
+                );
+
+                #[allow(deprecated)]
+                let max_buffer_size = sync.buffer_size.map_or(
+                    actor_context.config.developer.sync_log_store_buffer_size,
+                    |v| v as usize,
+                );
+
+                let serde = LogStoreRowSerde::new(
+                    &table,
+                    vnode_bitmap.clone().map(|b: Bitmap| b.into()),
+                    &KV_LOG_STORE_V2_INFO,
+                );
+
+                (
+                    Arc::new(input),
+                    Some((
+                        table.id,
+                        serde,
+                        max_buffer_size,
+                        pause_duration_ms,
+                        sync.aligned,
+                        chunk_size,
+                    )),
+                )
+            }
+            _ => (node.clone(), None),
+        };
 
         let (executor, subtasks) = self
             .create_nodes(
@@ -450,13 +511,99 @@ impl StreamActorManager {
             )
             .await?;
 
-        let dispatcher = DispatchExecutor::new(
-            executor,
-            new_output_request_rx,
-            actor.dispatchers,
-            &actor_context,
-        )
-        .await?;
+        let dispatcher = match sync_log_store_args {
+            Some((table_id, serde, max_buffer_size, pause_duration_ms, aligned, chunk_size)) => {
+                match self.env.state_store() {
+                    StateStoreImpl::HummockStateStore(store) => {
+                        let log_store_config = SyncLogStoreDispatchConfig {
+                            table_id,
+                            serde: serde.clone(),
+                            state_store: store.clone(),
+                            max_buffer_size,
+                            pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
+                            aligned,
+                            chunk_size,
+                            metrics: log_store_metrics,
+                        };
+                        let inner = SyncLogStoreDispatchExecutor::new(
+                            executor,
+                            new_output_request_rx,
+                            actor.dispatchers,
+                            &actor_context,
+                            log_store_config,
+                        )
+                        .await?;
+                        AnyDispatchExecutor::SyncLogStoreHummock(inner)
+                    }
+                    StateStoreImpl::MemoryStateStore(store) => {
+                        #[cfg(debug_assertions)]
+                        {
+                            let log_store_config = SyncLogStoreDispatchConfig {
+                                table_id,
+                                serde: serde.clone(),
+                                state_store: store.clone(),
+                                max_buffer_size,
+                                pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
+                                aligned,
+                                chunk_size,
+                                metrics: log_store_metrics,
+                            };
+                            let inner = SyncLogStoreDispatchExecutor::new(
+                                executor,
+                                new_output_request_rx,
+                                actor.dispatchers,
+                                &actor_context,
+                                log_store_config,
+                            )
+                            .await?;
+                            AnyDispatchExecutor::SyncLogStoreMemory(inner)
+                        }
+                        #[cfg(not(debug_assertions))]
+                        {
+                            unreachable!("memory state store should only be used in debug builds");
+                        }
+                    }
+                    StateStoreImpl::SledStateStore(store) => {
+                        #[cfg(debug_assertions)]
+                        {
+                            let log_store_config = SyncLogStoreDispatchConfig {
+                                table_id,
+                                serde: serde.clone(),
+                                state_store: store.clone(),
+                                max_buffer_size,
+                                pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
+                                aligned,
+                                chunk_size,
+                                metrics: log_store_metrics,
+                            };
+                            let inner = SyncLogStoreDispatchExecutor::new(
+                                executor,
+                                new_output_request_rx,
+                                actor.dispatchers,
+                                &actor_context,
+                                log_store_config,
+                            )
+                            .await?;
+                            AnyDispatchExecutor::SyncLogStoreSled(inner)
+                        }
+                        #[cfg(not(debug_assertions))]
+                        {
+                            unreachable!("sled state store should only be used in debug builds");
+                        }
+                    }
+                }
+            }
+            None => {
+                let inner = DispatchExecutor::new(
+                    executor,
+                    new_output_request_rx,
+                    actor.dispatchers,
+                    &actor_context,
+                )
+                .await?;
+                AnyDispatchExecutor::Direct(inner)
+            }
+        };
 
         let actor = Actor::new(
             dispatcher,
@@ -493,14 +640,13 @@ impl StreamActorManager {
             let actor = self
                 .clone()
                 .create_actor(
-                    actor,
+                    actor.clone(),
                     fragment_id,
-                    node,
+                    node.clone(),
                     barrier_manager.clone(),
                     new_output_request_rx,
-                    actor_config,
+                    actor_config.clone(),
                 )
-                .boxed()
                 .and_then(|actor| actor.run())
                 .map(move |result| {
                     if let Err(err) = result {
@@ -509,7 +655,8 @@ impl StreamActorManager {
                         tracing::error!(%actor_id, error = ?err.as_report(), "actor exit with error");
                         barrier_manager.notify_failure(actor_id, err);
                     }
-                });
+                })
+                .boxed();
             let traced = match &self.await_tree_reg {
                 Some(m) => m
                     .register(await_tree_key::Actor(actor_id), trace_span)

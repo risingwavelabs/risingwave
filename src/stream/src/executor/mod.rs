@@ -125,6 +125,7 @@ mod row_merge;
 #[cfg(test)]
 mod integration_tests;
 mod sync_kv_log_store;
+mod synced_log_store_shared;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod utils;
@@ -145,7 +146,10 @@ pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use changelog::ChangeLogExecutor;
 pub use dedup::AppendOnlyDedupExecutor;
-pub use dispatch::DispatchExecutor;
+pub(crate) use dispatch::SyncLogStoreDispatchConfig;
+pub use dispatch::{
+    AnyDispatchExecutor, DispatchExecutor, DispatcherImpl, SyncLogStoreDispatchExecutor,
+};
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
@@ -169,6 +173,7 @@ pub use receiver::ReceiverExecutor;
 use risingwave_common::id::SourceId;
 pub use row_merge::RowMergeExecutor;
 pub use sink::SinkExecutor;
+pub(crate) use sync_kv_log_store::FlushedChunkInfo;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
 pub use sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
 pub use temporal_join::TemporalJoinExecutor;

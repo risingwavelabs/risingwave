@@ -13,13 +13,13 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::FutureExt;
+use futures::stream::BoxStream;
+use futures::{FutureExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -30,11 +30,18 @@ use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
+use risingwave_storage::monitor::MonitoredStateStore;
+use risingwave_storage::store_impl::HummockStorageType;
+#[cfg(debug_assertions)]
+use risingwave_storage::store_impl::{MemoryStateStoreType, SledStateStoreType};
 use smallvec::{SmallVec, smallvec};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::consume_budget;
 use tokio::time::Instant;
+use tokio_stream::StreamExt;
+use tokio_stream::adapters::Peekable;
+use tokio::time::{Instant, Sleep, sleep_until};
 use tokio_stream::StreamExt;
 use tokio_stream::adapters::Peekable;
 use tracing::{Instrument, event};
@@ -50,6 +57,11 @@ use crate::task::{DispatcherId, NewOutputRequest};
 
 mod output_mapping;
 pub use output_mapping::DispatchOutputMapping;
+#[path = "dispatch_sync_log_store.rs"]
+mod dispatch_sync_log_store;
+pub use dispatch_sync_log_store::{
+    SyncLogStoreDispatchConfig, SyncLogStoreDispatchExecutor,
+};
 use risingwave_common::id::FragmentId;
 
 use crate::error::StreamError;
@@ -60,6 +72,15 @@ use crate::error::StreamError;
 pub struct DispatchExecutor {
     input: Executor,
     inner: DispatchExecutorInner,
+}
+
+pub enum AnyDispatchExecutor {
+    Direct(DispatchExecutor),
+    SyncLogStoreHummock(SyncLogStoreDispatchExecutor<MonitoredStateStore<HummockStorageType>>),
+    #[cfg(debug_assertions)]
+    SyncLogStoreMemory(SyncLogStoreDispatchExecutor<MonitoredStateStore<MemoryStateStoreType>>),
+    #[cfg(debug_assertions)]
+    SyncLogStoreSled(SyncLogStoreDispatchExecutor<MonitoredStateStore<SledStateStoreType>>),
 }
 
 struct DispatcherWithMetrics {
@@ -113,6 +134,7 @@ impl DispatchExecutorMetrics {
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: ActorId,
+    fragment_id: FragmentId,
     actor_config: Arc<StreamingConfig>,
     metrics: DispatchExecutorMetrics,
     new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
@@ -505,6 +527,7 @@ impl DispatchExecutor {
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
+                fragment_id,
                 actor_config,
                 metrics,
                 new_output_request_rx,
@@ -561,6 +584,29 @@ impl StreamConsumer for DispatchExecutor {
                             .await?;
                     }
                 }
+            }
+        }
+    }
+}
+
+impl StreamConsumer for AnyDispatchExecutor {
+    type BarrierStream = BoxStream<'static, StreamResult<Barrier>>;
+
+    fn execute(self: Box<Self>) -> Self::BarrierStream {
+        match *self {
+            AnyDispatchExecutor::Direct(exec) => {
+                futures::StreamExt::boxed(Box::new(exec).execute())
+            }
+            AnyDispatchExecutor::SyncLogStoreHummock(exec) => {
+                futures::StreamExt::boxed(Box::new(exec).execute())
+            }
+            #[cfg(debug_assertions)]
+            AnyDispatchExecutor::SyncLogStoreMemory(exec) => {
+                futures::StreamExt::boxed(Box::new(exec).execute())
+            }
+            #[cfg(debug_assertions)]
+            AnyDispatchExecutor::SyncLogStoreSled(exec) => {
+                futures::StreamExt::boxed(Box::new(exec).execute())
             }
         }
     }
