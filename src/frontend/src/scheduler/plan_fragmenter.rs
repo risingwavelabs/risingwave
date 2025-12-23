@@ -16,12 +16,12 @@ use std::cmp::min;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Debug, Display, Formatter};
 use std::num::NonZeroU64;
+use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_recursion::async_recursion;
 use enum_as_inner::EnumAsInner;
 use futures::TryStreamExt;
-use iceberg::expr::Predicate as IcebergPredicate;
 use itertools::Itertools;
 use petgraph::{Directed, Graph};
 use pgwire::pg_server::SessionId;
@@ -36,14 +36,13 @@ use risingwave_connector::source::filesystem::opendal_source::opendal_enumerator
 use risingwave_connector::source::filesystem::opendal_source::{
     BatchPosixFsEnumerator, OpendalAzblob, OpendalGcs, OpendalS3,
 };
-use risingwave_connector::source::iceberg::IcebergSplitEnumerator;
+use risingwave_connector::source::iceberg::{IcebergFileScanTask, IcebergSplit};
 use risingwave_connector::source::kafka::KafkaSplitEnumerator;
 use risingwave_connector::source::prelude::DatagenSplitEnumerator;
 use risingwave_connector::source::reader::reader::build_opendal_fs_list_for_batch;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, SplitEnumerator, SplitImpl,
 };
-use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::plan_common::Field as PbField;
@@ -337,9 +336,8 @@ pub struct SourceFetchInfo {
 
 #[derive(Debug, Clone)]
 pub struct IcebergSpecificInfo {
-    pub iceberg_scan_type: IcebergScanType,
-    pub predicate: IcebergPredicate,
     pub snapshot_id: Option<i64>,
+    pub iceberg_file_scan_task: Arc<IcebergFileScanTask>,
 }
 
 #[derive(Clone, Debug)]
@@ -437,27 +435,44 @@ impl SourceScanInfo {
                 Ok(SourceScanInfo::Complete(res))
             }
             (
-                ConnectorProperties::Iceberg(prop),
+                ConnectorProperties::Iceberg(_prop),
                 SourceFetchParameters::IcebergSpecificInfo(iceberg_specific_info),
             ) => {
-                let iceberg_enumerator =
-                    IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
-                        .await?;
+                let splits = iceberg_specific_info
+                    .iceberg_file_scan_task
+                    .as_ref()
+                    .clone()
+                    .split(batch_parallelism as usize)?;
 
-                let split_info = iceberg_enumerator
-                    .list_splits_batch(
-                        fetch_info.schema,
-                        iceberg_specific_info.snapshot_id,
-                        batch_parallelism,
-                        iceberg_specific_info.iceberg_scan_type,
-                        iceberg_specific_info.predicate,
-                    )
-                    .await?
-                    .into_iter()
-                    .map(SplitImpl::Iceberg)
-                    .collect_vec();
-
-                Ok(SourceScanInfo::Complete(split_info))
+                let spilt_info = if let Some(snapshot_id) = iceberg_specific_info.snapshot_id {
+                    splits
+                        .into_iter()
+                        .enumerate()
+                        .map(|(id, task)| {
+                            IcebergSplit {
+                                split_id: id as i64,
+                                snapshot_id,
+                                task,
+                            }
+                            .into()
+                        })
+                        .collect_vec()
+                } else {
+                    let task = iceberg_specific_info
+                        .iceberg_file_scan_task
+                        .as_ref()
+                        .clone();
+                    assert!(task.is_empty());
+                    vec![
+                        IcebergSplit {
+                            split_id: 0,
+                            snapshot_id: 0,
+                            task,
+                        }
+                        .into(),
+                    ]
+                };
+                Ok(SourceScanInfo::Complete(spilt_info))
             }
             (connector, _) => Err(SchedulerError::Internal(anyhow!(
                 "Unsupported to query directly from this {} source, \
@@ -1220,9 +1235,10 @@ impl BatchPlanFragmenter {
                     connector: property,
                     fetch_parameters: SourceFetchParameters::IcebergSpecificInfo(
                         IcebergSpecificInfo {
-                            predicate: batch_iceberg_scan.predicate.clone(),
-                            iceberg_scan_type: batch_iceberg_scan.iceberg_scan_type(),
-                            snapshot_id: batch_iceberg_scan.snapshot_id(),
+                            iceberg_file_scan_task: batch_iceberg_scan
+                                .iceberg_file_scan_task
+                                .clone(),
+                            snapshot_id: batch_iceberg_scan.snapshot_id,
                         },
                     ),
                 })));

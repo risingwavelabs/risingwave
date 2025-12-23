@@ -12,15 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{Hash, Hasher};
+use std::hash::Hash;
 use std::rc::Rc;
+use std::sync::Arc;
 
-use iceberg::expr::Predicate as IcebergPredicate;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
-use risingwave_common::types::DataType;
+use risingwave_connector::source::iceberg::IcebergFileScanTask;
 use risingwave_pb::batch_plan::IcebergScanNode;
-use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_sqlparser::ast::AsOf;
 
@@ -35,49 +33,21 @@ use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct BatchIcebergScan {
     pub base: PlanBase<Batch>,
     pub core: generic::Source,
-    iceberg_scan_type: IcebergScanType,
-    pub predicate: IcebergPredicate,
+    pub iceberg_file_scan_task: Arc<IcebergFileScanTask>,
     pub snapshot_id: Option<i64>,
-}
-
-impl PartialEq for BatchIcebergScan {
-    fn eq(&self, other: &Self) -> bool {
-        if self.predicate == IcebergPredicate::AlwaysTrue
-            && other.predicate == IcebergPredicate::AlwaysTrue
-        {
-            self.base == other.base
-                && self.core == other.core
-                && self.snapshot_id == other.snapshot_id
-        } else {
-            panic!("BatchIcebergScan::eq: comparing non-AlwaysTrue predicates is not supported")
-        }
-    }
 }
 
 impl Eq for BatchIcebergScan {}
 
-impl Hash for BatchIcebergScan {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        if self.predicate != IcebergPredicate::AlwaysTrue {
-            panic!("BatchIcebergScan::hash: hashing non-AlwaysTrue predicates is not supported")
-        } else {
-            self.base.hash(state);
-            self.core.hash(state);
-            self.snapshot_id.hash(state);
-        }
-    }
-}
-
 impl BatchIcebergScan {
     pub fn new(
         core: generic::Source,
-        iceberg_scan_type: IcebergScanType,
+        iceberg_file_scan_task: Arc<IcebergFileScanTask>,
         snapshot_id: Option<i64>,
-        predicate: IcebergPredicate,
     ) -> Self {
         let base = PlanBase::new_batch_with_core(
             &core,
@@ -89,35 +59,9 @@ impl BatchIcebergScan {
         Self {
             base,
             core,
-            iceberg_scan_type,
-            predicate,
+            iceberg_file_scan_task,
             snapshot_id,
         }
-    }
-
-    pub fn new_count_star_with_batch_iceberg_scan(batch_iceberg_scan: &BatchIcebergScan) -> Self {
-        let mut core = batch_iceberg_scan.core.clone();
-        core.column_catalog = vec![ColumnCatalog::visible(ColumnDesc::named(
-            "count",
-            ColumnId::first_user_column(),
-            DataType::Int64,
-        ))];
-        let base = PlanBase::new_batch_with_core(
-            &core,
-            batch_iceberg_scan.base.distribution().clone(),
-            batch_iceberg_scan.base.order().clone(),
-        );
-        Self {
-            base,
-            core,
-            iceberg_scan_type: IcebergScanType::CountStar,
-            predicate: IcebergPredicate::AlwaysTrue,
-            snapshot_id: batch_iceberg_scan.snapshot_id,
-        }
-    }
-
-    pub fn iceberg_scan_type(&self) -> IcebergScanType {
-        self.iceberg_scan_type
     }
 
     pub fn column_names(&self) -> Vec<&str> {
@@ -135,28 +79,13 @@ impl BatchIcebergScan {
         Self {
             base,
             core: self.core.clone(),
-            iceberg_scan_type: self.iceberg_scan_type,
-            predicate: self.predicate.clone(),
-            snapshot_id: self.snapshot_id,
-        }
-    }
-
-    pub fn clone_with_predicate(&self, predicate: IcebergPredicate) -> Self {
-        Self {
-            base: self.base.clone(),
-            core: self.core.clone(),
-            iceberg_scan_type: self.iceberg_scan_type,
-            predicate,
+            iceberg_file_scan_task: self.iceberg_file_scan_task.clone(),
             snapshot_id: self.snapshot_id,
         }
     }
 
     pub fn as_of(&self) -> Option<AsOf> {
         self.core.as_of.clone()
-    }
-
-    pub fn snapshot_id(&self) -> Option<i64> {
-        self.snapshot_id
     }
 }
 
@@ -168,8 +97,10 @@ impl Distill for BatchIcebergScan {
         let fields = vec![
             ("source", src),
             ("columns", column_names_pretty(self.schema())),
-            ("iceberg_scan_type", Pretty::debug(&self.iceberg_scan_type)),
-            ("predicate", Pretty::from(self.predicate.to_string())),
+            (
+                "iceberg_scan_type",
+                Pretty::debug(&self.iceberg_file_scan_task.get_iceberg_scan_type()),
+            ),
         ];
         childless_record("BatchIcebergScan", fields)
     }
@@ -201,7 +132,7 @@ impl ToBatchPb for BatchIcebergScan {
             with_properties,
             split: vec![],
             secret_refs,
-            iceberg_scan_type: self.iceberg_scan_type as i32,
+            iceberg_scan_type: self.iceberg_file_scan_task.get_iceberg_scan_type() as i32,
         })
     }
 }

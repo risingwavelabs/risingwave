@@ -16,26 +16,28 @@ use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::prelude::*;
 use crate::optimizer::plan_node::{LogicalAgg, LogicalIcebergScan, PlanAggCall};
+use crate::optimizer::rule::{ApplyResult, FallibleRule};
 
 pub struct IcebergCountStarRule;
-
-impl Rule<Logical> for IcebergCountStarRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+impl FallibleRule<Logical> for IcebergCountStarRule {
+    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         if !agg.group_key().is_empty() || !agg.grouping_sets().is_empty() {
-            return None;
+            return ApplyResult::NotApplicable;
         }
         if agg.agg_calls().len() != 1 || agg.agg_calls()[0] != PlanAggCall::count_star() {
-            return None;
+            return ApplyResult::NotApplicable;
         }
 
         let input = &agg.core().input;
         let iceberg_scan: &LogicalIcebergScan = input.as_logical_iceberg_scan()?;
-        if iceberg_scan.iceberg_scan_type() != IcebergScanType::DataScan {
-            return None;
+        if iceberg_scan.iceberg_scan_type()? != IcebergScanType::DataScan {
+            return ApplyResult::NotApplicable;
         }
 
-        Some(LogicalIcebergScan::new_count_star_with_logical_iceberg_scan(iceberg_scan).into())
+        ApplyResult::Ok(
+            LogicalIcebergScan::new_count_star_with_logical_iceberg_scan(iceberg_scan).into(),
+        )
     }
 }
 

@@ -13,89 +13,76 @@
 // limitations under the License.
 
 use std::rc::Rc;
+use std::sync::Arc;
 
-use chrono::Datelike;
-use iceberg::expr::{Predicate as IcebergPredicate, Reference};
-use iceberg::spec::Datum as IcebergDatum;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, Field};
-use risingwave_common::types::{DataType, ScalarImpl};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+use risingwave_common::types::DataType;
+use risingwave_connector::source::iceberg::IcebergFileScanTask;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
 use super::{
     ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject, PlanBase,
-    PredicatePushdown, ToBatch, ToStream, generic,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
-use crate::expr::{Expr, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::stream_dynamic_filter::ExprType;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
-    BatchIcebergScan, ColumnPruningContext, ExprImpl, LogicalFilter, LogicalSource,
-    PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
+    BatchIcebergScan, ColumnPruningContext, LogicalFilter, LogicalSource, PredicatePushdownContext,
+    RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalIcebergScan` is only used by batch queries. At the beginning of the batch query optimization, `LogicalSource` with a iceberg property would be converted into a `LogicalIcebergScan`.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Hash)]
 pub struct LogicalIcebergScan {
     pub base: PlanBase<Logical>,
-    pub core: generic::Source,
-    pub iceberg_scan_type: IcebergScanType,
+    pub logical_source: LogicalSource,
     pub predicate: Condition,
+    pub iceberg_file_scan_task: Option<Arc<IcebergFileScanTask>>,
+    pub count: u64,
     pub snapshot_id: Option<i64>,
-}
-
-impl PartialEq for LogicalIcebergScan {
-    fn eq(&self, other: &Self) -> bool {
-        self.base == other.base
-            && self.core == other.core
-            && self.iceberg_scan_type == other.iceberg_scan_type
-            && self.snapshot_id == other.snapshot_id
-            && self.predicate == other.predicate
-    }
 }
 
 impl Eq for LogicalIcebergScan {}
 
-impl std::hash::Hash for LogicalIcebergScan {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.base.hash(state);
-        self.core.hash(state);
-        self.iceberg_scan_type.hash(state);
-        self.snapshot_id.hash(state);
-        self.predicate.hash(state);
-    }
-}
-
 impl LogicalIcebergScan {
-    pub fn new(
-        logical_source: &LogicalSource,
-        iceberg_scan_type: IcebergScanType,
-        snapshot_id: Option<i64>,
-    ) -> Self {
+    pub fn new(logical_source: &LogicalSource, snapshot_id: Option<i64>) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
-
-        let core = logical_source.core.clone();
-        let base = PlanBase::new_logical_with_core(&core);
-
+        let base = PlanBase::new_logical_with_core(&logical_source.core);
         assert!(logical_source.output_exprs.is_none());
-
         LogicalIcebergScan {
             base,
-            core,
-            iceberg_scan_type,
+            logical_source: logical_source.clone(),
             predicate: Condition::true_cond(),
+            iceberg_file_scan_task: None,
+            count: 0,
             snapshot_id,
         }
     }
 
-    pub fn iceberg_scan_type(&self) -> IcebergScanType {
-        self.iceberg_scan_type
+    pub fn new_with_iceberg_file_scan_task(
+        logical_source: &LogicalSource,
+        iceberg_file_scan_task: IcebergFileScanTask,
+        count: u64,
+        snapshot_id: Option<i64>,
+    ) -> Self {
+        assert!(logical_source.core.is_iceberg_connector());
+        let base = PlanBase::new_logical_with_core(&logical_source.core);
+        assert!(logical_source.output_exprs.is_none());
+
+        LogicalIcebergScan {
+            base,
+            logical_source: logical_source.clone(),
+            predicate: Condition::true_cond(),
+            iceberg_file_scan_task: Some(Arc::new(iceberg_file_scan_task)),
+            count,
+            snapshot_id,
+        }
     }
 
     pub fn predicate(&self) -> Condition {
@@ -105,40 +92,69 @@ impl LogicalIcebergScan {
     pub fn clone_with_predicate(&self, predicate: Condition) -> Self {
         Self {
             base: self.base.clone(),
-            core: self.core.clone(),
-            iceberg_scan_type: self.iceberg_scan_type,
+            logical_source: self.logical_source.clone(),
             predicate,
+            iceberg_file_scan_task: self.iceberg_file_scan_task.clone(),
+            count: self.count,
             snapshot_id: self.snapshot_id,
+        }
+    }
+
+    pub fn clone_with_iceberg_file_scan_task(
+        &self,
+        iceberg_file_scan_task: IcebergFileScanTask,
+        count: u64,
+    ) -> Self {
+        Self {
+            base: self.base.clone(),
+            logical_source: self.logical_source.clone(),
+            predicate: self.predicate.clone(),
+            iceberg_file_scan_task: Some(Arc::new(iceberg_file_scan_task)),
+            count,
+            snapshot_id: self.snapshot_id,
+        }
+    }
+
+    pub fn iceberg_scan_type(&self) -> Result<IcebergScanType> {
+        match self.iceberg_file_scan_task.as_ref() {
+            Some(task) => Ok(task.get_iceberg_scan_type()),
+            None => Err(crate::error::ErrorCode::BindError(
+                "Iceberg file scan task is missing in LogicalIcebergScan".to_string(),
+            )
+            .into()),
         }
     }
 
     pub fn new_count_star_with_logical_iceberg_scan(
         logical_iceberg_scan: &LogicalIcebergScan,
     ) -> Self {
-        let mut core = logical_iceberg_scan.core.clone();
-        core.column_catalog = vec![ColumnCatalog::visible(ColumnDesc::named(
+        let mut logical_source = logical_iceberg_scan.logical_source.clone();
+        logical_source.core.column_catalog = vec![ColumnCatalog::visible(ColumnDesc::named(
             "count",
             ColumnId::first_user_column(),
             DataType::Int64,
         ))];
-        let base = PlanBase::new_logical_with_core(&core);
+        let base = PlanBase::new_logical_with_core(&logical_source.core);
 
         LogicalIcebergScan {
             base,
-            core,
-            iceberg_scan_type: IcebergScanType::CountStar,
+            logical_source,
             predicate: Condition::true_cond(),
+            iceberg_file_scan_task: Some(Arc::new(IcebergFileScanTask::CountStar(
+                logical_iceberg_scan.count,
+            ))),
+            count: 0,
             snapshot_id: logical_iceberg_scan.snapshot_id,
         }
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
-        self.core.catalog.clone()
+        self.logical_source.core.catalog.clone()
     }
 
     pub fn clone_with_required_cols(&self, required_cols: &[usize]) -> Self {
         assert!(!required_cols.is_empty());
-        let mut core = self.core.clone();
+        let mut core = self.logical_source.core.clone();
         let mut has_row_id = false;
         core.column_catalog = required_cols
             .iter()
@@ -156,9 +172,13 @@ impl LogicalIcebergScan {
 
         LogicalIcebergScan {
             base,
-            core,
-            iceberg_scan_type: self.iceberg_scan_type,
+            logical_source: LogicalSource {
+                core,
+                ..self.logical_source.clone()
+            },
             predicate: self.predicate.clone(),
+            iceberg_file_scan_task: self.iceberg_file_scan_task.clone(),
+            count: self.count,
             snapshot_id: self.snapshot_id,
         }
     }
@@ -172,7 +192,13 @@ impl Distill for LogicalIcebergScan {
             vec![
                 ("source", src),
                 ("columns", column_names_pretty(self.schema())),
-                ("iceberg_scan_type", Pretty::debug(&self.iceberg_scan_type)),
+                (
+                    "iceberg_scan_type",
+                    match self.iceberg_file_scan_task.as_deref() {
+                        Some(task) => Pretty::debug(&task.get_iceberg_scan_type()),
+                        None => Pretty::debug(&"NoType"),
+                    },
+                ),
             ]
         } else {
             vec![]
@@ -211,13 +237,14 @@ impl PredicatePushdown for LogicalIcebergScan {
 
 impl ToBatch for LogicalIcebergScan {
     fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
-        let iceberg_predicate =
-            rw_predicate_to_iceberg_predicate(self.predicate.clone(), self.schema().fields())?;
         let plan = BatchIcebergScan::new(
-            self.core.clone(),
-            self.iceberg_scan_type,
-            self.snapshot_id,
-            iceberg_predicate,
+            self.logical_source.core.clone(),
+            self.iceberg_file_scan_task.as_ref().ok_or_else(|| {
+                crate::error::ErrorCode::BindError(
+                    "Iceberg file scan task is missing in LogicalIcebergScan when converting to BatchIcebergScan".to_string(),
+                )
+            })?.clone(),
+            self.snapshot_id
         )
         .into();
         Ok(plan)
@@ -238,232 +265,4 @@ impl ToStream for LogicalIcebergScan {
     ) -> Result<(PlanRef, ColIndexMapping)> {
         unreachable!()
     }
-}
-
-fn rw_literal_to_iceberg_datum(literal: &Literal) -> Option<IcebergDatum> {
-    let Some(scalar) = literal.get_data() else {
-        return None;
-    };
-    match scalar {
-        ScalarImpl::Bool(b) => Some(IcebergDatum::bool(*b)),
-        ScalarImpl::Int32(i) => Some(IcebergDatum::int(*i)),
-        ScalarImpl::Int64(i) => Some(IcebergDatum::long(*i)),
-        ScalarImpl::Float32(f) => Some(IcebergDatum::float(*f)),
-        ScalarImpl::Float64(f) => Some(IcebergDatum::double(*f)),
-        ScalarImpl::Decimal(_) => {
-            // TODO(iceberg): iceberg-rust doesn't support decimal predicate pushdown yet.
-            None
-        }
-        ScalarImpl::Date(d) => {
-            let Ok(datum) = IcebergDatum::date_from_ymd(d.0.year(), d.0.month(), d.0.day()) else {
-                return None;
-            };
-            Some(datum)
-        }
-        ScalarImpl::Timestamp(t) => Some(IcebergDatum::timestamp_micros(
-            t.0.and_utc().timestamp_micros(),
-        )),
-        ScalarImpl::Timestamptz(t) => Some(IcebergDatum::timestamptz_micros(t.timestamp_micros())),
-        ScalarImpl::Utf8(s) => Some(IcebergDatum::string(s)),
-        ScalarImpl::Bytea(b) => Some(IcebergDatum::binary(b.clone())),
-        _ => None,
-    }
-}
-
-fn rw_expr_to_iceberg_predicate(expr: &ExprImpl, fields: &[Field]) -> Option<IcebergPredicate> {
-    match expr {
-        ExprImpl::Literal(l) => match l.get_data() {
-            Some(ScalarImpl::Bool(b)) => {
-                if *b {
-                    Some(IcebergPredicate::AlwaysTrue)
-                } else {
-                    Some(IcebergPredicate::AlwaysFalse)
-                }
-            }
-            _ => None,
-        },
-        ExprImpl::FunctionCall(f) => {
-            let args = f.inputs();
-            match f.func_type() {
-                ExprType::Not => {
-                    let arg = rw_expr_to_iceberg_predicate(&args[0], fields)?;
-                    Some(IcebergPredicate::negate(arg))
-                }
-                ExprType::And => {
-                    let arg0 = rw_expr_to_iceberg_predicate(&args[0], fields)?;
-                    let arg1 = rw_expr_to_iceberg_predicate(&args[1], fields)?;
-                    Some(IcebergPredicate::and(arg0, arg1))
-                }
-                ExprType::Or => {
-                    let arg0 = rw_expr_to_iceberg_predicate(&args[0], fields)?;
-                    let arg1 = rw_expr_to_iceberg_predicate(&args[1], fields)?;
-                    Some(IcebergPredicate::or(arg0, arg1))
-                }
-                ExprType::Equal if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)]
-                        | [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let column_name = &fields[lhs.index].name;
-                            let reference = Reference::new(column_name);
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.equal_to(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::NotEqual if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)]
-                        | [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let column_name = &fields[lhs.index].name;
-                            let reference = Reference::new(column_name);
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.not_equal_to(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::GreaterThan if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
-                            let column_name = &fields[lhs.index].name;
-                            let reference = Reference::new(column_name);
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than(datum))
-                        }
-                        [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let column_name = &fields[lhs.index].name;
-                            let reference = Reference::new(column_name);
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than_or_equal_to(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::GreaterThanOrEqual if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
-                            let column_name = &fields[lhs.index].name;
-                            let reference = Reference::new(column_name);
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than_or_equal_to(datum))
-                        }
-                        [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let column_name = &fields[lhs.index].name;
-                            let reference = Reference::new(column_name);
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::LessThan if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
-                            let column_name = &fields[lhs.index].name;
-                            let reference = Reference::new(column_name);
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than(datum))
-                        }
-                        [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let column_name = &fields[lhs.index].name;
-                            let reference = Reference::new(column_name);
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than_or_equal_to(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::LessThanOrEqual if args[0].return_type() == args[1].return_type() => {
-                    match [&args[0], &args[1]] {
-                        [ExprImpl::InputRef(lhs), ExprImpl::Literal(rhs)] => {
-                            let column_name = &fields[lhs.index].name;
-                            let reference = Reference::new(column_name);
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.less_than_or_equal_to(datum))
-                        }
-                        [ExprImpl::Literal(rhs), ExprImpl::InputRef(lhs)] => {
-                            let column_name = &fields[lhs.index].name;
-                            let reference = Reference::new(column_name);
-                            let datum = rw_literal_to_iceberg_datum(rhs)?;
-                            Some(reference.greater_than(datum))
-                        }
-                        _ => None,
-                    }
-                }
-                ExprType::IsNull => match &args[0] {
-                    ExprImpl::InputRef(lhs) => {
-                        let column_name = &fields[lhs.index].name;
-                        let reference = Reference::new(column_name);
-                        Some(reference.is_null())
-                    }
-                    _ => None,
-                },
-                ExprType::IsNotNull => match &args[0] {
-                    ExprImpl::InputRef(lhs) => {
-                        let column_name = &fields[lhs.index].name;
-                        let reference = Reference::new(column_name);
-                        Some(reference.is_not_null())
-                    }
-                    _ => None,
-                },
-                ExprType::In => match &args[0] {
-                    ExprImpl::InputRef(lhs) => {
-                        let column_name = &fields[lhs.index].name;
-                        let reference = Reference::new(column_name);
-                        let mut datums = Vec::with_capacity(args.len() - 1);
-                        for arg in &args[1..] {
-                            if args[0].return_type() != arg.return_type() {
-                                return None;
-                            }
-                            if let ExprImpl::Literal(l) = arg {
-                                if let Some(datum) = rw_literal_to_iceberg_datum(l) {
-                                    datums.push(datum);
-                                } else {
-                                    return None;
-                                }
-                            } else {
-                                return None;
-                            }
-                        }
-                        Some(reference.is_in(datums))
-                    }
-                    _ => None,
-                },
-                _ => None,
-            }
-        }
-        _ => None,
-    }
-}
-
-fn rw_predicate_to_iceberg_predicate(
-    predicate: Condition,
-    fields: &[Field],
-) -> Result<IcebergPredicate> {
-    if predicate.always_true() {
-        return Ok(IcebergPredicate::AlwaysTrue);
-    }
-
-    let mut conjunctions = predicate.conjunctions;
-
-    let mut iceberg_condition_root = conjunctions
-        .pop()
-        .and_then(|conjunction| rw_expr_to_iceberg_predicate(&conjunction, fields))
-        .ok_or_else(|| anyhow::anyhow!("No iceberg predicate could be pushed down"))?;
-
-    while let Some(conjunction) = conjunctions.pop() {
-        match rw_expr_to_iceberg_predicate(&conjunction, fields) {
-            Some(iceberg_predicate) => {
-                iceberg_condition_root = iceberg_condition_root.and(iceberg_predicate);
-            }
-            None => {
-                return Err(anyhow::anyhow!(
-                    "Rw iceberg scan predicate must be convert to iceberg predicate"
-                )
-                .into());
-            }
-        }
-    }
-    Ok(iceberg_condition_root)
 }

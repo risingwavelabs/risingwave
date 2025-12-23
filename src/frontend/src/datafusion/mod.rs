@@ -13,18 +13,15 @@
 // limitations under the License.
 
 mod convert;
+mod error;
 mod execute;
 mod function;
 mod iceberg_executor;
 mod iceberg_table_provider;
 
 pub use convert::*;
+pub use error::to_datafusion_error;
 pub use execute::*;
 pub use function::convert_function_call;
 pub use iceberg_executor::IcebergScan;
 pub use iceberg_table_provider::IcebergTableProvider;
-use risingwave_common::error::BoxedError;
-
-pub fn to_datafusion_error(error: impl Into<BoxedError>) -> datafusion::error::DataFusionError {
-    datafusion::error::DataFusionError::External(error.into())
-}

@@ -530,11 +530,14 @@ for_all_wrapped_id_fields! (
     }
     monitor_service {
         GetProfileStatsRequest {
+            executor_ids: ExecutorId,
             dispatcher_fragment_ids: FragmentId,
         }
         GetProfileStatsResponse {
             dispatch_fragment_output_row_count: FragmentId,
             dispatch_fragment_output_blocking_duration_ns: FragmentId,
+            stream_node_output_row_count: ExecutorId,
+            stream_node_output_blocking_duration_ns: ExecutorId,
         }
         StackTraceResponse {
             barrier_worker_state: WorkerId,
@@ -648,6 +651,9 @@ for_all_wrapped_id_fields! (
         StreamFsFetch {
             source_id: SourceId,
             associated_table_id: TableId,
+        }
+        StreamNode {
+            operator_id: StreamNodeLocalOperatorId,
         }
         StreamScanNode {
             table_id: TableId,
