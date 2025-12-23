@@ -313,9 +313,12 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
     // 4. int32 <-> bool is explicit
     // 5. timestamp/timestamptz -> time is assign
     // 6. int2/int4/int8 -> int256 is implicit and int256 -> float8 is explicit
+    //
+    // Remember to update test cases including `pg_cast.slt.part` and `test_func_sig_map` when
+    // changing this table.
     use DataTypeName::*;
     const CAST_TABLE: &[(&str, DataTypeName)] = &[
-        // 123456789ABCDEF
+        // 123456789ABCDEFG
         (". e            a ", Boolean),     // 0
         (" .iiiiii       a ", Int16),       // 1
         ("ea.iiiii       a ", Int32),       // 2
@@ -332,7 +335,7 @@ pub static CAST_TABLE: LazyLock<CastTable> = LazyLock::new(|| {
         ("eeeeeee      . a ", Jsonb),       // D
         ("              .a ", Bytea),       // E
         ("eeeeeeeeeeeeeee. ", Varchar),     // F
-        ("   e            .", Serial),
+        ("   e      e     .", Serial),      // G
     ];
     let mut map = BTreeMap::new();
     for (row, source) in CAST_TABLE {
