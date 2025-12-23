@@ -198,6 +198,7 @@ impl HummockManager {
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            &mut versioning.table_change_log,
             self.env.notification_manager(),
             None,
             &self.metrics,
@@ -295,6 +296,7 @@ impl HummockManager {
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
+            &mut versioning.table_change_log,
             self.env.notification_manager(),
             None,
             &self.metrics,

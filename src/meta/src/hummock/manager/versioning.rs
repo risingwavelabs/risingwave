@@ -17,6 +17,7 @@ use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     BranchedSstInfo, get_compaction_group_ids, get_table_compaction_group_id_mapping,
@@ -44,6 +45,7 @@ use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
+use crate::hummock::model::ext::to_table_change_log;
 use crate::model::VarTransaction;
 
 #[derive(Default)]
@@ -64,6 +66,7 @@ pub struct Versioning {
     /// Stats for latest hummock version.
     pub version_stats: HummockVersionStats,
     pub checkpoint: HummockVersionCheckpoint,
+    pub table_change_log: HashMap<TableId, TableChangeLog>,
 }
 
 impl ContextInfo {
@@ -262,6 +265,7 @@ impl HummockManager {
             let mut version = HummockVersionTransaction::new(
                 &mut versioning.current_version,
                 &mut versioning.hummock_version_deltas,
+                &mut versioning.table_change_log,
                 self.env.notification_manager(),
                 None,
                 &self.metrics,
@@ -273,6 +277,37 @@ impl HummockManager {
             new_version_delta.pre_apply();
             commit_multi_var!(self.meta_store_ref(), version)?;
         }
+        Ok(())
+    }
+
+    pub async fn load_table_change_log(&self) -> Result<()> {
+        use sea_orm::EntityTrait;
+
+        use crate::model::MetadataModelError;
+        let mut versioning = self.versioning.write().await;
+        // 1. Initialize from HummockVersion::table_change_log for backward-compatibility.
+        versioning.table_change_log = versioning.current_version.table_change_log.clone();
+        // 2. Merge table change log from meta store.
+        versioning.table_change_log.extend(
+            risingwave_meta_model::hummock_table_change_log::Entity::find()
+                .all(&self.env.meta_store_ref().conn)
+                .await
+                .map_err(MetadataModelError::from)?
+                .into_iter()
+                .map(|m| (m.table_id, to_table_change_log(m)))
+                .into_group_map()
+                .into_iter()
+                .map(|(table_id, unordered_change_logs)| {
+                    (
+                        table_id,
+                        TableChangeLog::new(
+                            unordered_change_logs
+                                .into_iter()
+                                .sorted_by_key(|l| l.checkpoint_epoch),
+                        ),
+                    )
+                }),
+        );
         Ok(())
     }
 }

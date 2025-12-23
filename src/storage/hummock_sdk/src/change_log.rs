@@ -24,7 +24,7 @@ use crate::sstable_info::SstableInfo;
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLogCommon<T>(
     // older log at the front
-    VecDeque<EpochNewChangeLogCommon<T>>,
+    pub VecDeque<EpochNewChangeLogCommon<T>>,
 );
 
 impl<T> TableChangeLogCommon<T> {

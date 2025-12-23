@@ -70,7 +70,8 @@ macro_rules! for_all_metadata_models_v2 {
             {fragment_splits, risingwave_meta_model::fragment_splits},
             {pending_sink_state, risingwave_meta_model::pending_sink_state},
             {refresh_jobs, risingwave_meta_model::refresh_job},
-            {cdc_table_snapshot_splits, risingwave_meta_model::cdc_table_snapshot_split}
+            {cdc_table_snapshot_splits, risingwave_meta_model::cdc_table_snapshot_split},
+            {hummock_table_change_logs, risingwave_meta_model::hummock_table_change_log}
         }
     };
 }
