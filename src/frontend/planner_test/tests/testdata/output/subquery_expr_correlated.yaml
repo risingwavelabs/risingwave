@@ -719,11 +719,13 @@
     └─BatchHashJoin { type: LeftSemi, predicate: t1.x IS NOT DISTINCT FROM t2.x, output: all }
       ├─BatchExchange { order: [], dist: HashShard(t1.x) }
       │ └─BatchScan { table: t1, columns: [t1.x, t1.y], distribution: SomeShard }
-      └─BatchProject { exprs: [t2.x] }
-        └─BatchGroupTopN { order: [t2.x ASC], limit: 1, offset: 0, group_key: [t2.x] }
-          └─BatchExchange { order: [], dist: HashShard(t2.x) }
-            └─BatchFilter { predicate: IsNotNull(t2.x) }
-              └─BatchScan { table: t2, columns: [t2.x], distribution: SomeShard }
+      └─BatchExchange { order: [], dist: HashShard(t2.x) }
+        └─BatchProject { exprs: [t2.x] }
+          └─BatchGroupTopN { order: [t2.x ASC], limit: 1, offset: 0, group_key: [t2.x] }
+            └─BatchExchange { order: [], dist: HashShard(t2.x) }
+              └─BatchProject { exprs: [t2.x, t2.x] }
+                └─BatchFilter { predicate: IsNotNull(t2.x) }
+                  └─BatchScan { table: t2, columns: [t2.x], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t1._row_id(hidden)], stream_key: [t1._row_id, x], pk_columns: [t1._row_id, x], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t1.x, t1._row_id) }
@@ -887,9 +889,9 @@
     └─BatchHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
       ├─BatchExchange { order: [], dist: HashShard(t1.k1) }
       │ └─BatchScan { table: t1, columns: [t1.v1, t1.k1], distribution: SomeShard }
-      └─BatchProject { exprs: [t2.k2, t2.v2] }
-        └─BatchGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
-          └─BatchExchange { order: [], dist: HashShard(t2.k2) }
+      └─BatchGroupTopN { order: [t2.v2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
+        └─BatchExchange { order: [], dist: HashShard(t2.k2) }
+          └─BatchProject { exprs: [t2.k2, t2.v2] }
             └─BatchFilter { predicate: IsNotNull(t2.k2) }
               └─BatchScan { table: t2, columns: [t2.v2, t2.k2], distribution: SomeShard }
   stream_plan: |-
@@ -942,9 +944,9 @@
     └─BatchHashJoin { type: LeftSemi, predicate: t1.v1 = t2.v2 AND t1.k1 IS NOT DISTINCT FROM t2.k2, output: all }
       ├─BatchExchange { order: [], dist: HashShard(t1.k1) }
       │ └─BatchScan { table: t1, columns: [t1.v1, t1.k1], distribution: SomeShard }
-      └─BatchProject { exprs: [t2.k2, t2.v2] }
-        └─BatchGroupTopN { order: [t2.k2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
-          └─BatchExchange { order: [], dist: HashShard(t2.k2) }
+      └─BatchGroupTopN { order: [t2.k2 ASC], limit: 1, offset: 0, group_key: [t2.k2] }
+        └─BatchExchange { order: [], dist: HashShard(t2.k2) }
+          └─BatchProject { exprs: [t2.k2, t2.v2] }
             └─BatchFilter { predicate: IsNotNull(t2.k2) }
               └─BatchScan { table: t2, columns: [t2.v2, t2.k2], distribution: SomeShard }
   stream_plan: |-
@@ -2374,9 +2376,9 @@
     └─BatchHashJoin { type: Inner, predicate: t1.y IS NOT DISTINCT FROM t2.y AND t1.x = t2.x, output: [t1.x, t1.y] }
       ├─BatchExchange { order: [], dist: HashShard(t1.y) }
       │ └─BatchScan { table: t1, columns: [t1.x, t1.y], distribution: SomeShard }
-      └─BatchProject { exprs: [t2.y, t2.x] }
-        └─BatchGroupTopN { order: [t2.y ASC], limit: 1, offset: 0, group_key: [t2.y] }
-          └─BatchExchange { order: [], dist: HashShard(t2.y) }
+      └─BatchGroupTopN { order: [t2.y ASC], limit: 1, offset: 0, group_key: [t2.y] }
+        └─BatchExchange { order: [], dist: HashShard(t2.y) }
+          └─BatchProject { exprs: [t2.y, t2.x] }
             └─BatchFilter { predicate: IsNotNull(t2.y) }
               └─BatchScan { table: t2, columns: [t2.x, t2.y], distribution: SomeShard }
   stream_plan: |-
