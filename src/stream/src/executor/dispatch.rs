@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::Future;
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
@@ -54,6 +54,11 @@ use risingwave_common::id::FragmentId;
 /// data chunks will be dispatched with some specified policy, while control message
 /// such as barriers will be distributed to all receivers.
 pub struct DispatchExecutor {
+    input: Executor,
+    inner: DispatchExecutorInner,
+}
+
+pub struct DispatchExecutorForSyncLogStore {
     input: Executor,
     inner: DispatchExecutorInner,
 }
@@ -492,6 +497,109 @@ impl DispatchExecutor {
     }
 }
 
+impl DispatchExecutorForSyncLogStore {
+    pub(crate) async fn new(
+        input: Executor,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        dispatchers: Vec<stream_plan::Dispatcher>,
+        actor_context: &ActorContextRef,
+    ) -> StreamResult<Self> {
+        let mut executor = Self::new_inner(
+            input,
+            new_output_request_rx,
+            vec![],
+            actor_context.id,
+            actor_context.fragment_id,
+            actor_context.config.clone(),
+            actor_context.streaming_metrics.clone(),
+        );
+        let inner = &mut executor.inner;
+        for dispatcher in dispatchers {
+            let outputs = inner
+                .collect_outputs(&dispatcher.downstream_actor_id)
+                .await?;
+            let dispatcher = DispatcherImpl::new(outputs, &dispatcher)?;
+            let dispatcher = inner.metrics.monitor_dispatcher(dispatcher);
+            inner.dispatchers.push(dispatcher);
+        }
+        Ok(executor)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        input: Executor,
+        dispatchers: Vec<DispatcherImpl>,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+        actor_config: Arc<StreamingConfig>,
+        metrics: Arc<StreamingMetrics>,
+    ) -> (
+        Self,
+        tokio::sync::mpsc::UnboundedSender<(ActorId, NewOutputRequest)>,
+    ) {
+        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+
+        (
+            Self::new_inner(
+                input,
+                rx,
+                dispatchers,
+                actor_id,
+                fragment_id,
+                actor_config,
+                metrics,
+            ),
+            tx,
+        )
+    }
+
+    fn new_inner(
+        mut input: Executor,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        dispatchers: Vec<DispatcherImpl>,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+        actor_config: Arc<StreamingConfig>,
+        metrics: Arc<StreamingMetrics>,
+    ) -> Self {
+        if crate::consistency::insane() {
+            // make some trouble before dispatching to avoid generating invalid dist key.
+            let mut info = input.info().clone();
+            info.identity = format!("{} (embedded trouble)", info.identity);
+            let troublemaker = TroublemakerExecutor::new(input, actor_config.developer.chunk_size);
+            input = (info, troublemaker).into();
+        }
+
+        let actor_id_str = actor_id.to_string();
+        let fragment_id_str = fragment_id.to_string();
+        let actor_out_record_cnt = metrics
+            .actor_out_record_cnt
+            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str]);
+        let metrics = DispatchExecutorMetrics {
+            actor_id_str,
+            fragment_id_str,
+            metrics,
+            actor_out_record_cnt,
+        };
+        let dispatchers = dispatchers
+            .into_iter()
+            .map(|dispatcher| metrics.monitor_dispatcher(dispatcher))
+            .collect();
+
+        Self {
+            input,
+            inner: DispatchExecutorInner {
+                dispatchers,
+                actor_id,
+                actor_config,
+                metrics,
+                new_output_request_rx,
+                pending_new_output_requests: Default::default(),
+            },
+        }
+    }
+}
+
 impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
@@ -539,6 +647,39 @@ impl StreamConsumer for DispatchExecutor {
                             .await?;
                     }
                 }
+            }
+        }
+    }
+}
+
+impl StreamConsumer for DispatchExecutorForSyncLogStore {
+    type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
+
+    fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+        let max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
+
+        #[try_stream]
+        async move {
+            let mut input = self.input.execute().peekable();
+            let mut pending: VecDeque<MessageBatch> = VecDeque::new();
+
+            loop {
+                async {
+                    tokio::select! {
+                        biased;
+
+                        _ = async {
+                            count += 1;
+                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        } => {}
+
+                        _ = async {
+                            count += 1;
+                            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                            println!("branch B done");
+                        } => {}
+                    }
+                }.await;
             }
         }
     }
