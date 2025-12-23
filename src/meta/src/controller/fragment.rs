@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -67,8 +68,9 @@ use serde::{Deserialize, Serialize};
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{
-    FragmentRenderMap, NoShuffleEnsemble, find_fragment_no_shuffle_dags_detailed,
-    load_fragment_info, resolve_streaming_job_definition,
+    FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
+    find_fragment_no_shuffle_dags_detailed, load_fragment_context_for_jobs,
+    render_actor_assignments, resolve_streaming_job_definition,
 };
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
@@ -1328,26 +1330,71 @@ impl CatalogController {
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<FragmentRenderMap> {
+        let loaded = self.load_fragment_context(database_id).await?;
+
+        if loaded.is_empty() {
+            return Ok(HashMap::new());
+        }
+
         let adaptive_parallelism_strategy = {
             let system_params_reader = self.env.system_params_reader().await;
             system_params_reader.adaptive_parallelism_strategy()
         };
 
+        let available_workers: BTreeMap<_, _> = worker_nodes
+            .current()
+            .values()
+            .filter(|worker| worker.is_streaming_schedulable())
+            .map(|worker| {
+                (
+                    worker.id,
+                    WorkerInfo {
+                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        resource_group: worker.resource_group(),
+                    },
+                )
+            })
+            .collect();
+
+        let RenderedGraph { fragments, .. } = render_actor_assignments(
+            self.env.actor_id_generator(),
+            &available_workers,
+            adaptive_parallelism_strategy,
+            &loaded,
+        )?;
+
+        tracing::trace!(?fragments, "reload all actors");
+
+        Ok(fragments)
+    }
+
+    /// Async load stage: collects all metadata required for rendering actor assignments.
+    pub async fn load_fragment_context(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<LoadedFragmentContext> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let database_fragment_infos = load_fragment_info(
-            &txn,
-            self.env.actor_id_generator(),
-            database_id,
-            worker_nodes,
-            adaptive_parallelism_strategy,
-        )
-        .await?;
+        let mut query = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId);
 
-        tracing::trace!(?database_fragment_infos, "reload all actors");
+        if let Some(database_id) = database_id {
+            query = query
+                .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+                .filter(object::Column::DatabaseId.eq(database_id));
+        }
 
-        Ok(database_fragment_infos)
+        let jobs: Vec<JobId> = query.into_tuple().all(&txn).await?;
+
+        let jobs: HashSet<JobId> = jobs.into_iter().collect();
+
+        if jobs.is_empty() {
+            return Ok(LoadedFragmentContext::default());
+        }
+
+        load_fragment_context_for_jobs(&txn, jobs).await
     }
 
     #[await_tree::instrument]
