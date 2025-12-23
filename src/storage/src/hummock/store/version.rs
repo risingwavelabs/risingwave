@@ -763,13 +763,19 @@ impl HummockVersionReader {
                         }
 
                         // filter vnode-key range that is definitely not containing the key
-                        if let Some(vnode_key_ranges) = &sstable_info.vnode_key_ranges {
+                        if let Some(vnode_statistics) = &sstable_info.vnode_statistics {
                             let vnode = VirtualNode::from_index(full_key.user_key.get_vnode_id());
                             // Only skip if vnode exists and key is out of range
                             // If vnode not found, it may be due to incomplete stats (reached limit)
-                            if let Some(key_range) = vnode_key_ranges.get_vnode_key_range(vnode) {
+                            if let Some((vnode_min, vnode_max)) =
+                                vnode_statistics.get_vnode_key_range(vnode)
+                            {
                                 local_stats.vnode_checked_get_count += 1;
-                                if key_range.user_key_out_of_range(full_key.user_key.as_ref()) {
+                                // Vnode key ranges use closed intervals [min_key, max_key]
+                                let user_key = full_key.user_key.as_ref();
+                                if user_key < vnode_min.user_key.as_ref()
+                                    || user_key > vnode_max.user_key.as_ref()
+                                {
                                     local_stats.vnode_pruned_get_count += 1;
                                     sync_point!("HUMMOCK_V2::GET::SKIP_BY_NO_VNODE_KEY_RANGE");
                                     continue;
@@ -1045,23 +1051,26 @@ impl HummockVersionReader {
                     let sstable_info = &sstable_infos[0];
 
                     // Filter by vnode key range: skip if query range does not overlap with vnode range
-                    if let Some(vnode_key_ranges) = &sstable_info.vnode_key_ranges
+                    if let Some(vnode_statistics) = &sstable_info.vnode_statistics
                         && let (Included(start_key) | Excluded(start_key), _) = &user_key_range_ref
                     {
                         let vnode = VirtualNode::from_index(start_key.get_vnode_id());
                         // Only skip if vnode exists and ranges don't overlap
                         // If vnode not found, it may be due to incomplete stats (reached limit)
-                        if let Some(vnode_key_range) = vnode_key_ranges.get_vnode_key_range(vnode) {
+                        if let Some((vnode_min, vnode_max)) =
+                            vnode_statistics.get_vnode_key_range(vnode)
+                        {
                             local_stats.vnode_checked_iter_count += 1;
-
-                            let vnode_left = FullKey::decode(&vnode_key_range.left).user_key;
-                            let vnode_right = FullKey::decode(&vnode_key_range.right).user_key;
-                            let vnode_right_exclusive = vnode_key_range.right_exclusive;
+                            // Vnode key ranges use closed intervals [min_key, max_key]
 
                             // Check if query range is completely left of vnode range
                             let query_left_of_vnode = match &user_key_range_ref.1 {
-                                Included(query_right) => *query_right < vnode_left,
-                                Excluded(query_right) => *query_right <= vnode_left,
+                                Included(query_right) => {
+                                    query_right.as_ref() < vnode_min.user_key.as_ref()
+                                }
+                                Excluded(query_right) => {
+                                    query_right.as_ref() <= vnode_min.user_key.as_ref()
+                                }
                                 Bound::Unbounded => false,
                             };
 
@@ -1073,10 +1082,11 @@ impl HummockVersionReader {
                             // Check if query range is completely right of vnode range
                             let query_right_of_vnode = match &user_key_range_ref.0 {
                                 Included(query_left) => {
-                                    *query_left > vnode_right
-                                        || (*query_left == vnode_right && vnode_right_exclusive)
+                                    query_left.as_ref() > vnode_max.user_key.as_ref()
                                 }
-                                Excluded(query_left) => *query_left >= vnode_right,
+                                Excluded(query_left) => {
+                                    query_left.as_ref() >= vnode_max.user_key.as_ref()
+                                }
                                 Bound::Unbounded => false,
                             };
 

@@ -15,12 +15,17 @@ enum BloomFilterType {
   BLOCKED = 2;
 }
 
+// Pruning hints for a single vnode within an SST.
+// Keys are always represented as closed intervals: [min_key, max_key].
 message VnodeKeyRange {
   uint32 vnode = 1;
-  KeyRange key_range = 2;
+  bytes min_key = 2;
+  bytes max_key = 3;
 }
 
-message VnodeKeyRangeInfo {
+// Optional per-vnode statistics for SSTs with few vnodes.
+// Enables more precise query pruning by providing vnode-level key ranges.
+message VnodeStatistics {
   repeated VnodeKeyRange vnode_key_ranges = 1;
 }
 
@@ -44,8 +49,9 @@ message SstableInfo {
   // `sst_size` represents the size of the sst instead of the object size(usually used in the meta).
   uint64 sst_size = 14;
 
-  // Optional pruning hints keyed by vnode when the SST spans only a small set of vnodes.
-  VnodeKeyRangeInfo vnode_key_ranges = 15;
+  // Optional per-vnode statistics for query pruning when the SST spans only a small set of vnodes.
+  // Only emitted when SST contains multiple vnodes to avoid redundancy with key_range.
+  VnodeStatistics vnode_statistics = 15;
 }
 
 enum LevelType {

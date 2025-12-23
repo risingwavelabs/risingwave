@@ -1004,7 +1004,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("hummock.SstableInfo", "#[derive(Eq)]")
         .type_attribute("hummock.KeyRange", "#[derive(Eq)]")
         .type_attribute("hummock.VnodeKeyRange", "#[derive(Eq)]")
-        .type_attribute("hummock.VnodeKeyRangeInfo", "#[derive(Eq)]")
+        .type_attribute("hummock.VnodeStatistics", "#[derive(Eq)]")
         .type_attribute("hummock.CompactionConfig", "#[derive(Eq)]")
         .type_attribute("hummock.GroupDelta.delta_type", "#[derive(Eq)]")
         .type_attribute("hummock.IntraLevelDelta", "#[derive(Eq)]")
