@@ -1489,9 +1489,9 @@
             └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [date_time DESC], limit: 1, offset: 0, group_key: [bidder, auction] }
-      └─BatchExchange { order: [], dist: HashShard(bidder, auction) }
-        └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
+    └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
+      └─BatchGroupTopN { order: [date_time DESC], limit: 1, offset: 0, group_key: [bidder, auction] }
+        └─BatchExchange { order: [], dist: HashShard(bidder, auction) }
           └─BatchKafkaScan { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: NoCheck }
@@ -1546,9 +1546,9 @@
             └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] }
-      └─BatchExchange { order: [], dist: HashShard(bidder, auction) }
-        └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
+    └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
+      └─BatchGroupTopN { order: [date_time DESC], limit: 1, offset: 0, with_ties: true, group_key: [bidder, auction] }
+        └─BatchExchange { order: [], dist: HashShard(bidder, auction) }
           └─BatchKafkaScan { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction, _row_id], pk_columns: [bidder, auction, _row_id], pk_conflict: NoCheck }
@@ -1603,9 +1603,9 @@
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─BatchSort { order: [auction ASC, price DESC] }
-        └─BatchGroupTopN { order: [price DESC], limit: 10, offset: 0, group_key: [auction] }
-          └─BatchExchange { order: [], dist: HashShard(auction) }
-            └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
+        └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
+          └─BatchGroupTopN { order: [price DESC], limit: 10, offset: 0, group_key: [auction] }
+            └─BatchExchange { order: [], dist: HashShard(auction) }
               └─BatchKafkaScan { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id], filter: (None, None) }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden), rank_number], stream_key: [auction, _row_id], pk_columns: [auction, _row_id], pk_conflict: NoCheck }

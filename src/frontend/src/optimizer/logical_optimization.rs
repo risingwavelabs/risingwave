@@ -425,7 +425,11 @@ static REWRITE_LIKE_EXPR: LazyLock<OptimizationStage> = LazyLock::new(|| {
 static TOP_N_AGG_ON_INDEX: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "TopN/SimpleAgg on Index",
-        vec![TopNOnIndexRule::create(), MinMaxOnIndexRule::create()],
+        vec![
+            TopNProjectTransposeRule::create(),
+            TopNOnIndexRule::create(),
+            MinMaxOnIndexRule::create(),
+        ],
         ApplyOrder::TopDown,
     )
 });
