@@ -20,7 +20,7 @@ use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 use crate::scale::auto_parallelism::MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE;
-use crate::utils::{kill_cn_and_meta_and_wait_recover, kill_cn_meta_and_wait_full_recovery};
+use crate::utils::kill_cn_and_meta_and_wait_recover;
 
 async fn wait_parallelism(
     session: &mut risingwave_simulation::cluster::Session,
