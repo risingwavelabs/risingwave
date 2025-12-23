@@ -61,13 +61,14 @@ use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArr
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::error::IcebergError;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::{Deserialize, Serialize};
 use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
@@ -1881,12 +1882,12 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<()> {
         tracing::info!("Starting iceberg direct commit in epoch {epoch}");
 
         let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns)? {
+            match self.pre_commit_inner(epoch, metadata, schema_change)? {
                 Some((write_results, snapshot_id)) => (write_results, snapshot_id),
                 None => {
                     tracing::debug!(?epoch, "no data to commit");
@@ -1914,12 +1915,12 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<Vec<u8>> {
         tracing::info!("Starting iceberg pre commit in epoch {epoch}");
 
         let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns)? {
+            match self.pre_commit_inner(epoch, metadata, schema_change)? {
                 Some((write_results, snapshot_id)) => (write_results, snapshot_id),
                 None => {
                     tracing::debug!(?epoch, "no data to commit");
@@ -1941,7 +1942,12 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         Ok(pre_commit_metadata_bytes)
     }
 
-    async fn commit(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()> {
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        commit_metadata: Vec<u8>,
+        _schema_change: Option<PbSinkSchemaChange>,
+    ) -> Result<()> {
         tracing::info!("Starting iceberg commit in epoch {epoch}");
         if commit_metadata.is_empty() {
             tracing::debug!(?epoch, "no data to commit");
@@ -1992,12 +1998,12 @@ impl IcebergSinkCommitter {
         &mut self,
         _epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<Option<(Vec<IcebergCommitResult>, i64)>> {
-        if let Some(add_columns) = add_columns {
+        if let Some(schema_change) = schema_change {
             return Err(anyhow!(
-                "Iceberg sink not support add columns, but got: {:?}",
-                add_columns
+                "Iceberg sink not support schema change, but got: {:?}",
+                schema_change
             )
             .into());
         }
@@ -2441,6 +2447,7 @@ mod test {
     use std::collections::BTreeMap;
 
     use risingwave_common::array::arrow::arrow_schema_iceberg::FieldRef as ArrowFieldRef;
+    use risingwave_common::catalog::Field;
     use risingwave_common::types::{DataType, MapType, StructType};
 
     use crate::connector_common::{IcebergCommon, IcebergTableIdentifier};

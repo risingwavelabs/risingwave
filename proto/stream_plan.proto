@@ -54,8 +54,31 @@ message StopMutation {
   repeated uint32 dropped_sink_fragments = 2;
 }
 
-message SinkAddColumns {
+message SinkSchemaChange {
+  repeated plan_common.Field original_schema = 1;
+
+  oneof op {
+    // Add new columns to the schema
+    SinkAddColumnsOp add_columns = 2;
+
+    // Drop columns from the schema
+    SinkDropColumnsOp drop_columns = 3;
+
+    // Future operations can be added here...
+    // RenameColumnsOp rename_columns = 4;
+    // AlterColumnTypeOp alter_column_type = 5;
+  }
+}
+
+// Add columns operation
+message SinkAddColumnsOp {
+  // Columns to add
   repeated plan_common.Field fields = 1;
+}
+
+// Drop columns operation
+message SinkDropColumnsOp {
+  repeated string column_names = 1;
 }
 
 message UpdateMutation {
@@ -101,7 +124,7 @@ message UpdateMutation {
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
   // CDC table snapshot splits
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
-  map<uint32, SinkAddColumns> sink_add_columns = 8;
+  map<uint32, SinkSchemaChange> sink_schema_change = 8;
 }
 
 message SourceChangeSplitMutation {

@@ -18,8 +18,8 @@ use std::ops::DerefMut;
 use async_trait::async_trait;
 use futures::FutureExt;
 use futures::future::BoxFuture;
-use risingwave_common::catalog::Field;
 use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::{
@@ -111,9 +111,11 @@ impl SinglePhaseCommitCoordinator for BoxSinglePhaseCoordinator {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> crate::sink::Result<()> {
-        self.deref_mut().commit(epoch, metadata, add_columns).await
+        self.deref_mut()
+            .commit(epoch, metadata, schema_change)
+            .await
     }
 }
 
@@ -127,15 +129,22 @@ impl TwoPhaseCommitCoordinator for BoxTwoPhaseCoordinator {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> crate::sink::Result<Vec<u8>> {
         self.deref_mut()
-            .pre_commit(epoch, metadata, add_columns)
+            .pre_commit(epoch, metadata, schema_change)
             .await
     }
 
-    async fn commit(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> crate::sink::Result<()> {
-        self.deref_mut().commit(epoch, commit_metadata).await
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        commit_metadata: Vec<u8>,
+        schema_change: Option<PbSinkSchemaChange>,
+    ) -> crate::sink::Result<()> {
+        self.deref_mut()
+            .commit(epoch, commit_metadata, schema_change)
+            .await
     }
 
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>) {

@@ -52,6 +52,11 @@ impl MigrationTrait for Migration {
                             .rw_binary(manager)
                             .not_null(),
                     )
+                    .col(
+                        ColumnDef::new(PendingSinkState::SchemaChange)
+                            .rw_binary(manager)
+                            .null(),
+                    )
                     .primary_key(
                         Index::create()
                             .col(PendingSinkState::SinkId)
@@ -99,6 +104,7 @@ impl MigrationTrait for Migration {
                     PendingSinkState::Epoch,
                     PendingSinkState::SinkState,
                     PendingSinkState::Metadata,
+                    PendingSinkState::SchemaChange,
                 ])
                 .on_conflict(
                     sea_query::OnConflict::columns([
@@ -123,6 +129,7 @@ impl MigrationTrait for Migration {
                     end_epoch.into(),
                     sink_state.into(),
                     combined_metadata.into(),
+                    None::<Vec<u8>>.into(),
                 ]);
             }
 
@@ -145,6 +152,7 @@ enum PendingSinkState {
     Epoch,
     SinkState,
     Metadata,
+    SchemaChange,
 }
 
 #[derive(DeriveIden)]
