@@ -2175,10 +2175,8 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
     state_table.commit_for_test(epoch).await.unwrap();
 
     // Test 1: Full range scan should find all 6 rows
-    let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
-        std::ops::Bound::Unbounded,
-        std::ops::Bound::Unbounded,
-    );
+    let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) =
+        (std::ops::Bound::Unbounded, std::ops::Bound::Unbounded);
     let it = state_table
         .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
         .await
@@ -2192,7 +2190,10 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
 
     // Test 2: Range before min key (1, 10) should be pruned
     let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
-        std::ops::Bound::Excluded(OwnedRow::new(vec![Some((-10_i32).into()), Some(0_i32.into())])),
+        std::ops::Bound::Excluded(OwnedRow::new(vec![
+            Some((-10_i32).into()),
+            Some(0_i32.into()),
+        ])),
         std::ops::Bound::Excluded(OwnedRow::new(vec![Some(0_i32.into()), Some(99_i32.into())])),
     );
     let it = state_table
@@ -2208,8 +2209,14 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
 
     // Test 3: Range after max key (9, 90) should be pruned
     let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
-        std::ops::Bound::Included(OwnedRow::new(vec![Some(100_i32.into()), Some(0_i32.into())])),
-        std::ops::Bound::Included(OwnedRow::new(vec![Some(200_i32.into()), Some(0_i32.into())])),
+        std::ops::Bound::Included(OwnedRow::new(vec![
+            Some(100_i32.into()),
+            Some(0_i32.into()),
+        ])),
+        std::ops::Bound::Included(OwnedRow::new(vec![
+            Some(200_i32.into()),
+            Some(0_i32.into()),
+        ])),
     );
     let it = state_table
         .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
@@ -2225,7 +2232,10 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
     // Test 4: Range that extends before min key gets narrowed
     // Range: [-100, 50] should be narrowed to [min_key, 50] and return rows (1,10), (1,20), (1,30), (5,50)
     let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
-        std::ops::Bound::Excluded(OwnedRow::new(vec![Some((-100_i32).into()), Some(0_i32.into())])),
+        std::ops::Bound::Excluded(OwnedRow::new(vec![
+            Some((-100_i32).into()),
+            Some(0_i32.into()),
+        ])),
         std::ops::Bound::Included(OwnedRow::new(vec![Some(5_i32.into()), Some(50_i32.into())])),
     );
     let it = state_table
@@ -2280,7 +2290,10 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
     // Range: [5, 1000] should be narrowed to [5, max_key] and return rows (5,50), (5,60), (9,90)
     let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) = (
         std::ops::Bound::Included(OwnedRow::new(vec![Some(5_i32.into()), Some(0_i32.into())])),
-        std::ops::Bound::Included(OwnedRow::new(vec![Some(1000_i32.into()), Some(0_i32.into())])),
+        std::ops::Bound::Included(OwnedRow::new(vec![
+            Some(1000_i32.into()),
+            Some(0_i32.into()),
+        ])),
     );
     let it = state_table
         .iter_with_vnode(SINGLETON_VNODE, &pk_range, Default::default())
