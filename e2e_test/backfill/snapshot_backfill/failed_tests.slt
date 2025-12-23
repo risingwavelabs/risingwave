@@ -2,3 +2,4 @@ statement ok
 set streaming_use_snapshot_backfill = true;
 
 include ../../streaming/alter_mv/alter_mv_simple.slt
+include ../../batch/explain_analyze.slt

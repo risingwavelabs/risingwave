@@ -23,6 +23,7 @@ use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::id::FragmentId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables_inner;
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::id::StreamNodeLocalOperatorId;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamScanType, StreamNode};
 use strum::IntoDiscriminant;
@@ -185,7 +186,7 @@ pub(crate) struct MatchResult {
     /// The mapping from source table id to target table within the fragment.
     pub table_matches: HashMap<TableId, PbTable>,
     /// The mapping from source `operator_id` to snapshot epoch
-    pub snapshot_backfill_epochs: HashMap<u64, u64>,
+    pub snapshot_backfill_epochs: HashMap<StreamNodeLocalOperatorId, u64>,
 }
 
 /// The match result of a fragment in the source graph to a fragment in the target graph.

@@ -29,67 +29,15 @@ if [ -f "${PREFIX_BIN}/adbc/${ADBC_SNOWFLAKE_DRIVER_NAME}" ]; then
     exit 0
 fi
 
-# Detect OS and architecture
-OS_TYPE="$(uname -s)"
-ARCH_TYPE="$(uname -m)"
-
-# Determine wheel filename suffix based on platform
-case "${OS_TYPE}" in
-    Linux)
-        case "${ARCH_TYPE}" in
-            x86_64)
-                WHEEL_SUFFIX="manylinux1_x86_64.manylinux2014_x86_64.manylinux_2_17_x86_64.manylinux_2_5_x86_64"
-                ;;
-            aarch64)
-                WHEEL_SUFFIX="manylinux2014_aarch64.manylinux_2_17_aarch64"
-                ;;
-            *)
-                echo "Error: Unsupported Linux architecture: ${ARCH_TYPE}"
-                exit 1
-                ;;
-        esac
-        ;;
-    Darwin)
-        case "${ARCH_TYPE}" in
-            x86_64)
-                WHEEL_SUFFIX="macosx_10_15_x86_64"
-                ;;
-            arm64)
-                WHEEL_SUFFIX="macosx_11_0_arm64"
-                ;;
-            *)
-                echo "Error: Unsupported macOS architecture: ${ARCH_TYPE}"
-                exit 1
-                ;;
-        esac
-        ;;
-    *)
-        echo "Error: Unsupported operating system: ${OS_TYPE}"
-        exit 1
-        ;;
-esac
-
-WHEEL_FILENAME="adbc_driver_snowflake-${ADBC_DRIVER_VERSION}-py3-none-${WHEEL_SUFFIX}.whl"
-DOWNLOAD_URL="https://github.com/apache/arrow-adbc/releases/download/apache-arrow-adbc-${ADBC_VERSION}/${WHEEL_FILENAME}"
-
-echo "ADBC Snowflake driver not found, downloading version ${ADBC_VERSION} (driver ${ADBC_DRIVER_VERSION})"
-echo "Platform: ${OS_TYPE} ${ARCH_TYPE}"
-echo "Download URL: ${DOWNLOAD_URL}"
-
-mkdir -p "${PREFIX_BIN}/adbc"
-curl -fL -o "${PREFIX_TMP}/${WHEEL_FILENAME}" "${DOWNLOAD_URL}"
-
-# Extract .so/.dylib from wheel (wheel is a zip file)
-unzip -j -o "${PREFIX_TMP}/${WHEEL_FILENAME}" "adbc_driver_snowflake/${ADBC_SNOWFLAKE_DRIVER_NAME}" -d "${PREFIX_BIN}/adbc"
-rm -f "${PREFIX_TMP}/${WHEEL_FILENAME}"
-
-if [ -f "${PREFIX_BIN}/adbc/${ADBC_SNOWFLAKE_DRIVER_NAME}" ]; then
-    echo "ADBC Snowflake driver installed successfully"
-else
-    echo "Warning: ADBC Snowflake driver file not found after extraction"
-    echo "Please check the archive contents and update the download script"
-    ls -la "${PREFIX_BIN}/adbc/"
-fi
+# Reuse the shared download script (also used by Docker builds).
+# Note: cargo-make runs task scripts from a temp dir (e.g. /tmp/scripts),
+# so we must not rely on `${BASH_SOURCE[0]}` to locate repo files.
+SCRIPT_PATH="${CARGO_MAKE_WORKING_DIRECTORY:-$(pwd)}/src/risedevtool/scripts/download_adbc_snowflake_driver.sh"
+ADBC_VERSION="${ADBC_VERSION}" \
+ADBC_DRIVER_VERSION="${ADBC_DRIVER_VERSION}" \
+DEST_DIR="${PREFIX_BIN}/adbc" \
+TMP_DIR="${PREFIX_TMP}" \
+  bash "${SCRIPT_PATH}"
 '''
 
 [tasks.remove-adbc-snowflake]

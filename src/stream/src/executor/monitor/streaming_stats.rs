@@ -33,6 +33,7 @@ use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_pb::id::ExecutorId;
 
 use crate::common::log_store_impl::kv_log_store::{
     REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
@@ -50,8 +51,8 @@ pub struct StreamingMetrics {
     // Profiling Metrics:
     // Aggregated per operator rather than per actor.
     // These are purely in-memory, never collected by prometheus.
-    pub mem_stream_node_output_row_count: CountMap,
-    pub mem_stream_node_output_blocking_duration_ns: CountMap,
+    pub mem_stream_node_output_row_count: CountMap<ExecutorId>,
+    pub mem_stream_node_output_blocking_duration_ns: CountMap<ExecutorId>,
 
     // Streaming actor metrics from tokio (disabled by default)
     actor_scheduled_duration: RelabeledGuardedIntCounterVec,

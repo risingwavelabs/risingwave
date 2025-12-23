@@ -196,7 +196,7 @@ use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,
     build_actor_cdc_table_snapshot_splits_with_generation,
 };
-use risingwave_pb::id::SubscriberId;
+use risingwave_pb::id::{ExecutorId, SubscriberId};
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 
 pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
@@ -219,7 +219,7 @@ pub struct ExecutorInfo {
     pub identity: String,
 
     /// The executor id of the executor.
-    pub id: u64,
+    pub id: ExecutorId,
 }
 
 impl ExecutorInfo {
@@ -229,7 +229,7 @@ impl ExecutorInfo {
             stream_key,
             stream_kind: PbStreamKind::Retract, // dummy value for test
             identity,
-            id,
+            id: id.into(),
         }
     }
 }

@@ -501,8 +501,11 @@ message CompactTask {
   uint32 max_sub_compaction = 26;
   // The compaction group id when the compaction task is created.
   uint64 compaction_group_version_id = 27;
+  // The maximum key-value count threshold for using Xor16 filter.
+  // When the number of keys exceeds this threshold, a BlockedXor16 filter will be used.
+  optional uint64 max_kv_count_for_xor16 = 28;
   // Max bytes for vnode-level key range hints to embed into output SSTs.
-  optional uint32 max_vnode_key_range_bytes = 28;
+  optional uint64 max_vnode_key_range_bytes = 29;
 }
 
 message LevelHandler {
@@ -804,7 +807,10 @@ message RiseCtlUpdateCompactionConfigRequest {
       // Enable the optimization of the interval selection for the level0 compaction
       bool enable_optimize_l0_interval_selection = 30;
       uint64 vnode_aligned_level_size_threshold = 31;
-      uint32 max_vnode_key_range_bytes = 32;
+      // The maximum key-value count threshold for using Xor16 filter
+      uint64 max_kv_count_for_xor16 = 32;
+      // Max bytes for vnode key-range hints recorded into each SST.
+      uint64 max_vnode_key_range_bytes = 33;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -1040,9 +1046,15 @@ message CompactionConfig {
   // Typical value: 50GB.
   optional uint64 vnode_aligned_level_size_threshold = 31;
 
+  // The maximum key-value count threshold for using Xor16 filter instead of BlockedXor16 filter.
+  // When the number of keys in a compaction task or SST exceeds this threshold,
+  // a BlockedXor16 filter will be used instead of a single Xor16 filter.
+  //
+  // Typical value: 256 * 1024 (256K keys).
+  optional uint64 max_kv_count_for_xor16 = 32;
+
   // Max bytes for vnode key-range hints recorded into each SST.
-  // 0 or unset disables emitting the map.
-  optional uint32 max_vnode_key_range_bytes = 32;
+  optional uint64 max_vnode_key_range_bytes = 33;
 }
 
 message TableStats {

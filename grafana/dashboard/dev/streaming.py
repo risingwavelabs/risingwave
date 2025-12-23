@@ -1,6 +1,13 @@
 from ..common import *
 from . import section
 
+def _sum_fragment_metric_by_mv(expr: str) -> str:
+    return (
+        f"sum(({expr})"
+        f"* on(fragment_id) group_left(materialized_view_id)"
+        f"max by (fragment_id, materialized_view_id) ({metric('table_info')}))"
+        f"by (materialized_view_id)"
+    )
 
 @section
 def _(outer_panels: Panels):
@@ -9,6 +16,22 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Streaming (Source/Sink/Materialized View/Barrier)",
             [
+                panels.subheader("General"),
+                panels.timeseries_percentage(
+                    "CPU Usage Per Streaming Job",
+                    "The figure shows the CPU usage of each streaming job",
+                    [
+                        panels.target(
+                            f"label_replace("
+                            f"({_sum_fragment_metric_by_mv(f'sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id) / on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)')}"
+                            f"/ 1000000000), "
+                            f"'id', '$1', 'materialized_view_id', '(.*)'"
+                            f") * on(id) group_left(name, type) {metric('relation_info')}",
+                            "{{type}} {{name}} id {{id}}",
+                        )
+                    ],
+                ),
+
                 panels.subheader("Source"),
                 panels.timeseries_rowsps(
                     "Source Throughput(rows/s)",

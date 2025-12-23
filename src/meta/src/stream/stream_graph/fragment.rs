@@ -36,6 +36,7 @@ use risingwave_connector::sink::catalog::SinkType;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::id::StreamNodeLocalOperatorId;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 use risingwave_pb::stream_plan::dispatch_output_mapping::TypePair;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
@@ -848,7 +849,7 @@ impl StreamFragmentGraph {
 
     pub fn fit_snapshot_backfill_epochs(
         &mut self,
-        mut snapshot_backfill_epochs: HashMap<u64, u64>,
+        mut snapshot_backfill_epochs: HashMap<StreamNodeLocalOperatorId, u64>,
     ) {
         for fragment in self.fragments.values_mut() {
             visit_stream_node_cont_mut(fragment.node.as_mut().unwrap(), |node| {
