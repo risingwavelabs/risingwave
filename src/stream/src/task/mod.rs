@@ -28,8 +28,8 @@
 //! ### Core Control Layer
 //! - [`LocalBarrierWorker`]: Central event coordinator and barrier processor
 //!   - Owns [`ControlStreamHandle`]: Bidirectional communication with Meta Service
-//!   - Manages [`ManagedBarrierState`]: Multi-database barrier state coordinator
-//!     + [`DatabaseManagedBarrierState`]: Per-database barrier state manager
+//!   - Manages [`ManagedBarrierState`]: Multi-partial-graph barrier state coordinator
+//!     + [`PartialGraphState`]: Per-partial-graph barrier state manager
 //!       - Uses [`StreamActorManager`]: Actor factory and lifecycle manager
 //!       - Manages [`PartialGraphManagedBarrierState`]: Per-partial-graph barrier coordination
 //!
@@ -41,7 +41,7 @@
 //!
 //! - [`risingwave_pb::stream_service::streaming_control_stream_request::Request`]: Barrier injection events sent from Meta Service to [`ControlStreamHandle`]
 //! - [`LocalActorOperation`]: Meta control events sent from [`LocalStreamManager`] to [`barrier_worker::LocalBarrierWorker`]
-//! - [`LocalBarrierEvent`]: Events sent from actors via [`LocalBarrierManager`] to [`barrier_worker::managed_state::DatabaseManagedBarrierState`]
+//! - [`LocalBarrierEvent`]: Events sent from actors via [`LocalBarrierManager`] to [`barrier_worker::managed_state::PartialGraphState`]
 //!
 //! ## Data Flow and Event Processing
 //!
@@ -51,12 +51,12 @@
 //! 1. Meta Service sends [`risingwave_pb::stream_service::InjectBarrierRequest`] via `streaming_control_stream`
 //! 2. [`barrier_worker::ControlStreamHandle`] (owned by [`barrier_worker::LocalBarrierWorker`]) receives the request
 //! 3. [`barrier_worker::LocalBarrierWorker`] processes the request and calls [`barrier_worker::LocalBarrierWorker::send_barrier()`]
-//!    - [`barrier_worker::managed_state::DatabaseManagedBarrierState::transform_to_issued`] creates new actors if needed
+//!    - [`barrier_worker::managed_state::PartialGraphState::transform_to_issued`] creates new actors if needed
 //!    - [`barrier_worker::managed_state::PartialGraphManagedBarrierState::transform_to_issued`] transitions to `Issued` state
 //!    - [`barrier_worker::managed_state::InflightActorState::issue_barrier`] sends barriers to individual actors
 //! 4. Stream Actors receive barriers and process them
 //! 5. Stream Actors finish processing barriers and send [`LocalBarrierEvent::ReportActorCollected`] via [`LocalBarrierManager::collect`]
-//! 6. [`barrier_worker::managed_state::DatabaseManagedBarrierState::poll_next_event`] processes the collection via [`DatabaseManagedBarrierState::collect`]
+//! 6. [`barrier_worker::managed_state::PartialGraphState::poll_next_event`] processes the collection via [`PartialGraphState::collect`]
 //! 6. [`barrier_worker::LocalBarrierWorker::complete_barrier`] initiates state store sync if needed
 //! 7. [`barrier_worker::LocalBarrierWorker::on_epoch_completed`] sends [`risingwave_pb::stream_service::BarrierCompleteResponse`] to Meta Service
 //!
@@ -64,7 +64,7 @@
 //! How actors are created, managed, and destroyed:
 //!
 //! 1. Meta Service sends [`risingwave_pb::stream_service::InjectBarrierRequest`] with `actors_to_build`
-//! 2. [`barrier_worker::managed_state::DatabaseManagedBarrierState::transform_to_issued`] processes new actors
+//! 2. [`barrier_worker::managed_state::PartialGraphState::transform_to_issued`] processes new actors
 //! 3. [`StreamActorManager::spawn_actor`] creates and starts actor tasks
 //! 4. [`barrier_worker::managed_state::InflightActorState::start`] tracks actor in system
 //!
@@ -73,15 +73,15 @@
 //!
 //! 1. Stream Actors encounter errors and call [`LocalBarrierManager::notify_failure`]
 //! 2. [`LocalBarrierManager`] sends error via `actor_failure_rx`
-//! 3. [`barrier_worker::managed_state::DatabaseManagedBarrierState::poll_next_event`] sends `ActorError` event
-//! 4. [`barrier_worker::LocalBarrierWorker::on_database_failure`] suspends database and reports to Meta Service
-//! 5. Meta Service responds with [`risingwave_pb::stream_service::streaming_control_stream_request::ResetDatabaseRequest`]
-//! 6. [`barrier_worker::LocalBarrierWorker::reset_database`] starts database reset process
-//! 7. [`barrier_worker::managed_state::SuspendedDatabaseState::reset`] cleans up actors and state
+//! 3. [`barrier_worker::managed_state::PartialGraphState::poll_next_event`] sends `ActorError` event
+//! 4. [`barrier_worker::LocalBarrierWorker::on_partial_graph_failure`] suspends partial graph and reports to Meta Service
+//! 5. Meta Service responds with [`risingwave_pb::stream_service::streaming_control_stream_request::ResetPartialGraphRequest`]
+//! 6. [`barrier_worker::LocalBarrierWorker::reset_partial_graph`] starts partial graph reset process
+//! 7. [`barrier_worker::managed_state::SuspendedPartialGraphState::reset`] cleans up actors and state
 
 #[expect(unused_imports, reason = "used for doc-link")]
 use barrier_worker::managed_state::{
-    DatabaseManagedBarrierState, ManagedBarrierState, PartialGraphManagedBarrierState,
+    ManagedBarrierState, PartialGraphManagedBarrierState, PartialGraphState,
 };
 
 use crate::executor::exchange::permit::{Receiver, Sender};
@@ -95,7 +95,8 @@ pub use actor_manager::*;
 pub use barrier_manager::*;
 pub use barrier_worker::*;
 pub use env::*;
-pub use risingwave_common::id::{ActorId, FragmentId, PartialGraphId};
+pub use risingwave_common::id::{ActorId, FragmentId};
+use risingwave_pb::id::PartialGraphId;
 pub use stream_manager::*;
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
@@ -105,8 +106,4 @@ pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
 #[cfg(test)]
-pub(crate) const TEST_DATABASE_ID: risingwave_common::catalog::DatabaseId =
-    risingwave_common::catalog::DatabaseId::new(u32::MAX);
-
-#[cfg(test)]
-pub(crate) const TEST_PARTIAL_GRAPH_ID: PartialGraphId = PartialGraphId::new(u32::MAX);
+pub(crate) const TEST_PARTIAL_GRAPH_ID: PartialGraphId = PartialGraphId::new(233);

@@ -179,7 +179,6 @@ impl RemoteInput {
                 up_down_ids.1,
                 up_down_frag.0,
                 up_down_frag.1,
-                local_barrier_manager.database_id,
                 upstream_partial_graph_id,
                 local_barrier_manager.term_id.clone(),
             )
