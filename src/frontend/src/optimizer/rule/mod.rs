@@ -124,6 +124,8 @@ mod project_eliminate_rule;
 pub use project_eliminate_rule::*;
 mod project_merge_rule;
 pub use project_merge_rule::*;
+mod top_n_project_transpose_rule;
+pub use top_n_project_transpose_rule::*;
 mod pull_up_correlated_predicate_rule;
 pub use pull_up_correlated_predicate_rule::*;
 mod pull_up_correlated_project_value_rule;
@@ -320,6 +322,7 @@ macro_rules! for_all_rules {
             , { SplitNowOrRule }
             , { FilterWithNowToJoinRule }
             , { GenerateSeriesWithNowRule }
+            , { TopNProjectTransposeRule }
             , { TopNOnIndexRule }
             , { TrivialProjectToValuesRule }
             , { UnionInputValuesMergeRule }
