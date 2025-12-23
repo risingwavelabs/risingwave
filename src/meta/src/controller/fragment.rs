@@ -68,9 +68,9 @@ use serde::{Deserialize, Serialize};
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{
-    FragmentRenderMap, NoShuffleEnsemble, PreparedRenderContext, RenderedGraph, WorkerInfo,
-    find_fragment_no_shuffle_dags_detailed, prepare_render_jobs, render_prepared,
-    resolve_streaming_job_definition,
+    FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
+    find_fragment_no_shuffle_dags_detailed, load_fragment_context_for_jobs,
+    render_actor_assignments, resolve_streaming_job_definition,
 };
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
@@ -1330,9 +1330,9 @@ impl CatalogController {
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<FragmentRenderMap> {
-        let prepared = self.prepare_all_actors_dynamic(database_id).await?;
+        let loaded = self.load_fragment_context(database_id).await?;
 
-        if prepared.is_empty() {
+        if loaded.is_empty() {
             return Ok(HashMap::new());
         }
 
@@ -1356,11 +1356,11 @@ impl CatalogController {
             })
             .collect();
 
-        let RenderedGraph { fragments, .. } = render_prepared(
+        let RenderedGraph { fragments, .. } = render_actor_assignments(
             self.env.actor_id_generator(),
             &available_workers,
             adaptive_parallelism_strategy,
-            &prepared,
+            &loaded,
         )?;
 
         tracing::trace!(?fragments, "reload all actors");
@@ -1368,10 +1368,11 @@ impl CatalogController {
         Ok(fragments)
     }
 
-    pub async fn prepare_all_actors_dynamic(
+    /// Async load stage: collects all metadata required for rendering actor assignments.
+    pub async fn load_fragment_context(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<PreparedRenderContext> {
+    ) -> MetaResult<LoadedFragmentContext> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1390,10 +1391,10 @@ impl CatalogController {
         let jobs: HashSet<JobId> = jobs.into_iter().collect();
 
         if jobs.is_empty() {
-            return Ok(PreparedRenderContext::default());
+            return Ok(LoadedFragmentContext::default());
         }
 
-        prepare_render_jobs(&txn, jobs).await
+        load_fragment_context_for_jobs(&txn, jobs).await
     }
 
     #[await_tree::instrument]

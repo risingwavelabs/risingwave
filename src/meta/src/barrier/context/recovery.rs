@@ -38,7 +38,7 @@ use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
-    FragmentRenderMap, PreparedRenderContext, RenderedGraph, WorkerInfo, render_prepared,
+    FragmentRenderMap, LoadedFragmentContext, RenderedGraph, WorkerInfo, render_actor_assignments,
 };
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentId, StreamActor};
@@ -161,26 +161,26 @@ impl GlobalBarrierWorkerContextImpl {
             .collect())
     }
 
-    /// Async prepare: collect rendering context for specified database (or all).
-    async fn prepare_database_info(
+    /// Async load stage: collect all metadata required for rendering actor assignments.
+    async fn load_fragment_context(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<PreparedRenderContext> {
+    ) -> MetaResult<LoadedFragmentContext> {
         self.metadata_manager
             .catalog_controller
-            .prepare_all_actors_dynamic(database_id)
+            .load_fragment_context(database_id)
             .await
     }
 
-    /// Sync render: use current workers and strategy to render prepared context.
-    fn render_database_info(
+    /// Sync render stage: use loaded context and current workers to produce actor assignments.
+    fn render_actor_assignments(
         &self,
         database_id: Option<DatabaseId>,
-        prepared: &PreparedRenderContext,
+        loaded: &LoadedFragmentContext,
         worker_nodes: &ActiveStreamingWorkerNodes,
         adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
     ) -> MetaResult<FragmentRenderMap> {
-        if prepared.is_empty() {
+        if loaded.is_empty() {
             return Ok(HashMap::new());
         }
 
@@ -199,14 +199,14 @@ impl GlobalBarrierWorkerContextImpl {
             })
             .collect();
 
-        let RenderedGraph { fragments, .. } = render_prepared(
+        let RenderedGraph { fragments, .. } = render_actor_assignments(
             self.metadata_manager
                 .catalog_controller
                 .env
                 .actor_id_generator(),
             &available_workers,
             adaptive_parallelism_strategy,
-            prepared,
+            loaded,
         )?;
 
         if let Some(database_id) = database_id {
@@ -497,18 +497,17 @@ impl GlobalBarrierWorkerContextImpl {
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if unreschedulable_jobs.is_empty() {
                         info!("trigger offline scaling");
-                        let prepared =
-                            self.prepare_database_info(None).await.inspect_err(|err| {
-                                warn!(error = %err.as_report(), "prepare actor context failed");
-                            })?;
-                        self.render_database_info(
+                        let loaded = self.load_fragment_context(None).await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "load fragment context failed");
+                        })?;
+                        self.render_actor_assignments(
                             None,
-                            &prepared,
+                            &loaded,
                             &active_streaming_nodes,
                             adaptive_parallelism_strategy,
                         )
                         .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "render actor info failed");
+                            warn!(error = %err.as_report(), "render actor assignments failed");
                         })?
                     } else {
                         bail!(
@@ -524,19 +523,18 @@ impl GlobalBarrierWorkerContextImpl {
                             .catalog_controller
                             .complete_dropped_tables(dropped_table_ids)
                             .await;
-                        let prepared =
-                            self.prepare_database_info(None).await.inspect_err(|err| {
-                                warn!(error = %err.as_report(), "prepare actor context failed");
-                            })?;
+                        let loaded = self.load_fragment_context(None).await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "load fragment context failed");
+                        })?;
                         info = self
-                            .render_database_info(
+                            .render_actor_assignments(
                                 None,
-                                &prepared,
+                                &loaded,
                                 &active_streaming_nodes,
                                 adaptive_parallelism_strategy,
                             )
                             .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "render actor info failed");
+                                warn!(error = %err.as_report(), "render actor assignments failed");
                             })?
                     }
 
@@ -694,22 +692,22 @@ impl GlobalBarrierWorkerContextImpl {
         let active_streaming_nodes =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
-        let prepared = self
-            .prepare_database_info(Some(database_id))
+        let loaded = self
+            .load_fragment_context(Some(database_id))
             .await
             .inspect_err(|err| {
-                warn!(error = %err.as_report(), "prepare actor context failed");
+                warn!(error = %err.as_report(), "load fragment context failed");
             })?;
 
         let mut all_info = self
-            .render_database_info(
+            .render_actor_assignments(
                 Some(database_id),
-                &prepared,
+                &loaded,
                 &active_streaming_nodes,
                 adaptive_parallelism_strategy,
             )
             .inspect_err(|err| {
-                warn!(error = %err.as_report(), "render actor info failed");
+                warn!(error = %err.as_report(), "render actor assignments failed");
             })?;
 
         let mut database_info = all_info

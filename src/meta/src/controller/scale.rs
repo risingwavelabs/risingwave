@@ -133,9 +133,9 @@ where
 
     let jobs: HashSet<JobId> = jobs.into_iter().collect();
 
-    let prepared = prepare_render_jobs(txn, jobs).await?;
+    let loaded = load_fragment_context_for_jobs(txn, jobs).await?;
 
-    if prepared.is_empty() {
+    if loaded.is_empty() {
         return Ok(HashMap::new());
     }
 
@@ -154,11 +154,11 @@ where
         })
         .collect();
 
-    let RenderedGraph { fragments, .. } = render_prepared(
+    let RenderedGraph { fragments, .. } = render_actor_assignments(
         actor_id_counter,
         &available_workers,
         adaptive_parallelism_strategy,
-        &prepared,
+        &loaded,
     )?;
 
     Ok(fragments)
@@ -191,8 +191,11 @@ impl RenderedGraph {
     }
 }
 
+/// Context loaded asynchronously from database, containing all metadata
+/// required to render actor assignments. This separates async I/O from
+/// sync rendering logic.
 #[derive(Default)]
-pub struct PreparedRenderContext {
+pub struct LoadedFragmentContext {
     pub ensembles: Vec<NoShuffleEnsemble>,
     pub fragment_map: HashMap<FragmentId, fragment::Model>,
     pub job_map: HashMap<JobId, streaming_job::Model>,
@@ -202,7 +205,7 @@ pub struct PreparedRenderContext {
     pub fragment_splits: HashMap<FragmentId, Vec<SplitImpl>>,
 }
 
-impl PreparedRenderContext {
+impl LoadedFragmentContext {
     pub fn is_empty(&self) -> bool {
         self.ensembles.is_empty()
     }
@@ -222,31 +225,31 @@ pub async fn render_fragments<C>(
 where
     C: ConnectionTrait,
 {
-    let prepared = prepare_render_fragments(txn, ensembles).await?;
+    let loaded = load_fragment_context(txn, ensembles).await?;
 
-    if prepared.is_empty() {
+    if loaded.is_empty() {
         return Ok(RenderedGraph::empty());
     }
 
-    render_prepared(
+    render_actor_assignments(
         actor_id_counter,
         &workers,
         adaptive_parallelism_strategy,
-        &prepared,
+        &loaded,
     )
 }
 
-/// Async prepare stage for fragment-scoped rendering. It resolves all metadata required to later
-/// render with arbitrary worker sets.
-pub async fn prepare_render_fragments<C>(
+/// Async load stage for fragment-scoped rendering. It resolves all metadata required to later
+/// render actor assignments with arbitrary worker sets.
+pub async fn load_fragment_context<C>(
     txn: &C,
     ensembles: Vec<NoShuffleEnsemble>,
-) -> MetaResult<PreparedRenderContext>
+) -> MetaResult<LoadedFragmentContext>
 where
     C: ConnectionTrait,
 {
     if ensembles.is_empty() {
-        return Ok(PreparedRenderContext::default());
+        return Ok(LoadedFragmentContext::default());
     }
 
     let required_fragment_ids: HashSet<_> = ensembles
@@ -283,7 +286,7 @@ where
         .collect();
 
     if job_ids.is_empty() {
-        return Ok(PreparedRenderContext::default());
+        return Ok(LoadedFragmentContext::default());
     }
 
     let jobs: HashMap<_, _> = StreamingJob::find()
@@ -300,7 +303,7 @@ where
         return Err(anyhow!("streaming jobs {:?} not found", missing).into());
     }
 
-    build_prepared_context(txn, ensembles, fragment_map, jobs).await
+    build_loaded_context(txn, ensembles, fragment_map, jobs).await
 }
 
 /// Job-scoped rendering entry point that walks every no-shuffle root belonging to the
@@ -315,31 +318,31 @@ pub async fn render_jobs<C>(
 where
     C: ConnectionTrait,
 {
-    let prepared = prepare_render_jobs(txn, job_ids).await?;
+    let loaded = load_fragment_context_for_jobs(txn, job_ids).await?;
 
-    if prepared.is_empty() {
+    if loaded.is_empty() {
         return Ok(RenderedGraph::empty());
     }
 
-    render_prepared(
+    render_actor_assignments(
         actor_id_counter,
         &workers,
         adaptive_parallelism_strategy,
-        &prepared,
+        &loaded,
     )
 }
 
-/// Async prepare stage for job-scoped rendering. It collects all no-shuffle ensembles and the
-/// metadata required to render them later with a provided worker set.
-pub async fn prepare_render_jobs<C>(
+/// Async load stage for job-scoped rendering. It collects all no-shuffle ensembles and the
+/// metadata required to render actor assignments later with a provided worker set.
+pub async fn load_fragment_context_for_jobs<C>(
     txn: &C,
     job_ids: HashSet<JobId>,
-) -> MetaResult<PreparedRenderContext>
+) -> MetaResult<LoadedFragmentContext>
 where
     C: ConnectionTrait,
 {
     if job_ids.is_empty() {
-        return Ok(PreparedRenderContext::default());
+        return Ok(LoadedFragmentContext::default());
     }
 
     let excluded_fragments_query = FragmentRelation::find()
@@ -395,31 +398,33 @@ where
         .map(|job| (job.job_id, job))
         .collect();
 
-    build_prepared_context(txn, ensembles, fragment_map, jobs).await
+    build_loaded_context(txn, ensembles, fragment_map, jobs).await
 }
 
-pub(crate) fn render_prepared(
+/// Sync render stage: uses loaded fragment context and current worker info
+/// to produce actor-to-worker assignments and vnode bitmaps.
+pub(crate) fn render_actor_assignments(
     actor_id_counter: &AtomicU32,
     worker_map: &BTreeMap<WorkerId, WorkerInfo>,
     adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
-    prepared: &PreparedRenderContext,
+    loaded: &LoadedFragmentContext,
 ) -> MetaResult<RenderedGraph> {
-    if prepared.is_empty() {
+    if loaded.is_empty() {
         return Ok(RenderedGraph::empty());
     }
 
     let render_context = RenderActorsContext {
-        fragment_source_ids: &prepared.fragment_source_ids,
-        fragment_splits: &prepared.fragment_splits,
-        streaming_job_databases: &prepared.streaming_job_databases,
-        database_map: &prepared.database_map,
+        fragment_source_ids: &loaded.fragment_source_ids,
+        fragment_splits: &loaded.fragment_splits,
+        streaming_job_databases: &loaded.streaming_job_databases,
+        database_map: &loaded.database_map,
     };
 
     let fragments = render_actors(
         actor_id_counter,
-        &prepared.ensembles,
-        &prepared.fragment_map,
-        &prepared.job_map,
+        &loaded.ensembles,
+        &loaded.fragment_map,
+        &loaded.job_map,
         worker_map,
         adaptive_parallelism_strategy,
         render_context,
@@ -427,21 +432,21 @@ pub(crate) fn render_prepared(
 
     Ok(RenderedGraph {
         fragments,
-        ensembles: prepared.ensembles.clone(),
+        ensembles: loaded.ensembles.clone(),
     })
 }
 
-async fn build_prepared_context<C>(
+async fn build_loaded_context<C>(
     txn: &C,
     ensembles: Vec<NoShuffleEnsemble>,
     fragment_map: HashMap<FragmentId, fragment::Model>,
     job_map: HashMap<JobId, streaming_job::Model>,
-) -> MetaResult<PreparedRenderContext>
+) -> MetaResult<LoadedFragmentContext>
 where
     C: ConnectionTrait,
 {
     if ensembles.is_empty() {
-        return Ok(PreparedRenderContext::default());
+        return Ok(LoadedFragmentContext::default());
     }
 
     #[cfg(debug_assertions)]
@@ -477,7 +482,7 @@ where
         .map(|db| (db.database_id, db))
         .collect();
 
-    Ok(PreparedRenderContext {
+    Ok(LoadedFragmentContext {
         ensembles,
         fragment_map,
         job_map,
