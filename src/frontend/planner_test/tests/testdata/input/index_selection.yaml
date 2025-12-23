@@ -570,3 +570,16 @@
     select * from t1 where a = 1 and b = 2 order by c desc limit 10;
   expected_outputs:
     - batch_plan
+- name: topn index selection for scan with output column idx
+  sql: |
+    create table t (c int, b int, a int);
+    create index idx on t(a, b desc, c desc);
+    select b from t where a = 1 order by b desc, c desc limit 1;
+  expected_outputs:
+    - batch_plan
+- name: topn index selection for scan with output column idx
+  sql: |
+    create table t (c int, b int, a int, primary key (a, b, c));
+    select b from t where a = 1 order by b, c limit 1;
+  expected_outputs:
+    - batch_plan
