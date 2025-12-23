@@ -414,9 +414,14 @@ mod tests {
         SinglePhaseCommitCoordinator, SinkCommitCoordinator, SinkError, SinkParam,
         TwoPhaseCommitCoordinator,
     };
+    use risingwave_meta_model::SinkSchemachange;
     use risingwave_pb::connector_service::SinkMetadata;
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
-    use risingwave_pb::stream_plan::PbSinkSchemaChange;
+    use risingwave_pb::data::PbDataType;
+    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_pb::plan_common::PbField;
+    use risingwave_pb::stream_plan::sink_schema_change::Op as SinkSchemachangeOp;
+    use risingwave_pb::stream_plan::{PbSinkAddColumnsOp, PbSinkSchemaChange};
     use risingwave_rpc_client::CoordinatorStreamHandle;
     use sea_orm::{ConnectionTrait, Database, DatabaseConnection};
     use tokio::sync::mpsc::unbounded_channel;
@@ -1397,16 +1402,18 @@ mod tests {
     }
 
     struct MockTwoPhaseCoordinator<
-        P: FnMut(u64, Vec<SinkMetadata>) -> Result<Vec<u8>, SinkError>,
-        C: FnMut(u64, Vec<u8>) -> Result<(), SinkError>,
+        P: FnMut(u64, Vec<SinkMetadata>, Option<PbSinkSchemaChange>) -> Result<Vec<u8>, SinkError>,
+        C: FnMut(u64, Vec<u8>, Option<PbSinkSchemaChange>) -> Result<(), SinkError>,
     > {
         pre_commit: P,
         commit: C,
     }
 
     impl<
-        P: FnMut(u64, Vec<SinkMetadata>) -> Result<Vec<u8>, SinkError> + Send + 'static,
-        C: FnMut(u64, Vec<u8>) -> Result<(), SinkError> + Send + 'static,
+        P: FnMut(u64, Vec<SinkMetadata>, Option<PbSinkSchemaChange>) -> Result<Vec<u8>, SinkError>
+            + Send
+            + 'static,
+        C: FnMut(u64, Vec<u8>, Option<PbSinkSchemaChange>) -> Result<(), SinkError> + Send + 'static,
     > MockTwoPhaseCoordinator<P, C>
     {
         fn new_coordinator(pre_commit: P, commit: C) -> SinkCommitCoordinator {
@@ -1419,8 +1426,10 @@ mod tests {
 
     #[async_trait]
     impl<
-        P: FnMut(u64, Vec<SinkMetadata>) -> Result<Vec<u8>, SinkError> + Send + 'static,
-        C: FnMut(u64, Vec<u8>) -> Result<(), SinkError> + Send + 'static,
+        P: FnMut(u64, Vec<SinkMetadata>, Option<PbSinkSchemaChange>) -> Result<Vec<u8>, SinkError>
+            + Send
+            + 'static,
+        C: FnMut(u64, Vec<u8>, Option<PbSinkSchemaChange>) -> Result<(), SinkError> + Send + 'static,
     > TwoPhaseCommitCoordinator for MockTwoPhaseCoordinator<P, C>
     {
         async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
@@ -1431,18 +1440,18 @@ mod tests {
             &mut self,
             epoch: u64,
             metadata: Vec<SinkMetadata>,
-            _schema_change: Option<PbSinkSchemaChange>,
+            schema_change: Option<PbSinkSchemaChange>,
         ) -> risingwave_connector::sink::Result<Vec<u8>> {
-            (self.pre_commit)(epoch, metadata)
+            (self.pre_commit)(epoch, metadata, schema_change)
         }
 
         async fn commit(
             &mut self,
             epoch: u64,
             commit_metadata: Vec<u8>,
-            _schema_change: Option<PbSinkSchemaChange>,
+            schema_change: Option<PbSinkSchemaChange>,
         ) -> risingwave_connector::sink::Result<()> {
-            (self.commit)(epoch, commit_metadata)
+            (self.commit)(epoch, commit_metadata, schema_change)
         }
 
         async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) {
@@ -1458,6 +1467,7 @@ mod tests {
                 epoch i64 NOT NULL,
                 sink_state STRING NOT NULL,
                 metadata BLOB NOT NULL,
+                schema_change BLOB,
                 PRIMARY KEY (sink_id, epoch)
             )
         ";
@@ -1470,8 +1480,11 @@ mod tests {
         db
     }
 
-    async fn list_rows(db: &DatabaseConnection) -> Vec<(i32, i64, String, Vec<u8>)> {
-        let sql = "SELECT sink_id, epoch, sink_state, metadata FROM pending_sink_state";
+    async fn list_rows(
+        db: &DatabaseConnection,
+    ) -> Vec<(i32, i64, String, Vec<u8>, Option<PbSinkSchemaChange>)> {
+        let sql =
+            "SELECT sink_id, epoch, sink_state, metadata, schema_change FROM pending_sink_state";
         let rows = db
             .query_all(sea_orm::Statement::from_string(
                 db.get_database_backend(),
@@ -1486,6 +1499,9 @@ mod tests {
                     row.try_get("", "epoch").unwrap(),
                     row.try_get("", "sink_state").unwrap(),
                     row.try_get("", "metadata").unwrap(),
+                    row.try_get::<Option<SinkSchemachange>>("", "schema_change")
+                        .unwrap()
+                        .map(|v| v.to_protobuf()),
                 )
             })
             .collect()
@@ -1565,10 +1581,10 @@ mod tests {
                                 param.clone(),
                                 new_writer_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
-                                    move |_epoch, _metadata_list| {
+                                    move |_epoch, _metadata_list, _schema_change| {
                                         Err(SinkError::Coordinator(anyhow!("failed to pre commit")))
                                     },
-                                    move |_epoch, _commit_metadata| unreachable!(),
+                                    move |_epoch, _commit_metadata, _schema_change| unreachable!(),
                                 ),
                                 subscriber.clone(),
                             )
@@ -1680,7 +1696,7 @@ mod tests {
                                 param.clone(),
                                 new_writer_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
-                                    move |_epoch, metadata_list| {
+                                    move |_epoch, metadata_list, _schema_change| {
                                         let metadata =
                                             metadata_list.into_iter().exactly_one().unwrap();
                                         Ok(match metadata.metadata {
@@ -1690,7 +1706,7 @@ mod tests {
                                             _ => unreachable!(),
                                         })
                                     },
-                                    move |_epoch, commit_metadata| {
+                                    move |_epoch, commit_metadata, _schema_change| {
                                         assert_eq!(commit_metadata, metadata);
                                         Ok(())
                                     },
@@ -1831,7 +1847,7 @@ mod tests {
                                 param.clone(),
                                 new_writer_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
-                                    move |_epoch, metadata_list| {
+                                    move |_epoch, metadata_list, _schema_change| {
                                         let metadata =
                                             metadata_list.into_iter().exactly_one().unwrap();
                                         Ok(match metadata.metadata {
@@ -1841,7 +1857,7 @@ mod tests {
                                             _ => unreachable!(),
                                         })
                                     },
-                                    move |_epoch, commit_metadata| {
+                                    move |_epoch, commit_metadata, _schema_change| {
                                         assert_eq!(commit_metadata, metadata);
                                         if commit_attempt
                                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
@@ -1978,7 +1994,7 @@ mod tests {
                                 param.clone(),
                                 new_writer_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
-                                    move |_epoch, metadata_list| {
+                                    move |_epoch, metadata_list, _schema_change| {
                                         let metadata =
                                             metadata_list.into_iter().exactly_one().unwrap();
                                         Ok(match metadata.metadata {
@@ -1988,7 +2004,7 @@ mod tests {
                                             _ => unreachable!(),
                                         })
                                     },
-                                    move |_epoch, commit_metadata| {
+                                    move |_epoch, commit_metadata, _schema_change| {
                                         assert_eq!(commit_metadata, metadata);
                                         Ok(())
                                     },
@@ -2061,7 +2077,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_flush_when_reschedule() {
+    async fn test_flush_schema_change_when_reschedule() {
         let db = prepare_db_backend().await;
 
         let param = SinkParam {
@@ -2090,6 +2106,24 @@ mod tests {
         let vnode = build_bitmap(&all_vnode);
 
         let metadata = vec![1u8, 2u8];
+        let schema_change = PbSinkSchemaChange {
+            original_schema: vec![PbField {
+                data_type: Some(PbDataType {
+                    type_name: PbTypeName::Int32 as i32,
+                    ..Default::default()
+                }),
+                name: "col_v1".into(),
+            }],
+            op: Some(SinkSchemachangeOp::AddColumns(PbSinkAddColumnsOp {
+                fields: vec![PbField {
+                    data_type: Some(PbDataType {
+                        type_name: PbTypeName::Varchar as i32,
+                        ..Default::default()
+                    }),
+                    name: "new_col".into(),
+                }],
+            })),
+        };
 
         let sender = Arc::new(tokio::sync::Mutex::new(None));
         let mock_subscriber: SinkCommittedEpochSubscriber = {
@@ -2110,9 +2144,12 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
+                let schema_change = schema_change.clone();
                 let db = db.clone();
                 move |param, new_writer_rx| {
                     let metadata = metadata.clone();
+                    let schema_change_for_pre_commit = schema_change.clone();
+                    let schema_change_for_commit = schema_change.clone();
                     let expected_param = expected_param.clone();
                     let db = db.clone();
                     tokio::spawn({
@@ -2124,7 +2161,11 @@ mod tests {
                                 param.clone(),
                                 new_writer_rx,
                                 MockTwoPhaseCoordinator::new_coordinator(
-                                    move |_epoch, metadata_list| {
+                                    move |_epoch, metadata_list, schema_change| {
+                                        assert_eq!(
+                                            schema_change,
+                                            Some(schema_change_for_pre_commit.clone())
+                                        );
                                         let metadata =
                                             metadata_list.into_iter().exactly_one().unwrap();
                                         Ok(match metadata.metadata {
@@ -2134,7 +2175,11 @@ mod tests {
                                             _ => unreachable!(),
                                         })
                                     },
-                                    move |_epoch, commit_metadata| {
+                                    move |_epoch, commit_metadata, schema_change| {
+                                        assert_eq!(
+                                            schema_change,
+                                            Some(schema_change_for_commit.clone())
+                                        );
                                         assert_eq!(commit_metadata, metadata);
                                         Ok(())
                                     },
@@ -2173,7 +2218,7 @@ mod tests {
                         metadata: metadata.clone(),
                     })),
                 },
-                None,
+                Some(schema_change.clone()),
             )
             .await
             .unwrap();
@@ -2183,6 +2228,7 @@ mod tests {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].1, epoch1 as i64);
             assert_eq!(rows[0].2, "PENDING");
+            assert_eq!(rows[0].4, Some(schema_change.clone()));
         }
 
         let mut build_client2_future = pin!(build_client(vnode.clone()));
@@ -2214,6 +2260,7 @@ mod tests {
             assert_eq!(rows.len(), 1);
             assert_eq!(rows[0].1, epoch1 as i64);
             assert_eq!(rows[0].2, "COMMITTED");
+            assert_eq!(rows[0].4, Some(schema_change.clone()));
         }
     }
 }
