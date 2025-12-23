@@ -28,7 +28,6 @@ use crate::hummock::{BlockMeta, MemoryLimiter};
 const FOOTER_XOR8: u8 = 254;
 const FOOTER_XOR16: u8 = 255;
 const FOOTER_BLOCKED_XOR16: u8 = 253;
-const MAX_KV_COUNT_FOR_XOR16: usize = 256 * 1024;
 
 pub struct Xor16FilterBuilder {
     key_hash_entries: Vec<u64>,
@@ -161,10 +160,6 @@ pub struct BlockedXor16FilterBuilder {
 const BLOCK_FILTER_CAPACITY: usize = 16 * 1024; // 16KB means 2K key count.
 
 impl BlockedXor16FilterBuilder {
-    pub fn is_kv_count_too_large(kv_count: usize) -> bool {
-        kv_count > MAX_KV_COUNT_FOR_XOR16
-    }
-
     pub fn new(capacity: usize) -> Self {
         Self {
             current: Xor16FilterBuilder::new(BLOCK_FILTER_CAPACITY),
