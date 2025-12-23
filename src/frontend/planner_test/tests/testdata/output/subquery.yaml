@@ -550,8 +550,8 @@
       └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number] }
         ├─BatchExchange { order: [], dist: HashShard(integers.i) }
         │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
-        └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-          └─BatchProject { exprs: [integers.i, row_number] }
+        └─BatchProject { exprs: [integers.i, row_number] }
+          └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
             └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
               └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
                 └─BatchSort { order: [integers.i ASC, integers.i ASC] }
@@ -588,8 +588,8 @@
             │   │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
             │   └─BatchExchange { order: [], dist: Single }
             │     └─BatchScan { table: integers, columns: [], distribution: SomeShard }
-            └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-              └─BatchProject { exprs: [integers.i, row_number] }
+            └─BatchProject { exprs: [integers.i, row_number] }
+              └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
                 └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
                   └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
                     └─BatchSort { order: [integers.i ASC, integers.i ASC] }
@@ -610,8 +610,8 @@
       └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, sum] }
         ├─BatchExchange { order: [], dist: HashShard(integers.i) }
         │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
-        └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-          └─BatchProject { exprs: [integers.i, sum] }
+        └─BatchProject { exprs: [integers.i, sum] }
+          └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
             └─BatchOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
               └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
                 └─BatchSort { order: [integers.i ASC, integers.i ASC] }
@@ -642,8 +642,8 @@
       └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, sum] }
         ├─BatchExchange { order: [], dist: HashShard(integers.i) }
         │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
-        └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-          └─BatchProject { exprs: [integers.i, sum] }
+        └─BatchProject { exprs: [integers.i, sum] }
+          └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
             └─BatchOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
               └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
                 └─BatchSort { order: [integers.i ASC, integers.i ASC] }

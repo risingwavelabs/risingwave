@@ -22,7 +22,7 @@ use std::collections::{BTreeMap, HashSet};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
 use super::prelude::{PlanRef, *};
-use crate::optimizer::plan_node::{LogicalScan, LogicalTopN, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalProject, LogicalScan, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 
 pub struct TopNOnIndexRule {}
@@ -54,20 +54,66 @@ impl TopNOnIndexRule {
         logical_scan: LogicalScan,
         required_order: &Order,
     ) -> Option<PlanRef> {
-        let prefix = Self::build_prefix_from_scan_predicates(&logical_scan);
+        let output_len = logical_scan.output_col_idx().len();
+        let scan_for_index = if logical_scan.output_col_idx() == logical_scan.required_col_idx() {
+            logical_scan.clone()
+        } else {
+            // `required_col_idx` is built by appending predicate columns to `output_col_idx`,
+            // so `output_col_idx` is always a prefix of `required_col_idx`.
+            logical_scan.clone_with_output_indices(logical_scan.required_col_idx().clone())
+        };
+        let scan_predicates = scan_for_index.predicate();
+        let output_col_map = scan_for_index
+            .output_col_idx()
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(id, col)| (col, id))
+            .collect::<BTreeMap<_, _>>();
+        let input_refs = scan_predicates.get_eq_const_input_refs();
+        let prefix = input_refs
+            .into_iter()
+            .flat_map(|input_ref| {
+                output_col_map
+                    .get(&input_ref.index)
+                    .into_iter()
+                    .flat_map(|&output_idx| {
+                        [
+                            ColumnOrder {
+                                column_index: output_idx,
+                                order_type: OrderType::ascending_nulls_first(),
+                            },
+                            ColumnOrder {
+                                column_index: output_idx,
+                                order_type: OrderType::ascending_nulls_last(),
+                            },
+                            ColumnOrder {
+                                column_index: output_idx,
+                                order_type: OrderType::descending_nulls_first(),
+                            },
+                            ColumnOrder {
+                                column_index: output_idx,
+                                order_type: OrderType::descending_nulls_last(),
+                            },
+                        ]
+                    })
+            })
+            .collect();
         let order_satisfied_index =
-            logical_scan.indexes_satisfy_order_with_prefix(required_order, &prefix);
+            scan_for_index.indexes_satisfy_order_with_prefix(required_order, &prefix);
         let mut longest_prefix: Option<Order> = None;
         let mut selected_index = None;
         for (index, prefix) in order_satisfied_index {
             if prefix.len() >= longest_prefix.as_ref().map_or(0, |p| p.len()) {
                 longest_prefix = Some(prefix.clone());
-                if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
-                    selected_index = Some(
-                        logical_top_n
-                            .clone_with_input_and_prefix(index_scan.into(), prefix)
-                            .into(),
-                    );
+                if let Some(index_scan) = scan_for_index.to_index_scan_if_index_covered(index) {
+                    let top_n =
+                        logical_top_n.clone_with_input_and_prefix(index_scan.into(), prefix);
+                    selected_index = Some(if scan_for_index.output_col_idx().len() == output_len {
+                        top_n.into()
+                    } else {
+                        LogicalProject::with_out_col_idx(top_n.into(), 0..output_len).into()
+                    });
                 }
             }
         }
@@ -80,16 +126,53 @@ impl TopNOnIndexRule {
         logical_scan: LogicalScan,
         order: &Order,
     ) -> Option<PlanRef> {
-        let prefix = Self::build_prefix_from_scan_predicates(&logical_scan);
-        let output_col_map = logical_scan
+        let output_len = logical_scan.output_col_idx().len();
+        let scan_for_pk = if logical_scan.output_col_idx() == logical_scan.required_col_idx() {
+            logical_scan.clone()
+        } else {
+            // `required_col_idx` is built by appending predicate columns to `output_col_idx`,
+            // so `output_col_idx` is always a prefix of `required_col_idx`.
+            logical_scan.clone_with_output_indices(logical_scan.required_col_idx().clone())
+        };
+        let scan_predicates = scan_for_pk.predicate();
+        let output_col_map = scan_for_pk
             .output_col_idx()
             .iter()
             .cloned()
             .enumerate()
             .map(|(id, col)| (col, id))
             .collect::<BTreeMap<_, _>>();
+        let input_refs = scan_predicates.get_eq_const_input_refs();
+        let prefix: HashSet<ColumnOrder> = input_refs
+            .into_iter()
+            .flat_map(|input_ref| {
+                output_col_map
+                    .get(&input_ref.index)
+                    .into_iter()
+                    .flat_map(|&output_idx| {
+                        [
+                            ColumnOrder {
+                                column_index: output_idx,
+                                order_type: OrderType::ascending_nulls_first(),
+                            },
+                            ColumnOrder {
+                                column_index: output_idx,
+                                order_type: OrderType::ascending_nulls_last(),
+                            },
+                            ColumnOrder {
+                                column_index: output_idx,
+                                order_type: OrderType::descending_nulls_first(),
+                            },
+                            ColumnOrder {
+                                column_index: output_idx,
+                                order_type: OrderType::descending_nulls_last(),
+                            },
+                        ]
+                    })
+            })
+            .collect();
         let unmatched_idx = output_col_map.len();
-        let primary_key = logical_scan.primary_key();
+        let primary_key = scan_for_pk.primary_key();
         let primary_key_order = Order {
             column_orders: primary_key
                 .iter()
@@ -125,38 +208,12 @@ impl TopNOnIndexRule {
         if !remaining_orders.satisfies(order) {
             return None;
         }
-        Some(
-            logical_top_n
-                .clone_with_input_and_prefix(logical_scan.into(), fixed_prefix)
-                .into(),
-        )
-    }
-
-    fn build_prefix_from_scan_predicates(logical_scan: &LogicalScan) -> HashSet<ColumnOrder> {
-        let scan_predicates = logical_scan.predicate();
-        let input_refs = scan_predicates.get_eq_const_input_refs();
-        input_refs
-            .into_iter()
-            .flat_map(|input_ref| {
-                [
-                    ColumnOrder {
-                        column_index: input_ref.index,
-                        order_type: OrderType::ascending_nulls_first(),
-                    },
-                    ColumnOrder {
-                        column_index: input_ref.index,
-                        order_type: OrderType::ascending_nulls_last(),
-                    },
-                    ColumnOrder {
-                        column_index: input_ref.index,
-                        order_type: OrderType::descending_nulls_first(),
-                    },
-                    ColumnOrder {
-                        column_index: input_ref.index,
-                        order_type: OrderType::descending_nulls_last(),
-                    },
-                ]
-            })
-            .collect()
+        let top_n =
+            logical_top_n.clone_with_input_and_prefix(scan_for_pk.clone().into(), fixed_prefix);
+        Some(if scan_for_pk.output_col_idx().len() == output_len {
+            top_n.into()
+        } else {
+            LogicalProject::with_out_col_idx(top_n.into(), 0..output_len).into()
+        })
     }
 }
