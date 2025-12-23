@@ -29,6 +29,15 @@ use crate::monitor::CompactorMetrics;
 
 thread_local!(static LOCAL_METRICS: RefCell<HashMap<u32,LocalStoreMetrics>> = RefCell::new(HashMap::default()));
 
+#[cfg(test)]
+pub(crate) fn flush_local_metrics_for_test() {
+    LOCAL_METRICS.with_borrow_mut(|local_metrics| {
+        for metrics in local_metrics.values_mut() {
+            metrics.flush();
+        }
+    });
+}
+
 #[derive(Default, Debug)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
