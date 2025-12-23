@@ -155,6 +155,8 @@ impl ZeroHeapSize for rust_decimal::Decimal {}
 
 impl ZeroHeapSize for ethnum::I256 {}
 
+impl ZeroHeapSize for ethnum::U256 {}
+
 impl<T> ZeroHeapSize for PhantomData<T> {}
 
 /// The size of the collection.

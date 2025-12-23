@@ -26,6 +26,7 @@ use risingwave_expr::{ExprError, Result, function};
 #[function("equal(decimal, decimal) -> boolean")]
 #[function("equal(*float, *float) -> boolean")]
 #[function("equal(int256, int256) -> boolean")]
+#[function("equal(uint256, uint256) -> boolean")]
 #[function("equal(serial, serial) -> boolean")]
 #[function("equal(date, date) -> boolean")]
 #[function("equal(time, time) -> boolean")]
@@ -55,6 +56,7 @@ where
 #[function("not_equal(decimal, decimal) -> boolean")]
 #[function("not_equal(*float, *float) -> boolean")]
 #[function("not_equal(int256, int256) -> boolean")]
+#[function("not_equal(uint256, uint256) -> boolean")]
 #[function("not_equal(serial, serial) -> boolean")]
 #[function("not_equal(date, date) -> boolean")]
 #[function("not_equal(time, time) -> boolean")]
@@ -88,6 +90,7 @@ where
 #[function("greater_than_or_equal(*float, *float) -> boolean")]
 #[function("greater_than_or_equal(serial, serial) -> boolean")]
 #[function("greater_than_or_equal(int256, int256) -> boolean")]
+#[function("greater_than_or_equal(uint256, uint256) -> boolean")]
 #[function("greater_than_or_equal(date, date) -> boolean")]
 #[function("greater_than_or_equal(time, time) -> boolean")]
 #[function("greater_than_or_equal(interval, interval) -> boolean")]
@@ -116,6 +119,7 @@ where
 #[function("greater_than(*float, *float) -> boolean")]
 #[function("greater_than(serial, serial) -> boolean")]
 #[function("greater_than(int256, int256) -> boolean")]
+#[function("greater_than(uint256, uint256) -> boolean")]
 #[function("greater_than(date, date) -> boolean")]
 #[function("greater_than(time, time) -> boolean")]
 #[function("greater_than(interval, interval) -> boolean")]
@@ -147,6 +151,7 @@ where
 #[function("less_than_or_equal(*float, *float) -> boolean")]
 #[function("less_than_or_equal(serial, serial) -> boolean")]
 #[function("less_than_or_equal(int256, int256) -> boolean")]
+#[function("less_than_or_equal(uint256, uint256) -> boolean")]
 #[function("less_than_or_equal(date, date) -> boolean")]
 #[function("less_than_or_equal(time, time) -> boolean")]
 #[function("less_than_or_equal(interval, interval) -> boolean")]
@@ -175,6 +180,7 @@ where
 #[function("less_than(*float, *float) -> boolean")]
 #[function("less_than(serial, serial) -> boolean")]
 #[function("less_than(int256, int256) -> boolean")]
+#[function("less_than(uint256, uint256) -> boolean")]
 #[function("less_than(date, date) -> boolean")]
 #[function("less_than(time, time) -> boolean")]
 #[function("less_than(interval, interval) -> boolean")]
@@ -300,6 +306,7 @@ fn is_not_null<T>(v: Option<T>) -> bool {
 #[function("greatest(...) -> *float")]
 #[function("greatest(...) -> serial")]
 #[function("greatest(...) -> int256")]
+#[function("greatest(...) -> uint256")]
 #[function("greatest(...) -> date")]
 #[function("greatest(...) -> time")]
 #[function("greatest(...) -> interval")]
@@ -330,6 +337,7 @@ where
 #[function("least(...) -> *float")]
 #[function("least(...) -> serial")]
 #[function("least(...) -> int256")]
+#[function("least(...) -> uint256")]
 #[function("least(...) -> date")]
 #[function("least(...) -> time")]
 #[function("least(...) -> interval")]
@@ -777,5 +785,69 @@ mod tests {
         F: Fn(Decimal, Decimal) -> <A as Array>::OwnedItem,
     {
         test_binary_inner::<DecimalArray, DecimalArray, _, _>(arithmetic(f), kind).await
+    }
+
+    #[test]
+    fn test_uint256_greatest_least() {
+        use std::str::FromStr;
+
+        use risingwave_common::types::{Int256, ScalarRefImpl, UInt256};
+
+        // Test uint256 greatest function
+        let values = [
+            UInt256::from_str("0").unwrap(),
+            UInt256::from_str("123456789012345678901234567890").unwrap(),
+            UInt256::from_str(
+                "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+            )
+            .unwrap(),
+        ]; // max uint256
+
+        let expected_max = UInt256::from_str(
+            "115792089237316195423570985008687907853269984665640564039457584007913129639935",
+        )
+        .unwrap();
+        let expected_min = UInt256::from_str("0").unwrap();
+
+        // Create a mock row-like structure for testing - use a slice which implements Row
+        let test_row: Vec<Option<ScalarRefImpl<'_>>> = values
+            .iter()
+            .map(|v| Some(v.as_scalar_ref().into()))
+            .collect();
+
+        // Test greatest
+        let result_max = general_variadic_greatest::<UInt256>(&test_row[..]).unwrap();
+        assert_eq!(result_max, expected_max);
+
+        // Test least
+        let result_min = general_variadic_least::<UInt256>(&test_row[..]).unwrap();
+        assert_eq!(result_min, expected_min);
+
+        // Test int256 as well for completeness
+        let int256_values = [
+            Int256::from_str("-123456789012345678901234567890").unwrap(),
+            Int256::from_str("0").unwrap(),
+            Int256::from_str(
+                "57896044618658097711785492504343953926634992332820282019728792003956564819967",
+            )
+            .unwrap(),
+        ]; // max int256
+
+        let expected_int256_max = Int256::from_str(
+            "57896044618658097711785492504343953926634992332820282019728792003956564819967",
+        )
+        .unwrap();
+        let expected_int256_min = Int256::from_str("-123456789012345678901234567890").unwrap();
+
+        let test_int256_row: Vec<Option<ScalarRefImpl<'_>>> = int256_values
+            .iter()
+            .map(|v| Some(v.as_scalar_ref().into()))
+            .collect();
+
+        let result_int256_max = general_variadic_greatest::<Int256>(&test_int256_row[..]).unwrap();
+        assert_eq!(result_int256_max, expected_int256_max);
+
+        let result_int256_min = general_variadic_least::<Int256>(&test_int256_row[..]).unwrap();
+        assert_eq!(result_int256_min, expected_int256_min);
     }
 }

@@ -21,7 +21,7 @@ use risingwave_common::array::{DataChunk, ListRef, ListValue, StructRef, StructV
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, ToText,
+    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, ToText, UInt256,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
@@ -33,6 +33,7 @@ use thiserror_ext::AsReport;
 #[function("cast(varchar) -> decimal")]
 #[function("cast(varchar) -> *float")]
 #[function("cast(varchar) -> int256")]
+#[function("cast(varchar) -> uint256")]
 #[function("cast(varchar) -> date")]
 #[function("cast(varchar) -> time")]
 #[function("cast(varchar) -> timestamp")]
@@ -62,6 +63,14 @@ pub fn pgwire_recv(elem: &[u8]) -> Result<i64> {
 pub fn to_int256<T: TryInto<Int256>>(elem: T) -> Result<Int256> {
     elem.try_into()
         .map_err(|_| ExprError::CastOutOfRange("int256"))
+}
+
+#[function("cast(int2) -> uint256")]
+#[function("cast(int4) -> uint256")]
+#[function("cast(int8) -> uint256")]
+pub fn to_uint256<T: TryInto<UInt256>>(elem: T) -> Result<UInt256> {
+    elem.try_into()
+        .map_err(|_| ExprError::CastOutOfRange("uint256"))
 }
 
 #[function("cast(jsonb) -> boolean")]
@@ -101,6 +110,8 @@ pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
 #[function("cast(decimal) -> int8")]
 #[function("cast(decimal) -> float4")]
 #[function("cast(decimal) -> float8")]
+#[function("cast(decimal) -> int256")]
+#[function("cast(decimal) -> uint256")]
 #[function("cast(float4) -> decimal")]
 #[function("cast(float8) -> decimal")]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
@@ -132,6 +143,7 @@ where
 #[function("cast(interval) -> time")]
 #[function("cast(varchar) -> varchar")]
 #[function("cast(int256) -> float8")]
+#[function("cast(uint256) -> float8")]
 pub fn cast<T1, T2>(elem: T1) -> T2
 where
     T1: Into<T2>,
@@ -155,6 +167,7 @@ pub fn int_to_bool(input: i32) -> bool {
 #[function("cast(decimal) -> varchar")]
 #[function("cast(*float) -> varchar")]
 #[function("cast(int256) -> varchar")]
+#[function("cast(uint256) -> varchar")]
 #[function("cast(time) -> varchar")]
 #[function("cast(date) -> varchar")]
 #[function("cast(interval) -> varchar")]
