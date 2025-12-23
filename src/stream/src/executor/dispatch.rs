@@ -668,11 +668,30 @@ impl StreamConsumer for DispatchExecutorForSyncLogStore {
                     tokio::select! {
                         biased;
 
-                        _ = async {
-                            count += 1;
-                            tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-                        } => {}
-
+                        // _ = async {
+                        //     count += 1;
+                        //     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
+                        // } => {}
+                        
+                        // pull from input and batch barriers
+                        pulled = async {
+                            if pending.len() < 256 {
+                                try_batch_barriers(max_barrier_count_per_batch, &mut input).await
+                            } else {
+                                Ok(None)
+                            }
+                        } => {
+                            match pulled? {
+                                Some(batch) => pending.push_back(batch),
+                                None => {
+                                    if pending.len() < 256 {
+                                        break;
+                                    } else {
+                                        // backpressure case: keep draining pending
+                                    }
+                                }
+                            }
+                        }
                         _ = async {
                             count += 1;
                             tokio::time::sleep(std::time::Duration::from_millis(5)).await;
@@ -681,6 +700,42 @@ impl StreamConsumer for DispatchExecutorForSyncLogStore {
                     }
                 }.await;
             }
+
+            enum Action {
+    Push(MessageBatch),
+    Dispatch(MessageBatch),
+    End,
+}
+
+            // loop {
+            //     let action: StreamResult<Action> = async {
+            //         tokio::select! {
+            //             pulled = async {
+            //                 if pending.len() < 256 {
+            //                     try_batch_barriers(max_barrier_count_per_batch, &mut input).await
+            //                 } else {
+            //                     Ok(None)
+            //                 }
+            //             } => {
+            //                 match pulled {
+            //                     Ok(Some(batch)) => Ok(Action::Push(batch)),
+            //                     Ok(None) => Ok(Action::End),
+            //                     Err(e) => Err(e),
+            //                 }
+            //             }
+
+            //             batch = async { pending.pop_front() }, if !pending.is_empty() => {
+            //                 Ok(Action::Dispatch(batch.expect("pending not empty")))
+            //             }
+            //         }
+            //     }.await;
+
+            //     match action? {
+            //         Action::Push(batch) => pending.push_back(batch),
+            //         Action::Dispatch(batch) => { /* dispatch + yield */ }
+            //         Action::End => break, // 或者设置 upstream_ended=true，等 pending 清空再 break
+            //     }
+            // }
         }
     }
 }
