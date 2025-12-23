@@ -56,7 +56,7 @@ impl TopNOnIndexRule {
     ) -> Option<PlanRef> {
         let output_len = logical_scan.output_col_idx().len();
         let scan_for_index = if logical_scan.output_col_idx() == logical_scan.required_col_idx() {
-            logical_scan.clone()
+            logical_scan
         } else {
             // `required_col_idx` is built by appending predicate columns to `output_col_idx`,
             // so `output_col_idx` is always a prefix of `required_col_idx`.
@@ -128,7 +128,7 @@ impl TopNOnIndexRule {
     ) -> Option<PlanRef> {
         let output_len = logical_scan.output_col_idx().len();
         let scan_for_pk = if logical_scan.output_col_idx() == logical_scan.required_col_idx() {
-            logical_scan.clone()
+            logical_scan
         } else {
             // `required_col_idx` is built by appending predicate columns to `output_col_idx`,
             // so `output_col_idx` is always a prefix of `required_col_idx`.
