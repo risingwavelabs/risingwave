@@ -40,10 +40,5 @@ pub fn array_sort_with_desc_and_nulls(
 ) {
     let order = OrderType::from_bools(Some(!descending), Some(nulls_first));
 
-    writer.write_iter(
-        array
-            .iter()
-            .sorted_by(|a, b| cmp_datum(*a, *b, order))
-            .map(|v| v.0),
-    );
+    writer.write_iter(array.iter().sorted_by(|a, b| cmp_datum(*a, *b, order)));
 }
