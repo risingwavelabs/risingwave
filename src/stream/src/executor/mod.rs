@@ -755,23 +755,23 @@ impl Mutation {
 
         match self {
             Mutation::Stop(StopMutation {
-                               dropped_actors,
-                               dropped_sink_fragments,
-                           }) => PbMutation::Stop(PbStopMutation {
+                dropped_actors,
+                dropped_sink_fragments,
+            }) => PbMutation::Stop(PbStopMutation {
                 actors: dropped_actors.iter().copied().collect(),
                 dropped_sink_fragments: dropped_sink_fragments.iter().copied().collect(),
             }),
             Mutation::Update(UpdateMutation {
-                                 dispatchers,
-                                 merges,
-                                 vnode_bitmaps,
-                                 dropped_actors,
-                                 actor_splits,
-                                 actor_new_dispatchers,
-                                 actor_cdc_table_snapshot_splits,
-                                 sink_add_columns,
-                                subscriptions_to_drop,
-                             }) => PbMutation::Update(PbUpdateMutation {
+                dispatchers,
+                merges,
+                vnode_bitmaps,
+                dropped_actors,
+                actor_splits,
+                actor_new_dispatchers,
+                actor_cdc_table_snapshot_splits,
+                sink_add_columns,
+                subscriptions_to_drop,
+            }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
                 actor_vnode_bitmap_update: vnode_bitmaps
@@ -792,7 +792,7 @@ impl Mutation {
                     })
                     .collect(),
                 actor_cdc_table_snapshot_splits: Some(PbCdcTableSnapshotSplitsWithGeneration {
-                    splits: actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id, (splits, generation))| {
+                    splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
                         (*actor_id, risingwave_pb::source::PbCdcTableSnapshotSplits {
                             splits: splits.iter().map(risingwave_connector::source::cdc::build_cdc_table_snapshot_split).collect(),
                             generation: *generation,
@@ -813,15 +813,15 @@ impl Mutation {
                 subscriptions_to_drop: subscriptions_to_drop.clone(),
             }),
             Mutation::Add(AddMutation {
-                              adds,
-                              added_actors,
-                              splits,
-                              pause,
-                              subscriptions_to_add,
-                              backfill_nodes_to_pause,
-                              actor_cdc_table_snapshot_splits,
-                              new_upstream_sinks,
-                          }) => PbMutation::Add(PbAddMutation {
+                adds,
+                added_actors,
+                splits,
+                pause,
+                subscriptions_to_add,
+                backfill_nodes_to_pause,
+                actor_cdc_table_snapshot_splits,
+                new_upstream_sinks,
+            }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
                     .map(|(&actor_id, dispatchers)| {
@@ -846,7 +846,7 @@ impl Mutation {
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
                 actor_cdc_table_snapshot_splits:
                 Some(PbCdcTableSnapshotSplitsWithGeneration {
-                    splits: actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id, (splits, generation))| {
+                    splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
                         (*actor_id, risingwave_pb::source::PbCdcTableSnapshotSplits {
                             splits: splits.iter().map(risingwave_connector::source::cdc::build_cdc_table_snapshot_split).collect(),
                             generation: *generation,
