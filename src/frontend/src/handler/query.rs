@@ -334,12 +334,12 @@ fn gen_batch_query_plan(
         if session.config().enable_datafusion_engine()
             && optimized_logical.plan.contains_iceberg_scan()
         {
-            let df_plan = optimized_logical.plan.to_datafusion_logical_plan()?;
             tracing::debug!(
-                "Converted RisingWave logical plan to DataFusion plan:\nRisingWave Plan: {:?}\nDataFusion Plan: {:?}",
-                optimized_logical,
-                df_plan
+                "Converting RisingWave logical plan to DataFusion plan:\nRisingWave Plan: {:?}",
+                optimized_logical
             );
+            let df_plan = optimized_logical.plan.to_datafusion_logical_plan()?;
+            tracing::debug!("Converted DataFusion plan:\nDataFusion Plan: {:?}", df_plan);
             return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
                 plan: df_plan,
                 schema,
