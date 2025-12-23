@@ -21,7 +21,7 @@ use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgr
 
 use crate::executor::ActorContext;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
-use crate::task::barrier_worker::managed_state::DatabaseManagedBarrierState;
+use crate::task::barrier_worker::managed_state::PartialGraphState;
 use crate::task::cdc_progress::CdcTableBackfillState;
 use crate::task::{ActorId, LocalBarrierManager};
 
@@ -95,7 +95,7 @@ impl Display for BackfillState {
     }
 }
 
-impl DatabaseManagedBarrierState {
+impl PartialGraphState {
     pub(crate) fn update_create_mview_progress(
         &mut self,
         epoch: EpochPair,
@@ -103,20 +103,14 @@ impl DatabaseManagedBarrierState {
         actor: ActorId,
         state: BackfillState,
     ) {
-        if let Some(actor_state) = self.actor_states.get(&actor)
-            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
-            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
+        if let Some((prev_fragment_id, _)) = self
+            .graph_states
+            .create_mview_progress
+            .entry(epoch.curr)
+            .or_default()
+            .insert(actor, (fragment_id, state))
         {
-            if let Some((prev_fragment_id, _)) = graph_state
-                .create_mview_progress
-                .entry(epoch.curr)
-                .or_default()
-                .insert(actor, (fragment_id, state))
-            {
-                assert_eq!(prev_fragment_id, fragment_id)
-            }
-        } else {
-            warn!(?epoch, %actor, ?state, "ignore create mview progress");
+            assert_eq!(prev_fragment_id, fragment_id)
         }
     }
 
@@ -126,18 +120,11 @@ impl DatabaseManagedBarrierState {
         actor: ActorId,
         state: CdcTableBackfillState,
     ) {
-        if let Some(actor_state) = self.actor_states.get(&actor)
-            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
-            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
-        {
-            graph_state
-                .cdc_table_backfill_progress
-                .entry(epoch.curr)
-                .or_default()
-                .insert(actor, state);
-        } else {
-            warn!(?epoch, %actor, ?state, "ignore CDC table backfill progress");
-        }
+        self.graph_states
+            .cdc_table_backfill_progress
+            .entry(epoch.curr)
+            .or_default()
+            .insert(actor, state);
     }
 }
 
