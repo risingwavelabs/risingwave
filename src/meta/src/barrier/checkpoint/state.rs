@@ -159,13 +159,14 @@ impl DatabaseCheckpointControl {
                 }
                 CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
                     assert!(!self.state.is_paused());
+                    let snapshot_epoch = barrier_info.prev_epoch();
                     // set snapshot epoch of upstream table for snapshot backfill
                     for snapshot_backfill_epoch in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
                         .values_mut()
                     {
                         assert_eq!(
-                            snapshot_backfill_epoch.replace(barrier_info.prev_epoch()),
+                            snapshot_backfill_epoch.replace(snapshot_epoch),
                             None,
                             "must not set previously"
                         );
@@ -187,7 +188,7 @@ impl DatabaseCheckpointControl {
                     let job = CreatingStreamingJobControl::new(
                         info,
                         snapshot_backfill_upstream_tables,
-                        barrier_info.prev_epoch(),
+                        snapshot_epoch,
                         hummock_version_stats,
                         control_stream_manager,
                         edges.as_mut().expect("should exist"),

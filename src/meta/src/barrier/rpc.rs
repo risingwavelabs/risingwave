@@ -944,7 +944,7 @@ impl ControlStreamManager {
                     &database_job_log_epochs,
                     snapshot_epoch,
                     committed_epoch,
-                    barrier_info.curr_epoch.value().0,
+                    &barrier_info,
                     info,
                     hummock_version_stats,
                     node_actors,
@@ -1039,7 +1039,7 @@ impl ControlStreamManager {
                     let mutation = mutation.clone();
                     let barrier = Barrier {
                         epoch: Some(risingwave_pb::data::Epoch {
-                            curr: barrier_info.curr_epoch.value().0,
+                            curr: barrier_info.curr_epoch(),
                             prev: barrier_info.prev_epoch(),
                         }),
                         mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
@@ -1121,7 +1121,7 @@ impl ControlStreamManager {
                 use risingwave_pb::meta::event_log;
                 let event = event_log::EventInjectBarrierFail {
                     prev_epoch: barrier_info.prev_epoch(),
-                    cur_epoch: barrier_info.curr_epoch.value().0,
+                    cur_epoch: barrier_info.curr_epoch(),
                     error: e.to_report_string(),
                 };
                 self.env

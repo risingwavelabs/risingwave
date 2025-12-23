@@ -691,8 +691,8 @@ impl std::fmt::Display for CommandContext {
         write!(
             f,
             "prev_epoch={}, curr_epoch={}, kind={}",
-            self.barrier_info.prev_epoch.value().0,
-            self.barrier_info.curr_epoch.value().0,
+            self.barrier_info.prev_epoch(),
+            self.barrier_info.curr_epoch(),
             self.barrier_info.kind.as_str_name()
         )?;
         if let Some(command) = &self.command {

@@ -363,6 +363,10 @@ impl BarrierInfo {
     pub(super) fn prev_epoch(&self) -> u64 {
         self.prev_epoch.value().0
     }
+
+    pub(super) fn curr_epoch(&self) -> u64 {
+        self.curr_epoch.value().0
+    }
 }
 
 #[derive(Debug)]
