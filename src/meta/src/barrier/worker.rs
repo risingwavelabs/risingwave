@@ -38,7 +38,9 @@ use uuid::Uuid;
 use crate::barrier::checkpoint::{CheckpointControl, CheckpointControlEvent};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompletingTask};
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
-use crate::barrier::rpc::{ControlStreamManager, WorkerNodeEvent, merge_node_rpc_errors};
+use crate::barrier::rpc::{
+    ControlStreamManager, WorkerNodeEvent, from_partial_graph_id, merge_node_rpc_errors,
+};
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, RecoveryReason,
@@ -458,14 +460,14 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             Response::CompleteBarrier(resp) => {
                                 self.checkpoint_control.barrier_collected(resp, &mut self.periodic_barriers)?;
                             },
-                            Response::ReportDatabaseFailure(resp) => {
+                            Response::ReportPartialGraphFailure(resp) => {
                                 if !self.enable_recovery {
                                     panic!("database failure reported but recovery not enabled: {:?}", resp)
                                 }
+                                let (database_id, _) = from_partial_graph_id(resp.partial_graph_id);
                                 if !self.enable_per_database_isolation() {
-                                        Err(anyhow!("database {} reset", resp.database_id))?;
+                                        Err(anyhow!("database {} reset", database_id))?;
                                     }
-                                let database_id = resp.database_id;
                                 if let Some(entering_recovery) = self.checkpoint_control.on_report_failure(database_id, &mut self.control_stream_manager) {
                                     warn!(%database_id, "database entering recovery");
                                     self.context.abort_and_mark_blocked(Some(database_id), RecoveryReason::Failover(anyhow!("reset database: {}", database_id).into()));
@@ -474,8 +476,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     entering_recovery.enter(output, &mut self.control_stream_manager);
                                 }
                             }
-                            Response::ResetDatabase(resp) => {
-                                self.checkpoint_control.on_reset_database_resp(worker_id, resp);
+                            Response::ResetPartialGraph(resp) => {
+                                self.checkpoint_control.on_reset_partial_graph_resp(worker_id, resp);
                             }
                             other @ Response::Init(_) | other @ Response::Shutdown(_) => {
                                 Err(anyhow!("get expected response: {:?}", other))?;
@@ -806,8 +808,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             {
                 let mut collected_databases = HashMap::new();
                 let mut collecting_databases = HashMap::new();
-                let mut failed_databases = HashSet::new();
+                let mut failed_databases = HashMap::new();
                 for (database_id, jobs) in database_job_infos {
+                    let mut injected_creating_jobs = HashSet::new();
                     let result = control_stream_manager.inject_database_initial_barrier(
                         database_id,
                         jobs,
@@ -821,6 +824,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         is_paused,
                         &hummock_version_stats,
                         &mut cdc_table_snapshot_splits,
+                        &mut injected_creating_jobs,
                     );
                     let node_to_collect = match result {
                         Ok(info) => {
@@ -828,7 +832,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                         Err(e) => {
                             warn!(%database_id, e = %e.as_report(), "failed to inject database initial barrier");
-                            assert!(failed_databases.insert(database_id), "non-duplicate");
+                            assert!(failed_databases.insert(database_id, injected_creating_jobs).is_none(), "non-duplicate");
                             continue;
                         }
                     };
@@ -845,11 +849,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     let resp = match result {
                         Err(e) => {
                             warn!(%worker_id, err = %e.as_report(), "worker node failure during recovery");
-                            for (failed_database_id, _) in collecting_databases.extract_if(|_, node_to_collect| {
-                                !node_to_collect.is_valid_after_worker_err(worker_id)
+                            for (failed_database_id, collector) in collecting_databases.extract_if(|_, collector| {
+                                !collector.is_valid_after_worker_err(worker_id)
                             }) {
                                 warn!(%failed_database_id, %worker_id, "database failed to recovery in global recovery due to worker node err");
-                                assert!(failed_databases.insert(failed_database_id));
+                                assert!(failed_databases.insert(failed_database_id, collector.creating_job_ids().collect()).is_none());
                             }
                             continue;
                         }
@@ -858,28 +862,28 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 Response::CompleteBarrier(resp) => {
                                     resp
                                 }
-                                Response::ReportDatabaseFailure(resp) => {
-                                    let database_id = resp.database_id;
-                                    if collecting_databases.remove(&database_id).is_some() {
+                                Response::ReportPartialGraphFailure(resp) => {
+                                    let (database_id, _) = from_partial_graph_id(resp.partial_graph_id);
+                                    if let Some(collector) = collecting_databases.remove(&database_id) {
                                         warn!(%database_id, %worker_id, "database reset during global recovery");
-                                        assert!(failed_databases.insert(database_id));
-                                    } else if collected_databases.remove(&database_id).is_some() {
+                                        assert!(failed_databases.insert(database_id, collector.creating_job_ids().collect()).is_none());
+                                    } else if let Some(database) = collected_databases.remove(&database_id) {
                                         warn!(%database_id, %worker_id, "database initialized but later reset during global recovery");
-                                        assert!(failed_databases.insert(database_id));
+                                        assert!(failed_databases.insert(database_id, database.creating_streaming_job_controls.keys().copied().collect()).is_none());
                                     } else {
-                                        assert!(failed_databases.contains(&database_id));
+                                        assert!(failed_databases.contains_key(&database_id));
                                     }
                                     continue;
                                 }
-                                other @ (Response::Init(_) | Response::Shutdown(_) | Response::ResetDatabase(_)) => {
+                                other @ (Response::Init(_) | Response::Shutdown(_) | Response::ResetPartialGraph(_)) => {
                                     return Err(anyhow!("get unexpected resp {:?}", other).into());
                                 }
                             }
                         }
                     };
                     assert_eq!(worker_id, resp.worker_id);
-                    let database_id = resp.database_id;
-                    if failed_databases.contains(&database_id) {
+                    let (database_id, _) = from_partial_graph_id(resp.partial_graph_id);
+                    if failed_databases.contains_key(&database_id) {
                         assert!(!collecting_databases.contains_key(&database_id));
                         // ignore the lately arrived collect resp of failed database
                         continue;
@@ -913,7 +917,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 if !enable_per_database_isolation && !failed_databases.is_empty() {
                     return Err(anyhow!(
                         "global recovery failed due to failure of databases {:?}",
-                        failed_databases.iter().map(|database_id| database_id.as_raw_id()).collect_vec()).into()
+                        failed_databases.keys().collect_vec()).into()
                     );
                 }
                 let checkpoint_control = CheckpointControl::recover(
