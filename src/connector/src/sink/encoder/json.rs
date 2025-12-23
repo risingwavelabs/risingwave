@@ -302,6 +302,12 @@ fn datum_to_json_object(
             }
             JsonbHandlingMode::Dynamic => JsonbVal::from(jsonb_ref).take(),
         },
+        (DataType::Int256, ScalarRefImpl::Int256(v)) => {
+            json!(v.to_text())
+        }
+        (DataType::UInt256, ScalarRefImpl::UInt256(v)) => {
+            json!(v.to_text())
+        }
         (DataType::List(datatype), ScalarRefImpl::List(list_ref)) => {
             let elems = list_ref.iter();
             let mut vec = Vec::with_capacity(elems.len());
@@ -414,7 +420,7 @@ pub(crate) fn schema_type_mapping(rw_type: &DataType) -> &'static str {
         DataType::Bytea => "bytes",
         DataType::Jsonb => "string",
         DataType::Serial => "string",
-        DataType::Int256 => "string",
+        DataType::Int256 | DataType::UInt256 => "string",
         DataType::Map(_) => "map",
     }
 }

@@ -44,6 +44,7 @@ macro_rules! for_all_variants {
             { Int32,        Int32,        int32,        i32,                        i32,                                $crate::array::I32Array,            $crate::array::I32ArrayBuilder          },
             { Int64,        Int64,        int64,        i64,                        i64,                                $crate::array::I64Array,            $crate::array::I64ArrayBuilder          },
             { Int256,       Int256,       int256,       $crate::types::Int256,      $crate::types::Int256Ref<'scalar>,  $crate::array::Int256Array,         $crate::array::Int256ArrayBuilder       },
+            { UInt256,      UInt256,      uint256,      $crate::types::UInt256,     $crate::types::UInt256Ref<'scalar>, $crate::array::UInt256Array,        $crate::array::UInt256ArrayBuilder      },
             { Float32,      Float32,      float32,      $crate::types::F32,         $crate::types::F32,                 $crate::array::F32Array,            $crate::array::F32ArrayBuilder          },
             { Float64,      Float64,      float64,      $crate::types::F64,         $crate::types::F64,                 $crate::array::F64Array,            $crate::array::F64ArrayBuilder          },
             { Varchar,      Utf8,         utf8,         Box<str>,                   &'scalar str,                       $crate::array::Utf8Array,           $crate::array::Utf8ArrayBuilder         },

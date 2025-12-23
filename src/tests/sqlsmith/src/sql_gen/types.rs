@@ -31,6 +31,7 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
         DataType::Int32 => AstDataType::Int,
         DataType::Int64 => AstDataType::BigInt,
         DataType::Int256 => AstDataType::Custom(vec!["rw_int256".into()].into()),
+        DataType::UInt256 => AstDataType::Custom(vec!["rw_uint256".into()].into()),
         DataType::Serial => unreachable!("serial should not be generated"),
         DataType::Decimal => AstDataType::Decimal(None, None),
         DataType::Float32 => AstDataType::Real,

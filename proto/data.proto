@@ -54,6 +54,7 @@ message DataType {
     INT256 = 20;
     MAP = 21;
     VECTOR = 22;
+    UINT256 = 23;
   }
   TypeName type_name = 1;
   // Data length for vector.
@@ -116,6 +117,7 @@ enum ArrayType {
   INT256 = 18;
   MAP = 20;
   VECTOR = 21;
+  UINT256 = 22;
 }
 
 message Array {

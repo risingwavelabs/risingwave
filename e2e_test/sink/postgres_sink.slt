@@ -587,6 +587,69 @@ DROP SINK rw_types_to_pg_types;
 statement ok
 DROP TABLE rw_types_subset_table;
 
+################### Test numeric 256-bit types
+
+# Create a Postgres table for numeric256 types
+system ok
+PGDATABASE=sink_test psql -c "
+CREATE TABLE pg_numeric256_types (
+    id BIGINT PRIMARY KEY,
+    int256_col NUMERIC(78, 0),
+    uint256_col NUMERIC(78, 0),
+    description TEXT
+)"
+
+statement ok
+CREATE TABLE rw_numeric256_types (
+    id BIGINT PRIMARY KEY,
+    int256_col rw_int256,
+    uint256_col rw_uint256,
+    description TEXT
+);
+
+statement ok
+CREATE SINK numeric256_sink FROM rw_numeric256_types WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_numeric256_types',
+    type='upsert',
+    primary_key='id'
+);
+
+# Insert test data
+statement ok
+INSERT INTO rw_numeric256_types VALUES
+    (1, 0::rw_int256, 0::rw_uint256, 'zeros'),
+    (2, '123456789012345678901234567890'::rw_int256, '123456789012345678901234567890'::rw_uint256, 'normal values'),
+    (3, '-123456789012345678901234567890'::rw_int256, NULL, 'negative int256'),
+    (4, '57896044618658097711785492504343953926634992332820282019728792003956564819967'::rw_int256, '115792089237316195423570985008687907853269984665640564039457584007913129639935'::rw_uint256, 'max values');
+
+statement ok
+FLUSH;
+
+# Verify in Postgres - check that data was successfully written
+system ok
+PGDATABASE=sink_test psql --tuples-only -c "SELECT id, int256_col, uint256_col, description FROM pg_numeric256_types ORDER BY id"
+----
+  1 |                                                                             0 |                                                                              0 | zeros
+  2 |                                                123456789012345678901234567890 |                                                 123456789012345678901234567890 | normal values
+  3 |                                               -123456789012345678901234567890 |                                                                                | negative int256
+  4 | 57896044618658097711785492504343953926634992332820282019728792003956564819967 | 115792089237316195423570985008687907853269984665640564039457584007913129639935 | max values
+
+
+statement ok
+DROP SINK numeric256_sink;
+
+statement ok
+DROP TABLE rw_numeric256_types;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_numeric256_types"
+
 ################### Drop DB
 
 system ok

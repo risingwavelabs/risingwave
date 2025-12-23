@@ -326,6 +326,7 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
         | DataType::Int32
         | DataType::Int64
         | DataType::Int256
+        | DataType::UInt256
         | DataType::Float32
         | DataType::Float64
         | DataType::Decimal
