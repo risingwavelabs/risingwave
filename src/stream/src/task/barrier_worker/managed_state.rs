@@ -97,7 +97,7 @@ use crate::task::cdc_progress::CdcTableBackfillState;
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
     running_actors: BTreeSet<ActorId>,
-    graph_states: &'a PartialGraphManagedBarrierState,
+    graph_state: &'a PartialGraphManagedBarrierState,
 }
 
 impl Display for ManagedBarrierStateDebugInfo<'_> {
@@ -108,7 +108,7 @@ impl Display for ManagedBarrierStateDebugInfo<'_> {
         }
         {
             writeln!(f, "graph states")?;
-            write!(f, "{}", self.graph_states)?;
+            write!(f, "{}", self.graph_state)?;
         }
         Ok(())
     }
@@ -591,7 +591,7 @@ pub(crate) struct PartialGraphState {
     pub(super) actor_pending_new_output_requests:
         HashMap<ActorId, Vec<(ActorId, NewOutputRequest)>>,
 
-    pub(crate) graph_states: PartialGraphManagedBarrierState,
+    pub(crate) graph_state: PartialGraphManagedBarrierState,
 
     table_ids: HashSet<TableId>,
 
@@ -616,7 +616,7 @@ impl PartialGraphState {
             partial_graph_id,
             actor_states: Default::default(),
             actor_pending_new_output_requests: Default::default(),
-            graph_states: PartialGraphManagedBarrierState::new(&actor_manager),
+            graph_state: PartialGraphManagedBarrierState::new(&actor_manager),
             table_ids: Default::default(),
             actor_manager,
             local_barrier_manager,
@@ -628,7 +628,7 @@ impl PartialGraphState {
     pub(super) fn to_debug_info(&self) -> ManagedBarrierStateDebugInfo<'_> {
         ManagedBarrierStateDebugInfo {
             running_actors: self.actor_states.keys().cloned().collect(),
-            graph_states: &self.graph_states,
+            graph_state: &self.graph_state,
         }
     }
 
@@ -705,7 +705,7 @@ impl PartialGraphState {
         let table_ids = HashSet::from_iter(request.table_ids_to_sync);
         self.table_ids.extend(table_ids.iter().cloned());
 
-        self.graph_states.transform_to_issued(
+        self.graph_state.transform_to_issued(
             barrier,
             request.actor_ids_to_collect.iter().copied(),
             table_ids,
@@ -838,7 +838,7 @@ impl PartialGraphState {
         }
         // yield some pending collected epochs
         {
-            if let Some(barrier) = self.graph_states.may_have_collected_all() {
+            if let Some(barrier) = self.graph_state.may_have_collected_all() {
                 return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected { barrier });
             }
         }
@@ -922,7 +922,7 @@ impl PartialGraphState {
             }
         }
 
-        debug_assert!(self.graph_states.may_have_collected_all().is_none());
+        debug_assert!(self.graph_state.may_have_collected_all().is_none());
         Poll::Pending
     }
 }
@@ -941,12 +941,12 @@ impl PartialGraphState {
                 monitor_task_handle.abort();
             }
         }
-        self.graph_states.collect(actor_id, epoch);
-        self.graph_states.may_have_collected_all()
+        self.graph_state.collect(actor_id, epoch);
+        self.graph_state.may_have_collected_all()
     }
 
     pub(super) fn pop_barrier_to_complete(&mut self, prev_epoch: u64) -> BarrierToComplete {
-        self.graph_states.pop_barrier_to_complete(prev_epoch)
+        self.graph_state.pop_barrier_to_complete(prev_epoch)
     }
 
     /// Collect actor errors for a while and find the one that might be the root cause.
@@ -992,7 +992,7 @@ impl PartialGraphState {
         if let Some(actor_state) = self.actor_states.get(&actor_id)
             && actor_state.inflight_barriers.contains(&epoch.prev)
         {
-            self.graph_states
+            self.graph_state
                 .list_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
@@ -1021,7 +1021,7 @@ impl PartialGraphState {
         if let Some(actor_state) = self.actor_states.get(&actor_id)
             && actor_state.inflight_barriers.contains(&epoch.prev)
         {
-            self.graph_states
+            self.graph_state
                 .load_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
@@ -1064,12 +1064,12 @@ impl PartialGraphState {
             );
             return;
         };
-        self.graph_states
+        self.graph_state
             .refresh_finished_tables
             .entry(epoch.curr)
             .or_default()
             .insert(table_id);
-        self.graph_states
+        self.graph_state
             .truncate_tables
             .entry(epoch.curr)
             .or_default()

@@ -902,9 +902,9 @@ impl LocalBarrierWorker {
             if let Some(mut graph) = self.state.partial_graphs.remove(&partial_graph_id) {
                 if let Some(graph) = graph.state_for_request() {
                     assert!(
-                        graph.graph_states.is_empty(),
+                        graph.graph_state.is_empty(),
                         "non empty graph to be removed: {}",
-                        &graph.graph_states
+                        &graph.graph_state
                     );
                 }
             } else {

@@ -156,10 +156,20 @@ impl FragmentEdgeBuilder {
         fragment_id: FragmentId,
         downstream: &DownstreamFragmentRelation,
     ) {
-        let fragment = &self
-            .fragments
-            .get(&fragment_id)
-            .unwrap_or_else(|| panic!("cannot find {}", fragment_id));
+        let Some(fragment) = &self.fragments.get(&fragment_id) else {
+            if self
+                .fragments
+                .contains_key(&downstream.downstream_fragment_id)
+            {
+                panic!(
+                    "cannot find fragment {} with downstream {:?}",
+                    fragment_id, downstream
+                )
+            } else {
+                // ignore fragment relation with both upstream and downstream not in the set of fragments
+                return;
+            }
+        };
         let downstream_fragment = &self.fragments[&downstream.downstream_fragment_id];
         let dispatchers = compose_dispatchers(
             fragment.distribution_type,

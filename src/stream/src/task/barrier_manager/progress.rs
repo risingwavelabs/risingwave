@@ -104,7 +104,7 @@ impl PartialGraphState {
         state: BackfillState,
     ) {
         if let Some((prev_fragment_id, _)) = self
-            .graph_states
+            .graph_state
             .create_mview_progress
             .entry(epoch.curr)
             .or_default()
@@ -120,7 +120,7 @@ impl PartialGraphState {
         actor: ActorId,
         state: CdcTableBackfillState,
     ) {
-        self.graph_states
+        self.graph_state
             .cdc_table_backfill_progress
             .entry(epoch.curr)
             .or_default()
