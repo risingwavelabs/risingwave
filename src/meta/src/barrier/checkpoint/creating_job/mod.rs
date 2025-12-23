@@ -407,6 +407,9 @@ impl CreatingStreamingJobControl {
 
         let mut upstream_fragment_downstreams: FragmentDownstreamRelation = Default::default();
         for (upstream_fragment_id, downstreams) in fragment_relations {
+            if fragment_infos.contains_key(upstream_fragment_id) {
+                continue;
+            }
             for downstream in downstreams {
                 if fragment_infos.contains_key(&downstream.downstream_fragment_id) {
                     upstream_fragment_downstreams
@@ -621,8 +624,8 @@ impl CreatingStreamingJobControl {
         barrier_info: &BarrierInfo,
     ) -> MetaResult<()> {
         let progress_epoch =
-            if let Some(max_collected_epoch) = self.barrier_control.max_committed_epoch() {
-                max(max_collected_epoch, self.snapshot_epoch)
+            if let Some(max_committed_epoch) = self.barrier_control.max_committed_epoch() {
+                max(max_committed_epoch, self.snapshot_epoch)
             } else {
                 self.snapshot_epoch
             };
