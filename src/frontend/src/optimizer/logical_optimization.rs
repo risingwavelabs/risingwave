@@ -447,6 +447,14 @@ static TOP_N_AGG_ON_INDEX: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static PROJECT_TOP_N_TRANSPOSE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Project TopN Transpose",
+        vec![ProjectTopNTransposeRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static ALWAYS_FALSE_FILTER: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Void always-false filter's downstream",
@@ -876,6 +884,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PULL_UP_HOP)?;
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX)?;
+
+        plan = plan.optimize_by_rules(&PROJECT_TOP_N_TRANSPOSE)?;
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN)?;
 
