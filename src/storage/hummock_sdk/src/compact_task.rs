@@ -237,6 +237,14 @@ impl CompactTask {
 
         crate::filter_utils::is_kv_count_too_large_for_xor16(kv_count, self.max_kv_count_for_xor16)
     }
+
+    /// Returns the effective vnode key-range hint limit (in bytes) for this compaction task.
+    ///
+    /// The hint is only meaningful when all input SSTs belong to a single table.
+    pub fn effective_vnode_key_range_limit(&self) -> Option<usize> {
+        let limit = self.max_vnode_key_range_bytes.filter(|&v| v > 0)? as usize;
+        (self.build_compact_table_ids().len() == 1).then_some(limit)
+    }
 }
 
 pub fn is_compaction_task_expired(

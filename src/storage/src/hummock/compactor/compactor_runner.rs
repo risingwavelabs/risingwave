@@ -44,8 +44,8 @@ use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
 use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_utils::{
-    build_multi_compaction_filter, effective_vnode_key_range_limit, estimate_task_output_capacity,
-    generate_splits_for_task, metrics_report_for_task, optimize_by_copy_block,
+    build_multi_compaction_filter, estimate_task_output_capacity, generate_splits_for_task,
+    metrics_report_for_task, optimize_by_copy_block,
 };
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
@@ -89,7 +89,7 @@ impl CompactorRunner {
         };
 
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
-        options.max_vnode_key_range_bytes = effective_vnode_key_range_limit(&task);
+        options.max_vnode_key_range_bytes = task.effective_vnode_key_range_limit();
         let use_block_based_filter = task.should_use_block_based_filter();
 
         let key_range = KeyRange {
@@ -116,7 +116,7 @@ impl CompactorRunner {
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
                 disable_drop_column_optimization: false,
-                max_vnode_key_range_bytes: effective_vnode_key_range_limit(&task),
+                max_vnode_key_range_bytes: task.effective_vnode_key_range_limit(),
             },
             object_id_getter,
         );

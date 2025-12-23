@@ -765,13 +765,12 @@ impl HummockVersionReader {
                         // filter vnode-key range that is definitely not containing the key
                         if let Some(vnode_statistics) = &sstable_info.vnode_statistics {
                             let vnode = VirtualNode::from_index(full_key.user_key.get_vnode_id());
-                            // Only skip if vnode exists and key is out of range
-                            // If vnode not found, it may be due to incomplete stats (reached limit)
+                            // Only skip if vnode-statistics exists and key is out of range
+                            // If vnode-statistics not found, it may be due to incomplete stats (reached limit)
                             if let Some((vnode_min, vnode_max)) =
                                 vnode_statistics.get_vnode_key_range(vnode)
                             {
                                 local_stats.vnode_checked_get_count += 1;
-                                // Vnode key ranges use closed intervals [min_key, max_key]
                                 let user_key = full_key.user_key.as_ref();
                                 if user_key < vnode_min.user_key.as_ref()
                                     || user_key > vnode_max.user_key.as_ref()
