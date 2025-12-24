@@ -1887,27 +1887,16 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
         add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
         tracing::info!("Starting iceberg direct commit in epoch {epoch}");
-        // Commit data if present
-        let (write_results, snapshot_id) = match self.pre_commit_inner(epoch, metadata, None)? {
-            Some((write_results, snapshot_id)) => (write_results, snapshot_id),
-            None => {
-                // No data to commit, but may have schema change
-                if let Some(add_columns) = add_columns {
-                    tracing::info!(?epoch, "No data to commit, but committing schema change");
-                    self.commit_schema_change(add_columns).await?;
-                } else {
-                    tracing::debug!(?epoch, "no data to commit");
-                }
-                return Ok(());
-            }
-        };
 
-        self.commit_datafile(epoch, write_results, snapshot_id)
-            .await?;
+        // Commit data if present
+        if let Some((write_results, snapshot_id)) = self.pre_commit_inner(epoch, metadata, None)? {
+            self.commit_datafile(epoch, write_results, snapshot_id)
+                .await?;
+        }
 
         // Commit schema change if present
         if let Some(add_columns) = add_columns {
-            tracing::info!(?epoch, "Committing schema change after data commit");
+            tracing::info!(?epoch, "Committing schema change");
             self.commit_schema_change(add_columns).await?;
         }
 
@@ -1933,6 +1922,15 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         add_columns: Option<Vec<Field>>,
     ) -> Result<Vec<u8>> {
         tracing::info!("Starting iceberg pre commit in epoch {epoch}");
+
+        // TwoPhaseCommitCoordinator does not support schema change yet
+        if let Some(add_columns) = &add_columns {
+            return Err(SinkError::Iceberg(anyhow!(
+                "TwoPhaseCommitCoordinator for Iceberg sink does not support schema change yet, \
+                 but got add_columns: {:?}",
+                add_columns.iter().map(|c| &c.name).collect::<Vec<_>>()
+            )));
+        }
 
         let (write_results, snapshot_id) =
             match self.pre_commit_inner(epoch, metadata, add_columns)? {

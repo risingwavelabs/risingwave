@@ -802,7 +802,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "health",
         "hummock",
         "iceberg_compaction",
-        "iceberg_commit_metadata",
         "java_binding",
         "meta",
         "monitor_service",
