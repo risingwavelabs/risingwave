@@ -807,19 +807,26 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
     }
 
     fn watermark_may_delete(&mut self, key: &FullKey<&[u8]>) -> bool {
-        let unused = vec![];
-        let unused_put = HummockValue::Put(unused.as_slice());
         // Correctness requires the assumption that these PkPrefixSkipWatermarkState and NonPkPrefixSkipWatermarkState never use the `unused_put`.
-        (self.pk_prefix_skip_watermark_state.has_watermark()
-            && self
-                .pk_prefix_skip_watermark_state
-                .should_delete(key, unused_put))
-            || (self.non_pk_prefix_skip_watermark_state.has_watermark()
+        let pk_prefix_has_watermark = self.pk_prefix_skip_watermark_state.has_watermark();
+        let non_pk_prefix_has_watermark = self.non_pk_prefix_skip_watermark_state.has_watermark();
+        if pk_prefix_has_watermark || non_pk_prefix_has_watermark {
+            let unused = vec![];
+            let unused_put = HummockValue::Put(unused.as_slice());
+            if (pk_prefix_has_watermark
                 && self
-                    .non_pk_prefix_skip_watermark_state
+                    .pk_prefix_skip_watermark_state
                     .should_delete(key, unused_put))
-            || (self.value_skip_watermark_state.has_watermark()
-                && self.value_skip_watermark_state.may_delete(key))
+                || (non_pk_prefix_has_watermark
+                    && self
+                        .non_pk_prefix_skip_watermark_state
+                        .should_delete(key, unused_put))
+            {
+                return true;
+            }
+        }
+        (self.value_skip_watermark_state.has_watermark()
+            && self.value_skip_watermark_state.may_delete(key))
     }
 
     fn watermark_should_delete(
