@@ -56,7 +56,7 @@ use crate::hummock::compactor::{
 use crate::hummock::iterator::{
     Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
     NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
-    ValueMeta, ValueSkipWatermarkIter, ValueSkipWatermarkState,
+    ValueMeta, ValueSkipWatermarkIterator, ValueSkipWatermarkState,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
@@ -265,7 +265,7 @@ impl CompactorRunner {
                 ),
             );
 
-            ValueSkipWatermarkIter::new(
+            ValueSkipWatermarkIterator::new(
                 pk_skip_watermark_iter,
                 ValueSkipWatermarkState::from_safe_epoch_watermarks(
                     self.compact_task.value_table_watermarks.clone(),

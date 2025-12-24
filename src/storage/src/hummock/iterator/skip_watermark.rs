@@ -453,7 +453,7 @@ pub type PkPrefixSkipWatermarkIterator<I> = SkipWatermarkIterator<I, PkPrefixSki
 pub type NonPkPrefixSkipWatermarkIterator<I> =
     SkipWatermarkIterator<I, NonPkPrefixSkipWatermarkState>;
 
-pub type ValueSkipWatermarkIter<I> = SkipWatermarkIterator<I, ValueSkipWatermarkState>;
+pub type ValueSkipWatermarkIterator<I> = SkipWatermarkIterator<I, ValueSkipWatermarkState>;
 
 pub struct ValueSkipWatermarkState {
     pub watermarks: BTreeMap<TableId, ReadTableWatermark>,
