@@ -173,6 +173,7 @@ pub struct IcebergCommon {
 }
 
 // Matches iceberg::io::object_cache default size (32MB).
+// TODO: change it after object cache get refactored.
 const DEFAULT_OBJECT_CACHE_SIZE_BYTES: u64 = 32 * 1024 * 1024;
 const SHARED_OBJECT_CACHE_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
 const SHARED_OBJECT_CACHE_MAX_TABLES: u64 =
@@ -814,12 +815,9 @@ pub(crate) async fn shared_object_cache(
             .build()
     });
 
-    if let Some(object_cache) = CACHE.get(&table_uuid).await {
-        return object_cache;
-    }
-
-    CACHE.insert(table_uuid, init_object_cache.clone()).await;
-    init_object_cache
+    CACHE
+        .get_with(table_uuid, async { init_object_cache })
+        .await
 }
 
 pub async fn rebuild_table_with_shared_cache(table: Table) -> Table {
