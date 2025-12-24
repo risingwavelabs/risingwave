@@ -18,7 +18,7 @@ mod mock_catalog;
 mod storage_catalog;
 
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, LazyLock};
 
 use ::iceberg::io::{
     S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
@@ -32,6 +32,7 @@ use iceberg::io::{
     GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
+use moka::future::Cache as MokaCache;
 use phf::{Set, phf_set};
 use risingwave_common::bail;
 use risingwave_common::error::IcebergError;
@@ -170,6 +171,12 @@ pub struct IcebergCommon {
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub vended_credentials: Option<bool>,
 }
+
+// Matches iceberg::io::object_cache default size (32MB).
+const DEFAULT_OBJECT_CACHE_SIZE_BYTES: u64 = 32 * 1024 * 1024;
+const SHARED_OBJECT_CACHE_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
+const SHARED_OBJECT_CACHE_MAX_TABLES: u64 =
+    SHARED_OBJECT_CACHE_BUDGET_BYTES / DEFAULT_OBJECT_CACHE_SIZE_BYTES;
 
 impl EnforceSecret for IcebergCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
@@ -791,32 +798,33 @@ impl IcebergCommon {
             .to_table_ident()
             .context("Unable to parse table name")?;
 
-        catalog
-            .load_table(&table_id)
-            .await
-            .map(rebuild_table_with_shared_cache)
-            .map_err(Into::into)
+        let table = catalog.load_table(&table_id).await?;
+        Ok(rebuild_table_with_shared_cache(table).await)
     }
 }
 
 /// Get a globally shared object cache keyed by table UUID to avoid reuse after drop & recreate.
-pub(crate) fn shared_object_cache(
+pub(crate) async fn shared_object_cache(
     init_object_cache: Arc<ObjectCache>,
     table_uuid: Uuid,
 ) -> Arc<ObjectCache> {
-    static CACHE: OnceLock<Mutex<HashMap<Uuid, Arc<ObjectCache>>>> = OnceLock::new();
+    static CACHE: LazyLock<MokaCache<Uuid, Arc<ObjectCache>>> = LazyLock::new(|| {
+        MokaCache::builder()
+            .max_capacity(SHARED_OBJECT_CACHE_MAX_TABLES)
+            .build()
+    });
 
-    let cache = CACHE.get_or_init(|| Mutex::new(HashMap::new()));
-    let mut guard = cache.lock().expect("global iceberg cache poisoned");
+    if let Some(object_cache) = CACHE.get(&table_uuid).await {
+        return object_cache;
+    }
 
-    guard
-        .entry(table_uuid)
-        .or_insert_with(|| init_object_cache)
-        .clone()
+    CACHE.insert(table_uuid, init_object_cache.clone()).await;
+    init_object_cache
 }
 
-pub fn rebuild_table_with_shared_cache(table: Table) -> Table {
+pub async fn rebuild_table_with_shared_cache(table: Table) -> Table {
     let table_uuid = table.metadata().uuid();
     let init_object_cache = table.object_cache();
-    table.with_object_cache(shared_object_cache(init_object_cache, table_uuid))
+    let object_cache = shared_object_cache(init_object_cache, table_uuid).await;
+    table.with_object_cache(object_cache)
 }
