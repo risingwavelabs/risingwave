@@ -125,6 +125,8 @@ pub const ICEBERG_COMPACTION_TYPE_FULL: &str = "full";
 pub const ICEBERG_COMPACTION_TYPE_SMALL_FILES: &str = "small-files";
 pub const ICEBERG_COMPACTION_TYPE_FILES_WITH_DELETE: &str = "files-with-delete";
 
+pub const PARTITION_DATA_ID_START: i32 = 1000;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum IcebergWriteMode {
@@ -695,7 +697,7 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
                                 .source_id(id)
                                 .transform(transform)
                                 .name(format!("_p_{}", column))
-                                .field_id(i as i32)
+                                .field_id(PARTITION_DATA_ID_START + i as i32)
                                 .build(),
                         ),
                         None => bail!(format!(

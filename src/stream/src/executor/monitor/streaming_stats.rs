@@ -33,6 +33,7 @@ use risingwave_common::{
     register_guarded_int_gauge_vec_with_registry,
 };
 use risingwave_connector::sink::catalog::SinkId;
+use risingwave_pb::id::ExecutorId;
 
 use crate::common::log_store_impl::kv_log_store::{
     REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
@@ -50,8 +51,8 @@ pub struct StreamingMetrics {
     // Profiling Metrics:
     // Aggregated per operator rather than per actor.
     // These are purely in-memory, never collected by prometheus.
-    pub mem_stream_node_output_row_count: CountMap,
-    pub mem_stream_node_output_blocking_duration_ns: CountMap,
+    pub mem_stream_node_output_row_count: CountMap<ExecutorId>,
+    pub mem_stream_node_output_blocking_duration_ns: CountMap<ExecutorId>,
 
     // Streaming actor metrics from tokio (disabled by default)
     actor_scheduled_duration: RelabeledGuardedIntCounterVec,
@@ -80,9 +81,9 @@ pub struct StreamingMetrics {
     // Exchange (see also `compute::ExchangeServiceMetrics`)
     pub exchange_frag_recv_size: LabelGuardedIntCounterVec,
 
-    // Streaming Merge (We break out this metric from `barrier_align_duration` because
+    // Streaming Merge (We breakout this metric from `barrier_align_duration` because
     // the alignment happens on different levels)
-    pub merge_barrier_align_duration: RelabeledGuardedHistogramVec,
+    pub merge_barrier_align_duration: RelabeledGuardedIntCounterVec,
 
     // Backpressure
     pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
@@ -459,13 +460,9 @@ impl StreamingMetrics {
         )
         .unwrap();
 
-        let opts = histogram_opts!(
-            "stream_merge_barrier_align_duration",
-            "Duration of merge align barrier",
-            exponential_buckets(0.0001, 2.0, 21).unwrap() // max 104s
-        );
-        let merge_barrier_align_duration = register_guarded_histogram_vec_with_registry!(
-            opts,
+        let merge_barrier_align_duration = register_guarded_int_counter_vec_with_registry!(
+            "stream_merge_barrier_align_duration_ns",
+            "Total merge barrier alignment duration (ns)",
             &["actor_id", "fragment_id"],
             registry
         )

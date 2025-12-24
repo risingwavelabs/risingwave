@@ -230,7 +230,7 @@ impl<S: StateStore> BackfillState<S> {
                 continue;
             };
             let progress = VnodeBackfillProgress::from_row(&progress_row, &pk_serde);
-            debug!(?vnode, ?progress, "load initial progress");
+            trace!(?vnode, ?progress, "load initial progress");
             assert!(
                 vnode_state
                     .insert(vnode, VnodeBackfillState::Committed(progress))

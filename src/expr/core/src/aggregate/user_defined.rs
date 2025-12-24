@@ -148,8 +148,8 @@ pub fn new_user_defined(
         return_type,
         always_retry_on_network_error: false,
         language,
-        is_async: None,
-        is_batched: None,
+        is_async: udf.is_async,
+        is_batched: udf.is_batched,
     })
     .context("failed to build UDF runtime")?;
 

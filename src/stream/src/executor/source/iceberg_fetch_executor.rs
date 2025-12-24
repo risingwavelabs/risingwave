@@ -597,7 +597,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                     Arc::new(
                                         SerialArray::from_iter_bitmap(
                                             itertools::repeat_n(Serial::from(0), columns[0].len()),
-                                            Bitmap::ones(columns[0].len()),
+                                            Bitmap::zeros(columns[0].len()),
                                         )
                                         .into(),
                                     ),

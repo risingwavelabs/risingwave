@@ -46,8 +46,8 @@ use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
     ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumns, PbUpstreamSinkInfo,
-    ResumeMutation, SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
+    ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -145,7 +145,6 @@ impl ReplaceStreamJobPlan {
             let fragment_change = CommandFragmentChanges::NewFragment {
                 job_id: self.streaming_job.id(),
                 info: new_fragment,
-                is_existing: false,
             };
             fragment_changes
                 .try_insert(fragment_id, fragment_change)
@@ -169,7 +168,6 @@ impl ReplaceStreamJobPlan {
                 let fragment_change = CommandFragmentChanges::NewFragment {
                     job_id: sink.original_sink.id.as_job_id(),
                     info: sink.new_fragment_info(),
-                    is_existing: false,
                 };
                 fragment_changes
                     .try_insert(sink.new_fragment.fragment_id, fragment_change)
@@ -332,7 +330,6 @@ pub enum Command {
         job_type: CreateStreamingJobType,
         cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     },
-    MergeSnapshotBackfillStreamingJobs(HashMap<JobId, HashSet<TableId>>),
 
     /// `Reschedule` command generates a `Update` barrier by the [`Reschedule`] of each fragment.
     /// Mainly used for scaling and migration.
@@ -379,11 +376,6 @@ pub enum Command {
 
     ConnectorPropsChange(ConnectorPropsChange),
 
-    /// `StartFragmentBackfill` command will trigger backfilling for specified scans by `fragment_id`.
-    StartFragmentBackfill {
-        fragment_ids: Vec<FragmentId>,
-    },
-
     /// `Refresh` command generates a barrier to refresh a table by truncating state
     /// and reloading data from source.
     Refresh {
@@ -419,9 +411,6 @@ impl std::fmt::Display for Command {
             Command::CreateStreamingJob { info, .. } => {
                 write!(f, "CreateStreamingJob: {}", info.streaming_job)
             }
-            Command::MergeSnapshotBackfillStreamingJobs(_) => {
-                write!(f, "MergeSnapshotBackfillStreamingJobs")
-            }
             Command::RescheduleFragment { .. } => write!(f, "RescheduleFragment"),
             Command::ReplaceStreamJob(plan) => {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
@@ -435,7 +424,6 @@ impl std::fmt::Display for Command {
                 subscription_id, ..
             } => write!(f, "DropSubscription: {subscription_id}"),
             Command::ConnectorPropsChange(_) => write!(f, "ConnectorPropsChange"),
-            Command::StartFragmentBackfill { .. } => write!(f, "StartFragmentBackfill"),
             Command::Refresh {
                 table_id,
                 associated_source_id,
@@ -518,7 +506,6 @@ impl Command {
                             CommandFragmentChanges::NewFragment {
                                 job_id: info.streaming_job.id(),
                                 info: fragment_infos,
-                                is_existing: false,
                             },
                         )
                     })
@@ -602,7 +589,6 @@ impl Command {
                     .collect(),
             )),
             Command::ReplaceStreamJob(plan) => Some((None, plan.fragment_changes())),
-            Command::MergeSnapshotBackfillStreamingJobs(_) => None,
             Command::SourceChangeSplit(SplitState {
                 split_assignment, ..
             }) => Some((
@@ -623,7 +609,6 @@ impl Command {
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
             Command::ConnectorPropsChange(_) => None,
-            Command::StartFragmentBackfill { .. } => None,
             Command::Refresh { .. } => None, // Refresh doesn't change fragment structure
             Command::ListFinish { .. } => None, // ListFinish doesn't change fragment structure
             Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
@@ -703,8 +688,8 @@ impl std::fmt::Display for CommandContext {
         write!(
             f,
             "prev_epoch={}, curr_epoch={}, kind={}",
-            self.barrier_info.prev_epoch.value().0,
-            self.barrier_info.curr_epoch.value().0,
+            self.barrier_info.prev_epoch(),
+            self.barrier_info.curr_epoch(),
             self.barrier_info.kind.as_str_name()
         )?;
         if let Some(command) = &self.command {
@@ -1033,21 +1018,6 @@ impl Command {
 
                 Some(Mutation::Add(add_mutation))
             }
-            Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge) => {
-                Some(Mutation::DropSubscriptions(DropSubscriptionsMutation {
-                    info: jobs_to_merge
-                        .iter()
-                        .flat_map(|(job_id, upstream_tables)| {
-                            upstream_tables.iter().map(move |upstream_table_id| {
-                                SubscriptionUpstreamInfo {
-                                    subscriber_id: job_id.as_subscriber_id(),
-                                    upstream_mv_table_id: *upstream_table_id,
-                                }
-                            })
-                        })
-                        .collect(),
-                }))
-            }
 
             Command::ReplaceStreamJob(ReplaceStreamJobPlan {
                 old_fragments,
@@ -1257,6 +1227,7 @@ impl Command {
                         splits: actor_cdc_table_snapshot_splits,
                     }),
                     sink_add_columns: Default::default(),
+                    subscriptions_to_drop: vec![],
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
@@ -1304,11 +1275,6 @@ impl Command {
                     },
                 ))
             }
-            Command::StartFragmentBackfill { fragment_ids } => Some(
-                Mutation::StartFragmentBackfill(StartFragmentBackfillMutation {
-                    fragment_ids: fragment_ids.clone(),
-                }),
-            ),
             Command::Refresh {
                 table_id,
                 associated_source_id,

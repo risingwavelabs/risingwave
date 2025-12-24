@@ -31,12 +31,12 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_storage::store::PrefetchOptions;
 
 use super::barrier_align::*;
-use crate::common::table::state_table::WatermarkCacheParameterizedStateTable;
+use crate::common::table::state_table::StateTable;
 use crate::consistency::consistency_panic;
 use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
 
-pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool> {
+pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
     eval_error_report: ActorEvalErrorReport,
@@ -46,7 +46,7 @@ pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool>
     source_r: Option<Executor>,
     key_l: usize,
     comparator: PbExprNodeType,
-    left_table: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
+    left_table: StateTable<S>,
     right_table: StateTable<S>,
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
@@ -54,7 +54,7 @@ pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool>
     cleaned_by_watermark: bool,
 }
 
-impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, USE_WATERMARK_CACHE> {
+impl<S: StateStore> DynamicFilterExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -64,7 +64,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         source_r: Executor,
         key_l: usize,
         comparator: PbExprNodeType,
-        state_table_l: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
+        state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
@@ -492,9 +492,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     }
 }
 
-impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Execute
-    for DynamicFilterExecutor<S, USE_WATERMARK_CACHE>
-{
+impl<S: StateStore> Execute for DynamicFilterExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -561,7 +559,7 @@ mod tests {
             actor_context: ctx.clone(),
             identity: "DynamicFilterExecutor".into(),
         };
-        let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
+        let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
             ctx,
             eval_error_report,
             source_l.schema().clone(),
