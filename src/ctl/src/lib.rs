@@ -213,6 +213,10 @@ enum HummockCommands {
         level0_stop_write_threshold_max_size: Option<u64>,
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
+        #[clap(long)]
+        vnode_aligned_level_size_threshold: Option<u64>,
+        #[clap(long)]
+        max_kv_count_for_xor16: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -662,6 +666,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
+            vnode_aligned_level_size_threshold,
+            max_kv_count_for_xor16,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -701,6 +707,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_stop_write_threshold_max_sst_count,
                     level0_stop_write_threshold_max_size,
                     enable_optimize_l0_interval_selection,
+                    vnode_aligned_level_size_threshold,
+                    max_kv_count_for_xor16,
                 ),
             )
             .await?

@@ -563,14 +563,6 @@ impl StreamSink {
                 .into());
             }
         }
-        if sink_decouple && auto_refresh_schema_from_table.is_some() {
-            return Err(ErrorCode::NotSupported(
-                "sink with auto schema refresh can only be created with sink_decouple disabled."
-                    .to_owned(),
-                hint_string(false),
-            )
-            .into());
-        }
         let log_store_type = if sink_decouple {
             SinkLogStoreType::KvLogStore
         } else {

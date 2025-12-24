@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use iceberg::Result;
-use iceberg::spec::DataFile;
+use iceberg::spec::{DataFile, PartitionKey};
 use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
 use risingwave_common::array::arrow::arrow_array_iceberg::RecordBatch;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
@@ -43,8 +43,11 @@ impl<B: IcebergWriterBuilder> MonitoredGeneralWriterBuilder<B> {
 impl<B: IcebergWriterBuilder> IcebergWriterBuilder for MonitoredGeneralWriterBuilder<B> {
     type R = MonitoredGeneralWriter<B::R>;
 
-    async fn build(self) -> Result<MonitoredGeneralWriter<B::R>> {
-        let inner = self.inner.build().await?;
+    async fn build(
+        self,
+        partition_key: Option<PartitionKey>,
+    ) -> Result<MonitoredGeneralWriter<B::R>> {
+        let inner = self.inner.build(partition_key).await?;
         Ok(MonitoredGeneralWriter {
             inner,
             write_qps: self.write_qps,

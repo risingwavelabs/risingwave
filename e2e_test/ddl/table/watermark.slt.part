@@ -1,6 +1,10 @@
-# Create a table with watermark.
+# Create an append-only table with watermark.
 statement ok
 create table t1 (v1 int, v2 timestamp with time zone, watermark for v2 as v2 - INTERVAL '10 MINUTES') append only;
+
+# Creating a normal table with watermark should fail.
+statement error Defining watermarks on table requires the table to be append only
+create table t2 (v1 int, v2 timestamp with time zone, watermark for v2 as v2 - INTERVAL '10 MINUTES');
 
 statement ok
 drop table t1;

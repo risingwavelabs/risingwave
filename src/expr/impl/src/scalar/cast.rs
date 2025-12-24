@@ -21,9 +21,10 @@ use risingwave_common::array::{DataChunk, ListRef, ListValue, StructRef, StructV
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, ToText,
+    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, Serial, Timestamptz, ToText,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::row_id::row_id_to_unix_millis;
 use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
 use risingwave_expr::{ExprError, Result, function};
 use risingwave_pb::expr::expr_node::PbType;
@@ -137,6 +138,13 @@ where
     T1: Into<T2>,
 {
     elem.into()
+}
+
+/// Extract the timestamp from row id.
+#[function("cast(serial) -> timestamptz")]
+pub fn serial_to_timestamptz(elem: Serial) -> Result<Timestamptz> {
+    let unix_ms = row_id_to_unix_millis(elem.as_row_id()).ok_or(ExprError::NumericOutOfRange)?;
+    Timestamptz::from_millis(unix_ms).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("cast(varchar) -> boolean")]

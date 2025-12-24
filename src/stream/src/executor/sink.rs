@@ -767,7 +767,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             Ok(()) => {
                                 error!(
                                     error = %e.as_report(),
-                                    executor_id = sink_writer_param.executor_id,
+                                    executor_id = %sink_writer_param.executor_id,
                                     sink_id = %sink_param.sink_id,
                                     "reset log reader stream successfully after sink error"
                                 );
@@ -808,7 +808,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                         sink_param.properties.extend(config.into_iter());
                                         sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                                         info!(
-                                            executor_id = sink_writer_param.executor_id,
+                                            executor_id = %sink_writer_param.executor_id,
                                             sink_id = %sink_param.sink_id,
                                             "alter sink config successfully with rewind"
                                         );

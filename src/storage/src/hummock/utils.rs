@@ -83,21 +83,24 @@ where
     R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]> + EmptySliceRef,
 {
+    debug_assert!(info.table_ids.is_sorted());
     let table_range = &info.key_range;
     let table_start = FullKey::decode(table_range.left.as_ref()).user_key;
     let table_end = FullKey::decode(table_range.right.as_ref()).user_key;
     let (left, right) = bound_table_key_range(table_id, table_key_range);
     let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
     let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
-    range_overlap(
-        &(left, right),
-        &table_start,
-        if table_range.right_exclusive {
-            Bound::Excluded(&table_end)
-        } else {
-            Bound::Included(&table_end)
-        },
-    ) && info.table_ids.binary_search(&table_id).is_ok()
+
+    info.table_ids.binary_search(&table_id).is_ok()
+        && range_overlap(
+            &(left, right),
+            &table_start,
+            if table_range.right_exclusive {
+                Bound::Excluded(&table_end)
+            } else {
+                Bound::Included(&table_end)
+            },
+        )
 }
 
 /// Search the SST containing the specified key within a level, using binary search.

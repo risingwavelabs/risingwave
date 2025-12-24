@@ -25,7 +25,6 @@ use either::Either;
 use foyer::Hint;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
-use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
@@ -35,8 +34,8 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt, VnodeCountCompat};
-use risingwave_common::row::{self, Once, OwnedRow, Row, RowExt, once};
-use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
+use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -61,20 +60,12 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::*;
-use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{KeyedRow, TableDistribution};
 use thiserror_ext::AsReport;
 use tracing::{Instrument, trace};
 
 use crate::cache::cache_may_stale;
-use crate::common::state_cache::{StateCache, StateCacheFiller};
-use crate::common::table::state_table_cache::StateTableWatermarkCache;
 use crate::executor::StreamExecutorResult;
-
-/// Mostly watermark operators will have inserts (append-only).
-/// So this number should not need to be very large.
-/// But we may want to improve this choice in the future.
-const WATERMARK_CACHE_ENTRIES: usize = 16;
 
 /// This macro is used to mark a point where we want to randomly discard the operation and early
 /// return, only in insane mode.
@@ -89,12 +80,8 @@ macro_rules! insane_mode_discard_point {
 
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
-pub struct StateTableInner<
-    S,
-    SD = BasicSerde,
-    const IS_REPLICATED: bool = false,
-    const USE_WATERMARK_CACHE: bool = false,
-> where
+pub struct StateTableInner<S, SD = BasicSerde, const IS_REPLICATED: bool = false>
+where
     S: StateStore,
     SD: ValueRowSerde,
 {
@@ -133,8 +120,6 @@ pub struct StateTableInner<
     pending_watermark: Option<ScalarImpl>,
     /// Last committed watermark for state cleaning. Will be restored on state table recovery.
     committed_watermark: Option<ScalarImpl>,
-    /// Cache for the top-N primary keys for reducing unnecessary range deletion.
-    watermark_cache: StateTableWatermarkCache,
 
     /// Data Types
     /// We will need to use to build data chunks from state table rows.
@@ -168,15 +153,9 @@ pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 /// `ReplicatedStateTable` is meant to replicate upstream shared buffer.
 /// Used for `ArrangementBackfill` executor.
 pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
-/// `WatermarkCacheStateTable` caches the watermark column.
-/// It will reduce state cleaning overhead.
-pub type WatermarkCacheStateTable<S> = StateTableInner<S, BasicSerde, false, true>;
-pub type WatermarkCacheParameterizedStateTable<S, const USE_WATERMARK_CACHE: bool> =
-    StateTableInner<S, BasicSerde, false, USE_WATERMARK_CACHE>;
 
 // initialize
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -418,14 +397,7 @@ pub enum StateTableOpConsistencyLevel {
     LogStoreEnabled,
 }
 
-pub struct StateTableBuilder<
-    'a,
-    S,
-    SD,
-    const IS_REPLICATED: bool,
-    const USE_WATERMARK_CACHE: bool,
-    PreloadAllRow,
-> {
+pub struct StateTableBuilder<'a, S, SD, const IS_REPLICATED: bool, PreloadAllRow> {
     table_catalog: &'a Table,
     store: S,
     vnodes: Option<Arc<Bitmap>>,
@@ -436,13 +408,8 @@ pub struct StateTableBuilder<
     _serde: PhantomData<SD>,
 }
 
-impl<
-    'a,
-    S: StateStore,
-    SD: ValueRowSerde,
-    const IS_REPLICATED: bool,
-    const USE_WATERMARK_CACHE: bool,
-> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, ()>
+impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
+    StateTableBuilder<'a, S, SD, IS_REPLICATED, ()>
 {
     pub fn new(table_catalog: &'a Table, store: S, vnodes: Option<Arc<Bitmap>>) -> Self {
         Self {
@@ -459,7 +426,7 @@ impl<
     fn with_preload_all_rows(
         self,
         preload_all_rows: bool,
-    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool> {
+    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, bool> {
         StateTableBuilder {
             table_catalog: self.table_catalog,
             store: self.store,
@@ -474,7 +441,7 @@ impl<
     pub fn enable_preload_all_rows_by_config(
         self,
         config: &StreamingConfig,
-    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool> {
+    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, bool> {
         let developer = &config.developer;
         let preload_all_rows = if developer.default_enable_mem_preload_state_table {
             !developer
@@ -488,21 +455,13 @@ impl<
         self.with_preload_all_rows(preload_all_rows)
     }
 
-    pub fn forbid_preload_all_rows(
-        self,
-    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool> {
+    pub fn forbid_preload_all_rows(self) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, bool> {
         self.with_preload_all_rows(false)
     }
 }
 
-impl<
-    'a,
-    S: StateStore,
-    SD: ValueRowSerde,
-    const IS_REPLICATED: bool,
-    const USE_WATERMARK_CACHE: bool,
-    PreloadAllRow,
-> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, PreloadAllRow>
+impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAllRow>
+    StateTableBuilder<'a, S, SD, IS_REPLICATED, PreloadAllRow>
 {
     pub fn with_op_consistency_level(
         mut self,
@@ -518,15 +477,10 @@ impl<
     }
 }
 
-impl<
-    'a,
-    S: StateStore,
-    SD: ValueRowSerde,
-    const IS_REPLICATED: bool,
-    const USE_WATERMARK_CACHE: bool,
-> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool>
+impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
+    StateTableBuilder<'a, S, SD, IS_REPLICATED, bool>
 {
-    pub async fn build(self) -> StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE> {
+    pub async fn build(self) -> StateTableInner<S, SD, IS_REPLICATED> {
         let mut preload_all_rows = self.preload_all_rows;
         if preload_all_rows
             && let Err(e) =
@@ -552,8 +506,7 @@ impl<
 // FIXME(kwannoel): Enforce that none of the constructors here
 // should be used by replicated state table.
 // Apart from from_table_catalog_inner.
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -722,12 +675,6 @@ where
             row_serde.kind().is_column_aware()
         );
 
-        let watermark_cache = if USE_WATERMARK_CACHE {
-            StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
-        } else {
-            StateTableWatermarkCache::new(0)
-        };
-
         // Get info for replicated state table.
         let output_column_ids_to_input_idx = output_column_ids
             .iter()
@@ -823,7 +770,6 @@ where
             value_indices,
             pending_watermark: None,
             committed_watermark,
-            watermark_cache,
             data_types,
             output_indices,
             i2o_mapping,
@@ -892,7 +838,7 @@ where
     }
 }
 
-impl<S, SD, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, USE_WATERMARK_CACHE>
+impl<S, SD> StateTableInner<S, SD, true>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -916,8 +862,7 @@ where
 }
 
 // point get
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1033,21 +978,15 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 /// should be called for all barriers rather than only for the barrier with update vnode bitmap. In this way, though we don't have scale test for all
 /// streaming executor, we can ensure that all executor covered by normal e2e test have properly handled the `StateTablePostCommit`.
 #[must_use]
-pub struct StateTablePostCommit<
-    'a,
-    S,
-    SD = BasicSerde,
-    const IS_REPLICATED: bool = false,
-    const USE_WATERMARK_CACHE: bool = false,
-> where
+pub struct StateTablePostCommit<'a, S, SD = BasicSerde, const IS_REPLICATED: bool = false>
+where
     S: StateStore,
     SD: ValueRowSerde,
 {
-    inner: &'a mut StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>,
+    inner: &'a mut StateTableInner<S, SD, IS_REPLICATED>,
 }
 
-impl<'a, S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTablePostCommit<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<'a, S, SD, const IS_REPLICATED: bool> StateTablePostCommit<'a, S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1060,7 +999,7 @@ where
             (
                 Arc<Bitmap>,
                 Arc<Bitmap>,
-                &'a mut StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>,
+                &'a mut StateTableInner<S, SD, IS_REPLICATED>,
             ),
             bool,
         )>,
@@ -1075,7 +1014,7 @@ where
         })
     }
 
-    pub fn inner(&self) -> &StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE> {
+    pub fn inner(&self) -> &StateTableInner<S, SD, IS_REPLICATED> {
         &*self.inner
     }
 
@@ -1108,9 +1047,6 @@ where
 
         if cache_may_stale {
             self.inner.pending_watermark = None;
-            if USE_WATERMARK_CACHE {
-                self.inner.watermark_cache.clear();
-            }
         }
 
         Ok((
@@ -1184,8 +1120,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     }
 }
 
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1195,9 +1130,6 @@ where
     pub fn insert(&mut self, value: impl Row) {
         let pk_indices = &self.pk_indices;
         let pk = (&value).project(pk_indices);
-        if USE_WATERMARK_CACHE {
-            self.watermark_cache.insert(&pk);
-        }
 
         let key_bytes = self.serialize_pk(&pk);
         dispatch_value_indices!(&self.value_indices, [value], {
@@ -1210,9 +1142,6 @@ where
     pub fn delete(&mut self, old_value: impl Row) {
         let pk_indices = &self.pk_indices;
         let pk = (&old_value).project(pk_indices);
-        if USE_WATERMARK_CACHE {
-            self.watermark_cache.delete(&pk);
-        }
 
         let key_bytes = self.serialize_pk(&pk);
         dispatch_value_indices!(&self.value_indices, [old_value], {
@@ -1272,17 +1201,11 @@ where
             let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, vnode);
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    if USE_WATERMARK_CACHE {
-                        self.watermark_cache.insert(&pk);
-                    }
                     dispatch_value_indices!(&self.value_indices, [row], {
                         self.row_store.insert(key_bytes, row);
                     });
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    if USE_WATERMARK_CACHE {
-                        self.watermark_cache.delete(&pk);
-                    }
                     dispatch_value_indices!(&self.value_indices, [row], {
                         self.row_store.delete(key_bytes, row);
                     });
@@ -1310,8 +1233,7 @@ where
     pub async fn commit(
         &mut self,
         new_epoch: EpochPair,
-    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
-    {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED>> {
         self.commit_inner(new_epoch, None).await
     }
 
@@ -1333,8 +1255,7 @@ where
         &mut self,
         new_epoch: EpochPair,
         op_consistency_level: StateTableOpConsistencyLevel,
-    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
-    {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED>> {
         if self.op_consistency_level != op_consistency_level {
             // avoid flooding e2e-test log
             if !cfg!(debug_assertions) {
@@ -1357,8 +1278,7 @@ where
         &mut self,
         new_epoch: EpochPair,
         switch_consistent_op: Option<StateTableOpConsistencyLevel>,
-    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
-    {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED>> {
         assert!(!self.on_post_commit);
         assert_eq!(
             self.epoch.expect("should only be called after init").curr,
@@ -1380,57 +1300,6 @@ where
             .await?;
         self.epoch = Some(new_epoch);
 
-        // Refresh watermark cache if it is out of sync.
-        if USE_WATERMARK_CACHE
-            && !self.watermark_cache.is_synced()
-            && let Some(ref watermark) = self.committed_watermark
-        {
-            let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
-                (Included(once(Some(watermark.clone()))), Unbounded);
-            // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
-            // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
-            // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
-            // TODO(kwannoel): We can optimize it with:
-            // 1. Either use `RefCell`.
-            // 2. Or pass in a direct reference to LocalStateStore,
-            //    instead of referencing it indirectly from `self`.
-            //    Similar to how we do for pk_indices.
-            let mut pks = Vec::with_capacity(self.watermark_cache.capacity());
-            {
-                let mut streams = vec![];
-                for vnode in self.vnodes().iter_vnodes() {
-                    let stream = self
-                        .iter_keyed_row_with_vnode(vnode, &range, PrefetchOptions::default())
-                        .await?;
-                    streams.push(Box::pin(stream));
-                }
-                let merged_stream = merge_sort(streams);
-                pin_mut!(merged_stream);
-
-                #[for_await]
-                for entry in merged_stream.take(self.watermark_cache.capacity()) {
-                    let keyed_row = entry?;
-                    let pk = self.pk_serde.deserialize(keyed_row.key())?;
-                    // watermark column should be part of the pk
-                    let pk_idx = self.clean_watermark_index_in_pk.unwrap_or(0) as usize;
-                    if !pk.is_null_at(pk_idx) {
-                        pks.push(pk);
-                    }
-                }
-            }
-
-            let mut filler = self.watermark_cache.begin_syncing();
-            for pk in pks {
-                filler.insert_unchecked(DefaultOrdered(pk), ());
-            }
-            filler.finish();
-
-            let n_cache_entries = self.watermark_cache.len();
-            if n_cache_entries < self.watermark_cache.capacity() {
-                self.watermark_cache.set_table_row_count(n_cache_entries);
-            }
-        }
-
         self.on_post_commit = true;
         Ok(StateTablePostCommit { inner: self })
     }
@@ -1446,85 +1315,30 @@ where
             !self.pk_indices().is_empty(),
             "see pending watermark on empty pk"
         );
-
-        let should_clean_watermark = {
-            {
-                if USE_WATERMARK_CACHE && self.watermark_cache.is_synced() {
-                    if let Some(key) = self.watermark_cache.lowest_key() {
-                        watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
-                    } else {
-                        // Watermark cache is synced,
-                        // And there's no key in watermark cache.
-                        // That implies table is empty.
-                        // We should not clean watermark.
-                        false
-                    }
-                } else {
-                    // Either we are not using watermark cache,
-                    // Or watermark_cache is not synced.
-                    // In either case we should clean watermark.
-                    true
-                }
-            }
-        };
-
-        let pair = watermark_serde_and_type(
+        let (watermark_serializer, watermark_type) = watermark_serde_and_type(
             self.clean_watermark_index_in_pk,
             self.clean_watermark_index_in_value,
             &self.pk_serde,
             &self.data_types,
+        )
+        .unwrap();
+        let watermark_suffix =
+            serialize_row(row::once(Some(watermark.clone())), &watermark_serializer);
+        let vnode_watermark = VnodeWatermark::new(
+            self.vnodes().clone(),
+            Bytes::copy_from_slice(watermark_suffix.as_ref()),
         );
+        trace!(table_id = %self.table_id, ?vnode_watermark, "table watermark");
 
-        // Compute Delete Ranges
-        let seal_watermark = if let Some((watermark_serializer, watermark_type)) = pair
-            && should_clean_watermark
-        {
-            let watermark_suffix =
-                serialize_row(row::once(Some(watermark.clone())), &watermark_serializer);
-            trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
-                self.vnodes().iter_vnodes().collect_vec()
-            }, "delete range");
-
-            let order_type = watermark_serializer.get_order_types().get(0).unwrap();
-
-            if order_type.is_ascending() {
-                Some((
-                    WatermarkDirection::Ascending,
-                    VnodeWatermark::new(
-                        self.vnodes().clone(),
-                        Bytes::copy_from_slice(watermark_suffix.as_ref()),
-                    ),
-                    watermark_type,
-                ))
-            } else {
-                Some((
-                    WatermarkDirection::Descending,
-                    VnodeWatermark::new(
-                        self.vnodes().clone(),
-                        Bytes::copy_from_slice(watermark_suffix.as_ref()),
-                    ),
-                    watermark_type,
-                ))
-            }
+        let order_type = watermark_serializer.get_order_types().get(0).unwrap();
+        let direction = if order_type.is_ascending() {
+            WatermarkDirection::Ascending
         } else {
-            None
+            WatermarkDirection::Descending
         };
+
         self.committed_watermark = Some(watermark);
-
-        // Clear the watermark cache and force a resync.
-        // TODO(kwannoel): This can be further optimized:
-        // 1. Add a `cache.drain_until` interface, so we only clear the watermark cache
-        //    up to the largest end of delete ranges.
-        // 2. Mark the cache as not_synced, so we can still refill it later.
-        // 3. When refilling the cache,
-        //    we just refill from the largest value of the cache, as the lower bound.
-        if USE_WATERMARK_CACHE && seal_watermark.is_some() {
-            self.watermark_cache.clear();
-        }
-
-        seal_watermark.map(|(direction, watermark, is_non_pk_prefix)| {
-            (direction, vec![watermark], is_non_pk_prefix)
-        })
+        Some((direction, vec![vnode_watermark], watermark_type))
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
@@ -1558,8 +1372,7 @@ impl FromVnodeBytes for () {
 }
 
 // Iterator functions
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1679,8 +1492,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     }
 }
 
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1828,11 +1640,6 @@ where
         self.row_store
             .iter_kv(vnode, memcomparable_range, None, prefetch_options)
             .await
-    }
-
-    #[cfg(test)]
-    pub fn get_watermark_cache(&self) -> &StateTableWatermarkCache {
-        &self.watermark_cache
     }
 }
 

@@ -17,7 +17,6 @@ use std::pin::Pin;
 use std::task::{Context, Poll};
 
 use risingwave_common::array::StreamChunkBuilder;
-use risingwave_common::config::MetricLevel;
 use tokio::sync::mpsc;
 
 use super::exchange::input::BoxedActorInput;
@@ -256,18 +255,14 @@ impl MergeExecutor {
         chunk_size: usize,
         schema: Schema,
     ) -> MergeUpstream {
-        let merge_barrier_align_duration = if metrics.level >= MetricLevel::Debug {
-            Some(
-                metrics
-                    .merge_barrier_align_duration
-                    .with_guarded_label_values(&[
-                        &actor_context.id.to_string(),
-                        &actor_context.fragment_id.to_string(),
-                    ]),
-            )
-        } else {
-            None
-        };
+        let merge_barrier_align_duration = Some(
+            metrics
+                .merge_barrier_align_duration
+                .with_guarded_label_values(&[
+                    &actor_context.id.to_string(),
+                    &actor_context.fragment_id.to_string(),
+                ]),
+        );
 
         BufferChunks::new(
             // Futures of all active upstreams.
@@ -300,6 +295,7 @@ where
             self.local_barrier_manager,
             self.metrics.clone(),
             self.fragment_id,
+            self.actor_context.config.clone(),
         );
 
         loop {
@@ -716,6 +712,8 @@ mod tests {
 
         let (upstream_fragment_id, fragment_id) = (10.into(), 18.into());
 
+        let actor_ctx = ActorContext::for_test(actor_id);
+
         let inputs: Vec<_> =
             try_join_all([untouched, old].into_iter().map(async |upstream_actor_id| {
                 new_input(
@@ -725,6 +723,7 @@ mod tests {
                     fragment_id,
                     &helper_make_local_actor(upstream_actor_id),
                     upstream_fragment_id,
+                    actor_ctx.config.clone(),
                 )
                 .await
             }))
@@ -753,7 +752,6 @@ mod tests {
         let barrier_rx = barrier_test_env
             .local_barrier_manager
             .subscribe_barrier(actor_id);
-        let actor_ctx = ActorContext::for_test(actor_id);
         let upstream = MergeExecutor::new_merge_upstream(
             inputs,
             &metrics,
@@ -934,6 +932,7 @@ mod tests {
                 (0.into(), 0.into()),
                 (0.into(), 0.into()),
                 Arc::new(StreamingMetrics::unused()),
+                Arc::new(StreamingConfig::default()),
             )
             .await
             .unwrap()

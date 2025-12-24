@@ -653,7 +653,12 @@ impl HummockVersionReader {
             TableKey(table_key.clone()),
             EpochWithGap::new(epoch, MAX_SPILL_TIMES),
         );
-        for local_sst in &uncommitted_ssts {
+        let single_table_key_range = table_key.clone()..=table_key.clone();
+
+        // prune uncommitted ssts with the keyrange
+        let pruned_uncommitted_ssts =
+            prune_overlapping_ssts(&uncommitted_ssts, table_id, &single_table_key_range);
+        for local_sst in pruned_uncommitted_ssts {
             local_stats.staging_sst_get_count += 1;
             if let Some(iter) = get_from_sstable_info(
                 self.sstable_store.clone(),
@@ -686,7 +691,6 @@ impl HummockVersionReader {
                 });
             }
         }
-        let single_table_key_range = table_key.clone()..=table_key.clone();
         // 3. read from committed_version sst file
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.

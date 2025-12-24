@@ -656,9 +656,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                 {
                                     // rebuild the stream reader with new props
                                     tracing::info!(
-                                        "updating source properties from {:?} to {:?}",
-                                        source_desc.source.config,
-                                        new_props
+                                        actor_id = %self.actor_ctx.id,
+                                        source_id = %source_id,
+                                        "updating source connector properties",
                                     );
                                     source_desc.update_reader(new_props.clone())?;
                                     // suppose the connector props change will not involve state change

@@ -36,6 +36,7 @@ use risingwave_connector::sink::catalog::SinkType;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::id::StreamNodeLocalOperatorId;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 use risingwave_pb::stream_plan::dispatch_output_mapping::TypePair;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
@@ -843,6 +844,26 @@ impl StreamFragmentGraph {
                     table.maybe_vnode_count = target.maybe_vnode_count;
                 },
             );
+        }
+    }
+
+    pub fn fit_snapshot_backfill_epochs(
+        &mut self,
+        mut snapshot_backfill_epochs: HashMap<StreamNodeLocalOperatorId, u64>,
+    ) {
+        for fragment in self.fragments.values_mut() {
+            visit_stream_node_cont_mut(fragment.node.as_mut().unwrap(), |node| {
+                if let PbNodeBody::StreamScan(scan) = node.node_body.as_mut().unwrap()
+                    && let StreamScanType::SnapshotBackfill
+                    | StreamScanType::CrossDbSnapshotBackfill = scan.stream_scan_type()
+                {
+                    let Some(epoch) = snapshot_backfill_epochs.remove(&node.operator_id) else {
+                        panic!("no snapshot epoch found for node {:?}", node)
+                    };
+                    scan.snapshot_backfill_epoch = Some(epoch);
+                }
+                true
+            })
         }
     }
 

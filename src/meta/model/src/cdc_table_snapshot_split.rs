@@ -29,6 +29,15 @@ pub struct Model {
     pub is_backfill_finished: i16,
 }
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
-pub enum Relation {}
+pub enum Relation {
+    #[sea_orm(
+        belongs_to = "super::object::Entity",
+        from = "Column::TableId",
+        to = "super::object::Column::Oid",
+        on_update = "NoAction",
+        on_delete = "NoAction"
+    )]
+    Object,
+}
 
 impl ActiveModelBehavior for ActiveModel {}

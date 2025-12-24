@@ -76,7 +76,7 @@ impl<St: ChangeLogRowStream> VnodeStream<St> {
         data_chunk_builder: DataChunkBuilder,
     ) -> Self {
         assert!(data_chunk_builder.is_empty());
-        assert!(data_chunk_builder.batch_size() > 2);
+        assert!(data_chunk_builder.batch_size() >= 2);
         let streams = FuturesUnordered::from_iter(vnode_streams.into_iter().map(
             |(vnode, stream, row_count)| {
                 let stream = stream.peekable();

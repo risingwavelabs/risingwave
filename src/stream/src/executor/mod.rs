@@ -29,11 +29,11 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FusedStream, FuturesUnordered, StreamFuture};
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
-use prometheus::Histogram;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
@@ -196,7 +196,7 @@ use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,
     build_actor_cdc_table_snapshot_splits_with_generation,
 };
-use risingwave_pb::id::SubscriberId;
+use risingwave_pb::id::{ExecutorId, SubscriberId};
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 
 pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
@@ -219,7 +219,7 @@ pub struct ExecutorInfo {
     pub identity: String,
 
     /// The executor id of the executor.
-    pub id: u64,
+    pub id: ExecutorId,
 }
 
 impl ExecutorInfo {
@@ -229,7 +229,7 @@ impl ExecutorInfo {
             stream_key,
             stream_kind: PbStreamKind::Retract, // dummy value for test
             identity,
-            id,
+            id: id.into(),
         }
     }
 }
@@ -713,8 +713,9 @@ impl Mutation {
 
     #[cfg(test)]
     fn to_protobuf(&self) -> PbMutation {
-        use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_with_generation;
-        use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
+        use risingwave_pb::source::{
+            ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
+        };
         use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
         use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
         use risingwave_pb::stream_plan::{
@@ -774,11 +775,14 @@ impl Mutation {
                         )
                     })
                     .collect(),
-                actor_cdc_table_snapshot_splits:
-                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
-                        actor_cdc_table_snapshot_splits.clone(),
-                    )
-                    .into(),
+                actor_cdc_table_snapshot_splits: Some(PbCdcTableSnapshotSplitsWithGeneration {
+                    splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
+                        (*actor_id, risingwave_pb::source::PbCdcTableSnapshotSplits {
+                            splits: splits.iter().map(risingwave_connector::source::cdc::build_cdc_table_snapshot_split).collect(),
+                            generation: *generation,
+                        })
+                    }).collect()
+                }),
                 sink_add_columns: sink_add_columns
                     .iter()
                     .map(|(sink_id, add_columns)| {
@@ -824,10 +828,14 @@ impl Mutation {
                     .collect(),
                 backfill_nodes_to_pause: backfill_nodes_to_pause.iter().copied().collect(),
                 actor_cdc_table_snapshot_splits:
-                    build_pb_actor_cdc_table_snapshot_splits_with_generation(
-                        actor_cdc_table_snapshot_splits.clone(),
-                    )
-                    .into(),
+                Some(PbCdcTableSnapshotSplitsWithGeneration {
+                    splits:actor_cdc_table_snapshot_splits.splits.iter().map(|(actor_id,(splits, generation))| {
+                        (*actor_id, risingwave_pb::source::PbCdcTableSnapshotSplits {
+                            splits: splits.iter().map(risingwave_connector::source::cdc::build_cdc_table_snapshot_split).collect(),
+                            generation: *generation,
+                        })
+                    }).collect()
+                }),
                 new_upstream_sinks: new_upstream_sinks
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
@@ -1441,7 +1449,7 @@ pub struct DynamicReceivers<InputId, M> {
     /// Currently only used for union.
     barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
     /// Only for merge. If None, then we don't take `Instant::now()` and `observe` during `poll_next`
-    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+    merge_barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
 }
 
 impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> Stream
@@ -1525,8 +1533,7 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
                         barrier_align_duration.inc_by(start_ts.elapsed().as_nanos() as u64);
                     }
                     if let Some(merge_barrier_align_duration) = &self.merge_barrier_align_duration {
-                        // Observe did a few atomic operation inside, we want to avoid the overhead.
-                        merge_barrier_align_duration.observe(start_ts.elapsed().as_secs_f64())
+                        merge_barrier_align_duration.inc_by(start_ts.elapsed().as_nanos() as u64);
                     }
 
                     break;
@@ -1550,7 +1557,7 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
     pub fn new(
         upstreams: Vec<BoxedMessageInput<InputId, M>>,
         barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
-        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+        merge_barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
     ) -> Self {
         let mut this = Self {
             barrier: None,
@@ -1629,7 +1636,9 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
         });
     }
 
-    pub fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram>> {
+    pub fn merge_barrier_align_duration(
+        &self,
+    ) -> Option<LabelGuardedMetric<GenericCounter<AtomicU64>>> {
         self.merge_barrier_align_duration.clone()
     }
 
@@ -1686,6 +1695,7 @@ struct BuildInputContext {
     pub local_barrier_manager: LocalBarrierManager,
     pub metrics: Arc<StreamingMetrics>,
     pub fragment_id: FragmentId,
+    pub actor_config: Arc<StreamingConfig>,
 }
 
 type BoxedNewInputsFuture =
@@ -1704,6 +1714,7 @@ impl DispatchBarrierBuffer {
         local_barrier_manager: LocalBarrierManager,
         metrics: Arc<StreamingMetrics>,
         fragment_id: FragmentId,
+        actor_config: Arc<StreamingConfig>,
     ) -> Self {
         Self {
             buffer: VecDeque::new(),
@@ -1716,6 +1727,7 @@ impl DispatchBarrierBuffer {
                 local_barrier_manager,
                 metrics,
                 fragment_id,
+                actor_config,
             }),
         }
     }
@@ -1827,6 +1839,7 @@ impl DispatchBarrierBuffer {
                         ctx.fragment_id,
                         upstream_actor,
                         upstream_fragment_id,
+                        ctx.actor_config.clone(),
                     )
                     .await?;
 

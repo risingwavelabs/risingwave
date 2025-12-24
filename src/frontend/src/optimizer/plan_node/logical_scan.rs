@@ -19,13 +19,12 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
+    BackfillType, BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
     LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamTableScan, ToBatch,
     ToStream, generic,
 };
@@ -190,6 +189,10 @@ impl LogicalScan {
 
     pub fn watermark_columns(&self) -> WatermarkColumns {
         self.core.watermark_columns()
+    }
+
+    pub fn cross_database(&self) -> bool {
+        self.core.cross_database()
     }
 
     /// Return indexes can satisfy the required order.
@@ -615,8 +618,7 @@ impl ToStream for LogicalScan {
         ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         if self.predicate().always_true() {
-            if self.core.cross_database() && ctx.stream_scan_type() == StreamScanType::UpstreamOnly
-            {
+            if self.core.cross_database() && ctx.backfill_type() == BackfillType::UpstreamOnly {
                 return Err(ErrorCode::NotSupported(
                     "We currently do not support cross database scan in upstream only mode."
                         .to_owned(),
@@ -627,7 +629,7 @@ impl ToStream for LogicalScan {
 
             Ok(StreamTableScan::new_with_stream_scan_type(
                 self.core.clone(),
-                ctx.stream_scan_type(),
+                ctx.backfill_type().to_stream_scan_type(),
             )
             .into())
         } else {

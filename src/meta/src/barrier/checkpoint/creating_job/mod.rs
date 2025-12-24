@@ -25,7 +25,6 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_connector::source::cdc::build_pb_actor_cdc_table_snapshot_splits_with_generation;
 use risingwave_meta_model::{CreateType, WorkerId};
 use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
@@ -44,9 +43,7 @@ use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::{
-    BackfillOrderState, BarrierKind, Command, CreateStreamingJobCommandInfo, TracedEpoch,
-};
+use crate::barrier::{BackfillOrderState, BarrierKind, CreateStreamingJobCommandInfo, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::StreamJobActorsToCreate;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -59,7 +56,7 @@ pub(crate) struct CreatingStreamingJobControl {
     definition: String,
     create_type: CreateType,
     pub(super) snapshot_backfill_upstream_tables: HashSet<TableId>,
-    backfill_epoch: u64,
+    snapshot_epoch: u64,
 
     node_actors: HashMap<WorkerId, HashSet<ActorId>>,
     state_table_ids: HashSet<TableId>,
@@ -74,7 +71,7 @@ impl CreatingStreamingJobControl {
     pub(super) fn new(
         info: &CreateStreamingJobCommandInfo,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
-        backfill_epoch: u64,
+        snapshot_epoch: u64,
         version_stat: &HummockVersionStats,
         control_stream_manager: &mut ControlStreamManager,
         edges: &mut FragmentEdgeBuildResult,
@@ -122,7 +119,7 @@ impl CreatingStreamingJobControl {
             ));
 
         let mut barrier_control =
-            CreatingStreamingJobBarrierControl::new(job_id, backfill_epoch, false);
+            CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, false, None);
 
         let mut prev_epoch_fake_physical_time = 0;
         let mut pending_non_checkpoint_barriers = vec![];
@@ -140,6 +137,11 @@ impl CreatingStreamingJobControl {
             .flat_map(build_actor_connector_splits)
             .collect();
 
+        assert!(
+            info.cdc_table_snapshot_splits.is_none(),
+            "should not have cdc backfill for snapshot backfill job"
+        );
+
         let initial_mutation = Mutation::Add(AddMutation {
             // for mutation of snapshot backfill job, we won't include changes to dispatchers of upstream actors.
             actor_dispatchers: Default::default(),
@@ -149,11 +151,7 @@ impl CreatingStreamingJobControl {
             pause: false,
             subscriptions_to_add: Default::default(),
             backfill_nodes_to_pause,
-            actor_cdc_table_snapshot_splits:
-                build_pb_actor_cdc_table_snapshot_splits_with_generation(
-                    info.cdc_table_snapshot_split_assignment.clone(),
-                )
-                .into(),
+            actor_cdc_table_snapshot_splits: None,
             new_upstream_sinks: Default::default(),
         });
 
@@ -183,14 +181,14 @@ impl CreatingStreamingJobControl {
             job_id,
             snapshot_backfill_upstream_tables,
             barrier_control,
-            backfill_epoch,
+            snapshot_epoch,
             status: CreatingStreamingJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,
                 pending_upstream_barriers: vec![],
                 version_stats: version_stat.clone(),
                 create_mview_tracker,
                 snapshot_backfill_actors,
-                backfill_epoch,
+                snapshot_epoch,
                 fragment_infos,
                 pending_non_checkpoint_barriers,
             },
@@ -205,22 +203,37 @@ impl CreatingStreamingJobControl {
     fn resolve_upstream_log_epochs(
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-        committed_epoch: u64,
-        upstream_curr_epoch: u64,
+        exclusive_start_log_epoch: u64,
+        upstream_barrier_info: &BarrierInfo,
     ) -> MetaResult<Vec<BarrierInfo>> {
-        // TODO: add sanity check
-        let table_id = snapshot_backfill_upstream_tables.iter().next().unwrap();
-        let mut epochs_iter = upstream_table_log_epochs[table_id].iter();
-        loop {
-            let (_, checkpoint_epoch) = epochs_iter.next().expect("not reach committed epoch yet");
-            if *checkpoint_epoch < committed_epoch {
-                continue;
+        let table_id = snapshot_backfill_upstream_tables
+            .iter()
+            .next()
+            .expect("snapshot backfill job should have upstream");
+        let epochs_iter = if let Some(epochs) = upstream_table_log_epochs.get(table_id) {
+            let mut epochs_iter = epochs.iter();
+            loop {
+                let (_, checkpoint_epoch) =
+                    epochs_iter.next().expect("not reach committed epoch yet");
+                if *checkpoint_epoch < exclusive_start_log_epoch {
+                    continue;
+                }
+                assert_eq!(*checkpoint_epoch, exclusive_start_log_epoch);
+                break;
             }
-            assert_eq!(*checkpoint_epoch, committed_epoch);
-            break;
-        }
+            epochs_iter
+        } else {
+            // snapshot backfill job has been marked as creating, but upstream table has not committed a new epoch yet, so no table change log
+            assert_eq!(
+                upstream_barrier_info.prev_epoch(),
+                exclusive_start_log_epoch
+            );
+            static EMPTY_VEC: Vec<(Vec<u64>, u64)> = Vec::new();
+            EMPTY_VEC.iter()
+        };
+
         let mut ret = vec![];
-        let mut prev_epoch = committed_epoch;
+        let mut prev_epoch = exclusive_start_log_epoch;
         let mut pending_non_checkpoint_barriers = vec![];
         for (non_checkpoint_epochs, checkpoint_epoch) in epochs_iter {
             for (i, epoch) in non_checkpoint_epochs
@@ -244,7 +257,7 @@ impl CreatingStreamingJobControl {
         }
         ret.push(BarrierInfo {
             prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
-            curr_epoch: TracedEpoch::new(Epoch(upstream_curr_epoch)),
+            curr_epoch: TracedEpoch::new(Epoch(upstream_barrier_info.curr_epoch())),
             kind: BarrierKind::Checkpoint(pending_non_checkpoint_barriers),
         });
         Ok(ret)
@@ -255,9 +268,9 @@ impl CreatingStreamingJobControl {
         definition: &String,
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-        backfill_epoch: u64,
+        snapshot_epoch: u64,
         committed_epoch: u64,
-        upstream_curr_epoch: u64,
+        upstream_barrier_info: &BarrierInfo,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
         version_stat: &HummockVersionStats,
     ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
@@ -281,8 +294,8 @@ impl CreatingStreamingJobControl {
                 pending_upstream_barriers: Self::resolve_upstream_log_epochs(
                     snapshot_backfill_upstream_tables,
                     upstream_table_log_epochs,
-                    backfill_epoch,
-                    upstream_curr_epoch,
+                    snapshot_epoch,
+                    upstream_barrier_info,
                 )?,
                 version_stats: version_stat.clone(),
                 create_mview_tracker,
@@ -291,7 +304,7 @@ impl CreatingStreamingJobControl {
                 )
                 .collect(),
                 fragment_infos,
-                backfill_epoch,
+                snapshot_epoch,
                 pending_non_checkpoint_barriers,
             },
             barrier_info,
@@ -303,14 +316,14 @@ impl CreatingStreamingJobControl {
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         committed_epoch: u64,
-        upstream_curr_epoch: u64,
+        upstream_barrier_info: &BarrierInfo,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
         let mut barriers_to_inject = Self::resolve_upstream_log_epochs(
             snapshot_backfill_upstream_tables,
             upstream_table_log_epochs,
             committed_epoch,
-            upstream_curr_epoch,
+            upstream_barrier_info,
         )?;
         let mut first_barrier = barriers_to_inject.remove(0);
         assert!(first_barrier.kind.is_checkpoint());
@@ -339,9 +352,9 @@ impl CreatingStreamingJobControl {
         definition: String,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
-        backfill_epoch: u64,
+        snapshot_epoch: u64,
         committed_epoch: u64,
-        upstream_curr_epoch: u64,
+        upstream_barrier_info: &BarrierInfo,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
         version_stat: &HummockVersionStats,
         new_actors: StreamJobActorsToCreate,
@@ -353,22 +366,26 @@ impl CreatingStreamingJobControl {
             definition,
             "recovered creating job"
         );
-        let mut barrier_control =
-            CreatingStreamingJobBarrierControl::new(job_id, backfill_epoch, true);
+        let mut barrier_control = CreatingStreamingJobBarrierControl::new(
+            job_id,
+            snapshot_epoch,
+            true,
+            Some(committed_epoch),
+        );
 
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
         let state_table_ids =
             InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
 
-        let (status, first_barrier_info) = if committed_epoch < backfill_epoch {
+        let (status, first_barrier_info) = if committed_epoch < snapshot_epoch {
             Self::recover_consuming_snapshot(
                 job_id,
                 &definition,
                 &snapshot_backfill_upstream_tables,
                 upstream_table_log_epochs,
-                backfill_epoch,
+                snapshot_epoch,
                 committed_epoch,
-                upstream_curr_epoch,
+                upstream_barrier_info,
                 fragment_infos,
                 version_stat,
             )?
@@ -378,7 +395,7 @@ impl CreatingStreamingJobControl {
                 &snapshot_backfill_upstream_tables,
                 upstream_table_log_epochs,
                 committed_epoch,
-                upstream_curr_epoch,
+                upstream_barrier_info,
                 fragment_infos,
             )?
         };
@@ -401,7 +418,7 @@ impl CreatingStreamingJobControl {
             definition,
             create_type: CreateType::Background,
             snapshot_backfill_upstream_tables,
-            backfill_epoch,
+            snapshot_epoch,
             node_actors,
             state_table_ids,
             barrier_control,
@@ -467,16 +484,11 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub(super) fn pinned_upstream_log_epoch(&self) -> Option<u64> {
-        if self.status.is_finishing() {
-            None
-        } else {
-            // TODO: when supporting recoverable snapshot backfill, we should use the max epoch that has committed
-            Some(max(
-                self.barrier_control.max_collected_epoch().unwrap_or(0),
-                self.backfill_epoch,
-            ))
-        }
+    pub(super) fn pinned_upstream_log_epoch(&self) -> u64 {
+        max(
+            self.barrier_control.max_committed_epoch().unwrap_or(0),
+            self.snapshot_epoch,
+        )
     }
 
     fn inject_barrier(
@@ -507,31 +519,41 @@ impl CreatingStreamingJobControl {
         Ok(())
     }
 
-    pub(super) fn on_new_command(
+    pub(super) fn start_consume_upstream(
         &mut self,
         control_stream_manager: &mut ControlStreamManager,
-        command: Option<&Command>,
         barrier_info: &BarrierInfo,
-    ) -> MetaResult<Option<HashMap<FragmentId, InflightFragmentInfo>>> {
-        let job_id = self.job_id;
-        let start_consume_upstream =
-            if let Some(Command::MergeSnapshotBackfillStreamingJobs(jobs_to_merge)) = command {
-                jobs_to_merge.contains_key(&job_id)
-            } else {
-                false
-            };
-        if start_consume_upstream {
-            info!(
-                %job_id,
-                prev_epoch = barrier_info.prev_epoch(),
-                "start consuming upstream"
-            );
-        }
+    ) -> MetaResult<HashMap<FragmentId, InflightFragmentInfo>> {
+        info!(
+            job_id = %self.job_id,
+            prev_epoch = barrier_info.prev_epoch(),
+            "start consuming upstream"
+        );
+        let fragment_infos = self.status.start_consume_upstream(barrier_info);
+        Self::inject_barrier(
+            self.database_id,
+            self.job_id,
+            control_stream_manager,
+            &mut self.barrier_control,
+            &self.node_actors,
+            None,
+            barrier_info.clone(),
+            None,
+            None,
+        )?;
+        Ok(fragment_infos)
+    }
+
+    pub(super) fn on_new_upstream_barrier(
+        &mut self,
+        control_stream_manager: &mut ControlStreamManager,
+        barrier_info: &BarrierInfo,
+    ) -> MetaResult<()> {
         let progress_epoch =
-            if let Some(max_collected_epoch) = self.barrier_control.max_collected_epoch() {
-                max(max_collected_epoch, self.backfill_epoch)
+            if let Some(max_collected_epoch) = self.barrier_control.max_committed_epoch() {
+                max(max_collected_epoch, self.snapshot_epoch)
             } else {
-                self.backfill_epoch
+                self.snapshot_epoch
             };
         self.upstream_lag.set(
             barrier_info
@@ -540,21 +562,7 @@ impl CreatingStreamingJobControl {
                 .0
                 .saturating_sub(progress_epoch) as _,
         );
-        let fragment_infos = if start_consume_upstream {
-            let fragment_infos = self.status.start_consume_upstream(barrier_info);
-            Self::inject_barrier(
-                self.database_id,
-                self.job_id,
-                control_stream_manager,
-                &mut self.barrier_control,
-                &self.node_actors,
-                None,
-                barrier_info.clone(),
-                None,
-                None,
-            )?;
-            Some(fragment_infos)
-        } else {
+        {
             for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(barrier_info) {
                 Self::inject_barrier(
                     self.database_id,
@@ -568,9 +576,8 @@ impl CreatingStreamingJobControl {
                     mutation,
                 )?;
             }
-            None
-        };
-        Ok(fragment_infos)
+        }
+        Ok(())
     }
 
     pub(crate) fn collect(&mut self, resp: BarrierCompleteResponse) -> bool {

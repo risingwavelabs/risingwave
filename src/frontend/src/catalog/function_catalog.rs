@@ -102,6 +102,8 @@ impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
             body: c.body.clone(),
             compressed_binary: c.compressed_binary.clone(),
             version: PbUdfExprVersion::LATEST as _,
+            is_async: c.is_async,
+            is_batched: c.is_batched,
         }
     }
 }

@@ -110,7 +110,7 @@ pub(super) enum CreatingStreamingJobStatus {
         version_stats: HummockVersionStats,
         create_mview_tracker: CreateMviewProgressTracker,
         snapshot_backfill_actors: HashSet<ActorId>,
-        backfill_epoch: u64,
+        snapshot_epoch: u64,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
@@ -143,18 +143,18 @@ impl CreatingStreamingJobStatus {
                 ref mut prev_epoch_fake_physical_time,
                 ref mut pending_upstream_barriers,
                 ref mut pending_non_checkpoint_barriers,
-                ref backfill_epoch,
+                ref snapshot_epoch,
                 ..
             } => {
                 for progress in create_mview_progress {
                     create_mview_tracker.apply_progress(progress, version_stats);
                 }
                 if create_mview_tracker.is_finished() {
-                    pending_non_checkpoint_barriers.push(*backfill_epoch);
+                    pending_non_checkpoint_barriers.push(*snapshot_epoch);
 
                     let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
                     let barriers_to_inject: Vec<_> = [BarrierInfo {
-                        curr_epoch: TracedEpoch::new(Epoch(*backfill_epoch)),
+                        curr_epoch: TracedEpoch::new(Epoch(*snapshot_epoch)),
                         prev_epoch: TracedEpoch::new(prev_epoch),
                         kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
                     }]
@@ -165,7 +165,7 @@ impl CreatingStreamingJobStatus {
                     let CreatingStreamingJobStatus::ConsumingSnapshot {
                         create_mview_tracker,
                         fragment_infos,
-                        backfill_epoch,
+                        snapshot_epoch,
                         snapshot_backfill_actors,
                         ..
                     } = replace(self, CreatingStreamingJobStatus::PlaceHolder)
@@ -183,7 +183,7 @@ impl CreatingStreamingJobStatus {
                             barriers_to_inject
                                 .last()
                                 .map(|barrier_info| {
-                                    barrier_info.prev_epoch().saturating_sub(backfill_epoch)
+                                    barrier_info.prev_epoch().saturating_sub(snapshot_epoch)
                                 })
                                 .unwrap_or(0),
                         ),
@@ -332,10 +332,6 @@ impl CreatingStreamingJobStatus {
                 }
             }
         }
-    }
-
-    pub(super) fn is_finishing(&self) -> bool {
-        matches!(self, Self::Finishing(..))
     }
 
     pub(super) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {

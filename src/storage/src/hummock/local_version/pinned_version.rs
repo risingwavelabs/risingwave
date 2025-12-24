@@ -15,12 +15,13 @@
 use std::collections::{BTreeMap, HashMap};
 use std::iter::empty;
 use std::ops::Deref;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
+use risingwave_common::log::LogSuppressor;
 use risingwave_hummock_sdk::change_log::TableChangeLogCommon;
 use risingwave_hummock_sdk::level::{Level, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -70,7 +71,15 @@ impl Drop for PinnedVersionGuard {
             .send(PinVersionAction::Unpin(self.version_id))
             .is_err()
         {
-            tracing::warn!("failed to send req unpin version id: {}", self.version_id);
+            static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                LazyLock::new(|| LogSuppressor::per_second(1));
+            if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                tracing::warn!(
+                    suppressed_count,
+                    version_id = %self.version_id,
+                    "failed to send req unpin"
+                );
+            }
         }
     }
 }

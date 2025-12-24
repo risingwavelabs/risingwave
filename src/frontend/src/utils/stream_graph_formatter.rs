@@ -186,7 +186,7 @@ impl StreamGraphFormatter {
     fn explain_node<'a>(&mut self, node: &StreamNode) -> Pretty<'a> {
         let one_line_explain = match node.get_node_body().unwrap() {
             stream_node::NodeBody::Exchange(_) => {
-                let edge = self.edges.get(&node.operator_id).unwrap();
+                let edge = self.edges.get(&node.operator_id.as_raw_id()).unwrap();
                 let upstream_fragment_id = edge.upstream_id;
                 let dist = edge.dispatch_strategy.as_ref().unwrap();
                 format!(

@@ -109,6 +109,8 @@ mod tests {
         barrier_test_env.inject_barrier(&b1, [actor_id]);
         barrier_test_env.flush_all_events().await;
 
+        let actor_ctx = ActorContext::for_test(actor_id);
+
         let input = new_input(
             &barrier_test_env.local_barrier_manager,
             metrics.clone(),
@@ -116,12 +118,13 @@ mod tests {
             fragment_id,
             &helper_make_local_actor(old),
             upstream_fragment_id,
+            actor_ctx.config.clone(),
         )
         .await
         .unwrap();
 
         let receiver = ReceiverExecutor::new(
-            ActorContext::for_test(actor_id),
+            actor_ctx.clone(),
             fragment_id,
             upstream_fragment_id,
             input,

@@ -505,6 +505,7 @@ impl UpstreamSinkBarrierManager {
                 ctx.actor_context.fragment_id,
                 actor,
                 upstream_fragment_id,
+                ctx.actor_context.config.clone(),
             )
         }))
         .await?;

@@ -29,6 +29,7 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{self, SchemaRef};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
+use risingwave_pb::id::ExecutorId;
 use serde::Deserialize;
 use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
@@ -207,7 +208,7 @@ pub struct OpenDalSinkWriter {
     operator: Operator,
     sink_writer: Option<FileWriterEnum>,
     write_path: String,
-    executor_id: u64,
+    executor_id: ExecutorId,
     unique_writer_id: Uuid,
     encode_type: SinkEncode,
     row_encoder: JsonEncoder,
@@ -360,7 +361,7 @@ impl OpenDalSinkWriter {
         operator: Operator,
         write_path: &str,
         rw_schema: Schema,
-        executor_id: u64,
+        executor_id: ExecutorId,
         format_desc: &SinkFormatDesc,
         engine_type: EngineType,
         batching_strategy: BatchingStrategy,

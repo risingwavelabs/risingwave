@@ -13,5 +13,3 @@
 // limitations under the License.
 
 pub mod monitored_general_writer;
-pub mod monitored_partition_writer;
-pub mod monitored_position_delete_writer;

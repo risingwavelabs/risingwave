@@ -27,7 +27,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::serde_as;
-use tonic::Status;
+use google_cloud_gax::grpc::Status;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
