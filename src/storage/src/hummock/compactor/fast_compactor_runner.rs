@@ -825,8 +825,8 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
                 return true;
             }
         }
-        (self.value_skip_watermark_state.has_watermark()
-            && self.value_skip_watermark_state.may_delete(key))
+        self.value_skip_watermark_state.has_watermark()
+            && self.value_skip_watermark_state.may_delete(key)
     }
 
     fn watermark_should_delete(
