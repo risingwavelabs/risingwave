@@ -271,6 +271,7 @@ impl ScaleController {
                 .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
 
             let max_parallelism = streaming_job.max_parallelism;
+            let existing_parallelism = streaming_job.parallelism.clone();
 
             let mut streaming_job = streaming_job.into_active_model();
 
@@ -301,6 +302,13 @@ impl ScaleController {
             match &target {
                 ReschedulePolicy::AdaptiveParallelismStrategy(p)
                 | ReschedulePolicy::ParallelismAndAdaptiveParallelismStrategy(_, p) => {
+                    if matches!(existing_parallelism, StreamingParallelism::Fixed(_)) {
+                        tracing::warn!(
+                            "adaptive_parallelism_strategy set for fixed-parallelism job {}, strategy {:?} will not change fixed parallelism",
+                            table_id,
+                            p.strategy
+                        );
+                    }
                     streaming_job.adaptive_parallelism_strategy =
                         Set(p.strategy.as_ref().map(ToString::to_string));
                 }
@@ -791,7 +799,7 @@ pub struct ResourceGroupPolicy {
     pub resource_group: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct AdaptiveParallelismStrategyPolicy {
     pub strategy: Option<AdaptiveParallelismStrategy>,
 }

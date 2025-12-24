@@ -235,6 +235,27 @@ async fn test_alter_adaptive_parallelism_strategy() -> Result<()> {
 }
 
 #[tokio::test]
+async fn test_alter_adaptive_parallelism_strategy_on_fixed() -> Result<()> {
+    let config = Configuration::for_auto_parallelism(10, true);
+    let total_cores = config.total_streaming_cores();
+    assert_eq!(total_cores, 6u32);
+
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    session.run("set streaming_parallelism = 4").await?;
+    session.run("create table t_fixed_strategy(v int)").await?;
+    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_fixed_strategy' and distribution_type = 'HASH';").await?.assert_result_eq("4");
+
+    session
+        .run("alter table t_fixed_strategy set adaptive_parallelism_strategy to 'BOUNDED(2)'")
+        .await?;
+    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_fixed_strategy' and distribution_type = 'HASH';").await?.assert_result_eq("4");
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn test_streaming_parallelism_strategy_persistence() -> Result<()> {
     // Session-level strategy should persist for created jobs even after altering system strategy.
     let config = Configuration::for_auto_parallelism(10, true);

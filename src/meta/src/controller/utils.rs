@@ -2341,7 +2341,7 @@ impl StreamingJobExtraInfo {
     }
 }
 
-/// Tuple of (job_id, timezone, config_override, adaptive_parallelism_strategy)
+/// Tuple of (`job_id`, timezone, `config_override`, `adaptive_parallelism_strategy`)
 type StreamingJobExtraInfoRow = (JobId, Option<String>, Option<String>, Option<String>);
 
 pub async fn get_streaming_job_extra_info<C>(
