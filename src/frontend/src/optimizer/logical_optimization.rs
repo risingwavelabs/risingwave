@@ -211,6 +211,14 @@ static VALUES_EXTRACT_PROJECT: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static APPLY_TABLE_FUNCTION_TO_PROJECT_SET: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Apply Table Function To ProjectSet",
+        vec![ApplyTableFunctionToProjectSetRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Simple Unnesting",
@@ -604,6 +612,9 @@ impl LogicalOptimizer {
         plan = Self::predicate_pushdown(plan, explain_trace, ctx);
         // In order to unnest values with correlated input ref, we need to extract project first.
         plan = plan.optimize_by_rules(&VALUES_EXTRACT_PROJECT)?;
+        // Eliminate lateral table-function apply into a unary ProjectSet when possible, so that we
+        // can avoid the Domain/Distinct introduced by general apply translation.
+        plan = plan.optimize_by_rules(&APPLY_TABLE_FUNCTION_TO_PROJECT_SET)?;
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
         // join.
