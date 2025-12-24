@@ -104,6 +104,7 @@ impl LogicalIcebergScan {
         &self,
         iceberg_file_scan_task: IcebergFileScanTask,
         count: u64,
+        snapshot_id: Option<i64>
     ) -> Self {
         Self {
             base: self.base.clone(),
@@ -111,7 +112,7 @@ impl LogicalIcebergScan {
             predicate: self.predicate.clone(),
             iceberg_file_scan_task: Some(Arc::new(iceberg_file_scan_task)),
             count,
-            snapshot_id: self.snapshot_id,
+            snapshot_id,
         }
     }
 

@@ -91,7 +91,7 @@ impl FallibleRule<Logical> for PopulateIcebergTaskAndTransformDeleteRule {
             snapshot_id,
         } = delete_parameters;
         let mut iceberg_scan: PlanRef = scan
-            .clone_with_iceberg_file_scan_task(data_tasks, count)
+            .clone_with_iceberg_file_scan_task(data_tasks, count, snapshot_id)
             .into();
 
         if !equality_delete_columns.is_empty() {

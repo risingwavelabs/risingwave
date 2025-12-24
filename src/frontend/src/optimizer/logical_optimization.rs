@@ -521,7 +521,7 @@ static POPULATE_ICEBERG_TASK_AND_TRANSFORM_DELETE: LazyLock<OptimizationStage> =
         OptimizationStage::new(
             "Populate Iceberg Task And Transform Delete",
             vec![PopulateIcebergTaskAndTransformDeleteRule::create()],
-            ApplyOrder::TopDown,
+            ApplyOrder::BottomUp,
         )
     });
 
@@ -881,6 +881,13 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
 
+        // Iceberg-specific predicate pushdown (for zone-map optimization)
+        plan = plan.optimize_by_rules(&LOGICAL_ICEBERG_PREDICATE_PUSHDOWN)?;
+
+        plan = plan.optimize_by_rules(&LOGICAL_ICEBGER_COUNT_STAR)?;
+
+        plan = plan.optimize_by_rules(&POPULATE_ICEBERG_TASK_AND_TRANSFORM_DELETE)?;
+
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
         if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
@@ -901,13 +908,6 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN)?;
 
         plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
-
-        // Iceberg-specific predicate pushdown (for zone-map optimization)
-        plan = plan.optimize_by_rules(&LOGICAL_ICEBERG_PREDICATE_PUSHDOWN)?;
-
-        plan = plan.optimize_by_rules(&LOGICAL_ICEBGER_COUNT_STAR)?;
-
-        plan = plan.optimize_by_rules(&POPULATE_ICEBERG_TASK_AND_TRANSFORM_DELETE)?;
 
         #[cfg(debug_assertions)]
         InputRefValidator.validate(plan.clone());

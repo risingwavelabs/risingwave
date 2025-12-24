@@ -35,8 +35,7 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
-    Schema,
+    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME, ROW_ID_COLUMN_NAME, Schema
 };
 use risingwave_common::types::JsonbVal;
 use risingwave_common_estimate_size::EstimateSize;
@@ -473,6 +472,7 @@ impl IcebergSplitEnumerator {
                 name.ne(&ICEBERG_SEQUENCE_NUM_COLUMN_NAME)
                     && name.ne(&ICEBERG_FILE_PATH_COLUMN_NAME)
                     && name.ne(&ICEBERG_FILE_POS_COLUMN_NAME)
+                    && name.ne(&ROW_ID_COLUMN_NAME)
             })
             .cloned()
             .collect_vec();
