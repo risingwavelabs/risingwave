@@ -99,7 +99,7 @@ pub use risingwave_common::id::{ActorId, FragmentId};
 pub use stream_manager::*;
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
-pub type DispatcherId = u64;
+pub type DispatcherId = FragmentId;
 /// (`upstream_actor_id`, `downstream_actor_id`)
 pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);

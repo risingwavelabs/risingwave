@@ -26,7 +26,7 @@ use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
 use datafusion::physical_plan::{DisplayAs, ExecutionPlan, Partitioning, PlanProperties};
 use datafusion::prelude::Expr;
-use datafusion_common::{DataFusionError, internal_err, not_impl_err};
+use datafusion_common::{DataFusionError, exec_err, internal_err, not_impl_err};
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iceberg::scan::FileScanTask;
@@ -105,9 +105,7 @@ impl ExecutionPlan for IcebergScan {
         context: Arc<TaskContext>,
     ) -> datafusion_common::Result<SendableRecordBatchStream> {
         if partition >= self.inner.tasks.len() {
-            return Err(DataFusionError::Internal(
-                "IcebergScan: partition out of bounds".to_owned(),
-            ));
+            return exec_err!("IcebergScan: partition out of bounds");
         }
 
         let chunk_size = context.session_config().batch_size();

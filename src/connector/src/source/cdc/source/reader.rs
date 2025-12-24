@@ -169,7 +169,7 @@ impl<T: CdcSourceTypeTrait> SplitReader for CdcSplitReader<T> {
                 bail!(
                     "failed to start cdc connector due to timeout (default 60s).\n\
                     HINT: You can increase the timeout by:\n\
-                    - Alter the running source: ALTER SOURCE <source_name> SET CONNECTOR WITH ('cdc.source.wait.streaming.start.timeout' = '<larger_value>');\n\
+                    - Alter the running source: ALTER SOURCE <source_name> CONNECTOR WITH (cdc.source.wait.streaming.start.timeout = '<larger_value>');\n\
                     - Set session variable and recreate the source: SET cdc_source_wait_streaming_start_timeout = <larger_value>;"
                 );
             }

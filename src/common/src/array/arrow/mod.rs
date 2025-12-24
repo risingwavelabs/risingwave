@@ -16,7 +16,6 @@
 // and the default From/To implementations.
 
 mod arrow_54;
-mod arrow_55;
 mod arrow_56;
 // These mods import mods above and may override some methods.
 mod arrow_deltalake;
@@ -33,6 +32,11 @@ pub use reexport::*;
 /// For other RisingWave crates, they can directly use arrow re-exported here, without adding
 /// `arrow` dependencies in their `Cargo.toml`. And they don't need to care about the version.
 mod reexport {
+    pub use super::arrow_56::{
+        FromArrow as Arrow56FromArrow, ToArrow as Arrow56ToArrow, arrow_array as arrow_array_56,
+        arrow_buffer as arrow_buffer_56, arrow_cast as arrow_cast_56,
+        arrow_schema as arrow_schema_56,
+    };
     pub use super::arrow_deltalake::{
         FromArrow as DeltaLakeFromArrow, ToArrow as DeltaLakeToArrow,
         arrow_array as arrow_array_deltalake, arrow_buffer as arrow_buffer_deltalake,

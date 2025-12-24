@@ -363,6 +363,10 @@ impl BarrierInfo {
     pub(super) fn prev_epoch(&self) -> u64 {
         self.prev_epoch.value().0
     }
+
+    pub(super) fn curr_epoch(&self) -> u64 {
+        self.curr_epoch.value().0
+    }
 }
 
 #[derive(Debug)]
@@ -370,10 +374,6 @@ pub(super) enum CommandFragmentChanges {
     NewFragment {
         job_id: JobId,
         info: InflightFragmentInfo,
-        /// Whether the fragment already exists before added. This is used
-        /// when snapshot backfill is finished and add its fragment info
-        /// back to the database.
-        is_existing: bool,
     },
     AddNodeUpstream(PbUpstreamSinkInfo),
     DropNodeUpstream(Vec<FragmentId>),
@@ -798,7 +798,6 @@ impl InflightDatabaseInfo {
                     CommandFragmentChanges::NewFragment {
                         job_id: job.job_id,
                         info,
-                        is_existing: true,
                     },
                 )
             }));
@@ -839,15 +838,9 @@ impl InflightDatabaseInfo {
             let mut shared_actor_writer = shared_infos.start_writer(self.database_id);
             for (fragment_id, change) in fragment_changes {
                 match change {
-                    CommandFragmentChanges::NewFragment {
-                        job_id,
-                        info,
-                        is_existing,
-                    } => {
+                    CommandFragmentChanges::NewFragment { job_id, info } => {
                         let fragment_infos = self.jobs.get_mut(&job_id).expect("should exist");
-                        if !is_existing {
-                            shared_actor_writer.upsert([(&info, job_id)]);
-                        }
+                        shared_actor_writer.upsert([(&info, job_id)]);
                         fragment_infos
                             .fragment_infos
                             .try_insert(fragment_id, info)
@@ -1008,14 +1001,12 @@ impl InflightDatabaseInfo {
                 | Command::Pause
                 | Command::Resume
                 | Command::DropStreamingJobs { .. }
-                | Command::MergeSnapshotBackfillStreamingJobs(_)
                 | Command::RescheduleFragment { .. }
                 | Command::SourceChangeSplit { .. }
                 | Command::Throttle(_)
                 | Command::CreateSubscription { .. }
                 | Command::DropSubscription { .. }
                 | Command::ConnectorPropsChange(_)
-                | Command::StartFragmentBackfill { .. }
                 | Command::Refresh { .. }
                 | Command::ListFinish { .. }
                 | Command::LoadFinish { .. } => {

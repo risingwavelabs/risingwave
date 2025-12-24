@@ -29,7 +29,6 @@ use futures::future::try_join_all;
 use futures::stream::{BoxStream, FusedStream, FuturesUnordered, StreamFuture};
 use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use itertools::Itertools;
-use prometheus::Histogram;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
@@ -197,7 +196,7 @@ use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,
     build_actor_cdc_table_snapshot_splits_with_generation,
 };
-use risingwave_pb::id::SubscriberId;
+use risingwave_pb::id::{ExecutorId, SubscriberId};
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 
 pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
@@ -220,7 +219,7 @@ pub struct ExecutorInfo {
     pub identity: String,
 
     /// The executor id of the executor.
-    pub id: u64,
+    pub id: ExecutorId,
 }
 
 impl ExecutorInfo {
@@ -230,7 +229,7 @@ impl ExecutorInfo {
             stream_key,
             stream_kind: PbStreamKind::Retract, // dummy value for test
             identity,
-            id,
+            id: id.into(),
         }
     }
 }
@@ -318,8 +317,8 @@ pub const INVALID_EPOCH: u64 = 0;
 type UpstreamFragmentId = FragmentId;
 type SplitAssignments = HashMap<ActorId, Vec<SplitImpl>>;
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "test"), derive(Default))]
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
 pub struct UpdateMutation {
     pub dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
     pub merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
@@ -329,10 +328,11 @@ pub struct UpdateMutation {
     pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub sink_add_columns: HashMap<SinkId, Vec<Field>>,
+    pub subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "test"), derive(Default))]
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
 pub struct AddMutation {
     pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
     pub added_actors: HashSet<ActorId>,
@@ -347,15 +347,16 @@ pub struct AddMutation {
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "test"), derive(Default))]
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
 pub struct StopMutation {
     pub dropped_actors: HashSet<ActorId>,
     pub dropped_sink_fragments: HashSet<FragmentId>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
-#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, Clone)]
 pub enum Mutation {
     Stop(StopMutation),
     Update(UpdateMutation),
@@ -367,7 +368,7 @@ pub enum Mutation {
     ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
-        subscriptions_to_drop: Vec<(SubscriberId, TableId)>,
+        subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
     },
     StartFragmentBackfill {
         fragment_ids: HashSet<FragmentId>,
@@ -664,6 +665,19 @@ impl Barrier {
             })
     }
 
+    pub fn as_subscriptions_to_drop(&self) -> Option<&[SubscriptionUpstreamInfo]> {
+        match self.mutation.as_deref() {
+            Some(Mutation::DropSubscriptions {
+                subscriptions_to_drop,
+            })
+            | Some(Mutation::Update(UpdateMutation {
+                subscriptions_to_drop,
+                ..
+            })) => Some(subscriptions_to_drop.as_slice()),
+            _ => None,
+        }
+    }
+
     pub fn get_curr_epoch(&self) -> Epoch {
         Epoch(self.epoch.curr)
     }
@@ -756,6 +770,7 @@ impl Mutation {
                 actor_new_dispatchers,
                 actor_cdc_table_snapshot_splits,
                 sink_add_columns,
+                subscriptions_to_drop,
             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -795,6 +810,7 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                subscriptions_to_drop: subscriptions_to_drop.clone(),
             }),
             Mutation::Add(AddMutation {
                 adds,
@@ -872,15 +888,7 @@ impl Mutation {
             Mutation::DropSubscriptions {
                 subscriptions_to_drop,
             } => PbMutation::DropSubscriptions(PbDropSubscriptionsMutation {
-                info: subscriptions_to_drop
-                    .iter()
-                    .map(
-                        |(subscriber_id, upstream_mv_table_id)| SubscriptionUpstreamInfo {
-                            subscriber_id: *subscriber_id,
-                            upstream_mv_table_id: *upstream_mv_table_id,
-                        },
-                    )
-                    .collect(),
+                info: subscriptions_to_drop.clone(),
             }),
             Mutation::ConnectorPropsChange(map) => {
                 PbMutation::ConnectorPropsChange(PbConnectorPropsChangeMutation {
@@ -985,6 +993,7 @@ impl Mutation {
                         )
                     })
                     .collect(),
+                subscriptions_to_drop: update.subscriptions_to_drop.clone(),
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {
@@ -1062,11 +1071,7 @@ impl Mutation {
                     .collect(),
             ),
             PbMutation::DropSubscriptions(drop) => Mutation::DropSubscriptions {
-                subscriptions_to_drop: drop
-                    .info
-                    .iter()
-                    .map(|info| (info.subscriber_id, info.upstream_mv_table_id))
-                    .collect(),
+                subscriptions_to_drop: drop.info.clone(),
             },
             PbMutation::ConnectorPropsChange(alter_connector_props) => {
                 Mutation::ConnectorPropsChange(
@@ -1255,7 +1260,8 @@ impl Watermark {
     }
 }
 
-#[derive(Debug, EnumAsInner, PartialEq, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, EnumAsInner, Clone)]
 pub enum MessageInner<M> {
     Chunk(StreamChunk),
     Barrier(BarrierInner<M>),
@@ -1277,7 +1283,7 @@ pub type DispatcherMessage = MessageInner<()>;
 
 /// `MessageBatchInner` is used exclusively by `Dispatcher` and the `Merger`/`Receiver` for exchanging messages between them.
 /// It shares the same message type as the fundamental `MessageInner`, but batches multiple barriers into a single message.
-#[derive(Debug, EnumAsInner, PartialEq, Clone)]
+#[derive(Debug, EnumAsInner, Clone)]
 pub enum MessageBatchInner<M> {
     Chunk(StreamChunk),
     BarrierBatch(Vec<BarrierInner<M>>),
@@ -1450,7 +1456,7 @@ pub struct DynamicReceivers<InputId, M> {
     /// Currently only used for union.
     barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
     /// Only for merge. If None, then we don't take `Instant::now()` and `observe` during `poll_next`
-    merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+    merge_barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
 }
 
 impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> Stream
@@ -1534,8 +1540,7 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug + Unpin, M: Clone + Unpin> St
                         barrier_align_duration.inc_by(start_ts.elapsed().as_nanos() as u64);
                     }
                     if let Some(merge_barrier_align_duration) = &self.merge_barrier_align_duration {
-                        // Observe did a few atomic operation inside, we want to avoid the overhead.
-                        merge_barrier_align_duration.observe(start_ts.elapsed().as_secs_f64())
+                        merge_barrier_align_duration.inc_by(start_ts.elapsed().as_nanos() as u64);
                     }
 
                     break;
@@ -1559,7 +1564,7 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
     pub fn new(
         upstreams: Vec<BoxedMessageInput<InputId, M>>,
         barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
-        merge_barrier_align_duration: Option<LabelGuardedMetric<Histogram>>,
+        merge_barrier_align_duration: Option<LabelGuardedMetric<GenericCounter<AtomicU64>>>,
     ) -> Self {
         let mut this = Self {
             barrier: None,
@@ -1638,7 +1643,9 @@ impl<InputId: Clone + Ord + Hash + std::fmt::Debug, M> DynamicReceivers<InputId,
         });
     }
 
-    pub fn merge_barrier_align_duration(&self) -> Option<LabelGuardedMetric<Histogram>> {
+    pub fn merge_barrier_align_duration(
+        &self,
+    ) -> Option<LabelGuardedMetric<GenericCounter<AtomicU64>>> {
         self.merge_barrier_align_duration.clone()
     }
 

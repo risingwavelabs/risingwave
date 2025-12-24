@@ -62,7 +62,7 @@ message UpdateMutation {
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
     uint32 actor_id = 1;
-    uint64 dispatcher_id = 2;
+    uint32 dispatcher_id = 2;
     // The hash mapping for consistent hash.
     // For dispatcher types other than HASH, this is ignored.
     ActorMapping hash_mapping = 3;
@@ -102,6 +102,7 @@ message UpdateMutation {
   // CDC table snapshot splits
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
   map<uint32, SinkAddColumns> sink_add_columns = 8;
+  repeated SubscriptionUpstreamInfo subscriptions_to_drop = 9;
 }
 
 message SourceChangeSplitMutation {
@@ -1185,7 +1186,7 @@ message Dispatcher {
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
   // This is exactly the same as its downstream fragment id.
-  uint64 dispatcher_id = 4;
+  uint32 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }
