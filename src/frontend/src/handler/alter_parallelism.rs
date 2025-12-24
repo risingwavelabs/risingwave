@@ -44,7 +44,7 @@ pub async fn handle_alter_parallelism(
 
     let catalog_writer = session.catalog_writer()?;
     execute_with_long_running_notification(
-        catalog_writer.alter_parallelism(job_id, target_parallelism, deferred),
+        catalog_writer.alter_parallelism(job_id, target_parallelism, deferred, None),
         &session,
         "ALTER PARALLELISM",
         LongRunningNotificationAction::SuggestRecover,

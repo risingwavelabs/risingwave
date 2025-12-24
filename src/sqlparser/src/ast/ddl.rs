@@ -91,6 +91,11 @@ pub enum AlterTableOperation {
     SetSchema {
         new_schema_name: ObjectName,
     },
+    /// `SET ADAPTIVE_PARALLELISM_STRATEGY TO <strategy> [ DEFERRED ]`
+    SetAdaptiveParallelismStrategy {
+        strategy: SetVariableValue,
+        deferred: bool,
+    },
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
         parallelism: SetVariableValue,
@@ -135,6 +140,11 @@ pub enum AlterIndexOperation {
     RenameIndex {
         index_name: ObjectName,
     },
+    /// `SET ADAPTIVE_PARALLELISM_STRATEGY TO <strategy> [ DEFERRED ]`
+    SetAdaptiveParallelismStrategy {
+        strategy: SetVariableValue,
+        deferred: bool,
+    },
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
         parallelism: SetVariableValue,
@@ -160,6 +170,11 @@ pub enum AlterViewOperation {
     },
     SetSchema {
         new_schema_name: ObjectName,
+    },
+    /// `SET ADAPTIVE_PARALLELISM_STRATEGY TO <strategy> [ DEFERRED ]`
+    SetAdaptiveParallelismStrategy {
+        strategy: SetVariableValue,
+        deferred: bool,
     },
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
@@ -207,6 +222,11 @@ pub enum AlterSinkOperation {
     },
     SetSchema {
         new_schema_name: ObjectName,
+    },
+    /// `SET ADAPTIVE_PARALLELISM_STRATEGY TO <strategy> [ DEFERRED ]`
+    SetAdaptiveParallelismStrategy {
+        strategy: SetVariableValue,
+        deferred: bool,
     },
     /// `SET PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetParallelism {
@@ -396,6 +416,14 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
             }
+            AlterTableOperation::SetAdaptiveParallelismStrategy { strategy, deferred } => {
+                write!(
+                    f,
+                    "SET ADAPTIVE_PARALLELISM_STRATEGY TO {}{}",
+                    strategy,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
             AlterTableOperation::SetParallelism {
                 parallelism,
                 deferred,
@@ -448,6 +476,14 @@ impl fmt::Display for AlterIndexOperation {
             AlterIndexOperation::RenameIndex { index_name } => {
                 write!(f, "RENAME TO {index_name}")
             }
+            AlterIndexOperation::SetAdaptiveParallelismStrategy { strategy, deferred } => {
+                write!(
+                    f,
+                    "SET ADAPTIVE_PARALLELISM_STRATEGY TO {}{}",
+                    strategy,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
+            }
             AlterIndexOperation::SetParallelism {
                 parallelism,
                 deferred,
@@ -480,6 +516,14 @@ impl fmt::Display for AlterViewOperation {
             }
             AlterViewOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterViewOperation::SetAdaptiveParallelismStrategy { strategy, deferred } => {
+                write!(
+                    f,
+                    "SET ADAPTIVE_PARALLELISM_STRATEGY TO {}{}",
+                    strategy,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
             AlterViewOperation::SetParallelism {
                 parallelism,
@@ -537,6 +581,14 @@ impl fmt::Display for AlterSinkOperation {
             }
             AlterSinkOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {}", new_schema_name)
+            }
+            AlterSinkOperation::SetAdaptiveParallelismStrategy { strategy, deferred } => {
+                write!(
+                    f,
+                    "SET ADAPTIVE_PARALLELISM_STRATEGY TO {}{}",
+                    strategy,
+                    if *deferred { " DEFERRED" } else { "" }
+                )
             }
             AlterSinkOperation::SetParallelism {
                 parallelism,

@@ -275,7 +275,9 @@ impl ScaleController {
             let mut streaming_job = streaming_job.into_active_model();
 
             match &target {
-                ReschedulePolicy::Parallelism(p) | ReschedulePolicy::Both(p, _) => {
+                ReschedulePolicy::Parallelism(p)
+                | ReschedulePolicy::Both(p, _)
+                | ReschedulePolicy::ParallelismAndAdaptiveParallelismStrategy(p, _) => {
                     if let StreamingParallelism::Fixed(n) = p.parallelism
                         && n > max_parallelism as usize
                     {
@@ -292,6 +294,15 @@ impl ScaleController {
             match &target {
                 ReschedulePolicy::ResourceGroup(r) | ReschedulePolicy::Both(_, r) => {
                     streaming_job.specific_resource_group = Set(r.resource_group.clone());
+                }
+                _ => {}
+            }
+
+            match &target {
+                ReschedulePolicy::AdaptiveParallelismStrategy(p)
+                | ReschedulePolicy::ParallelismAndAdaptiveParallelismStrategy(_, p) => {
+                    streaming_job.adaptive_parallelism_strategy =
+                        Set(p.strategy.as_ref().map(ToString::to_string));
                 }
                 _ => {}
             }
@@ -780,11 +791,18 @@ pub struct ResourceGroupPolicy {
     pub resource_group: Option<String>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AdaptiveParallelismStrategyPolicy {
+    pub strategy: Option<AdaptiveParallelismStrategy>,
+}
+
 #[derive(Clone, Debug)]
 pub enum ReschedulePolicy {
     Parallelism(ParallelismPolicy),
     ResourceGroup(ResourceGroupPolicy),
     Both(ParallelismPolicy, ResourceGroupPolicy),
+    AdaptiveParallelismStrategy(AdaptiveParallelismStrategyPolicy),
+    ParallelismAndAdaptiveParallelismStrategy(ParallelismPolicy, AdaptiveParallelismStrategyPolicy),
 }
 
 impl GlobalStreamManager {

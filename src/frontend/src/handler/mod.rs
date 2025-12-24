@@ -42,6 +42,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_adaptive_parallelism_strategy;
 mod alter_connection_props;
 mod alter_database_param;
 mod alter_mv;
@@ -821,6 +822,16 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterTableOperation::SetAdaptiveParallelismStrategy { strategy, deferred } => {
+                alter_adaptive_parallelism_strategy::handle_alter_adaptive_parallelism_strategy(
+                    handler_args,
+                    name,
+                    strategy,
+                    StatementType::ALTER_TABLE,
+                    deferred,
+                )
+                .await
+            }
             AlterTableOperation::SetParallelism {
                 parallelism,
                 deferred,
@@ -923,6 +934,16 @@ pub async fn handle(
             AlterIndexOperation::RenameIndex { index_name } => {
                 alter_rename::handle_rename_index(handler_args, name, index_name).await
             }
+            AlterIndexOperation::SetAdaptiveParallelismStrategy { strategy, deferred } => {
+                alter_adaptive_parallelism_strategy::handle_alter_adaptive_parallelism_strategy(
+                    handler_args,
+                    name,
+                    strategy,
+                    StatementType::ALTER_INDEX,
+                    deferred,
+                )
+                .await
+            }
             AlterIndexOperation::SetParallelism {
                 parallelism,
                 deferred,
@@ -978,6 +999,19 @@ pub async fn handle(
                     } else {
                         alter_rename::handle_rename_view(handler_args, name, view_name).await
                     }
+                }
+                AlterViewOperation::SetAdaptiveParallelismStrategy { strategy, deferred } => {
+                    if !materialized {
+                        bail_not_implemented!("ALTER VIEW SET ADAPTIVE_PARALLELISM_STRATEGY");
+                    }
+                    alter_adaptive_parallelism_strategy::handle_alter_adaptive_parallelism_strategy(
+                        handler_args,
+                        name,
+                        strategy,
+                        statement_type,
+                        deferred,
+                    )
+                    .await
                 }
                 AlterViewOperation::SetParallelism {
                     parallelism,
@@ -1119,6 +1153,16 @@ pub async fn handle(
                     new_schema_name,
                     StatementType::ALTER_SINK,
                     None,
+                )
+                .await
+            }
+            AlterSinkOperation::SetAdaptiveParallelismStrategy { strategy, deferred } => {
+                alter_adaptive_parallelism_strategy::handle_alter_adaptive_parallelism_strategy(
+                    handler_args,
+                    name,
+                    strategy,
+                    StatementType::ALTER_SINK,
+                    deferred,
                 )
                 .await
             }

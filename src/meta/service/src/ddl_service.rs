@@ -23,6 +23,7 @@ use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::id::TableId;
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_connector::sink::catalog::SinkId;
@@ -31,7 +32,8 @@ use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_comp
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
 use risingwave_meta::stream::{
-    ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy, ThrottleConfig,
+    AdaptiveParallelismStrategyPolicy, ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy,
+    ThrottleConfig,
 };
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::StreamingParallelism;
@@ -1015,12 +1017,39 @@ impl DdlService for DdlServiceImpl {
             _ => bail_unavailable!(),
         };
 
+        let strategy_policy = req
+            .adaptive_parallelism_strategy
+            .as_ref()
+            .map(|s| {
+                if s.is_empty() || s.eq_ignore_ascii_case("DEFAULT") {
+                    Ok(AdaptiveParallelismStrategyPolicy { strategy: None })
+                } else {
+                    parse_strategy(s)
+                        .map(|strategy| AdaptiveParallelismStrategyPolicy {
+                            strategy: Some(strategy),
+                        })
+                        .map_err(|e| anyhow!(e))
+                }
+            })
+            .transpose()
+            .map_err(|e| Status::invalid_argument(e.to_string()))?;
+
+        let reschedule_policy = match strategy_policy {
+            Some(strategy_policy) => {
+                if matches!(parallelism, StreamingParallelism::Adaptive) {
+                    ReschedulePolicy::AdaptiveParallelismStrategy(strategy_policy)
+                } else {
+                    ReschedulePolicy::ParallelismAndAdaptiveParallelismStrategy(
+                        ParallelismPolicy { parallelism },
+                        strategy_policy,
+                    )
+                }
+            }
+            None => ReschedulePolicy::Parallelism(ParallelismPolicy { parallelism }),
+        };
+
         self.ddl_controller
-            .reschedule_streaming_job(
-                job_id,
-                ReschedulePolicy::Parallelism(ParallelismPolicy { parallelism }),
-                deferred,
-            )
+            .reschedule_streaming_job(job_id, reschedule_policy, deferred)
             .await?;
 
         Ok(Response::new(AlterParallelismResponse {}))
