@@ -58,6 +58,11 @@ pub async fn handle_alter_adaptive_parallelism_strategy(
     )
     .await?;
 
+    builder = builder.notice(
+        "Adaptive parallelism strategy updated. If the job uses fixed parallelism, the strategy will not take effect."
+            .to_owned(),
+    );
+
     if deferred {
         builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());
     }
