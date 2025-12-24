@@ -700,19 +700,14 @@ where
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
-        let clean_watermark_index = table_catalog
-            .get_clean_watermark_column_indices()
-            .first()
-            .map(|&i| i as usize);
+        let clean_watermark_indices = table_catalog.get_clean_watermark_column_indices();
+        if clean_watermark_indices.len() > 1 {
+            unimplemented!("multiple clean watermark columns are not supported yet")
+        }
+        let clean_watermark_index = clean_watermark_indices.first().map(|&i| i as usize);
 
-        let watermark_serde = if pk_indices.is_empty() {
-            None
-        } else {
-            // If clean watermark index is not specified, use the first column as the watermark column.
-            let clean_watermark_index = clean_watermark_index.unwrap_or_else(|| pk_indices[0]);
-            let pk_idx = pk_indices
-                .iter()
-                .position(|&idx| idx == clean_watermark_index);
+        let watermark_serde = clean_watermark_index.map(|idx| {
+            let pk_idx = pk_indices.iter().position(|&i| i == idx);
             let (watermark_serde, watermark_serde_type) = match pk_idx {
                 Some(0) => (pk_serde.index(0).into_owned(), WatermarkSerdeType::PkPrefix),
                 Some(pk_idx) => (
@@ -721,14 +716,15 @@ where
                 ),
                 None => (
                     OrderedRowSerde::new(
-                        vec![data_types[clean_watermark_index].clone()],
+                        vec![data_types[idx].clone()],
                         vec![OrderType::ascending()],
                     ),
+                    // TODO(ttl): may introduce a new type for watermark not in pk.
                     WatermarkSerdeType::NonPkPrefix,
                 ),
             };
-            Some((watermark_serde, watermark_serde_type))
-        };
+            (watermark_serde, watermark_serde_type)
+        });
 
         // Restore persisted table watermark.
         //

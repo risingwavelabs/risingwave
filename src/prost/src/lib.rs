@@ -538,12 +538,20 @@ impl catalog::Table {
         if !self.clean_watermark_indices.is_empty() {
             // New format: directly return clean_watermark_indices
             self.clean_watermark_indices.clone()
-        } else if let Some(pk_idx) = self.clean_watermark_index_in_pk {
+        } else if let Some(pk_idx) = self
+            .clean_watermark_index_in_pk
+            // At the very beginning, we didn't have `clean_watermark_index_in_pk` as well.
+            // When `cleaned_by_watermark` is set, we assume the watermark is the first column.
+            .or_else(|| self.cleaned_by_watermark.then_some(0))
+        {
             // Old format: convert PK index to column index
             // The pk_idx is the position in the PK, we need to find the corresponding column index
             if let Some(col_order) = self.pk.get(pk_idx as usize) {
                 vec![col_order.column_index]
             } else {
+                if cfg!(debug_assertions) {
+                    panic!("clean_watermark_index_in_pk is out of range: {self:?}");
+                }
                 vec![]
             }
         } else {
