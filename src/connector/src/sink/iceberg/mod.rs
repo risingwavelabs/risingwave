@@ -97,6 +97,7 @@ use crate::sink::{
 use crate::{deserialize_bool_from_string, deserialize_optional_string_seq_from_string};
 
 pub const ICEBERG_SINK: &str = "iceberg";
+
 pub const ICEBERG_COW_BRANCH: &str = "ingestion";
 pub const ICEBERG_WRITE_MODE_MERGE_ON_READ: &str = "merge-on-read";
 pub const ICEBERG_WRITE_MODE_COPY_ON_WRITE: &str = "copy-on-write";
@@ -845,6 +846,10 @@ impl Sink for IcebergSink {
 
         let _ = self.create_and_validate_table().await?;
         Ok(())
+    }
+
+    fn support_schema_change() -> bool {
+        true
     }
 
     fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
@@ -1885,17 +1890,19 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
     ) -> Result<()> {
         tracing::info!("Starting iceberg direct commit in epoch {epoch}");
 
-        let (write_results, snapshot_id) =
-            match self.pre_commit_inner(epoch, metadata, add_columns)? {
-                Some((write_results, snapshot_id)) => (write_results, snapshot_id),
-                None => {
-                    tracing::debug!(?epoch, "no data to commit");
-                    return Ok(());
-                }
-            };
+        // Commit data if present
+        if let Some((write_results, snapshot_id)) = self.pre_commit_inner(epoch, metadata, None)? {
+            self.commit_datafile(epoch, write_results, snapshot_id)
+                .await?;
+        }
 
-        self.commit_iceberg_inner(epoch, write_results, snapshot_id)
-            .await
+        // Commit schema change if present
+        if let Some(add_columns) = add_columns {
+            tracing::info!(?epoch, "Committing schema change");
+            self.commit_schema_change(add_columns).await?;
+        }
+
+        Ok(())
     }
 }
 
@@ -1917,6 +1924,15 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         add_columns: Option<Vec<Field>>,
     ) -> Result<Vec<u8>> {
         tracing::info!("Starting iceberg pre commit in epoch {epoch}");
+
+        // TwoPhaseCommitCoordinator does not support schema change yet
+        if let Some(add_columns) = &add_columns {
+            return Err(SinkError::Iceberg(anyhow!(
+                "TwoPhaseCommitCoordinator for Iceberg sink does not support schema change yet, \
+                 but got add_columns: {:?}",
+                add_columns.iter().map(|c| &c.name).collect::<Vec<_>>()
+            )));
+        }
 
         let (write_results, snapshot_id) =
             match self.pre_commit_inner(epoch, metadata, add_columns)? {
@@ -1974,7 +1990,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
             write_results.push(write_result);
         }
 
-        self.commit_iceberg_inner(epoch, write_results, snapshot_id)
+        self.commit_datafile(epoch, write_results, snapshot_id)
             .await?;
 
         Ok(())
@@ -2033,7 +2049,7 @@ impl IcebergSinkCommitter {
         Ok(Some((write_results, snapshot_id)))
     }
 
-    async fn commit_iceberg_inner(
+    async fn commit_datafile(
         &mut self,
         epoch: u64,
         write_results: Vec<IcebergCommitResult>,
@@ -2173,6 +2189,81 @@ impl IcebergSinkCommitter {
         } else {
             Ok(false)
         }
+    }
+
+    /// Commit schema changes (e.g., add columns) to the iceberg table.
+    /// This function uses Transaction API to atomically update the table schema
+    /// with optimistic locking to prevent concurrent conflicts.
+    async fn commit_schema_change(&mut self, add_columns: Vec<Field>) -> Result<()> {
+        use iceberg::spec::NestedField;
+
+        tracing::info!(
+            "Starting to commit schema change with {} columns",
+            add_columns.len()
+        );
+
+        // Step 1: Get current table metadata
+        let metadata = self.table.metadata();
+        let mut next_field_id = metadata.last_column_id() + 1;
+        tracing::debug!("Starting schema change, next_field_id: {}", next_field_id);
+
+        // Step 2: Build new fields to add
+        let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+        let mut new_fields = Vec::new();
+
+        for field in &add_columns {
+            // Convert RisingWave Field to Arrow Field using IcebergCreateTableArrowConvert
+            let arrow_field = iceberg_create_table_arrow_convert
+                .to_arrow_field(&field.name, &field.data_type)
+                .with_context(|| format!("Failed to convert field '{}' to arrow", field.name))
+                .map_err(SinkError::Iceberg)?;
+
+            // Convert Arrow DataType to Iceberg Type
+            let iceberg_type = iceberg::arrow::arrow_type_to_type(arrow_field.data_type())
+                .map_err(|err| {
+                    SinkError::Iceberg(
+                        anyhow!(err).context("Failed to convert Arrow type to Iceberg type"),
+                    )
+                })?;
+
+            // Create NestedField with the next available field ID
+            let nested_field = Arc::new(NestedField::optional(
+                next_field_id,
+                &field.name,
+                iceberg_type,
+            ));
+
+            new_fields.push(nested_field);
+            tracing::info!("Prepared field '{}' with ID {}", field.name, next_field_id);
+            next_field_id += 1;
+        }
+
+        // Step 3: Create Transaction with UpdateSchemaAction
+        tracing::info!(
+            "Committing schema change to catalog for table {}",
+            self.table.identifier()
+        );
+
+        let txn = Transaction::new(&self.table);
+        let action = txn.update_schema().add_fields(new_fields);
+
+        let updated_table = action
+            .apply(txn)
+            .context("Failed to apply schema update action")
+            .map_err(SinkError::Iceberg)?
+            .commit(self.catalog.as_ref())
+            .await
+            .context("Failed to commit table schema change")
+            .map_err(SinkError::Iceberg)?;
+
+        self.table = updated_table;
+
+        tracing::info!(
+            "Successfully committed schema change, added {} columns to iceberg table",
+            add_columns.len()
+        );
+
+        Ok(())
     }
 
     /// Check if the number of snapshots since the last rewrite/overwrite operation exceeds the limit
@@ -2374,11 +2465,11 @@ pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) 
     Ok(())
 }
 
-pub fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
+fn serialize_metadata(metadata: Vec<Vec<u8>>) -> Vec<u8> {
     serde_json::to_vec(&metadata).unwrap()
 }
 
-pub fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
+fn deserialize_metadata(bytes: Vec<u8>) -> Vec<Vec<u8>> {
     serde_json::from_slice(&bytes).unwrap()
 }
 
