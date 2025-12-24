@@ -594,6 +594,7 @@ for_all_wrapped_id_fields! (
         }
         Dispatcher {
             downstream_actor_id: ActorId,
+            dispatcher_id: FragmentId,
         }
         DmlNode {
             table_id: TableId,
@@ -678,6 +679,7 @@ for_all_wrapped_id_fields! (
         }
         UpdateMutation.DispatcherUpdate {
             actor_id: ActorId,
+            dispatcher_id: FragmentId,
             added_downstream_actor_id: ActorId,
             removed_downstream_actor_id: ActorId,
         }

@@ -30,6 +30,7 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 };
 use tracing::warn;
 
+use crate::barrier::checkpoint::creating_job::CreatingJobInfo;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -111,7 +112,7 @@ pub(super) enum CreatingStreamingJobStatus {
         create_mview_tracker: CreateMviewProgressTracker,
         snapshot_backfill_actors: HashSet<ActorId>,
         snapshot_epoch: u64,
-        fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+        info: CreatingJobInfo,
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
     },
@@ -120,7 +121,7 @@ pub(super) enum CreatingStreamingJobStatus {
     /// Will transit to `Finishing` on `on_new_upstream_epoch` when `start_consume_upstream` is `true`.
     ConsumingLogStore {
         tracking_job: TrackingJob,
-        fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+        info: CreatingJobInfo,
         log_store_progress_tracker: CreateMviewLogStoreProgressTracker,
         barriers_to_inject: Option<Vec<BarrierInfo>>,
     },
@@ -164,7 +165,7 @@ impl CreatingStreamingJobStatus {
 
                     let CreatingStreamingJobStatus::ConsumingSnapshot {
                         create_mview_tracker,
-                        fragment_infos,
+                        info,
                         snapshot_epoch,
                         snapshot_backfill_actors,
                         ..
@@ -177,7 +178,7 @@ impl CreatingStreamingJobStatus {
 
                     *self = CreatingStreamingJobStatus::ConsumingLogStore {
                         tracking_job,
-                        fragment_infos,
+                        info,
                         log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
                             snapshot_backfill_actors.iter().cloned(),
                             barriers_to_inject
@@ -204,10 +205,7 @@ impl CreatingStreamingJobStatus {
         }
     }
 
-    pub(super) fn start_consume_upstream(
-        &mut self,
-        barrier_info: &BarrierInfo,
-    ) -> HashMap<FragmentId, InflightFragmentInfo> {
+    pub(super) fn start_consume_upstream(&mut self, barrier_info: &BarrierInfo) -> CreatingJobInfo {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. } => {
                 unreachable!(
@@ -219,15 +217,13 @@ impl CreatingStreamingJobStatus {
                 {
                     assert!(barrier_info.kind.is_checkpoint());
                     let CreatingStreamingJobStatus::ConsumingLogStore {
-                        fragment_infos,
-                        tracking_job,
-                        ..
+                        info, tracking_job, ..
                     } = replace(self, CreatingStreamingJobStatus::PlaceHolder)
                     else {
                         unreachable!()
                     };
                     *self = CreatingStreamingJobStatus::Finishing(prev_epoch, tracking_job);
-                    fragment_infos
+                    info
                 }
             }
             CreatingStreamingJobStatus::Finishing { .. } => {
@@ -336,11 +332,9 @@ impl CreatingStreamingJobStatus {
 
     pub(super) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
         match self {
-            CreatingStreamingJobStatus::ConsumingSnapshot { fragment_infos, .. } => {
-                Some(fragment_infos)
-            }
-            CreatingStreamingJobStatus::ConsumingLogStore { fragment_infos, .. } => {
-                Some(fragment_infos)
+            CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
+                Some(&info.fragment_infos)
             }
             CreatingStreamingJobStatus::Finishing(..) => None,
             CreatingStreamingJobStatus::PlaceHolder => {
