@@ -652,6 +652,43 @@ impl StreamConsumer for DispatchExecutor {
     }
 }
 
+enum PullOutcome {
+    Continue,
+    EndOfStream,
+}
+
+async fn pull_batch_or_wait(
+    max_barrier_count_per_batch: u32,
+    input: &mut Peekable<BoxedMessageStream>,
+    pending: &mut VecDeque<MessageBatch>,
+    count: &mut usize,
+) -> StreamResult<PullOutcome> {
+    tokio::select! {
+        biased;
+
+        pulled = async {
+            if pending.len() < 256 {
+                try_batch_barriers(max_barrier_count_per_batch, input).await
+            } else {
+                Ok(None)
+            }
+        } => {
+            match pulled? {
+                Some(batch) => {
+                    
+                }
+                None => {
+                    if pending.len() < 256 {
+                        Ok(PullOutcome::EndOfStream)
+                    } else {
+                        Ok(PullOutcome::Continue)
+                    }
+                }
+            }
+        }
+    }
+}
+
 impl StreamConsumer for DispatchExecutorForSyncLogStore {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
@@ -663,53 +700,12 @@ impl StreamConsumer for DispatchExecutorForSyncLogStore {
             let mut input = self.input.execute().peekable();
             let mut pending: VecDeque<MessageBatch> = VecDeque::new();
 
-            // loop {
-            //     async {
-            //         tokio::select! {
-            //             biased;
-
-            //             // _ = async {
-            //             //     count += 1;
-            //             //     tokio::time::sleep(std::time::Duration::from_millis(10)).await;
-            //             // } => {}
-                        
-            //             // pull from input and batch barriers
-            //             pulled = async {
-            //                 if pending.len() < 256 {
-            //                     try_batch_barriers(max_barrier_count_per_batch, &mut input).await
-            //                 } else {
-            //                     Ok(None)
-            //                 }
-            //             } => {
-            //                 match pulled? {
-            //                     Some(batch) => pending.push_back(batch),
-            //                     None => {
-            //                         if pending.len() < 256 {
-            //                             break;
-            //                         } else {
-            //                             // backpressure case: keep draining pending
-            //                         }
-            //                     }
-            //                 }
-            //             }
-            //             _ = async {
-            //                 count += 1;
-            //                 tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-            //                 println!("branch B done");
-            //             } => {}
-            //         }
-            //     }.await;
-            // }
-
-            enum Action {
-                Push(MessageBatch),
-                Dispatch(MessageBatch),
-                End,
-            }
-
             loop {
-                let action: StreamResult<Action> = async {
+                async {
                     tokio::select! {
+                        biased;
+                        
+                        // pull from input and batch barriers
                         pulled = async {
                             if pending.len() < 256 {
                                 try_batch_barriers(max_barrier_count_per_batch, &mut input).await
@@ -717,25 +713,61 @@ impl StreamConsumer for DispatchExecutorForSyncLogStore {
                                 Ok(None)
                             }
                         } => {
-                            match pulled {
-                                Ok(Some(batch)) => Ok(Action::Push(batch)),
-                                Ok(None) => Ok(Action::End),
-                                Err(e) => Err(e),
+                            match pulled? {
+                                Some(batch) => pending.push_back(batch),
+                                None => {
+                                    if pending.len() < 256 {
+                                        break;
+                                    } else {
+                                        // backpressure case: keep draining pending
+                                    }
+                                }
                             }
                         }
-
-                        batch = async { pending.pop_front() }, if !pending.is_empty() => {
-                            Ok(Action::Dispatch(batch.expect("pending not empty")))
-                        }
+                        _ = async {
+                            count += 1;
+                            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+                            println!("branch B done");
+                        } => {}
                     }
                 }.await;
-
-                match action? {
-                    Action::Push(batch) => pending.push_back(batch),
-                    Action::Dispatch(batch) => { /* dispatch + yield */ }
-                    Action::End => break, // 或者设置 upstream_ended=true，等 pending 清空再 break
-                }
             }
+
+            // enum Action {
+            //     Push(MessageBatch),
+            //     Dispatch(MessageBatch),
+            //     End,
+            // }
+
+            // loop {
+            //     let action: StreamResult<Action> = async {
+            //         tokio::select! {
+            //             pulled = async {
+            //                 if pending.len() < 256 {
+            //                     try_batch_barriers(max_barrier_count_per_batch, &mut input).await
+            //                 } else {
+            //                     Ok(None)
+            //                 }
+            //             } => {
+            //                 match pulled {
+            //                     Ok(Some(batch)) => Ok(Action::Push(batch)),
+            //                     Ok(None) => Ok(Action::End),
+            //                     Err(e) => Err(e),
+            //                 }
+            //             }
+
+            //             batch = async { pending.pop_front() }, if !pending.is_empty() => {
+            //                 Ok(Action::Dispatch(batch.expect("pending not empty")))
+            //             }
+            //         }
+            //     }.await;
+
+            //     match action? {
+            //         Action::Push(batch) => pending.push_back(batch),
+            //         Action::Dispatch(batch) => { /* dispatch + yield */ }
+            //         Action::End => break, // 或者设置 upstream_ended=true，等 pending 清空再 break
+            //     }
+            // }
         }
     }
 }
