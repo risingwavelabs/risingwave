@@ -226,6 +226,7 @@ pub trait CatalogWriter: Send + Sync {
         job_id: JobId,
         parallelism: PbTableParallelism,
         deferred: bool,
+        adaptive_parallelism_strategy: Option<String>,
     ) -> Result<()>;
 
     async fn alter_config(
@@ -624,9 +625,10 @@ impl CatalogWriter for CatalogWriterImpl {
         job_id: JobId,
         parallelism: PbTableParallelism,
         deferred: bool,
+        adaptive_parallelism_strategy: Option<String>,
     ) -> Result<()> {
         self.meta_client
-            .alter_parallelism(job_id, parallelism, deferred)
+            .alter_parallelism(job_id, parallelism, deferred, adaptive_parallelism_strategy)
             .await?;
         Ok(())
     }

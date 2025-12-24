@@ -3249,6 +3249,21 @@ impl Parser<'_> {
                 AlterTableOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
+            } else if self.parse_word("ADAPTIVE_PARALLELISM_STRATEGY") {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self
+                        .expected("TO or = after ALTER TABLE SET ADAPTIVE_PARALLELISM_STRATEGY");
+                }
+
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterTableOperation::SetAdaptiveParallelismStrategy {
+                    strategy: value,
+                    deferred,
+                }
             } else if self.parse_keyword(Keyword::PARALLELISM) {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
@@ -3275,7 +3290,7 @@ impl Parser<'_> {
                 AlterTableOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT/CONFIG after SET",
+                    "SCHEMA/ADAPTIVE_PARALLELISM_STRATEGY/PARALLELISM/SOURCE_RATE_LIMIT/DML_RATE_LIMIT/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
@@ -3422,7 +3437,23 @@ impl Parser<'_> {
                 return self.expected("TO after RENAME");
             }
         } else if self.parse_keyword(Keyword::SET) {
-            if self.parse_keyword(Keyword::PARALLELISM) {
+            if self.parse_word("ADAPTIVE_PARALLELISM_STRATEGY") {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self
+                        .expected("TO or = after ALTER INDEX SET ADAPTIVE_PARALLELISM_STRATEGY");
+                }
+
+                let value = self.parse_set_variable()?;
+
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterIndexOperation::SetAdaptiveParallelismStrategy {
+                    strategy: value,
+                    deferred,
+                }
+            } else if self.parse_keyword(Keyword::PARALLELISM) {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
                 {
@@ -3441,7 +3472,8 @@ impl Parser<'_> {
                 let entries = self.parse_options()?;
                 AlterIndexOperation::SetConfig { entries }
             } else {
-                return self.expected("PARALLELISM or CONFIG after SET");
+                return self
+                    .expected("ADAPTIVE_PARALLELISM_STRATEGY/PARALLELISM or CONFIG after SET");
             }
         } else if self.parse_keyword(Keyword::RESET) {
             if self.parse_keyword(Keyword::CONFIG) {
@@ -3495,6 +3527,22 @@ impl Parser<'_> {
                 }
                 let value = self.parse_boolean()?;
                 AlterViewOperation::SetStreamingEnableUnalignedJoin { enable: value }
+            } else if self.parse_word("ADAPTIVE_PARALLELISM_STRATEGY") && materialized {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected(
+                        "TO or = after ALTER MATERIALIZED VIEW SET ADAPTIVE_PARALLELISM_STRATEGY",
+                    );
+                }
+
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterViewOperation::SetAdaptiveParallelismStrategy {
+                    strategy: value,
+                    deferred,
+                }
             } else if self.parse_keyword(Keyword::PARALLELISM) && materialized {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
@@ -3532,7 +3580,9 @@ impl Parser<'_> {
                 let entries = self.parse_options()?;
                 AlterViewOperation::SetConfig { entries }
             } else {
-                return self.expected("SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT/CONFIG after SET");
+                return self.expected(
+                    "SCHEMA/ADAPTIVE_PARALLELISM_STRATEGY/PARALLELISM/BACKFILL_RATE_LIMIT/CONFIG after SET",
+                );
             }
         } else if self.parse_keyword(Keyword::RESET) {
             if self.parse_keyword(Keyword::RESOURCE_GROUP) && materialized {
@@ -3629,7 +3679,7 @@ impl Parser<'_> {
                 AlterSinkOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
+                    "SCHEMA/ADAPTIVE_PARALLELISM_STRATEGY/PARALLELISM/SINK_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {

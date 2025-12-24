@@ -308,6 +308,8 @@ message AlterParallelismRequest {
   uint32 table_id = 1;
   meta.TableParallelism parallelism = 2;
   bool deferred = 3;
+  // Optional adaptive parallelism strategy for the job. When unset, no change.
+  optional string adaptive_parallelism_strategy = 4;
 }
 
 message AlterParallelismResponse {}
