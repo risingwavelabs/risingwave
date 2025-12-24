@@ -2183,7 +2183,7 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
         .unwrap();
     pin_mut!(it);
     let mut count = 0;
-    while let Some(_) = it.next().await {
+    while (it.next().await).is_some() {
         count += 1;
     }
     assert_eq!(count, 6);
