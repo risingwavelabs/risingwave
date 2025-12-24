@@ -41,6 +41,33 @@
     select * from t cross join unnest(arr) WITH ORDINALITY as foo(a,ord,bar);
   expected_outputs:
     - binder_error
+- name: filter on ordinality column
+  sql: |
+    create table t(x int , arr int[]);
+    select * from t
+    cross join unnest(arr) WITH ORDINALITY as u(val, ord)
+    where ord > 1;
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: correlated arg uses array concat (int[] || int)
+  sql: |
+    create table t(x int , arr int[]);
+    select * from t
+    cross join unnest(arr || x) WITH ORDINALITY as u(val, ord);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
+- name: multiple correlated table functions with ordinality
+  sql: |
+    create table t(x int , arr int[]);
+    select *
+    from t
+    cross join unnest(arr) WITH ORDINALITY as u(a, ord1)
+    cross join unnest(arr || x) WITH ORDINALITY as v(b, ord2);
+  expected_outputs:
+    - batch_plan
+    - stream_plan
 # multiple with ordinality
 - sql: |
     create table t(x int , arr int[]);
