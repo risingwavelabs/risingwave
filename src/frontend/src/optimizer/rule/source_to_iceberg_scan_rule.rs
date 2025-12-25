@@ -51,7 +51,8 @@ impl FallibleRule<Logical> for SourceToIcebergScanRule {
             {
                 use std::collections::HashMap;
 
-                let data_iceberg_scan: PlanRef = LogicalIcebergScan::new(source, None, HashMap::default()).into();
+                let data_iceberg_scan: PlanRef =
+                    LogicalIcebergScan::new(source, None, HashMap::default()).into();
                 ApplyResult::Ok(data_iceberg_scan)
             }
         } else {

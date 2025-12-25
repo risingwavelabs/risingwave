@@ -35,7 +35,8 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
 use risingwave_common::bail;
 use risingwave_common::catalog::{
-    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME, ROW_ID_COLUMN_NAME, Schema
+    ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
+    ROW_ID_COLUMN_NAME, Schema,
 };
 use risingwave_common::types::JsonbVal;
 use risingwave_common_estimate_size::EstimateSize;
@@ -493,11 +494,9 @@ impl IcebergSplitEnumerator {
             .collect_vec();
         let name_to_field_id: HashMap<String, i32> = require_names
             .iter()
-            .filter_map(|name| {
-                match table_schema.field_id_by_name(name) {
-                    Some(field_id) => Some((name.clone(), field_id)),
-                    None => None,
-                }
+            .filter_map(|name| match table_schema.field_id_by_name(name) {
+                Some(field_id) => Some((name.clone(), field_id)),
+                None => None,
             })
             .collect();
 
@@ -539,7 +538,10 @@ impl IcebergSplitEnumerator {
                         if !equality_delete_set.contains(&delete.data_file_path) {
                             equality_delete_set.insert(delete.data_file_path.clone());
                             let mut delete_file_scan_task = delete.as_ref().clone();
-                            delete_file_scan_task.project_field_ids = delete_file_scan_task.equality_ids.clone().unwrap_or_default();
+                            delete_file_scan_task.project_field_ids = delete_file_scan_task
+                                .equality_ids
+                                .clone()
+                                .unwrap_or_default();
                             equality_delete_file_scan_tasks.push(delete_file_scan_task);
                         }
                     }

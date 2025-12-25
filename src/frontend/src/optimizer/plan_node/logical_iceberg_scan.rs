@@ -61,14 +61,18 @@ impl Hash for LogicalIcebergScan {
         for (k, v) in &self.name_to_field_id {
             k.hash(state);
             v.hash(state);
-        }    
+        }
     }
 }
 
 impl Eq for LogicalIcebergScan {}
 
 impl LogicalIcebergScan {
-    pub fn new(logical_source: &LogicalSource, snapshot_id: Option<i64>, name_to_field_id: HashMap<String, i32>) -> Self {
+    pub fn new(
+        logical_source: &LogicalSource,
+        snapshot_id: Option<i64>,
+        name_to_field_id: HashMap<String, i32>,
+    ) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
         let base = PlanBase::new_logical_with_core(&logical_source.core);
         assert!(logical_source.output_exprs.is_none());
@@ -79,7 +83,7 @@ impl LogicalIcebergScan {
             iceberg_file_scan_task: None,
             count: 0,
             snapshot_id,
-            name_to_field_id
+            name_to_field_id,
         }
     }
 
@@ -88,7 +92,7 @@ impl LogicalIcebergScan {
         iceberg_file_scan_task: IcebergFileScanTask,
         count: u64,
         snapshot_id: Option<i64>,
-        name_to_field_id: HashMap<String, i32>
+        name_to_field_id: HashMap<String, i32>,
     ) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
         let base = PlanBase::new_logical_with_core(&logical_source.core);
@@ -101,7 +105,7 @@ impl LogicalIcebergScan {
             iceberg_file_scan_task: Some(Arc::new(iceberg_file_scan_task)),
             count,
             snapshot_id,
-            name_to_field_id
+            name_to_field_id,
         }
     }
 
@@ -135,7 +139,7 @@ impl LogicalIcebergScan {
             iceberg_file_scan_task: Some(Arc::new(iceberg_file_scan_task)),
             count,
             snapshot_id,
-            name_to_field_id
+            name_to_field_id,
         }
     }
 
@@ -143,7 +147,7 @@ impl LogicalIcebergScan {
         match self.iceberg_file_scan_task.as_ref() {
             Some(task) => Ok(task.get_iceberg_scan_type()),
             None => Err(crate::error::ErrorCode::BindError(
-                "Iceberg file scan task is missing in LogicalIcebergScan".to_string(),
+                "Iceberg file scan task is missing in LogicalIcebergScan".to_owned(),
             )
             .into()),
         }
@@ -196,14 +200,16 @@ impl LogicalIcebergScan {
         let base = PlanBase::new_logical_with_core(&core);
         // add new columns for iceberg scan task
         let iceberg_file_scan_task = if !self.name_to_field_id.is_empty() {
-            let fields_id:Vec<_> = core.column_catalog.iter().filter_map(|col| {
-                self.name_to_field_id.get(&col.name).cloned()
-            }).collect();
-            let mut iceberg_file_scan_task= self.iceberg_file_scan_task.clone();
-            iceberg_file_scan_task.as_mut().map(|tasks| {
-                tasks.add_project_field_ids(fields_id);
-                tasks
-            }).cloned()
+            let fields_id: Vec<_> = core
+                .column_catalog
+                .iter()
+                .filter_map(|col| self.name_to_field_id.get(&col.name).cloned())
+                .collect();
+            let mut iceberg_file_scan_task = self.iceberg_file_scan_task.clone();
+            if let Some(tasks) = iceberg_file_scan_task.as_mut() {
+                Arc::make_mut(tasks).add_project_field_ids(fields_id);
+            }
+            iceberg_file_scan_task
         } else {
             self.iceberg_file_scan_task.clone()
         };
@@ -280,7 +286,7 @@ impl ToBatch for LogicalIcebergScan {
             self.logical_source.core.clone(),
             self.iceberg_file_scan_task.as_ref().ok_or_else(|| {
                 crate::error::ErrorCode::BindError(
-                    "Iceberg file scan task is missing in LogicalIcebergScan when converting to BatchIcebergScan".to_string(),
+                    "Iceberg file scan task is missing in LogicalIcebergScan when converting to BatchIcebergScan".to_owned(),
                 )
             })?.clone(),
             self.snapshot_id

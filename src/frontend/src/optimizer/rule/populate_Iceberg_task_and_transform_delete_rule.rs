@@ -70,7 +70,7 @@ impl FallibleRule<Logical> for PopulateIcebergTaskAndTransformDeleteRule {
         } else {
             return ApplyResult::Err(
                 crate::error::ErrorCode::BindError(
-                    "iceberg_scan can't be used in the madsim mode".to_string(),
+                    "iceberg_scan can't be used in the madsim mode".to_owned(),
                 )
                 .into(),
             );
@@ -94,7 +94,12 @@ impl FallibleRule<Logical> for PopulateIcebergTaskAndTransformDeleteRule {
             name_to_field_id,
         } = delete_parameters;
         let mut iceberg_scan: PlanRef = scan
-            .clone_with_iceberg_file_scan_task(data_tasks, count, snapshot_id, name_to_field_id.clone())
+            .clone_with_iceberg_file_scan_task(
+                data_tasks,
+                count,
+                snapshot_id,
+                name_to_field_id.clone(),
+            )
             .into();
 
         if !equality_delete_columns.is_empty() {
@@ -118,7 +123,7 @@ impl FallibleRule<Logical> for PopulateIcebergTaskAndTransformDeleteRule {
         }
 
         if rw_predicate.always_true() {
-            ApplyResult::Ok(iceberg_scan.into())
+            ApplyResult::Ok(iceberg_scan)
         } else {
             let filter = LogicalFilter::new(iceberg_scan, rw_predicate);
             ApplyResult::Ok(filter.into())
@@ -411,7 +416,7 @@ fn build_equality_delete_hashjoin_scan(
         equality_delete_tasks,
         0,
         snapshot_id,
-        name_to_field_id
+        name_to_field_id,
     );
 
     let data_columns_len = data_iceberg_scan.schema().len();
@@ -509,7 +514,7 @@ fn build_position_delete_hashjoin_scan(
         position_delete_tasks,
         0,
         snapshot_id,
-        name_to_field_id
+        name_to_field_id,
     );
     let data_columns_len = data_iceberg_scan.schema().len();
 
