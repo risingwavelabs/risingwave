@@ -18,6 +18,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
     FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
@@ -269,9 +270,8 @@ impl HummockSnapshotManager {
         self.latest_snapshot.borrow().clone()
     }
 
-    pub fn init(&self, version: FrontendHummockVersion) {
-        let updated_change_log_table_ids: HashSet<_> = version
-            .table_change_log
+    pub fn init(&self, version: FrontendHummockVersion, table_change_logs: TableChangeLogs) {
+        let updated_change_log_table_ids: HashSet<_> = table_change_logs
             .iter()
             .filter_map(|(table_id, change_log)| {
                 if change_log.get_non_empty_epochs(0, usize::MAX).is_empty() {

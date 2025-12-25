@@ -19,7 +19,9 @@ use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo, PbTableChangeLog};
 use tracing::warn;
 
+use crate::HummockObjectId;
 use crate::sstable_info::SstableInfo;
+use crate::version::ObjectIdReader;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLogCommon<T>(
@@ -54,19 +56,21 @@ impl<T> TableChangeLogCommon<T> {
             .iter()
             .flat_map(|epoch_change_log| epoch_change_log.epochs())
     }
-
-    pub(crate) fn change_log_into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
-        self.0.into_iter()
-    }
-
-    pub(crate) fn change_log_iter_mut(
-        &mut self,
-    ) -> impl Iterator<Item = &mut EpochNewChangeLogCommon<T>> {
-        self.0.iter_mut()
-    }
 }
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
+pub type TableChangeLogs = HashMap<TableId, TableChangeLog>;
+
+impl TableChangeLog {
+    pub fn get_object_ids(&self) -> impl Iterator<Item = HummockObjectId> + '_ {
+        self.0.iter().flat_map(|c| {
+            c.old_value
+                .iter()
+                .chain(c.new_value.iter())
+                .map(|t| HummockObjectId::Sstable(t.object_id()))
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EpochNewChangeLogCommon<T> {

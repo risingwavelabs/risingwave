@@ -720,13 +720,17 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             }
         }
 
+        #[expect(deprecated)]
         // apply to table change log
+        // Set clean_up_only=true because self.table_change_log is deprecated.
+        // Use apply_change_log_delta specifically to clean up existing change logs.
         Self::apply_change_log_delta(
             &mut self.table_change_log,
             &version_delta.change_log_delta,
             &version_delta.removed_table_ids,
             &version_delta.state_table_info_delta,
             &changed_table_info,
+            true,
         );
 
         // apply to vector index
@@ -745,18 +749,21 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         removed_table_ids: &HashSet<TableId>,
         state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
         changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
+        clean_up_only: bool,
     ) {
-        for (table_id, change_log_delta) in change_log_delta {
-            let new_change_log = &change_log_delta.new_log;
-            match table_change_log.entry(*table_id) {
-                Entry::Occupied(entry) => {
-                    let change_log = entry.into_mut();
-                    change_log.add_change_log(new_change_log.clone());
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(TableChangeLogCommon::new(once(new_change_log.clone())));
-                }
-            };
+        if !clean_up_only {
+            for (table_id, change_log_delta) in change_log_delta {
+                let new_change_log = &change_log_delta.new_log;
+                match table_change_log.entry(*table_id) {
+                    Entry::Occupied(entry) => {
+                        let change_log = entry.into_mut();
+                        change_log.add_change_log(new_change_log.clone());
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(TableChangeLogCommon::new(once(new_change_log.clone())));
+                    }
+                };
+            }
         }
 
         // If a table has no new change log entry (even an empty one), it means we have stopped maintained
@@ -1001,16 +1008,7 @@ impl<T> HummockVersionCommon<T>
 where
     T: SstableIdReader + ObjectIdReader,
 {
-    pub fn get_sst_object_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableObjectId> {
-        self.get_sst_infos(exclude_change_log)
-            .map(|s| s.object_id())
-            .collect()
-    }
-
-    pub fn get_object_ids(
-        &self,
-        exclude_change_log: bool,
-    ) -> impl Iterator<Item = HummockObjectId> + '_ {
+    pub fn get_object_ids(&self) -> impl Iterator<Item = HummockObjectId> + '_ {
         // DO NOT REMOVE THIS LINE
         // This is to ensure that when adding new variant to `HummockObjectId`,
         // the compiler will warn us if we forget to handle it here.
@@ -1019,7 +1017,7 @@ where
             HummockObjectId::VectorFile(_) => {}
             HummockObjectId::HnswGraphFile(_) => {}
         };
-        self.get_sst_infos(exclude_change_log)
+        self.get_sst_infos()
             .map(|s| HummockObjectId::Sstable(s.object_id()))
             .chain(
                 self.vector_indexes
@@ -1028,35 +1026,13 @@ where
             )
     }
 
-    pub fn get_sst_ids(&self, exclude_change_log: bool) -> HashSet<HummockSstableId> {
-        self.get_sst_infos(exclude_change_log)
-            .map(|s| s.sst_id())
-            .collect()
+    pub fn get_sst_ids(&self) -> HashSet<HummockSstableId> {
+        self.get_sst_infos().map(|s| s.sst_id()).collect()
     }
 
-    pub fn get_sst_infos(&self, exclude_change_log: bool) -> impl Iterator<Item = &T> {
-        let may_table_change_log = if exclude_change_log {
-            None
-        } else {
-            Some(self.table_change_log.values())
-        };
+    pub fn get_sst_infos(&self) -> impl Iterator<Item = &T> {
         self.get_combined_levels()
             .flat_map(|level| level.table_infos.iter())
-            .chain(
-                may_table_change_log
-                    .map(|v| {
-                        v.flat_map(|table_change_log| {
-                            table_change_log.iter().flat_map(|epoch_change_log| {
-                                epoch_change_log
-                                    .old_value
-                                    .iter()
-                                    .chain(epoch_change_log.new_value.iter())
-                            })
-                        })
-                    })
-                    .into_iter()
-                    .flatten(),
-            )
     }
 }
 
@@ -1494,7 +1470,7 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
     }
 }
 
-pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64> {
+pub fn version_object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64> {
     // DO NOT REMOVE THIS LINE
     // This is to ensure that when adding new variant to `HummockObjectId`,
     // the compiler will warn us if we forget to handle it here.
@@ -1513,14 +1489,6 @@ pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64
                 .chain(cg.levels.iter())
                 .flat_map(|level| level.table_infos.iter().map(|t| (t.object_id, t.file_size)))
         })
-        .chain(version.table_change_log.values().flat_map(|c| {
-            c.iter().flat_map(|l| {
-                l.old_value
-                    .iter()
-                    .chain(l.new_value.iter())
-                    .map(|t| (t.object_id, t.file_size))
-            })
-        }))
         .map(|(object_id, size)| (HummockObjectId::Sstable(object_id), size))
         .chain(
             version
@@ -1696,7 +1664,7 @@ mod tests {
             )]),
             ..Default::default()
         };
-        assert_eq!(version.get_object_ids(false).count(), 0);
+        assert_eq!(version.get_object_ids().count(), 0);
 
         // Add to sub level
         version
@@ -1716,7 +1684,7 @@ mod tests {
                 ],
                 ..Default::default()
             });
-        assert_eq!(version.get_object_ids(false).count(), 1);
+        assert_eq!(version.get_object_ids().count(), 1);
 
         // Add to non sub level
         version.levels.get_mut(&0).unwrap().levels.push(Level {
@@ -1730,7 +1698,7 @@ mod tests {
             ],
             ..Default::default()
         });
-        assert_eq!(version.get_object_ids(false).count(), 2);
+        assert_eq!(version.get_object_ids().count(), 2);
     }
 
     #[test]

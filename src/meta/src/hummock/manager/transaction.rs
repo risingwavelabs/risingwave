@@ -131,6 +131,7 @@ impl<'a> HummockVersionTransaction<'a> {
             &delta.removed_table_ids,
             &delta.state_table_info_delta,
             &changed_table_info,
+            false,
         );
         deltas.push(delta);
     }
