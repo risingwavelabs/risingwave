@@ -631,6 +631,8 @@ message DynamicFilterNode {
   // If this is false, we need to store RHS records which match the condition in the internal table.
   // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
   bool condition_always_relax = 5 [deprecated = true];
+  // Whether the dynamic filter can clean its left state table by watermark.
+  bool cleaned_by_watermark = 6;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
