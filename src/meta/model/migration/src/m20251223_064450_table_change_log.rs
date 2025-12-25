@@ -19,7 +19,7 @@ impl MigrationTrait for Migration {
                             .not_null(),
                     )
                     .col(
-                        ColumnDef::new(HummockTableChangeLog::CheckPointEpoch)
+                        ColumnDef::new(HummockTableChangeLog::CheckpointEpoch)
                             .big_integer()
                             .not_null(),
                     )
@@ -41,7 +41,7 @@ impl MigrationTrait for Migration {
                     .primary_key(
                         Index::create()
                             .col(HummockTableChangeLog::TableId)
-                            .col(HummockTableChangeLog::CheckPointEpoch),
+                            .col(HummockTableChangeLog::CheckpointEpoch),
                     )
                     .to_owned(),
             )
@@ -59,7 +59,7 @@ impl MigrationTrait for Migration {
 enum HummockTableChangeLog {
     Table,
     TableId,
-    CheckPointEpoch,
+    CheckpointEpoch,
     NonCheckpointEpochs,
     NewValueSst,
     OldValueSst,
