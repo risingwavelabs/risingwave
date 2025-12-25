@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::future::Future;
+use std::future::{Future, pending};
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
@@ -652,41 +652,64 @@ impl StreamConsumer for DispatchExecutor {
     }
 }
 
-enum PullOutcome {
-    Continue,
-    EndOfStream,
-}
-
-async fn pull_batch_or_wait(
+async fn write_message_to_buffer(
     max_barrier_count_per_batch: u32,
     input: &mut Peekable<BoxedMessageStream>,
-    pending: &mut VecDeque<MessageBatch>,
-    count: &mut usize,
-) -> StreamResult<PullOutcome> {
-    tokio::select! {
-        biased;
-
-        pulled = async {
-            if pending.len() < 256 {
-                try_batch_barriers(max_barrier_count_per_batch, input).await
-            } else {
-                Ok(None)
-            }
-        } => {
-            match pulled? {
-                Some(batch) => {
-                    
-                }
-                None => {
-                    if pending.len() < 256 {
-                        Ok(PullOutcome::EndOfStream)
-                    } else {
-                        Ok(PullOutcome::Continue)
-                    }
-                }
-            }
+    buffer: &mut VecDeque<MessageBatch>,
+    end_of_stream: &mut bool,
+) -> StreamResult<()>{
+    match try_batch_barriers(max_barrier_count_per_batch, input).await? {
+        Some(message) => {
+            buffer.push_back(message);
+        }
+        None => {
+            *end_of_stream = true;
         }
     }
+    Ok(())
+}
+
+// make sure the buffer is not empty when calling this function
+// divide the logistics of dispatching data to downstream from sending barriers to localbarriermanager
+async fn dispatch_message_to_downstream(
+    buffer: &mut VecDeque<MessageBatch>,
+    inner: &mut DispatchExecutorInner,
+) -> StreamResult<()>{
+    let msg = buffer.pop_back().expect("buffer is not empty when reading message");
+    match msg {
+        chunk @ MessageBatch::Chunk(_) => {
+            inner
+            .dispatch(chunk)
+            .instrument(tracing::info_span!("dispatch_chunk"))
+            .instrument_await("dispatch_chunk")
+            .await?;
+        }
+        MessageBatch::BarrierBatch(barrier_batch) => {
+            assert!(!barrier_batch.is_empty());
+            inner
+                .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
+                .instrument(tracing::info_span!("dispatch_barrier_batch"))
+                .instrument_await("dispatch_barrier_batch")
+                .await?;
+            inner
+                .metrics
+                .metrics
+                .barrier_batch_size
+                .observe(barrier_batch.len() as f64);
+            // TODO: send barriers to localbarriermanager
+            // for barrier in barrier_batch {
+            //     yield barrier;
+            // }
+        }
+        watermark @ MessageBatch::Watermark(_) => {
+            inner
+                .dispatch(watermark)
+                .instrument(tracing::info_span!("dispatch_watermark"))
+                .instrument_await("dispatch_watermark")
+                .await?;
+        }                                                                
+    }
+    Ok(())
 }
 
 impl StreamConsumer for DispatchExecutorForSyncLogStore {
@@ -694,82 +717,9 @@ impl StreamConsumer for DispatchExecutorForSyncLogStore {
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
         let max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
-
-        #[try_stream]
-        async move {
-            let mut input = self.input.execute().peekable();
-            let mut pending: VecDeque<MessageBatch> = VecDeque::new();
-
-            loop {
-                async {
-                    tokio::select! {
-                        biased;
-                        
-                        // pull from input and batch barriers
-                        pulled = async {
-                            if pending.len() < 256 {
-                                try_batch_barriers(max_barrier_count_per_batch, &mut input).await
-                            } else {
-                                Ok(None)
-                            }
-                        } => {
-                            match pulled? {
-                                Some(batch) => pending.push_back(batch),
-                                None => {
-                                    if pending.len() < 256 {
-                                        break;
-                                    } else {
-                                        // backpressure case: keep draining pending
-                                    }
-                                }
-                            }
-                        }
-                        _ = async {
-                            count += 1;
-                            tokio::time::sleep(std::time::Duration::from_millis(5)).await;
-                            println!("branch B done");
-                        } => {}
-                    }
-                }.await;
-            }
-
-            // enum Action {
-            //     Push(MessageBatch),
-            //     Dispatch(MessageBatch),
-            //     End,
-            // }
-
-            // loop {
-            //     let action: StreamResult<Action> = async {
-            //         tokio::select! {
-            //             pulled = async {
-            //                 if pending.len() < 256 {
-            //                     try_batch_barriers(max_barrier_count_per_batch, &mut input).await
-            //                 } else {
-            //                     Ok(None)
-            //                 }
-            //             } => {
-            //                 match pulled {
-            //                     Ok(Some(batch)) => Ok(Action::Push(batch)),
-            //                     Ok(None) => Ok(Action::End),
-            //                     Err(e) => Err(e),
-            //                 }
-            //             }
-
-            //             batch = async { pending.pop_front() }, if !pending.is_empty() => {
-            //                 Ok(Action::Dispatch(batch.expect("pending not empty")))
-            //             }
-            //         }
-            //     }.await;
-
-            //     match action? {
-            //         Action::Push(batch) => pending.push_back(batch),
-            //         Action::Dispatch(batch) => { /* dispatch + yield */ }
-            //         Action::End => break, // 或者设置 upstream_ended=true，等 pending 清空再 break
-            //     }
-            // }
-        }
+        
     }
+
 }
 
 /// Tries to batch up to `max_barrier_count_per_batch` consecutive barriers within a single message batch.
