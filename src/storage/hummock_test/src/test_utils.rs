@@ -85,13 +85,15 @@ pub async fn prepare_first_valid_version(
     )
     .await;
     observer_manager.start().await;
-    let hummock_version = match rx.recv().await {
-        Some(HummockVersionUpdate::PinnedVersion(version)) => version,
+    let (hummock_version, table_change_logs) = match rx.recv().await {
+        Some(HummockVersionUpdate::PinnedVersion(version, table_change_logs)) => {
+            (version, table_change_logs)
+        }
         _ => unreachable!("should be full version"),
     };
 
     (
-        PinnedVersion::new(*hummock_version, unbounded_channel().0),
+        PinnedVersion::new(*hummock_version, *table_change_logs, unbounded_channel().0),
         tx,
         rx,
     )

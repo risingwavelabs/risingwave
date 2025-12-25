@@ -288,7 +288,10 @@ impl BackupReader {
 
 fn build_version_holder<S: Metadata>(s: MetaSnapshot<S>) -> VersionHolder {
     let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-    (PinnedVersion::new(s.metadata.hummock_version(), tx), rx)
+    (
+        PinnedVersion::new(s.metadata.hummock_version(), HashMap::default(), tx),
+        rx,
+    )
 }
 
 impl From<BackupError> for StorageError {

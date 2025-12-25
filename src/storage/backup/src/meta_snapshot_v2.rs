@@ -12,11 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::fmt::{Display, Formatter};
 
 use anyhow::anyhow;
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
+use risingwave_hummock_sdk::HummockRawObjectId;
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::version::HummockVersion;
 use serde::{Deserialize, Serialize};
 
@@ -202,6 +205,47 @@ impl Metadata for MetadataV2 {
             })
             .exactly_one()
             .map_err(|_| BackupError::Other(anyhow!("expect data_directory")))
+    }
+
+    fn table_change_log_object_ids(&self) -> HashSet<HummockRawObjectId> {
+        self.hummock_table_change_logs
+            .iter()
+            .flat_map(|m| {
+                let change_log = to_table_change_log(m);
+                change_log
+                    .new_value
+                    .iter()
+                    .chain(change_log.old_value.iter())
+                    .map(|s| s.object_id.as_raw())
+                    .collect::<HashSet<_>>()
+            })
+            .collect()
+    }
+}
+
+fn to_table_change_log(
+    change_log: &risingwave_meta_model::hummock_table_change_log::Model,
+) -> EpochNewChangeLog {
+    EpochNewChangeLog {
+        new_value: change_log
+            .new_value_sst
+            .to_protobuf()
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        old_value: change_log
+            .old_value_sst
+            .to_protobuf()
+            .into_iter()
+            .map(Into::into)
+            .collect(),
+        non_checkpoint_epochs: change_log
+            .non_checkpoint_epochs
+            .0
+            .iter()
+            .map(|e| *e as _)
+            .collect(),
+        checkpoint_epoch: change_log.checkpoint_epoch as _,
     }
 }
 

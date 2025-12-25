@@ -36,6 +36,7 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{HummockVersionId, INVALID_VERSION_ID};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
@@ -1321,6 +1322,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn list_unmigrated_tables(&self) -> RpcResult<HashMap<crate::catalog::TableId, String>> {
         unimplemented!()
+    }
+
+    async fn get_hummock_table_change_log(&self) -> RpcResult<TableChangeLogs> {
+        Ok(HashMap::default())
     }
 }
 

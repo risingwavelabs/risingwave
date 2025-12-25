@@ -381,6 +381,12 @@ message GetCurrentVersionResponse {
   HummockVersion current_version = 2;
 }
 
+message GetTableChangeLogsRequest {}
+
+message GetTableChangeLogsResponse {
+  map<uint32, TableChangeLog> table_change_logs = 1;
+}
+
 message UnpinVersionRequest {
   uint32 context_id = 1;
 }
@@ -957,6 +963,7 @@ service HummockManagerService {
   rpc CancelCompactTask(CancelCompactTaskRequest) returns (CancelCompactTaskResponse);
   rpc GetVersionByEpoch(GetVersionByEpochRequest) returns (GetVersionByEpochResponse);
   rpc MergeCompactionGroup(MergeCompactionGroupRequest) returns (MergeCompactionGroupResponse);
+  rpc GetTableChangeLogs(GetTableChangeLogsRequest) returns (GetTableChangeLogsResponse);
 
   // iceberg
   rpc SubscribeIcebergCompactionEvent(stream iceberg_compaction.SubscribeIcebergCompactionEventRequest) returns (stream iceberg_compaction.SubscribeIcebergCompactionEventResponse);

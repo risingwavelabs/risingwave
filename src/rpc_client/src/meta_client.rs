@@ -47,6 +47,7 @@ use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_error::bail;
 use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
+use risingwave_hummock_sdk::change_log::{TableChangeLog, TableChangeLogs};
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockVersionId, ObjectIdRange, SyncResult,
@@ -1670,6 +1671,16 @@ impl MetaClient {
         Ok(resp.configs)
     }
 
+    pub async fn get_table_change_logs(&self) -> Result<TableChangeLogs> {
+        let req = GetTableChangeLogsRequest {};
+        let resp = self.inner.get_table_change_logs(req).await?;
+        Ok(resp
+            .table_change_logs
+            .into_iter()
+            .map(|(id, change_log)| (TableId::new(id), TableChangeLog::from_protobuf(&change_log)))
+            .collect())
+    }
+
     pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
         let _resp = self
             .inner
@@ -2594,6 +2605,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
             ,{ hummock_client, merge_compaction_group, MergeCompactionGroupRequest, MergeCompactionGroupResponse }
+            ,{ hummock_client, get_table_change_logs, GetTableChangeLogsRequest, GetTableChangeLogsResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

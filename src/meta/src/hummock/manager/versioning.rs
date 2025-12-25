@@ -17,7 +17,7 @@ use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::change_log::TableChangeLog;
+use risingwave_hummock_sdk::change_log::{TableChangeLog, TableChangeLogs};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     BranchedSstInfo, get_compaction_group_ids, get_table_compaction_group_id_mapping,
@@ -60,6 +60,8 @@ pub struct Versioning {
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
+    /// Used by object GC and metric update.
+    pub checkpoint_table_change_log_object_size: HashMap<HummockObjectId, u64>,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
@@ -97,7 +99,12 @@ impl Versioning {
         let mut tracked_object_ids = self
             .checkpoint
             .version
-            .get_object_ids(false)
+            .get_object_ids()
+            .chain(
+                self.table_change_log
+                    .values()
+                    .flat_map(|c| c.get_object_ids()),
+            )
             .collect::<HashSet<_>>();
         // add object ids added between checkpoint version and current version
         for (_, delta) in self.hummock_version_deltas.range((
@@ -157,6 +164,14 @@ impl HummockManager {
 
     pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
         f(&self.versioning.read().await.current_version)
+    }
+
+    pub async fn on_current_version_and_table_change_log<T>(
+        &self,
+        mut f: impl FnMut(&HummockVersion, &TableChangeLogs) -> T,
+    ) -> T {
+        let guard = self.versioning.read().await;
+        f(&guard.current_version, &guard.table_change_log)
     }
 
     pub async fn get_version_id(&self) -> HummockVersionId {
@@ -280,6 +295,7 @@ impl HummockManager {
         Ok(())
     }
 
+    #[expect(deprecated)]
     pub async fn load_table_change_log(&self) -> Result<()> {
         use sea_orm::EntityTrait;
 

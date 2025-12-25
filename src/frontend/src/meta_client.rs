@@ -20,6 +20,7 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::util::cluster_limit::ClusterLimit;
 use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_pb::backup_service::MetaSnapshotMetadata;
 use risingwave_pb::catalog::Table;
@@ -108,6 +109,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_hummock_pinned_versions(&self) -> Result<Vec<(WorkerId, u64)>>;
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion>;
+
+    async fn get_hummock_table_change_log(&self) -> Result<TableChangeLogs>;
 
     async fn get_hummock_checkpoint_version(&self) -> Result<HummockVersion>;
 
@@ -325,6 +328,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn get_hummock_current_version(&self) -> Result<HummockVersion> {
         self.0.get_current_version().await
+    }
+
+    async fn get_hummock_table_change_log(&self) -> Result<TableChangeLogs> {
+        self.0.get_table_change_logs().await
     }
 
     async fn get_hummock_checkpoint_version(&self) -> Result<HummockVersion> {
