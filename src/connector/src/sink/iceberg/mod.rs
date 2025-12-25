@@ -73,7 +73,7 @@ use serde_json::from_value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedSender;
-use tokio_retry::Retry;
+use tokio_retry::RetryIf;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tracing::warn;
 use url::Url;
@@ -2116,36 +2116,74 @@ impl IcebergSinkCommitter {
             .take(self.commit_retry_num as usize);
         let catalog = self.catalog.clone();
         let table_ident = self.table.identifier().clone();
-        let table = Retry::spawn(retry_strategy, || async {
-            let table = Self::reload_table(
-                catalog.as_ref(),
-                &table_ident,
-                expect_schema_id,
-                expect_partition_spec_id,
-            )
-            .await?;
-            let txn = Transaction::new(&table);
-            let append_action = txn
-                .fast_append()
-                .set_snapshot_id(snapshot_id)
-                .set_target_branch(commit_branch(
-                    self.config.r#type.as_str(),
-                    self.config.write_mode,
-                ))
-                .add_data_files(data_files.clone());
 
-            let tx = append_action.apply(txn).map_err(|err| {
-                let err: IcebergError = err.into();
-                tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
-                SinkError::Iceberg(anyhow!(err))
-            })?;
-            tx.commit(self.catalog.as_ref()).await.map_err(|err| {
-                let err: IcebergError = err.into();
-                tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
-                SinkError::Iceberg(anyhow!(err))
-            })
-        })
-        .await?;
+        // Custom retry logic that:
+        // 1. Calls reload_table before each commit attempt to get the latest metadata
+        // 2. If reload_table fails (table not exists/schema/partition mismatch), stops retrying immediately
+        // 3. If commit fails, retries with backoff
+        enum CommitError {
+            ReloadTable(SinkError), // Non-retriable: schema/partition mismatch
+            Commit(SinkError),      // Retriable: commit conflicts, network errors
+        }
+
+        let table = RetryIf::spawn(
+            retry_strategy,
+            || async {
+                // Reload table before each commit attempt to get the latest metadata
+                let table = Self::reload_table(
+                    catalog.as_ref(),
+                    &table_ident,
+                    expect_schema_id,
+                    expect_partition_spec_id,
+                )
+                .await
+                .map_err(|e| {
+                    tracing::error!(error = %e.as_report(), "Failed to reload iceberg table");
+                    CommitError::ReloadTable(e)
+                })?;
+
+                let txn = Transaction::new(&table);
+                let append_action = txn
+                    .fast_append()
+                    .set_snapshot_id(snapshot_id)
+                    .set_target_branch(commit_branch(
+                        self.config.r#type.as_str(),
+                        self.config.write_mode,
+                    ))
+                    .add_data_files(data_files.clone());
+
+                let tx = append_action.apply(txn).map_err(|err| {
+                    let err: IcebergError = err.into();
+                    tracing::error!(error = %err.as_report(), "Failed to apply iceberg table");
+                    CommitError::Commit(SinkError::Iceberg(anyhow!(err)))
+                })?;
+
+                tx.commit(catalog.as_ref()).await.map_err(|err| {
+                    let err: IcebergError = err.into();
+                    tracing::error!(error = %err.as_report(), "Failed to commit iceberg table");
+                    CommitError::Commit(SinkError::Iceberg(anyhow!(err)))
+                })
+            },
+            |err: &CommitError| {
+                // Only retry on commit errors, not on reload_table errors
+                match err {
+                    CommitError::Commit(_) => {
+                        tracing::warn!("Commit failed, will retry");
+                        true
+                    }
+                    CommitError::ReloadTable(_) => {
+                        tracing::error!(
+                            "reload_table failed with non-retriable error, will not retry"
+                        );
+                        false
+                    }
+                }
+            },
+        )
+        .await
+        .map_err(|e| match e {
+            CommitError::ReloadTable(e) | CommitError::Commit(e) => e,
+        })?;
         self.table = table;
 
         let snapshot_num = self.table.metadata().snapshots().count();
