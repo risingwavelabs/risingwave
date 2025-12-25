@@ -152,6 +152,7 @@ impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
                 .into_iter()
                 .map(|(table_id, v)| (table_id.into(), v))
                 .collect(),
+            HashMap::default(),
         ));
 
         Self::new(
@@ -899,6 +900,7 @@ pub(super) mod tests {
             FilterKeyExtractorImpl::Multi(filter),
             table_id_to_vnode,
             table_id_to_watermark_serde,
+            HashMap::default(),
         ));
 
         let mut builder = SstableBuilder::new(
