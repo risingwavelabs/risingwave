@@ -62,7 +62,7 @@ message UpdateMutation {
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
     uint32 actor_id = 1;
-    uint64 dispatcher_id = 2;
+    uint32 dispatcher_id = 2;
     // The hash mapping for consistent hash.
     // For dispatcher types other than HASH, this is ignored.
     ActorMapping hash_mapping = 3;
@@ -102,6 +102,7 @@ message UpdateMutation {
   // CDC table snapshot splits
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
   map<uint32, SinkAddColumns> sink_add_columns = 8;
+  repeated SubscriptionUpstreamInfo subscriptions_to_drop = 9;
 }
 
 message SourceChangeSplitMutation {
@@ -213,9 +214,6 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
-
-  // Record the actors that the barrier has passed. Only used for debugging.
-  repeated uint32 passed_actors = 255;
 }
 
 message Watermark {
@@ -966,7 +964,8 @@ message OverWindowNode {
   repeated uint32 partition_by = 2;
   repeated common.ColumnOrder order_by = 3;
   catalog.Table state_table = 4;
-  OverWindowCachePolicy cache_policy = 5;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  OverWindowCachePolicy cache_policy = 5 [deprecated = true];
 }
 
 message LocalApproxPercentileNode {
@@ -988,8 +987,10 @@ message RowMergeNode {
 
 message SyncLogStoreNode {
   catalog.Table log_store_table = 1;
-  uint32 pause_duration_ms = 2;
-  uint32 buffer_size = 3;
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  optional uint32 pause_duration_ms = 2 [deprecated = true];
+  // Deprecated. Use the one from `StreamingDeveloperConfig` instead.
+  optional uint32 buffer_size = 3 [deprecated = true];
   bool aligned = 4;
 }
 
@@ -1185,7 +1186,7 @@ message Dispatcher {
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
   // This is exactly the same as its downstream fragment id.
-  uint64 dispatcher_id = 4;
+  uint32 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }
@@ -1284,4 +1285,37 @@ message StreamFragmentGraph {
 
   // The backfill order strategy for the fragments.
   BackfillOrder backfill_order = 8;
+}
+
+// Schema change operation for sink
+message SinkSchemaChange {
+  // Original schema before this change (optional, can be empty)
+  // Used for validation and conflict detection
+  // For current stage, this can be left empty
+  repeated plan_common.Field original_schema = 1;
+
+  // Schema change operation (mutually exclusive)
+  oneof op {
+    // Add new columns to the schema
+    AddColumnsOp add_columns = 2;
+
+    // Drop columns from the schema
+    DropColumnsOp drop_columns = 3;
+
+    // Future operations can be added here...
+    // RenameColumnsOp rename_columns = 4;
+    // AlterColumnTypeOp alter_column_type = 5;
+  }
+}
+
+// Add columns operation
+message AddColumnsOp {
+  // Columns to add
+  repeated plan_common.Field fields = 1;
+}
+
+// Drop columns operation
+message DropColumnsOp {
+  // Column names to drop
+  repeated string column_names = 1;
 }

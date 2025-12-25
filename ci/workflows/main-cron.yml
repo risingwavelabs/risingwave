@@ -14,6 +14,7 @@ anchors:
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
         propagate-environment: true
+        upload-container-logs: always
     - docker-compose-standard: &docker-compose-standard
         <<: *docker-compose
         run: ci-standard-env

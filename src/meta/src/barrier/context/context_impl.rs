@@ -29,6 +29,7 @@ use risingwave_pb::stream_service::streaming_control_stream_request::PbInitReque
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::MetaResult;
+use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::command::CommandContext;
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
@@ -39,6 +40,7 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
+use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
 use crate::stream::{SourceChange, SplitState};
 
@@ -89,13 +91,18 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
+        let job_id = job.job_id();
         job.finish(&self.metadata_manager, &self.source_manager)
-            .await
+            .await?;
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::StreamingJobBackfillFinished(job_id));
+        Ok(())
     }
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]
     async fn finish_cdc_table_backfill(&self, job: JobId) -> MetaResult<()> {
-        self.env.cdc_table_backfill_tracker.complete_job(job).await
+        CdcTableBackfillTracker::mark_complete_job(&self.env.meta_store().conn, job).await
     }
 
     #[await_tree::instrument("new_control_stream({})", node.id)]
@@ -298,9 +305,11 @@ impl CommandContext {
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(SourceChange::UpdateSourceProps {
+                        // Only sources are managed in source manager. Convert object IDs to source IDs and let
+                        // source manager ignore unknown/unregistered sources.
                         source_id_map_new_props: obj_id_map_props
                             .iter()
-                            .map(|(source_id, props)| (source_id.as_source_id(), props.clone()))
+                            .map(|(object_id, props)| (object_id.as_source_id(), props.clone()))
                             .collect(),
                     })
                     .await;
@@ -473,8 +482,6 @@ impl CommandContext {
                     .await?
             }
             Command::DropSubscription { .. } => {}
-            Command::MergeSnapshotBackfillStreamingJobs(_) => {}
-            Command::StartFragmentBackfill { .. } => {}
             Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
         }
 

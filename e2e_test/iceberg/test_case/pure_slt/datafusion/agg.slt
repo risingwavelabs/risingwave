@@ -1,0 +1,118 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+CREATE TABLE t (
+    t_int INT,
+    t_float FLOAT,
+    t_jsonb JSONB,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t VALUES
+    (1, 1.0,    '1'),
+    (1, 2.5,    '"a"'),
+    (1, NULL,   '{"x": 10}'),
+    (2, 10.0,   'true'),
+    (2, NULL,   NULL),
+    (3, NULL,   NULL);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?
+SELECT jsonb_agg(t_jsonb ORDER BY t_jsonb)
+FROM t
+WHERE t_int = 1;
+----
+["a", 1, {"x": 10}]
+
+query ??
+SELECT
+    sum(t_float),
+    avg(t_float)
+FROM t
+WHERE t_int = 1;
+----
+3.5 1.75
+
+query ??
+SELECT
+    sum(t_float),
+    avg(t_float)
+FROM t
+WHERE t_int = 2;
+----
+10 10
+
+query ??
+SELECT
+    sum(t_float),
+    avg(t_float)
+FROM t
+WHERE t_int = 3;
+----
+NULL NULL
+
+query ???? rowsort
+SELECT
+    t_int,
+    sum(t_float),
+    avg(t_float),
+    jsonb_agg(t_jsonb ORDER BY t_jsonb)
+FROM t
+GROUP BY t_int;
+----
+1 3.5 1.75 ["a", 1, {"x": 10}]
+2 10 10 [true, null]
+3 NULL NULL [null]
+
+query ??
+SELECT
+    sum(t_float * 2),
+    avg(t_float + 1)
+FROM t
+WHERE t_int = 1;
+----
+7 2.75
+
+query ???
+SELECT
+    sum(t_float),
+    avg(t_float),
+    jsonb_agg(t_jsonb)
+FROM t
+WHERE t_int = 999;
+----
+NULL NULL []
+
+statement ok
+DROP TABLE t;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

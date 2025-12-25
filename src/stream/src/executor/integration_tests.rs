@@ -133,6 +133,7 @@ async fn test_merger_sum_aggr() {
     let (input, rx) = channel_for_test();
     let actor_future = {
         let local_barrier_manager = barrier_test_env.local_barrier_manager.clone();
+        let config = local_barrier_manager.env.global_config().clone();
         let expr_context = expr_context.clone();
         async move {
             let receiver_op = Executor::new(
@@ -150,11 +151,11 @@ async fn test_merger_sum_aggr() {
                 vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
                     inputs,
                     DispatchOutputMapping::Simple(vec![0]),
-                    0,
+                    0.into(),
                 ))],
                 0.into(),
                 0.into(),
-                local_barrier_manager.clone(),
+                config,
                 metrics,
             );
             let actor = Actor::new(

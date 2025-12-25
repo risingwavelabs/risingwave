@@ -714,6 +714,7 @@ impl CatalogController {
                 .map(|(_, fragment)| fragment.actors.len() as u64)
                 .sum::<u64>()
         };
+        let database_num = Database::find().count(&inner.db).await?;
 
         Ok(CatalogStats {
             table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
@@ -726,6 +727,7 @@ impl CatalogController {
             function_num,
             streaming_job_num,
             actor_num,
+            database_num,
         })
     }
 
@@ -821,6 +823,7 @@ pub struct CatalogStats {
     pub function_num: u64,
     pub streaming_job_num: u64,
     pub actor_num: u64,
+    pub database_num: u64,
 }
 
 impl CatalogControllerInner {
@@ -937,10 +940,20 @@ impl CatalogControllerInner {
             .into_iter()
             .collect();
 
+        let sink_ids: HashSet<SinkId> = Sink::find()
+            .select_only()
+            .column(sink::Column::SinkId)
+            .into_tuple::<SinkId>()
+            .all(&self.db)
+            .await?
+            .into_iter()
+            .collect();
+
         let job_ids: HashSet<JobId> = table_objs
             .iter()
             .map(|(t, _)| t.table_id.as_job_id())
             .chain(job_statuses.keys().cloned())
+            .chain(sink_ids.into_iter().map(|s| s.as_job_id()))
             .collect();
 
         let internal_table_objs = Table::find()
@@ -1017,16 +1030,11 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_sinks` return all `CREATED` and `BACKGROUND` sinks.
+    /// `list_sinks` return all sinks.
     async fn list_sinks(&self) -> MetaResult<Vec<PbSink>> {
         let sink_objs = Sink::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(
-                streaming_job::Column::JobStatus
-                    .eq(JobStatus::Created)
-                    .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
-            )
             .all(&self.db)
             .await?;
 

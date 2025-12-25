@@ -76,6 +76,8 @@ impl MonitoredStorageMetrics {
     pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
         // 256B ~ max 64GB
         let size_buckets = exponential_buckets(256.0, 16.0, 8).unwrap();
+        // Dedicated buckets for sync size: 16MB ~ 1TB (17 buckets, x2 growth)
+        let sync_size_buckets = exponential_buckets(16.0 * 1024.0 * 1024.0, 2.0, 17).unwrap();
         // 10ms ~ max 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         // ----- get -----
@@ -155,7 +157,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_iter_item",
             "Total bytes gotten from state store scan(), for calculating read throughput",
-            size_buckets.clone(),
+            size_buckets,
         );
         let iter_item = register_guarded_histogram_vec_with_registry!(
             opts,
@@ -252,7 +254,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_sync_size",
             "Total size of upload to l0 every epoch",
-            size_buckets,
+            sync_size_buckets,
         );
         let sync_size = register_histogram_with_registry!(opts, registry).unwrap();
 

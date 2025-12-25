@@ -65,7 +65,7 @@ pub async fn handle_alter_owner(
         let user_reader = session.env().user_info_reader().read_guard();
         let new_owner = user_reader
             .get_user_by_name(&new_owner_name)
-            .ok_or(CatalogError::NotFound("user", new_owner_name))?;
+            .ok_or(CatalogError::not_found("user", new_owner_name))?;
 
         let check_owned_by_admin = |owner: &UserId| -> Result<()> {
             let user_catalog = user_reader.get_user_by_id(owner).unwrap();

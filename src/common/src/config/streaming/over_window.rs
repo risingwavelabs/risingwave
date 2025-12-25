@@ -17,8 +17,20 @@ use std::str::FromStr;
 use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_pb::stream_plan::PbOverWindowCachePolicy;
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 
-#[derive(Copy, Default, Debug, Clone, PartialEq, Eq, Display, EnumAsInner)]
+#[derive(
+    Copy,
+    Default,
+    Debug,
+    Clone,
+    PartialEq,
+    Eq,
+    Display,
+    EnumAsInner,
+    SerializeDisplay,
+    DeserializeFromStr,
+)]
 #[display(style = "snake_case")]
 pub enum OverWindowCachePolicy {
     /// Cache all entries.

@@ -42,6 +42,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_connection_props;
 mod alter_database_param;
 mod alter_mv;
 mod alter_owner;
@@ -1342,6 +1343,14 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterConnectionOperation::AlterConnectorProps { alter_props } => {
+                alter_connection_props::handle_alter_connection_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
+                )
+                .await
+            }
         },
         Statement::AlterSystem { param, value } => {
             alter_system::handle_alter_system(handler_args, param, value).await
@@ -1456,20 +1465,6 @@ fn check_ban_ddl_for_iceberg_engine_table(
             if table.is_iceberg_engine_table() {
                 bail!(
                     "ALTER TABLE RENAME is not supported for iceberg table: {}.{}",
-                    schema_name,
-                    name
-                );
-            }
-        }
-
-        Statement::AlterTable {
-            name,
-            operation: AlterTableOperation::ChangeOwner { .. },
-        } => {
-            let (table, schema_name) = get_table_catalog_by_table_name(session.as_ref(), name)?;
-            if table.is_iceberg_engine_table() {
-                bail!(
-                    "ALTER TABLE CHANGE OWNER is not supported for iceberg table: {}.{}",
                     schema_name,
                     name
                 );

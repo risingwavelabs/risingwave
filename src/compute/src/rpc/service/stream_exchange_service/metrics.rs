@@ -19,14 +19,14 @@ use prometheus::{Registry, register_int_counter_vec_with_registry};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]
-pub struct ExchangeServiceMetrics {
+pub struct StreamExchangeServiceMetrics {
     pub stream_fragment_exchange_bytes: GenericCounterVec<AtomicU64>,
 }
 
-pub static GLOBAL_EXCHANGE_SERVICE_METRICS: LazyLock<ExchangeServiceMetrics> =
-    LazyLock::new(|| ExchangeServiceMetrics::new(&GLOBAL_METRICS_REGISTRY));
+pub static GLOBAL_STREAM_EXCHANGE_SERVICE_METRICS: LazyLock<StreamExchangeServiceMetrics> =
+    LazyLock::new(|| StreamExchangeServiceMetrics::new(&GLOBAL_METRICS_REGISTRY));
 
-impl ExchangeServiceMetrics {
+impl StreamExchangeServiceMetrics {
     fn new(registry: &Registry) -> Self {
         let stream_fragment_exchange_bytes = register_int_counter_vec_with_registry!(
             "stream_exchange_frag_send_size",

@@ -610,7 +610,7 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
             })?;
             let s3_operator = FileSink::<S3Sink>::new_s3_sink(s3_inner)?;
             let (mut writer, path) =
-                build_opendal_writer_path(s3_inner, 0, &s3_operator, &None).await?;
+                build_opendal_writer_path(s3_inner, 0.into(), &s3_operator, &None).await?;
             let manifest_json = json!({
                 "entries": paths
             });
@@ -916,6 +916,8 @@ fn build_copy_into_sql(
         FROM '{manifest_path}'
         CREDENTIALS '{credentials}'
         FORMAT AS JSON 'auto'
+        DATEFORMAT 'auto'
+        TIMEFORMAT 'auto'
         MANIFEST;
         "#,
         table_name = table_name,

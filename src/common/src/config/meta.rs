@@ -160,6 +160,16 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
+    /// Whether meta should request pausing all data sources on the next bootstrap.
+    /// This allows us to pause the cluster on next bootstrap in an offline way.
+    /// It's important for standalone or single node deployments.
+    /// In those cases, meta node, frontend and compute may all be co-located.
+    /// If the compute node enters an inconsistent state, and continuously crashloops,
+    /// we may not be able to connect to the cluster to run `alter system set pause_on_next_bootstrap = true;`.
+    /// By providing it in the static config, we can have an offline way to trigger the pause on bootstrap.
+    #[serde(default = "default::meta::pause_on_next_bootstrap_offline")]
+    pub pause_on_next_bootstrap_offline: bool,
+
     /// Whether to disable adaptive-scaling feature.
     #[serde(default)]
     pub disable_automatic_parallelism_control: bool,
@@ -523,6 +533,10 @@ pub struct CompactionConfig {
     pub level0_stop_write_threshold_max_size: u64,
     #[serde(default = "default::compaction_config::enable_optimize_l0_interval_selection")]
     pub enable_optimize_l0_interval_selection: bool,
+    #[serde(default = "default::compaction_config::vnode_aligned_level_size_threshold")]
+    pub vnode_aligned_level_size_threshold: Option<u64>,
+    #[serde(default = "default::compaction_config::max_kv_count_for_xor16")]
+    pub max_kv_count_for_xor16: Option<u64>,
 }
 
 pub mod default {
@@ -593,6 +607,10 @@ pub mod default {
 
         pub fn default_parallelism() -> DefaultParallelism {
             DefaultParallelism::Full
+        }
+
+        pub fn pause_on_next_bootstrap_offline() -> bool {
+            false
         }
 
         pub fn node_num_monitor_interval_sec() -> u64 {
@@ -794,6 +812,8 @@ pub mod default {
         const DEFAULT_EMERGENCY_LEVEL0_SUB_LEVEL_PARTITION: u32 = 256;
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SST_COUNT: u32 = 10000; // 10000 * 32M = 320G
         const DEFAULT_LEVEL0_STOP_WRITE_THRESHOLD_MAX_SIZE: u64 = 300 * 1024 * MB; // 300GB
+        const DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD: Option<u64> = None;
+        pub const DEFAULT_MAX_KV_COUNT_FOR_XOR16: u64 = 256 * 1024;
 
         use crate::catalog::hummock::CompactionFilterFlag;
 
@@ -899,6 +919,14 @@ pub mod default {
 
         pub fn enable_optimize_l0_interval_selection() -> bool {
             false
+        }
+
+        pub fn vnode_aligned_level_size_threshold() -> Option<u64> {
+            DEFAULT_VNODE_ALIGNED_LEVEL_SIZE_THRESHOLD
+        }
+
+        pub fn max_kv_count_for_xor16() -> Option<u64> {
+            Some(DEFAULT_MAX_KV_COUNT_FOR_XOR16)
         }
     }
 }

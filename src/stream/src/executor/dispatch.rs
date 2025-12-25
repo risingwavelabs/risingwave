@@ -23,6 +23,7 @@ use futures::{FutureExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::RowExt;
@@ -43,7 +44,7 @@ use super::{
 };
 use crate::executor::prelude::*;
 use crate::executor::{StopMutation, StreamConsumer};
-use crate::task::{DispatcherId, LocalBarrierManager, NewOutputRequest};
+use crate::task::{DispatcherId, NewOutputRequest};
 
 mod output_mapping;
 pub use output_mapping::DispatchOutputMapping;
@@ -108,7 +109,7 @@ impl DispatchExecutorMetrics {
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: ActorId,
-    local_barrier_manager: LocalBarrierManager,
+    actor_config: Arc<StreamingConfig>,
     metrics: DispatchExecutorMetrics,
     new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     pending_new_output_requests: HashMap<ActorId, NewOutputRequest>,
@@ -184,13 +185,7 @@ impl DispatchExecutorInner {
             }};
         }
 
-        // TODO(config): use config from actor context, instead of the global one
-        let limit = self
-            .local_barrier_manager
-            .env
-            .global_config()
-            .developer
-            .exchange_concurrent_dispatchers;
+        let limit = self.actor_config.developer.exchange_concurrent_dispatchers;
         // Only barrier can be batched for now.
         match msg {
             MessageBatch::BarrierBatch(barrier_batch) => {
@@ -399,19 +394,16 @@ impl DispatchExecutor {
         input: Executor,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         dispatchers: Vec<stream_plan::Dispatcher>,
-        actor_id: ActorId,
-        fragment_id: FragmentId,
-        local_barrier_manager: LocalBarrierManager,
-        metrics: Arc<StreamingMetrics>,
+        actor_context: &ActorContextRef,
     ) -> StreamResult<Self> {
         let mut executor = Self::new_inner(
             input,
             new_output_request_rx,
             vec![],
-            actor_id,
-            fragment_id,
-            local_barrier_manager,
-            metrics,
+            actor_context.id,
+            actor_context.fragment_id,
+            actor_context.config.clone(),
+            actor_context.streaming_metrics.clone(),
         );
         let inner = &mut executor.inner;
         for dispatcher in dispatchers {
@@ -431,7 +423,7 @@ impl DispatchExecutor {
         dispatchers: Vec<DispatcherImpl>,
         actor_id: ActorId,
         fragment_id: FragmentId,
-        local_barrier_manager: LocalBarrierManager,
+        actor_config: Arc<StreamingConfig>,
         metrics: Arc<StreamingMetrics>,
     ) -> (
         Self,
@@ -446,7 +438,7 @@ impl DispatchExecutor {
                 dispatchers,
                 actor_id,
                 fragment_id,
-                local_barrier_manager,
+                actor_config,
                 metrics,
             ),
             tx,
@@ -459,19 +451,14 @@ impl DispatchExecutor {
         dispatchers: Vec<DispatcherImpl>,
         actor_id: ActorId,
         fragment_id: FragmentId,
-        local_barrier_manager: LocalBarrierManager,
+        actor_config: Arc<StreamingConfig>,
         metrics: Arc<StreamingMetrics>,
     ) -> Self {
-        let chunk_size = local_barrier_manager
-            .env
-            .global_config()
-            .developer
-            .chunk_size;
         if crate::consistency::insane() {
             // make some trouble before dispatching to avoid generating invalid dist key.
             let mut info = input.info().clone();
             info.identity = format!("{} (embedded trouble)", info.identity);
-            let troublemaker = TroublemakerExecutor::new(input, chunk_size);
+            let troublemaker = TroublemakerExecutor::new(input, actor_config.developer.chunk_size);
             input = (info, troublemaker).into();
         }
 
@@ -490,12 +477,13 @@ impl DispatchExecutor {
             .into_iter()
             .map(|dispatcher| metrics.monitor_dispatcher(dispatcher))
             .collect();
+
         Self {
             input,
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
-                local_barrier_manager,
+                actor_config,
                 metrics,
                 new_output_request_rx,
                 pending_new_output_requests: Default::default(),
@@ -508,14 +496,7 @@ impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-        // TODO(config): use config from actor context, instead of the global one
-        let max_barrier_count_per_batch = self
-            .inner
-            .local_barrier_manager
-            .env
-            .global_config()
-            .developer
-            .max_barrier_batch_size;
+        let max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
         #[try_stream]
         async move {
             let mut input = self.input.execute().peekable();
@@ -1282,7 +1263,7 @@ mod tests {
             key_indices.to_vec(),
             DispatchOutputMapping::Simple(vec![0, 1, 2]),
             hash_mapping,
-            0,
+            0.into(),
         );
 
         let chunk = StreamChunk::from_pretty(
@@ -1333,16 +1314,14 @@ mod tests {
         let _schema = Schema { fields: vec![] };
         let (tx, rx) = channel_for_test();
         let actor_id = 233.into();
-        let fragment_id = 666.into();
         let barrier_test_env = LocalBarrierTestEnv::for_test().await;
-        let metrics = Arc::new(StreamingMetrics::unused());
 
         let (untouched, old, new) = (234.into(), 235.into(), 238.into()); // broadcast downstream actors
         let (old_simple, new_simple) = (114.into(), 514.into()); // simple downstream actors
 
         // actor_id -> untouched, old, new, old_simple, new_simple
 
-        let broadcast_dispatcher_id = 666;
+        let broadcast_dispatcher_id = 666.into();
         let broadcast_dispatcher = PbDispatcher {
             r#type: DispatcherType::Broadcast as _,
             dispatcher_id: broadcast_dispatcher_id,
@@ -1351,7 +1330,7 @@ mod tests {
             ..Default::default()
         };
 
-        let simple_dispatcher_id = 888;
+        let simple_dispatcher_id = 888.into();
         let simple_dispatcher = PbDispatcher {
             r#type: DispatcherType::Simple as _,
             dispatcher_id: simple_dispatcher_id,
@@ -1406,10 +1385,7 @@ mod tests {
                 input,
                 new_output_request_rx,
                 vec![broadcast_dispatcher, simple_dispatcher],
-                actor_id,
-                fragment_id,
-                barrier_test_env.local_barrier_manager.clone(),
-                metrics,
+                &ActorContext::for_test(actor_id),
             )
             .await
             .unwrap(),
@@ -1536,7 +1512,7 @@ mod tests {
             key_indices.to_vec(),
             DispatchOutputMapping::Simple((0..dimension).collect()),
             hash_mapping.clone(),
-            0,
+            0.into(),
         );
 
         let mut ops = Vec::new();

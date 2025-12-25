@@ -95,6 +95,7 @@ impl DdlServiceImpl {
             stream_manager,
             source_manager,
             barrier_manager,
+            sink_manager.clone(),
         )
         .await;
         Self {

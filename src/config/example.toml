@@ -29,6 +29,7 @@ hummock_time_travel_snapshot_interval = 100
 min_delta_log_num_for_hummock_version_checkpoint = 10
 max_heartbeat_interval_secs = 60
 disable_recovery = false
+pause_on_next_bootstrap_offline = false
 disable_automatic_parallelism_control = false
 parallelism_control_batch_size = 10
 parallelism_control_trigger_period_sec = 10
@@ -98,6 +99,7 @@ emergency_level0_sub_level_partition = 256
 level0_stop_write_threshold_max_sst_count = 10000
 level0_stop_write_threshold_max_size = 322122547200
 enable_optimize_l0_interval_selection = false
+max_kv_count_for_xor16 = 262144
 
 [meta.developer]
 cached_traces_num = 256
@@ -202,7 +204,7 @@ memory_controller_sequence_tls_step = 128
 memory_controller_sequence_tls_lag = 32
 enable_arrangement_backfill = true
 high_join_amplification_threshold = 2048
-enable_actor_tokio_metrics = false
+enable_actor_tokio_metrics = true
 exchange_connection_pool_size = 1
 enable_auto_schema_change = true
 enable_shared_source = true
@@ -220,6 +222,9 @@ mem_preload_state_table_ids_blacklist = []
 aggressive_noop_update_elimination = false
 refresh_scheduler_interval_sec = 60
 join_encoding_type = "memory_optimized"
+sync_log_store_pause_duration_ms = 64
+sync_log_store_buffer_size = 2048
+over_window_cache_policy = "full"
 
 [streaming.developer.compute_client_config]
 connect_timeout_secs = 5
@@ -239,6 +244,7 @@ compactor_max_task_multiplier = 3.0
 compactor_memory_available_proportion = 0.8
 sstable_id_remote_fetch_number = 10
 min_sstable_size_mb = 32
+sst_skip_bloom_filter_in_serde = false
 min_sst_size_for_streaming_upload = 33554432
 max_concurrent_compaction_task_number = 16
 max_preload_wait_time_mill = 0

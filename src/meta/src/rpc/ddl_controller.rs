@@ -41,7 +41,6 @@ use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
-use risingwave_meta_model::exactly_once_iceberg_sink::{Column, Entity};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
@@ -64,7 +63,6 @@ use risingwave_pb::stream_plan::{
     StreamFragmentGraph as StreamFragmentGraphProto,
 };
 use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
-use sea_orm::{ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter};
 use strum::Display;
 use thiserror_ext::AsReport;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore};
@@ -77,6 +75,7 @@ use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter, bail_unavailable};
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
     NotificationVersion, StreamingJob, StreamingJobType,
@@ -87,7 +86,7 @@ use crate::model::{
     TableParallelism,
 };
 use crate::stream::cdc::{
-    is_parallelized_backfill_enabled, try_init_parallel_cdc_table_snapshot_splits,
+    parallel_cdc_table_backfill_fragment, try_init_parallel_cdc_table_snapshot_splits,
 };
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
@@ -267,6 +266,7 @@ pub struct DdlController {
     pub(crate) stream_manager: GlobalStreamManagerRef,
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
+    sink_manager: SinkCoordinatorManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -344,6 +344,7 @@ impl DdlController {
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
+        sink_manager: SinkCoordinatorManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -352,6 +353,7 @@ impl DdlController {
             stream_manager,
             source_manager,
             barrier_manager,
+            sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -865,7 +867,6 @@ impl DdlController {
         node_body: &Option<NodeBody>,
         table_id: TableId,
     ) -> MetaResult<bool> {
-        let meta_store = self.env.meta_store_ref();
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
         {
@@ -881,20 +882,6 @@ impl DdlController {
             let _enumerator = props
                 .create_split_enumerator(SourceEnumeratorContext::dummy().into())
                 .await?;
-
-            if is_parallelized_backfill_enabled(stream_cdc_scan) {
-                // Create parallel splits for a CDC table. The resulted split assignments are persisted and immutable.
-                try_init_parallel_cdc_table_snapshot_splits(
-                    table_id,
-                    cdc_table_desc,
-                    meta_store,
-                    &stream_cdc_scan.options,
-                    self.env.opts.cdc_table_split_init_insert_batch_size,
-                    self.env.opts.cdc_table_split_init_sleep_interval_splits,
-                    self.env.opts.cdc_table_split_init_sleep_duration_millis,
-                )
-                .await?;
-            }
 
             tracing::debug!(?table_id, "validate cdc table success");
             Ok(true)
@@ -1218,6 +1205,11 @@ impl DdlController {
             .await;
 
         // clean up iceberg table sinks
+        let iceberg_sink_ids: Vec<SinkId> = removed_iceberg_table_sinks
+            .iter()
+            .map(|sink| sink.id)
+            .collect();
+
         for sink in removed_iceberg_table_sinks {
             let sink_param = SinkParam::try_from_sink_catalog(sink.into())
                 .expect("Iceberg sink should be valid");
@@ -1241,6 +1233,13 @@ impl DdlController {
                         );
                     });
             }
+        }
+
+        // stop sink coordinators for iceberg table sinks
+        if !iceberg_sink_ids.is_empty() {
+            self.sink_manager
+                .stop_sink_coordinator(iceberg_sink_ids)
+                .await;
         }
 
         // remove secrets.
@@ -1570,17 +1569,7 @@ impl DdlController {
                     .await?;
                 IGNORED_NOTIFICATION_VERSION
             }
-            JobStatus::Created => {
-                let version = self.drop_object(object_type, object_id, drop_mode).await?;
-                #[cfg(not(madsim))]
-                if let StreamingJobId::Sink(sink_id) = job_id {
-                    // delete system table for exactly once iceberg sink
-                    // todo(wcy-fdu): optimize the logic to be Iceberg unique.
-                    let db = self.env.meta_store_ref().conn.clone();
-                    clean_all_rows_by_sink_id(&db, sink_id).await?;
-                }
-                version
-            }
+            JobStatus::Created => self.drop_object(object_type, object_id, drop_mode).await?,
         };
 
         Ok(version)
@@ -1857,6 +1846,27 @@ impl DdlController {
             None
         };
 
+        let mut cdc_table_snapshot_splits = None;
+        if let StreamingJob::Table(None, table, TableJobType::SharedCdcSource) = &stream_job
+            && let Some((_, stream_cdc_scan)) =
+                parallel_cdc_table_backfill_fragment(stream_job_fragments.fragments.values())
+        {
+            {
+                // Create parallel splits for a CDC table. The resulted split assignments are persisted and immutable.
+                let splits = try_init_parallel_cdc_table_snapshot_splits(
+                    table.id,
+                    stream_cdc_scan.cdc_table_desc.as_ref().unwrap(),
+                    self.env.meta_store_ref(),
+                    stream_cdc_scan.options.as_ref().unwrap(),
+                    self.env.opts.cdc_table_split_init_insert_batch_size,
+                    self.env.opts.cdc_table_split_init_sleep_interval_splits,
+                    self.env.opts.cdc_table_split_init_sleep_duration_millis,
+                )
+                .await?;
+                cdc_table_snapshot_splits = Some(splits);
+            }
+        }
+
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
             new_no_shuffle,
@@ -1872,6 +1882,7 @@ impl DdlController {
             cross_db_snapshot_backfill_info,
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
+            cdc_table_snapshot_splits,
         };
 
         Ok((
@@ -1944,11 +1955,11 @@ impl DdlController {
             let old_state_graph =
                 state_match::Graph::from_existing(&old_fragments, &old_fragments_upstreams);
             let new_state_graph = state_match::Graph::from_building(&fragment_graph);
-            let mapping =
-                state_match::match_graph_internal_tables(&new_state_graph, &old_state_graph)
-                    .context("incompatible altering on the streaming job states")?;
+            let result = state_match::match_graph(&new_state_graph, &old_state_graph)
+                .context("incompatible altering on the streaming job states")?;
 
-            fragment_graph.fit_internal_table_ids_with_mapping(mapping);
+            fragment_graph.fit_internal_table_ids_with_mapping(result.table_matches);
+            fragment_graph.fit_snapshot_backfill_epochs(result.snapshot_backfill_epochs);
         } else {
             // If it's ALTER TABLE or SOURCE, use a trivial table id matching algorithm to keep the original behavior.
             // TODO(alter-mv): this is actually a special case of ALTER MV, can we merge the two branches?
@@ -1976,7 +1987,7 @@ impl DdlController {
                 .iter()
                 .map(|sink| sink.original_fragment.fragment_id)
                 .collect();
-            for (_, downstream_fragment, _) in &mut downstream_fragments {
+            for (_, downstream_fragment, nodes) in &mut downstream_fragments {
                 if let Some(sink) = auto_refresh_schema_sinks.iter().find(|sink| {
                     sink.original_fragment.fragment_id == downstream_fragment.fragment_id
                 }) {
@@ -1990,6 +2001,7 @@ impl DdlController {
                     }
 
                     *downstream_fragment = (&sink.new_fragment_info(), stream_job.id()).into();
+                    *nodes = sink.new_fragment.nodes.clone();
                 }
             }
             assert!(remaining_fragment.is_empty());
@@ -2267,33 +2279,6 @@ fn report_create_object(
         Some(obj_type),
         attr_info,
     );
-}
-
-async fn clean_all_rows_by_sink_id(db: &DatabaseConnection, sink_id: SinkId) -> MetaResult<()> {
-    match Entity::delete_many()
-        .filter(Column::SinkId.eq(sink_id))
-        .exec(db)
-        .await
-    {
-        Ok(result) => {
-            let deleted_count = result.rows_affected;
-
-            tracing::info!(
-                "Deleted {} items for sink_id = {} in iceberg exactly once system table.",
-                deleted_count,
-                sink_id
-            );
-            Ok(())
-        }
-        Err(e) => {
-            tracing::error!(
-                "Error deleting records for sink_id = {} from iceberg exactly once system table: {:?}",
-                sink_id,
-                e.as_report()
-            );
-            Err(e.into())
-        }
-    }
 }
 
 pub fn build_upstream_sink_info(

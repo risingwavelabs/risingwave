@@ -82,16 +82,14 @@ mod tests {
     use risingwave_common::config::RpcClientConfig;
     use risingwave_pb::batch_plan::{TaskId, TaskOutputId};
     use risingwave_pb::data::DataChunk;
-    use risingwave_pb::task_service::exchange_service_server::{
-        ExchangeService, ExchangeServiceServer,
+    use risingwave_pb::task_service::batch_exchange_service_server::{
+        BatchExchangeService, BatchExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{
-        GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
-    };
+    use risingwave_pb::task_service::{GetDataRequest, GetDataResponse};
     use risingwave_rpc_client::ComputeClient;
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
-    use tonic::{Request, Response, Status, Streaming};
+    use tonic::{Request, Response, Status};
 
     use crate::exchange_source::ExchangeSource;
     use crate::execution::grpc_exchange::GrpcExchangeSource;
@@ -101,9 +99,8 @@ mod tests {
     }
 
     #[async_trait::async_trait]
-    impl ExchangeService for FakeExchangeService {
+    impl BatchExchangeService for FakeExchangeService {
         type GetDataStream = ReceiverStream<Result<GetDataResponse, Status>>;
-        type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
 
         async fn get_data(
             &self,
@@ -120,13 +117,6 @@ mod tests {
             }
             Ok(Response::new(ReceiverStream::new(rx)))
         }
-
-        async fn get_stream(
-            &self,
-            _request: Request<Streaming<GetStreamRequest>>,
-        ) -> Result<Response<Self::GetStreamStream>, Status> {
-            unimplemented!()
-        }
     }
 
     #[tokio::test]
@@ -137,7 +127,7 @@ mod tests {
 
         // Start a server.
         let (shutdown_send, shutdown_recv) = tokio::sync::oneshot::channel();
-        let exchange_svc = ExchangeServiceServer::new(FakeExchangeService {
+        let exchange_svc = BatchExchangeServiceServer::new(FakeExchangeService {
             rpc_called: rpc_called.clone(),
         });
         let cp_server_run = server_run.clone();

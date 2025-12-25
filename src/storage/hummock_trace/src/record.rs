@@ -214,8 +214,8 @@ impl Encode for TracedBytes {
     }
 }
 
-impl Decode for TracedBytes {
-    fn decode<D: bincode::de::Decoder>(
+impl<C> Decode<C> for TracedBytes {
+    fn decode<D: bincode::de::Decoder<Context = C>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
         let buf: Vec<u8> = Decode::decode(decoder)?;
@@ -224,8 +224,8 @@ impl Decode for TracedBytes {
     }
 }
 
-impl<'de> bincode::BorrowDecode<'de> for TracedBytes {
-    fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
+impl<'de, C> bincode::BorrowDecode<'de, C> for TracedBytes {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de, Context = C>>(
         decoder: &mut D,
     ) -> core::result::Result<Self, bincode::error::DecodeError> {
         let buf: Vec<u8> = Decode::decode(decoder)?;
@@ -305,8 +305,8 @@ impl Encode for TracedSubResp {
     }
 }
 
-impl Decode for TracedSubResp {
-    fn decode<D: bincode::de::Decoder>(
+impl<C> Decode<C> for TracedSubResp {
+    fn decode<D: bincode::de::Decoder<Context = C>>(
         decoder: &mut D,
     ) -> Result<Self, bincode::error::DecodeError> {
         let buf: Vec<u8> = Decode::decode(decoder)?;
@@ -317,8 +317,8 @@ impl Decode for TracedSubResp {
     }
 }
 
-impl<'de> bincode::BorrowDecode<'de> for TracedSubResp {
-    fn borrow_decode<D: bincode::de::BorrowDecoder<'de>>(
+impl<'de, C> bincode::BorrowDecode<'de, C> for TracedSubResp {
+    fn borrow_decode<D: bincode::de::BorrowDecoder<'de, Context = C>>(
         decoder: &mut D,
     ) -> core::result::Result<Self, bincode::error::DecodeError> {
         let buf: Vec<u8> = Decode::decode(decoder)?;

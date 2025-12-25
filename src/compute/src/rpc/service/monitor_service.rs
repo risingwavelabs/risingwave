@@ -301,7 +301,7 @@ impl MonitorService for MonitorServiceImpl {
         let metrics = global_streaming_metrics(MetricLevel::Info);
         let inner = request.into_inner();
         let executor_ids = &inner.executor_ids;
-        let fragment_ids = HashSet::from_iter(inner.dispatcher_fragment_ids.into_iter());
+        let fragment_ids = HashSet::from_iter(inner.dispatcher_fragment_ids);
         let stream_node_output_row_count = metrics
             .mem_stream_node_output_row_count
             .collect(executor_ids);
