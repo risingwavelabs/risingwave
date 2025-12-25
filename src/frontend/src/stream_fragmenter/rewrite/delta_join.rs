@@ -33,7 +33,7 @@ fn build_no_shuffle_exchange_for_delta_join(
     upstream: &StreamNode,
 ) -> StreamNode {
     StreamNode {
-        operator_id: state.gen_operator_id() as u64,
+        operator_id: state.gen_operator_id(),
         identity: "NO SHUFFLE Exchange (Lookup and Merge)".into(),
         fields: upstream.fields.clone(),
         stream_key: upstream.stream_key.clone(),
@@ -53,7 +53,7 @@ fn build_consistent_hash_shuffle_exchange_for_delta_join(
     dist_key_indices: Vec<u32>,
 ) -> StreamNode {
     StreamNode {
-        operator_id: state.gen_operator_id() as u64,
+        operator_id: state.gen_operator_id(),
         identity: "HASH Exchange (Lookup and Merge)".into(),
         fields: upstream.fields.clone(),
         stream_key: upstream.stream_key.clone(),
@@ -95,7 +95,7 @@ fn build_lookup_for_delta_join(
     lookup_node: LookupNode,
 ) -> StreamNode {
     StreamNode {
-        operator_id: state.gen_operator_id() as u64,
+        operator_id: state.gen_operator_id(),
         identity: "Lookup".into(),
         fields: output_fields,
         stream_key: output_stream_key,
@@ -228,7 +228,7 @@ fn build_delta_join_inner(
         lookup_0_frag.fragment_id,
         StreamFragmentEdge {
             dispatch_strategy: dispatch_no_shuffle(i0_output_indices.clone()),
-            link_id: exchange_a0l0.operator_id,
+            link_id: exchange_a0l0.operator_id.as_raw_id(),
         },
     );
 
@@ -246,7 +246,7 @@ fn build_delta_join_inner(
                     .collect_vec(),
                 i0_output_indices,
             ),
-            link_id: exchange_a0l1.operator_id,
+            link_id: exchange_a0l1.operator_id.as_raw_id(),
         },
     );
 
@@ -264,7 +264,7 @@ fn build_delta_join_inner(
                     .collect_vec(),
                 i1_output_indices.clone(),
             ),
-            link_id: exchange_a1l0.operator_id,
+            link_id: exchange_a1l0.operator_id.as_raw_id(),
         },
     );
 
@@ -275,7 +275,7 @@ fn build_delta_join_inner(
         lookup_1_frag.fragment_id,
         StreamFragmentEdge {
             dispatch_strategy: dispatch_no_shuffle(i1_output_indices),
-            link_id: exchange_a1l1.operator_id,
+            link_id: exchange_a1l1.operator_id.as_raw_id(),
         },
     );
 
@@ -287,7 +287,7 @@ fn build_delta_join_inner(
     // LookupUnion's inputs might have different distribution and we need to unify them by using
     // hash shuffle.
     let union = StreamNode {
-        operator_id: state.gen_operator_id() as u64,
+        operator_id: state.gen_operator_id(),
         identity: "Union".into(),
         fields: node.fields.clone(),
         stream_key: node.stream_key.clone(),
@@ -306,7 +306,7 @@ fn build_delta_join_inner(
                 node.stream_key.clone(),
                 (0..node.fields.len() as u32).collect(),
             ),
-            link_id: exchange_l0m.operator_id,
+            link_id: exchange_l0m.operator_id.as_raw_id(),
         },
     );
 
@@ -318,7 +318,7 @@ fn build_delta_join_inner(
                 node.stream_key.clone(),
                 (0..node.fields.len() as u32).collect(),
             ),
-            link_id: exchange_l1m.operator_id,
+            link_id: exchange_l1m.operator_id.as_raw_id(),
         },
     );
 

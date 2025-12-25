@@ -161,7 +161,6 @@ services:
       - pulsar-server
       - mongodb
       - mongodb-setup
-      - mongo_data_generator
       - nats-server
       - vault-server
       - message_queue_sasl_1
@@ -183,7 +182,6 @@ services:
       - pulsar-server
       - mongodb
       - mongodb-setup
-      - mongo_data_generator
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
@@ -440,16 +438,6 @@ services:
     volumes:
       - ./mongodb/config-replica.js:/config-replica.js
 
-  mongo_data_generator:
-    build:
-      context: .
-      dockerfile: ./mongodb/Dockerfile.generator
-    depends_on:
-      - mongodb
-    environment:
-      MONGO_HOST: mongodb
-      MONGO_PORT: 27017
-      MONGO_DB_NAME: random_data
   mqtt-server:
     image: eclipse-mosquitto
     command:

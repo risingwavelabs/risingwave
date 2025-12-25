@@ -19,6 +19,7 @@ pub use progress::CreateMviewProgressReporter;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_pb::id::FragmentId;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -39,6 +40,7 @@ pub(super) enum LocalBarrierEvent {
     },
     ReportCreateProgress {
         epoch: EpochPair,
+        fragment_id: FragmentId,
         actor: ActorId,
         state: BackfillState,
     },

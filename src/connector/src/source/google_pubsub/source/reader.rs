@@ -14,9 +14,9 @@
 
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
+use google_cloud_gax::grpc::Code;
 use google_cloud_pubsub::subscription::Subscription;
 use risingwave_common::{bail, ensure};
-use tonic::Code;
 
 use super::TaggedReceivedMessage;
 use crate::error::{ConnectorError, ConnectorResult as Result};

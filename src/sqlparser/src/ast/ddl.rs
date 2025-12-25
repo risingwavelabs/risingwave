@@ -96,6 +96,14 @@ pub enum AlterTableOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET CONFIG (key = value, ...)`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG (key, ...)`
+    ResetConfig {
+        keys: Vec<ObjectName>,
+    },
     RefreshSchema,
     /// `SET SOURCE_RATE_LIMIT TO <rate_limit>`
     SetSourceRateLimit {
@@ -131,6 +139,14 @@ pub enum AlterIndexOperation {
     SetParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
+    },
+    /// `SET CONFIG (key = value, ...)`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG (key, ...)`
+    ResetConfig {
+        keys: Vec<ObjectName>,
     },
 }
 
@@ -171,6 +187,14 @@ pub enum AlterViewOperation {
     AsQuery {
         query: Box<Query>,
     },
+    /// `SET CONFIG ( streaming.some_config_key = <some_config_value>, .. )`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG ( streaming.some_config_key, .. )`
+    ResetConfig {
+        keys: Vec<ObjectName>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -188,6 +212,14 @@ pub enum AlterSinkOperation {
     SetParallelism {
         parallelism: SetVariableValue,
         deferred: bool,
+    },
+    /// `SET CONFIG (key = value, ...)`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG (key, ...)`
+    ResetConfig {
+        keys: Vec<ObjectName>,
     },
     /// `SWAP WITH <sink_name>`
     SwapRenameSink {
@@ -241,6 +273,14 @@ pub enum AlterSourceOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET CONFIG (key = value, ...)`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG (key, ...)`
+    ResetConfig {
+        keys: Vec<ObjectName>,
+    },
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -255,6 +295,7 @@ pub enum AlterFunctionOperation {
 pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
+    AlterConnectorProps { alter_props: Vec<SqlOption> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -366,6 +407,12 @@ impl fmt::Display for AlterTableOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterTableOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterTableOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
+            }
             AlterTableOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
@@ -411,6 +458,12 @@ impl fmt::Display for AlterIndexOperation {
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
+            }
+            AlterIndexOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterIndexOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
             }
         }
     }
@@ -463,6 +516,12 @@ impl fmt::Display for AlterViewOperation {
             AlterViewOperation::AsQuery { query } => {
                 write!(f, "AS {}", query)
             }
+            AlterViewOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterViewOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
+            }
         }
     }
 }
@@ -489,6 +548,12 @@ impl fmt::Display for AlterSinkOperation {
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
+            }
+            AlterSinkOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterSinkOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
             }
             AlterSinkOperation::SwapRenameSink { target_sink } => {
                 write!(f, "SWAP WITH {}", target_sink)
@@ -571,6 +636,12 @@ impl fmt::Display for AlterSourceOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterSourceOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterSourceOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
+            }
             AlterSourceOperation::AlterConnectorProps { alter_props } => {
                 write!(
                     f,
@@ -600,6 +671,13 @@ impl fmt::Display for AlterConnectionOperation {
             }
             AlterConnectionOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {new_owner_name}")
+            }
+            AlterConnectionOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
             }
         }
     }

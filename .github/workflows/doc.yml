@@ -13,7 +13,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: risingwave-large # this runner comes with more disk space, necessary for workflows that build RW
     steps:
       - uses: actions/checkout@v4
       - name: Setup Rust toolchain
@@ -22,6 +22,10 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y make build-essential cmake protobuf-compiler curl openssl libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config postgresql-client tmux lld libblas-dev liblapack-dev libomp-dev
       - name: Run sccache-cache
         uses: mozilla-actions/sccache-action@v0.0.9
+      - name: Install tools for building docs
+        uses: taiki-e/install-action@v2
+        with:
+          tool: mdbook@0.5,mdbook-toc@0.15,mdbook-linkcheck2@0.11
       - name: build rustdocs
         run: |
           cargo doc --workspace --no-deps --document-private-items
@@ -29,12 +33,6 @@ jobs:
 
           mkdir -p artifact/rustdoc
           cp -R target/doc/* artifact/rustdoc
-      - name: Show available storage
-        run: df -h
-      - name: Install tools for building docs
-        uses: taiki-e/install-action@v2
-        with:
-          tool: mdbook,mdbook-toc,mdbook-linkcheck
       - name: build developer doc
         run: |
           cd docs/dev
@@ -45,6 +43,7 @@ jobs:
         with:
           path: artifact
       - name: Show available storage
+        if: always()
         run: df -h
   deploy:
     needs: build

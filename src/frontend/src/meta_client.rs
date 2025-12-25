@@ -37,6 +37,7 @@ use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
+use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
@@ -148,6 +149,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>>;
 
+    async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>>;
+
     async fn get_meta_store_endpoint(&self) -> Result<String>;
 
     async fn alter_sink_props(
@@ -174,6 +177,13 @@ pub trait FrontendMetaClient: Send + Sync {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
+    ) -> Result<()>;
+
+    async fn alter_connection_connector_props(
+        &self,
+        connection_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> Result<()>;
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
@@ -460,6 +470,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
             .await
     }
 
+    async fn alter_connection_connector_props(
+        &self,
+        connection_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> Result<()> {
+        self.0
+            .alter_connection_connector_props(connection_id, changed_props, changed_secret_refs)
+            .await
+    }
+
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>> {
         self.0.list_hosted_iceberg_tables().await
     }
@@ -508,5 +529,9 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_unmigrated_tables(&self) -> Result<HashMap<TableId, String>> {
         self.0.list_unmigrated_tables().await
+    }
+
+    async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>> {
+        self.0.list_refresh_table_states().await
     }
 }

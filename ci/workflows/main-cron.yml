@@ -14,6 +14,7 @@ anchors:
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
         propagate-environment: true
+        upload-container-logs: always
     - docker-compose-standard: &docker-compose-standard
         <<: *docker-compose
         run: ci-standard-env
@@ -180,7 +181,7 @@ steps:
             <<: *docker-compose
             run: source-test-env
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 25
+      timeout_in_minutes: 30
       retry: *auto-retry
 
     - label: "end-to-end sink test ({{matrix.backend}} backend)"
@@ -254,7 +255,7 @@ steps:
           <<: *docker-compose
           environment:
           - CODECOV_TOKEN
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "unit test (madsim)"
@@ -958,8 +959,8 @@ steps:
     matrix:
       setup:
         java_version:
-          - "11"
           - "17"
+          - "21"
     timeout_in_minutes: 10
     retry: *auto-retry
 

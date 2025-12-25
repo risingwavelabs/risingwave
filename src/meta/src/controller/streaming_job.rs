@@ -18,27 +18,30 @@ use std::num::NonZeroUsize;
 use anyhow::anyhow;
 use indexmap::IndexMap;
 use itertools::Itertools;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
+use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
 use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
 };
 use risingwave_common::{bail, current_cluster_version};
 use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_fly_fields;
+use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::source::{ConnectorProperties, pb_connection_type_to_connection_type};
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
+use risingwave_meta_model::refresh_job::RefreshState;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
-use risingwave_pb::catalog::{PbCreateType, PbTable};
+use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -47,6 +50,9 @@ use risingwave_pb::meta::subscribe_response::{
 };
 use risingwave_pb::meta::{PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
+use risingwave_pb::plan_common::source_refresh_mode::{
+    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
+};
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -83,6 +89,18 @@ use crate::model::{
 use crate::stream::SplitAssignment;
 use crate::{MetaError, MetaResult};
 
+/// A planned fragment update for dependent sources when a connection's properties change.
+///
+/// We keep it as a named struct (instead of a tuple) for readability and to avoid clippy
+/// `type_complexity` warnings.
+#[derive(Debug)]
+struct DependentSourceFragmentUpdate {
+    job_ids: Vec<JobId>,
+    with_properties: BTreeMap<String, String>,
+    secret_refs: BTreeMap<String, PbSecretRef>,
+    is_shared_source: bool,
+}
+
 impl CatalogController {
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
@@ -91,7 +109,7 @@ impl CatalogController {
         database_id: Option<DatabaseId>,
         schema_id: Option<SchemaId>,
         create_type: PbCreateType,
-        timezone: Option<String>,
+        ctx: StreamContext,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
         specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
@@ -102,7 +120,8 @@ impl CatalogController {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Initial),
             create_type: Set(create_type.into()),
-            timezone: Set(timezone),
+            timezone: Set(ctx.timezone),
+            config_override: Set(Some(ctx.config_override.to_string())),
             parallelism: Set(streaming_parallelism),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
@@ -189,7 +208,7 @@ impl CatalogController {
                     Some(table.database_id),
                     Some(table.schema_id),
                     create_type,
-                    ctx.timezone.clone(),
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
@@ -218,7 +237,7 @@ impl CatalogController {
                     Some(sink.database_id),
                     Some(sink.schema_id),
                     create_type,
-                    ctx.timezone.clone(),
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
@@ -236,7 +255,7 @@ impl CatalogController {
                     Some(table.database_id),
                     Some(table.schema_id),
                     create_type,
-                    ctx.timezone.clone(),
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
@@ -260,6 +279,31 @@ impl CatalogController {
                 }
                 let table_model: table::ActiveModel = table.clone().into();
                 Table::insert(table_model).exec(&txn).await?;
+
+                if table.refreshable {
+                    let trigger_interval_secs = src
+                        .as_ref()
+                        .and_then(|source_catalog| source_catalog.refresh_mode)
+                        .and_then(
+                            |source_refresh_mode| match source_refresh_mode.refresh_mode {
+                                Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
+                                    refresh_interval_sec,
+                                })) => refresh_interval_sec,
+                                Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})) => None,
+                                None => None,
+                            },
+                        );
+
+                    RefreshJob::insert(refresh_job::ActiveModel {
+                        table_id: Set(table.id),
+                        last_trigger_time: Set(None),
+                        trigger_interval_secs: Set(trigger_interval_secs),
+                        current_status: Set(RefreshState::Idle),
+                        last_success_time: Set(None),
+                    })
+                    .exec(&txn)
+                    .await?;
+                }
             }
             StreamingJob::Index(index, table) => {
                 ensure_object_id(ObjectType::Table, index.primary_table_id, &txn).await?;
@@ -270,7 +314,7 @@ impl CatalogController {
                     Some(index.database_id),
                     Some(index.schema_id),
                     create_type,
-                    ctx.timezone.clone(),
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
@@ -302,7 +346,7 @@ impl CatalogController {
                     Some(src.database_id),
                     Some(src.schema_id),
                     create_type,
-                    ctx.timezone.clone(),
+                    ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
@@ -622,6 +666,10 @@ impl CatalogController {
             }
         }
 
+        // Record original job info before any potential job id rewrite (e.g. iceberg sink).
+        let original_job_id = job_id;
+        let original_obj_type = obj.obj_type;
+
         let iceberg_table_id =
             try_get_iceberg_table_by_downstream_sink(&txn, job_id.as_sink_id()).await?;
         if let Some(iceberg_table_id) = iceberg_table_id {
@@ -648,9 +696,10 @@ impl CatalogController {
         let mut need_notify =
             streaming_job.is_some_and(|job| job.create_type == CreateType::Background);
         if !need_notify {
-            // If the job is not created in the background, we only need to notify the frontend if the job is a materialized view.
             if let Some(table) = &table_obj {
                 need_notify = table.table_type == TableType::MaterializedView;
+            } else if original_obj_type == ObjectType::Sink {
+                need_notify = true;
             }
         }
 
@@ -675,6 +724,25 @@ impl CatalogController {
         }
 
         if need_notify {
+            // Special handling for iceberg sinks: the `job_id` may have been rewritten to the table id.
+            // Ensure we still notify the frontend to delete the original sink object.
+            if original_obj_type == ObjectType::Sink && original_job_id != job_id {
+                let orig_obj: Option<PartialObject> = Object::find_by_id(original_job_id)
+                    .select_only()
+                    .columns([
+                        object::Column::Oid,
+                        object::Column::ObjType,
+                        object::Column::SchemaId,
+                        object::Column::DatabaseId,
+                    ])
+                    .into_partial_model()
+                    .one(&txn)
+                    .await?;
+                if let Some(orig_obj) = orig_obj {
+                    objs.push(orig_obj);
+                }
+            }
+
             let obj: Option<PartialObject> = Object::find_by_id(job_id)
                 .select_only()
                 .columns([
@@ -861,15 +929,19 @@ impl CatalogController {
         }
 
         // 3. check parallelism.
-        let (original_max_parallelism, original_timezone): (i32, Option<String>) =
-            StreamingJobModel::find_by_id(id)
-                .select_only()
-                .column(streaming_job::Column::MaxParallelism)
-                .column(streaming_job::Column::Timezone)
-                .into_tuple()
-                .one(&txn)
-                .await?
-                .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
+        let (original_max_parallelism, original_timezone, original_config_override): (
+            i32,
+            Option<String>,
+            Option<String>,
+        ) = StreamingJobModel::find_by_id(id)
+            .select_only()
+            .column(streaming_job::Column::MaxParallelism)
+            .column(streaming_job::Column::Timezone)
+            .column(streaming_job::Column::ConfigOverride)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
 
         if let Some(max_parallelism) = expected_original_max_parallelism
             && original_max_parallelism != max_parallelism as i32
@@ -889,9 +961,15 @@ impl CatalogController {
             None => StreamingParallelism::Adaptive,
             Some(n) => StreamingParallelism::Fixed(n.get() as _),
         };
-        let timezone = ctx
-            .map(|ctx| ctx.timezone.clone())
-            .unwrap_or(original_timezone);
+
+        let ctx = StreamContext {
+            timezone: ctx
+                .map(|ctx| ctx.timezone.clone())
+                .unwrap_or(original_timezone),
+            // We don't expect replacing a job with a different config override.
+            // Thus always use the original config override.
+            config_override: original_config_override.unwrap_or_default().into(),
+        };
 
         // 4. create streaming object for new replace table.
         let new_obj_id = Self::create_streaming_job_obj(
@@ -901,7 +979,7 @@ impl CatalogController {
             Some(streaming_job.database_id() as _),
             Some(streaming_job.schema_id() as _),
             streaming_job.create_type(),
-            timezone,
+            ctx,
             parallelism,
             original_max_parallelism as _,
             None,
@@ -1030,6 +1108,7 @@ impl CatalogController {
             NotificationOperation::Add
         };
         let mut updated_user_info = vec![];
+        let mut need_grant_default_privileges = true;
 
         match job_type {
             ObjectType::Table => {
@@ -1064,11 +1143,18 @@ impl CatalogController {
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
+                if sink.name.starts_with(ICEBERG_SINK_PREFIX) {
+                    need_grant_default_privileges = false;
+                }
+                // If sinks were pre-notified during CREATING, we should use Update at finish
+                // to avoid duplicate Add notifications (align with MV behavior).
+                notification_op = NotificationOperation::Update;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
                 });
             }
             ObjectType::Index => {
+                need_grant_default_privileges = false;
                 let (index, obj) = Index::find_by_id(job_id.as_index_id())
                     .find_also_related(Object)
                     .one(txn)
@@ -1153,7 +1239,7 @@ impl CatalogController {
             _ => unreachable!("invalid job type: {:?}", job_type),
         }
 
-        if job_type != ObjectType::Index {
+        if need_grant_default_privileges {
             updated_user_info = grant_default_privileges_automatically(txn, job_id).await?;
         }
 
@@ -2301,6 +2387,435 @@ impl CatalogController {
             .await;
 
         Ok((props.into_iter().collect(), sink_id))
+    }
+
+    /// Update connection properties and all dependent sources/sinks in a single transaction
+    pub async fn update_connection_and_dependent_objects_props(
+        &self,
+        connection_id: ConnectionId,
+        alter_props: BTreeMap<String, String>,
+        alter_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> MetaResult<(
+        WithOptionsSecResolved,                   // Connection's new properties
+        Vec<(SourceId, HashMap<String, String>)>, // Source ID and their complete properties
+        Vec<(SinkId, HashMap<String, String>)>,   // Sink ID and their complete properties
+    )> {
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        // Find all dependent sources and sinks first
+        let dependent_sources: Vec<SourceId> = Source::find()
+            .select_only()
+            .column(source::Column::SourceId)
+            .filter(source::Column::ConnectionId.eq(connection_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let dependent_sinks: Vec<SinkId> = Sink::find()
+            .select_only()
+            .column(sink::Column::SinkId)
+            .filter(sink::Column::ConnectionId.eq(connection_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let (connection_catalog, _obj) = Connection::find_by_id(connection_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+            })?;
+
+        // Validate that props can be altered
+        let prop_keys: Vec<String> = alter_props
+            .keys()
+            .chain(alter_secret_refs.keys())
+            .cloned()
+            .collect();
+
+        // Map the connection type enum to the string name expected by the validation function
+        let connection_type_str = pb_connection_type_to_connection_type(
+            &connection_catalog.params.to_protobuf().connection_type(),
+        )
+        .ok_or_else(|| MetaError::invalid_parameter("Unspecified connection type"))?;
+
+        risingwave_connector::allow_alter_on_fly_fields::check_connection_allow_alter_on_fly_fields(
+            connection_type_str, &prop_keys,
+        )?;
+
+        let connection_pb = connection_catalog.params.to_protobuf();
+        let mut connection_options_with_secret = WithOptionsSecResolved::new(
+            connection_pb.properties.into_iter().collect(),
+            connection_pb.secret_refs.into_iter().collect(),
+        );
+
+        let (to_add_secret_dep, to_remove_secret_dep) = connection_options_with_secret
+            .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
+
+        tracing::debug!(
+            "applying new properties to connection and dependents: connection_id={}, sources={:?}, sinks={:?}",
+            connection_id,
+            dependent_sources,
+            dependent_sinks
+        );
+
+        // Validate connection
+        {
+            let conn_params_pb = risingwave_pb::catalog::ConnectionParams {
+                connection_type: connection_pb.connection_type,
+                properties: connection_options_with_secret
+                    .as_plaintext()
+                    .clone()
+                    .into_iter()
+                    .collect(),
+                secret_refs: connection_options_with_secret
+                    .as_secret()
+                    .clone()
+                    .into_iter()
+                    .collect(),
+            };
+            let connection = PbConnection {
+                id: connection_id as _,
+                info: Some(risingwave_pb::catalog::connection::Info::ConnectionParams(
+                    conn_params_pb,
+                )),
+                ..Default::default()
+            };
+            validate_connection(&connection).await?;
+        }
+
+        // Update connection secret dependencies
+        if !to_add_secret_dep.is_empty() {
+            ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
+                object_dependency::ActiveModel {
+                    oid: Set(secret_id.into()),
+                    used_by: Set(connection_id.as_object_id()),
+                    ..Default::default()
+                }
+            }))
+            .exec(&txn)
+            .await?;
+        }
+        if !to_remove_secret_dep.is_empty() {
+            let _ = ObjectDependency::delete_many()
+                .filter(
+                    object_dependency::Column::Oid
+                        .is_in(to_remove_secret_dep)
+                        .and(object_dependency::Column::UsedBy.eq(connection_id.as_object_id())),
+                )
+                .exec(&txn)
+                .await?;
+        }
+
+        // Update the connection with new properties
+        let updated_connection_params = risingwave_pb::catalog::ConnectionParams {
+            connection_type: connection_pb.connection_type,
+            properties: connection_options_with_secret
+                .as_plaintext()
+                .clone()
+                .into_iter()
+                .collect(),
+            secret_refs: connection_options_with_secret
+                .as_secret()
+                .clone()
+                .into_iter()
+                .collect(),
+        };
+        let active_connection_model = connection::ActiveModel {
+            connection_id: Set(connection_id),
+            params: Set(ConnectionParams::from(&updated_connection_params)),
+            ..Default::default()
+        };
+        active_connection_model.update(&txn).await?;
+
+        // Batch update dependent sources and collect their complete properties
+        let mut updated_sources_with_props: Vec<(SourceId, HashMap<String, String>)> = Vec::new();
+
+        if !dependent_sources.is_empty() {
+            // Batch fetch all dependent sources
+            let sources_with_objs = Source::find()
+                .find_also_related(Object)
+                .filter(source::Column::SourceId.is_in(dependent_sources.iter().cloned()))
+                .all(&txn)
+                .await?;
+
+            // Prepare batch updates
+            let mut source_updates = Vec::new();
+            let mut fragment_updates: Vec<DependentSourceFragmentUpdate> = Vec::new();
+
+            for (source, _obj) in sources_with_objs {
+                let source_id = source.source_id;
+
+                let mut source_options_with_secret = WithOptionsSecResolved::new(
+                    source.with_properties.0.clone(),
+                    source
+                        .secret_ref
+                        .clone()
+                        .map(|secret_ref| secret_ref.to_protobuf())
+                        .unwrap_or_default(),
+                );
+                let (_source_to_add_secret_dep, _source_to_remove_secret_dep) =
+                    source_options_with_secret
+                        .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
+
+                // Validate the updated source properties
+                let _ = ConnectorProperties::extract(source_options_with_secret.clone(), true)?;
+
+                // Prepare source update
+                let active_source = source::ActiveModel {
+                    source_id: Set(source_id),
+                    with_properties: Set(Property(
+                        source_options_with_secret.as_plaintext().clone(),
+                    )),
+                    secret_ref: Set((!source_options_with_secret.as_secret().is_empty()).then(
+                        || {
+                            risingwave_meta_model::SecretRef::from(
+                                source_options_with_secret.as_secret().clone(),
+                            )
+                        },
+                    )),
+                    ..Default::default()
+                };
+                source_updates.push(active_source);
+
+                // Prepare fragment update:
+                // - If the source is a table-associated source, update fragments for the table job.
+                // - Otherwise update the shared source job.
+                // - For non-shared sources, also update any dependent streaming jobs that embed a copy.
+                let is_shared_source = source.is_shared();
+                let mut dep_source_job_ids: Vec<JobId> = Vec::new();
+                if !is_shared_source {
+                    dep_source_job_ids = ObjectDependency::find()
+                        .select_only()
+                        .column(object_dependency::Column::UsedBy)
+                        .filter(object_dependency::Column::Oid.eq(source_id))
+                        .into_tuple()
+                        .all(&txn)
+                        .await?;
+                }
+
+                let base_job_id =
+                    if let Some(associate_table_id) = source.optional_associated_table_id {
+                        associate_table_id.as_job_id()
+                    } else {
+                        source_id.as_share_source_job_id()
+                    };
+                let job_ids = vec![base_job_id]
+                    .into_iter()
+                    .chain(dep_source_job_ids.into_iter())
+                    .collect_vec();
+
+                fragment_updates.push(DependentSourceFragmentUpdate {
+                    job_ids,
+                    with_properties: source_options_with_secret.as_plaintext().clone(),
+                    secret_refs: source_options_with_secret.as_secret().clone(),
+                    is_shared_source,
+                });
+
+                // Collect the complete properties for runtime broadcast
+                let complete_source_props = LocalSecretManager::global()
+                    .fill_secrets(
+                        source_options_with_secret.as_plaintext().clone(),
+                        source_options_with_secret.as_secret().clone(),
+                    )
+                    .map_err(MetaError::from)?
+                    .into_iter()
+                    .collect::<HashMap<String, String>>();
+                updated_sources_with_props.push((source_id, complete_source_props));
+            }
+
+            for source_update in source_updates {
+                source_update.update(&txn).await?;
+            }
+
+            // Batch execute fragment updates
+            for DependentSourceFragmentUpdate {
+                job_ids,
+                with_properties,
+                secret_refs,
+                is_shared_source,
+            } in fragment_updates
+            {
+                update_connector_props_fragments(
+                    &txn,
+                    job_ids,
+                    FragmentTypeFlag::Source,
+                    |node, found| {
+                        if let PbNodeBody::Source(node) = node
+                            && let Some(source_inner) = &mut node.source_inner
+                        {
+                            source_inner.with_properties = with_properties.clone();
+                            source_inner.secret_refs = secret_refs.clone();
+                            *found = true;
+                        }
+                    },
+                    is_shared_source,
+                )
+                .await?;
+            }
+        }
+
+        // Batch update dependent sinks and collect their complete properties
+        let mut updated_sinks_with_props: Vec<(SinkId, HashMap<String, String>)> = Vec::new();
+
+        if !dependent_sinks.is_empty() {
+            // Batch fetch all dependent sinks
+            let sinks_with_objs = Sink::find()
+                .find_also_related(Object)
+                .filter(sink::Column::SinkId.is_in(dependent_sinks.iter().cloned()))
+                .all(&txn)
+                .await?;
+
+            // Prepare batch updates
+            let mut sink_updates = Vec::new();
+            let mut sink_fragment_updates = Vec::new();
+
+            for (sink, _obj) in sinks_with_objs {
+                let sink_id = sink.sink_id;
+
+                // Validate that sink props can be altered
+                match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
+                    Some(connector) => {
+                        let connector_type = connector.to_lowercase();
+                        check_sink_allow_alter_on_fly_fields(&connector_type, &prop_keys)
+                            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+                        match_sink_name_str!(
+                            connector_type.as_str(),
+                            SinkType,
+                            {
+                                let mut new_sink_props = sink.properties.0.clone();
+                                new_sink_props.extend(alter_props.clone());
+                                SinkType::validate_alter_config(&new_sink_props)
+                            },
+                            |sink: &str| Err(SinkError::Config(anyhow!(
+                                "unsupported sink type {}",
+                                sink
+                            )))
+                        )?
+                    }
+                    None => {
+                        return Err(SinkError::Config(anyhow!(
+                            "connector not specified when alter sink"
+                        ))
+                        .into());
+                    }
+                };
+
+                let mut new_sink_props = sink.properties.0.clone();
+                new_sink_props.extend(alter_props.clone());
+
+                // Prepare sink update
+                let active_sink = sink::ActiveModel {
+                    sink_id: Set(sink_id),
+                    properties: Set(risingwave_meta_model::Property(new_sink_props.clone())),
+                    ..Default::default()
+                };
+                sink_updates.push(active_sink);
+
+                // Prepare fragment updates for this sink
+                sink_fragment_updates.push((sink_id, new_sink_props.clone()));
+
+                // Collect the complete properties for runtime broadcast
+                let complete_sink_props: HashMap<String, String> =
+                    new_sink_props.into_iter().collect();
+                updated_sinks_with_props.push((sink_id, complete_sink_props));
+            }
+
+            // Batch execute sink updates
+            for sink_update in sink_updates {
+                sink_update.update(&txn).await?;
+            }
+
+            // Batch execute sink fragment updates using the reusable function
+            for (sink_id, new_sink_props) in sink_fragment_updates {
+                update_connector_props_fragments(
+                    &txn,
+                    vec![sink_id.as_job_id()],
+                    FragmentTypeFlag::Sink,
+                    |node, found| {
+                        if let PbNodeBody::Sink(node) = node
+                            && let Some(sink_desc) = &mut node.sink_desc
+                            && sink_desc.id == sink_id.as_raw_id()
+                        {
+                            sink_desc.properties = new_sink_props.clone();
+                            *found = true;
+                        }
+                    },
+                    true,
+                )
+                .await?;
+            }
+        }
+
+        // Collect all updated objects for frontend notification
+        let mut updated_objects = Vec::new();
+
+        // Add connection
+        let (connection, obj) = Connection::find_by_id(connection_id)
+            .find_also_related(Object)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+            })?;
+        updated_objects.push(PbObject {
+            object_info: Some(PbObjectInfo::Connection(
+                ObjectModel(connection, obj.unwrap()).into(),
+            )),
+        });
+
+        // Add sources
+        for source_id in &dependent_sources {
+            let (source, obj) = Source::find_by_id(*source_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(ObjectType::Source.as_str(), *source_id)
+                })?;
+            updated_objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Source(
+                    ObjectModel(source, obj.unwrap()).into(),
+                )),
+            });
+        }
+
+        // Add sinks
+        for sink_id in &dependent_sinks {
+            let (sink, obj) = Sink::find_by_id(*sink_id)
+                .find_also_related(Object)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| {
+                    MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), *sink_id)
+                })?;
+            updated_objects.push(PbObject {
+                object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+            });
+        }
+
+        // Commit the transaction
+        txn.commit().await?;
+
+        // Notify frontend about all updated objects
+        if !updated_objects.is_empty() {
+            self.notify_frontend(
+                NotificationOperation::Update,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects: updated_objects,
+                }),
+            )
+            .await;
+        }
+
+        Ok((
+            connection_options_with_secret,
+            updated_sources_with_props,
+            updated_sinks_with_props,
+        ))
     }
 
     pub async fn update_fragment_rate_limit_by_fragment_id(

@@ -509,10 +509,10 @@ impl LdapAuthenticator {
 
         // Build search filter
         let search_filter = if let Some(filter_template) = &self.config.search_filter {
-            // Use custom filter template with {username} placeholder
+            // Use custom filter template with $username placeholder
             // SECURITY: Escape username to prevent LDAP filter injection
             let escaped_username = ldap_escape(username);
-            filter_template.replace("{username}", &escaped_username)
+            filter_template.replace("$username", &escaped_username)
         } else {
             // Default filter using search_attribute (defaults to "uid" if not configured)
             // SECURITY: Escape username to prevent LDAP filter injection

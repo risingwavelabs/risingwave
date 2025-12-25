@@ -48,7 +48,6 @@ use crate::barrier::{
 };
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::hummock::CommitEpochInfo;
-use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{ActiveStreamingWorkerNodes, MetaOpts, MetaSrvEnv};
 use crate::model::StreamActor;
 
@@ -164,8 +163,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     })
     .await;
     let (_request_tx, request_rx) = mpsc::unbounded_channel();
-    let sink_manager = SinkCoordinatorManager::for_test();
-    let mut worker = GlobalBarrierWorker::new_inner(env, sink_manager, request_rx, context).await;
+    let mut worker = GlobalBarrierWorker::new_inner(env, request_rx, context).await;
     let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
     let _join_handle = tokio::spawn(async move {
@@ -205,6 +203,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         vnode_bitmap: None,
         mview_definition: "".to_owned(),
         expr_context: None,
+        config_override: "".into(),
     };
     let table1 = TableId::new(1);
     let table2 = TableId::new(2);
@@ -285,7 +284,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
             barrier_interval_ms: None,
             checkpoint_frequency: None,
         }],
-        cdc_table_snapshot_split_assignment: Default::default(),
+        cdc_table_snapshot_splits: Default::default(),
     })
     .unwrap();
     let make_control_stream_handle = || {

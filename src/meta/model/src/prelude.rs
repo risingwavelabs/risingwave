@@ -34,6 +34,7 @@ pub use super::hummock_version_stats::Entity as HummockVersionStats;
 pub use super::index::Entity as Index;
 pub use super::object::Entity as Object;
 pub use super::object_dependency::Entity as ObjectDependency;
+pub use super::refresh_job::Entity as RefreshJob;
 pub use super::schema::Entity as Schema;
 pub use super::secret::Entity as Secret;
 pub use super::session_parameter::Entity as SessionParameter;

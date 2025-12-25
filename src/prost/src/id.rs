@@ -32,53 +32,100 @@ pub const OBJECT_ID_PLACEHOLDER: u32 = u32::MAX - 1;
 
 #[derive(Clone, Copy, Default, Hash, PartialOrd, PartialEq, Eq, Ord)]
 #[repr(transparent)]
-pub struct TypedId<const N: usize>(pub(crate) u32);
+pub struct TypedId<const N: usize, P>(pub(crate) P);
 
-impl<const N: usize> std::fmt::Debug for TypedId<N> {
+impl<const N: usize, P: std::fmt::Debug> std::fmt::Debug for TypedId<N, P> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        <u32 as std::fmt::Debug>::fmt(&self.0, f)
+        <P as std::fmt::Debug>::fmt(&self.0, f)
     }
 }
 
-impl<const N: usize> std::fmt::Display for TypedId<N> {
+impl<const N: usize, P: std::fmt::Display> std::fmt::Display for TypedId<N, P> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        <u32 as std::fmt::Display>::fmt(&self.0, f)
+        <P as std::fmt::Display>::fmt(&self.0, f)
     }
 }
 
-impl<const N: usize> PartialEq<u32> for TypedId<N> {
-    fn eq(&self, other: &u32) -> bool {
+impl<const N: usize, P: std::fmt::UpperHex> std::fmt::UpperHex for TypedId<N, P> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        <P as std::fmt::UpperHex>::fmt(&self.0, f)
+    }
+}
+
+impl<const N: usize, P: PartialEq> PartialEq<P> for TypedId<N, P> {
+    fn eq(&self, other: &P) -> bool {
         self.0 == *other
     }
 }
 
-impl<const N: usize> FromStr for TypedId<N> {
-    type Err = <u32 as FromStr>::Err;
+impl<const N: usize, P: FromStr> FromStr for TypedId<N, P> {
+    type Err = <P as FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self(<u32 as FromStr>::from_str(s)?))
+        Ok(Self(<P as FromStr>::from_str(s)?))
     }
 }
 
-impl<const N: usize> TypedId<N> {
-    pub const fn new(inner: u32) -> Self {
+impl<const N: usize, P> TypedId<N, P>
+where
+    Self: UniqueTypedIdDeclaration,
+{
+    pub const fn new(inner: P) -> Self {
         TypedId(inner)
     }
 
-    pub fn as_raw_id(self) -> u32 {
+    #[expect(clippy::wrong_self_convention)]
+    pub fn as_raw_id(self) -> P {
         self.0
     }
 
-    pub fn as_i32_id(self) -> i32 {
-        self.to_i32()
+    pub fn raw_slice(slice: &[Self]) -> &[P] {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(slice) }
     }
 
+    pub fn mut_raw_vec(vec: &mut Vec<Self>) -> &mut Vec<P> {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(vec) }
+    }
+
+    pub fn raw_hash_map_ref<V>(map: &HashMap<Self, V>) -> &HashMap<P, V> {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(map) }
+    }
+
+    pub fn raw_hash_map_mut_ref<V>(map: &mut HashMap<Self, V>) -> &mut HashMap<P, V> {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(map) }
+    }
+
+    pub fn raw_btree_map_ref<V>(map: &BTreeMap<Self, V>) -> &BTreeMap<P, V> {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(map) }
+    }
+
+    pub fn raw_btree_map_mut_ref<V>(map: &mut BTreeMap<Self, V>) -> &mut BTreeMap<P, V> {
+        // SAFETY: transparent repr
+        unsafe { std::mem::transmute(map) }
+    }
+}
+
+type TypedU32Id<const N: usize> = TypedId<N, u32>;
+
+impl<const N: usize> TypedU32Id<N>
+where
+    Self: UniqueTypedIdDeclaration,
+{
     pub const fn placeholder() -> Self {
         Self(OBJECT_ID_PLACEHOLDER)
     }
 
     pub fn is_placeholder(&self) -> bool {
         self.0 == OBJECT_ID_PLACEHOLDER
+    }
+
+    pub fn as_i32_id(self) -> i32 {
+        self.to_i32()
     }
 
     fn from_i32(inner: i32) -> Self {
@@ -122,51 +169,27 @@ impl<const N: usize> TypedId<N> {
             }
         })
     }
+}
 
-    pub fn raw_slice(slice: &[Self]) -> &[u32] {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(slice) }
-    }
-
-    pub fn mut_raw_vec(vec: &mut Vec<Self>) -> &mut Vec<u32> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(vec) }
-    }
-
-    pub fn raw_hash_map_ref<V>(map: &HashMap<Self, V>) -> &HashMap<u32, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
-    }
-
-    pub fn raw_hash_map_mut_ref<V>(map: &mut HashMap<Self, V>) -> &mut HashMap<u32, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
-    }
-
-    pub fn raw_btree_map_ref<V>(map: &BTreeMap<Self, V>) -> &BTreeMap<u32, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
-    }
-
-    pub fn raw_btree_map_mut_ref<V>(map: &mut BTreeMap<Self, V>) -> &mut BTreeMap<u32, V> {
-        // SAFETY: transparent repr
-        unsafe { std::mem::transmute(map) }
+impl<const N: usize, P> From<P> for TypedId<N, P> {
+    fn from(id: P) -> Self {
+        Self(id)
     }
 }
 
-impl<const N: usize> From<u32> for TypedId<N> {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-
-impl<const N: usize> From<TypedId<N>> for sea_orm::Value {
-    fn from(value: TypedId<N>) -> Self {
+impl<const N: usize> From<TypedU32Id<N>> for sea_orm::Value
+where
+    TypedU32Id<N>: UniqueTypedIdDeclaration,
+{
+    fn from(value: TypedU32Id<N>) -> Self {
         sea_orm::Value::from(value.to_i32())
     }
 }
 
-impl<const N: usize> sea_orm::sea_query::ValueType for TypedId<N> {
+impl<const N: usize> sea_orm::sea_query::ValueType for TypedU32Id<N>
+where
+    Self: UniqueTypedIdDeclaration,
+{
     fn try_from(v: sea_orm::Value) -> Result<Self, ValueTypeErr> {
         let inner = <i32 as sea_orm::sea_query::ValueType>::try_from(v)?;
         Ok(Self::from_i32(inner))
@@ -185,45 +208,51 @@ impl<const N: usize> sea_orm::sea_query::ValueType for TypedId<N> {
     }
 }
 
-impl<const N: usize> sea_orm::sea_query::Nullable for TypedId<N> {
+impl<const N: usize> sea_orm::sea_query::Nullable for TypedU32Id<N> {
     fn null() -> sea_orm::Value {
         <i32 as sea_orm::sea_query::Nullable>::null()
     }
 }
 
-impl<const N: usize> sea_orm::TryGetable for TypedId<N> {
+impl<const N: usize> sea_orm::TryGetable for TypedU32Id<N>
+where
+    Self: UniqueTypedIdDeclaration,
+{
     fn try_get_by<I: ColIdx>(res: &QueryResult, index: I) -> Result<Self, TryGetError> {
         let inner = <i32 as sea_orm::TryGetable>::try_get_by(res, index)?;
         Ok(Self::from_i32(inner))
     }
 }
 
-impl<const N: usize> sea_orm::TryFromU64 for TypedId<N> {
+impl<const N: usize> sea_orm::TryFromU64 for TypedU32Id<N>
+where
+    Self: UniqueTypedIdDeclaration,
+{
     fn try_from_u64(n: u64) -> Result<Self, DbErr> {
         let inner = <i32 as sea_orm::TryFromU64>::try_from_u64(n)?;
         Ok(Self::from_i32(inner))
     }
 }
 
-impl<const N: usize> Serialize for TypedId<N> {
+impl<const N: usize, P: Serialize> Serialize for TypedId<N, P> {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
-        <u32 as Serialize>::serialize(&self.0, serializer)
+        <P as Serialize>::serialize(&self.0, serializer)
     }
 }
 
-impl<'de, const N: usize> Deserialize<'de> for TypedId<N> {
+impl<'de, const N: usize, P: Deserialize<'de>> Deserialize<'de> for TypedId<N, P> {
     fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
     where
         D: Deserializer<'de>,
     {
-        Ok(Self(<u32 as Deserialize>::deserialize(deserializer)?))
+        Ok(Self(<P as Deserialize>::deserialize(deserializer)?))
     }
 }
 
-impl<const N: usize> Add<u32> for TypedId<N> {
+impl<const N: usize> Add<u32> for TypedU32Id<N> {
     type Output = Self;
 
     fn add(self, rhs: u32) -> Self::Output {
@@ -231,56 +260,113 @@ impl<const N: usize> Add<u32> for TypedId<N> {
     }
 }
 
-impl<const N: usize> AddAssign<u32> for TypedId<N> {
+impl<const N: usize> AddAssign<u32> for TypedU32Id<N> {
     fn add_assign(&mut self, rhs: u32) {
         self.0 = self.0.checked_add(rhs).unwrap()
     }
 }
 
-pub type TableId = TypedId<1>;
-pub type JobId = TypedId<2>;
-pub type DatabaseId = TypedId<3>;
-pub type SchemaId = TypedId<4>;
-pub type FragmentId = TypedId<5>;
-pub type ActorId = TypedId<6>;
-pub type WorkerId = TypedId<7>;
-pub type SinkId = TypedId<8>;
-pub type SourceId = TypedId<9>;
+#[expect(dead_code)]
+pub trait UniqueTypedIdDeclaration {}
 
-pub type SubscriptionId = TypedId<10>;
-pub type IndexId = TypedId<11>;
-pub type ViewId = TypedId<12>;
-pub type FunctionId = TypedId<13>;
-pub type ConnectionId = TypedId<14>;
-pub type SecretId = TypedId<15>;
+macro_rules! declare_id_type {
+    ($name:ident, $primitive:ty, $type_id:expr) => {
+        pub type $name = TypedId<{ $type_id }, $primitive>;
+        impl UniqueTypedIdDeclaration for $name {}
+    };
+}
 
-pub type ObjectId = TypedId<256>;
+macro_rules! declare_id_types {
+    ($primitive:ty $(, $name:ident)+) => {
+        declare_id_types! {
+            $primitive, 0 $(, $name)+
+        }
+    };
+    ($primitive:ty, $next_type_id:expr) => {};
+    ($primitive:ty, $next_type_id:expr, $name:ident $(, $rest:ident)*) => {
+        declare_id_type! { $name, $primitive, $next_type_id }
+        declare_id_types! {
+            $primitive, $next_type_id + 1  $(, $rest)*
+        }
+    };
+    ($($invalid:tt)+) => {
+        compile_error!(stringify!($($invalid)+))
+    }
+}
+
+declare_id_types!(
+    u32,
+    TableId,
+    JobId,
+    DatabaseId,
+    SchemaId,
+    FragmentId,
+    ActorId,
+    WorkerId,
+    SinkId,
+    SourceId,
+    SubscriptionId,
+    IndexId,
+    ViewId,
+    FunctionId,
+    ConnectionId,
+    SecretId,
+    SubscriberId,
+    LocalOperatorId
+);
+
+declare_id_type!(ObjectId, u32, 256);
+
+declare_id_types!(u64, GlobalOperatorId, StreamNodeLocalOperatorId, ExecutorId);
+
+macro_rules! impl_as {
+    (@func $target_id_name:ident, $alias_name:ident) => {
+        paste::paste! {
+            pub fn [< as_ $alias_name >](self) -> $target_id_name {
+                $target_id_name::new(self.0)
+            }
+        }
+    };
+    (@func $target_id_name:ident) => {
+        paste::paste! {
+            impl_as! { @func $target_id_name, [< $target_id_name:snake >] }
+        }
+    };
+    ($src_id_name:ident $(,$target_id_name:ident)* $(,{$orig_target_id_name:ident , $alias_name:ident})*) => {
+        impl $src_id_name {
+            $(
+                impl_as! { @func $target_id_name }
+            )*
+            $(
+                impl_as! { @func $orig_target_id_name, $alias_name }
+            )*
+        }
+    }
+}
 
 impl JobId {
     pub fn is_mv_table_id(self, table_id: TableId) -> bool {
         self.0 == table_id.0
     }
+}
 
-    pub fn as_mv_table_id(self) -> TableId {
-        TableId::new(self.0)
-    }
+impl_as!(JobId, SinkId, IndexId, SubscriberId, {TableId, mv_table_id}, {SourceId, shared_source_id});
+impl_as!(TableId, JobId);
 
-    pub fn as_sink_id(self) -> SinkId {
-        SinkId::new(self.0)
-    }
-
-    pub fn as_shared_source_id(self) -> SourceId {
-        SourceId::new(self.0)
-    }
-
-    pub fn as_index_id(self) -> IndexId {
-        IndexId::new(self.0)
+impl From<StreamNodeLocalOperatorId> for LocalOperatorId {
+    fn from(value: StreamNodeLocalOperatorId) -> Self {
+        assert!(
+            value.0 <= u32::MAX as u64,
+            "oversized operator id {} in stream node",
+            value.0
+        );
+        Self(value.0 as u32)
     }
 }
 
-impl TableId {
-    pub fn as_job_id(self) -> JobId {
-        JobId::new(self.0)
+impl From<LocalOperatorId> for StreamNodeLocalOperatorId {
+    fn from(value: LocalOperatorId) -> Self {
+        Self(value.0 as u64)
     }
 }
 
@@ -297,27 +383,10 @@ impl From<TableId> for OptionalAssociatedTableId {
     }
 }
 
-impl SinkId {
-    pub fn as_job_id(self) -> JobId {
-        JobId::new(self.0)
-    }
-}
-
-impl IndexId {
-    pub fn as_job_id(self) -> JobId {
-        JobId::new(self.0)
-    }
-}
-
-impl SourceId {
-    pub fn as_share_source_job_id(self) -> JobId {
-        JobId::new(self.0)
-    }
-
-    pub fn as_cdc_table_id(self) -> TableId {
-        TableId::new(self.0)
-    }
-}
+impl_as!(SinkId, JobId);
+impl_as!(IndexId, JobId);
+impl_as!(SourceId, {JobId, share_source_job_id}, {TableId, cdc_table_id});
+impl_as!(SubscriptionId, SubscriberId);
 
 impl From<OptionalAssociatedSourceId> for SourceId {
     fn from(value: OptionalAssociatedSourceId) -> Self {

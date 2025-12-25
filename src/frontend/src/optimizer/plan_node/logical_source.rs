@@ -359,10 +359,7 @@ impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         let is_refreshable_iceberg = self.source_catalog().is_some_and(|catalog| {
             catalog.refresh_mode.is_some_and(|refresh_mode| {
-                matches!(
-                    refresh_mode.refresh_mode,
-                    Some(RefreshMode::FullRecompute(_))
-                )
+                matches!(refresh_mode.refresh_mode, Some(RefreshMode::FullReload(_)))
             })
         }); // for refreshable iceberg table, we does not expose iceberg hidden columns to the user
 

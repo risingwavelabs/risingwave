@@ -31,8 +31,11 @@ mod plan_rewriter;
 
 mod plan_visitor;
 
+#[cfg(feature = "datafusion")]
+pub use plan_visitor::LogicalPlanToDataFusionExt;
 pub use plan_visitor::{
-    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
+    ExecutionModeDecider, LogicalIcebergScanExt, PlanVisitor, RelationCollectorVisitor,
+    SysTableVisitor,
 };
 use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 
@@ -82,9 +85,9 @@ use crate::expr::TimestamptzExprFinder;
 use crate::handler::create_table::{CreateTableInfo, CreateTableProps};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind, Union};
 use crate::optimizer::plan_node::{
-    Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker, PlanTreeNode, Stream,
-    StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion, StreamVectorIndexWrite,
-    ToStream, VisitExprsRecursive,
+    BackfillType, Batch, BatchExchange, BatchPlanNodeType, BatchPlanRef, ConventionMarker,
+    PlanTreeNode, Stream, StreamExchange, StreamPlanRef, StreamUnion, StreamUpstreamSinkUnion,
+    StreamVectorIndexWrite, ToStream, VisitExprsRecursive,
 };
 use crate::optimizer::plan_visitor::{
     LocalityProviderCounter, RwTimestampValidator, TemporalJoinValidator,
@@ -488,25 +491,25 @@ impl LogicalPlanRoot {
         emit_on_window_close: bool,
         allow_snapshot_backfill: bool,
     ) -> Result<StreamOptimizedLogicalPlanRoot> {
-        let stream_scan_type = if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
-            StreamScanType::SnapshotBackfill
+        let backfill_type = if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
+            BackfillType::SnapshotBackfill
         } else if self.should_use_arrangement_backfill() {
-            StreamScanType::ArrangementBackfill
+            BackfillType::ArrangementBackfill
         } else {
-            StreamScanType::Backfill
+            BackfillType::Backfill
         };
-        self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)
+        self.gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type)
     }
 
     fn gen_optimized_stream_plan_inner(
         self,
         emit_on_window_close: bool,
-        stream_scan_type: StreamScanType,
+        backfill_type: BackfillType,
     ) -> Result<StreamOptimizedLogicalPlanRoot> {
         let ctx = self.plan.ctx();
         let _explain_trace = ctx.is_explain_trace();
 
-        let optimized_plan = self.gen_stream_plan(emit_on_window_close, stream_scan_type)?;
+        let optimized_plan = self.gen_stream_plan(emit_on_window_close, backfill_type)?;
 
         let mut plan = optimized_plan
             .plan
@@ -597,7 +600,7 @@ impl LogicalPlanRoot {
     fn gen_stream_plan(
         self,
         emit_on_window_close: bool,
-        stream_scan_type: StreamScanType,
+        backfill_type: BackfillType,
     ) -> Result<StreamOptimizedLogicalPlanRoot> {
         let ctx = self.plan.ctx();
         let explain_trace = ctx.is_explain_trace();
@@ -662,9 +665,9 @@ impl LogicalPlanRoot {
                     out_col_change.rewrite_bitset(&optimized_plan.out_fields);
                 let mut plan = plan.to_stream_with_dist_required(
                     &optimized_plan.required_dist,
-                    &mut ToStreamContext::new_with_stream_scan_type(
+                    &mut ToStreamContext::new_with_backfill_type(
                         emit_on_window_close,
-                        stream_scan_type,
+                        backfill_type,
                     ),
                 )?;
                 plan = stream_enforce_eowc_requirement(ctx.clone(), plan, emit_on_window_close)?;
@@ -948,7 +951,7 @@ impl LogicalPlanRoot {
                             .refresh_mode
                             .as_ref()
                             .map(|refresh_mode| refresh_mode.refresh_mode),
-                        Some(Some(RefreshMode::FullRecompute(_)))
+                        Some(Some(RefreshMode::FullReload(_)))
                     )
                 }
             })
@@ -1072,27 +1075,27 @@ impl LogicalPlanRoot {
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
     ) -> Result<StreamSink> {
-        let stream_scan_type = if without_backfill {
-            StreamScanType::UpstreamOnly
+        let backfill_type = if without_backfill {
+            BackfillType::UpstreamOnly
         } else if target_table.is_none() && self.should_use_snapshot_backfill() {
             // Snapshot backfill on sink-into-table is not allowed
-            StreamScanType::SnapshotBackfill
+            BackfillType::SnapshotBackfill
         } else if self.should_use_arrangement_backfill() {
-            StreamScanType::ArrangementBackfill
+            BackfillType::ArrangementBackfill
         } else {
-            StreamScanType::Backfill
+            BackfillType::Backfill
         };
         if auto_refresh_schema_from_table.is_some()
-            && stream_scan_type != StreamScanType::ArrangementBackfill
+            && backfill_type != BackfillType::ArrangementBackfill
         {
             return Err(ErrorCode::InvalidInputSyntax(format!(
                 "auto schema change only support for ArrangementBackfill, but got: {:?}",
-                stream_scan_type
+                backfill_type
             ))
             .into());
         }
         let stream_plan =
-            self.gen_optimized_stream_plan_inner(emit_on_window_close, stream_scan_type)?;
+            self.gen_optimized_stream_plan_inner(emit_on_window_close, backfill_type)?;
         let target_columns_to_plan_mapping = target_table.as_ref().map(|t| {
             let columns = t.columns_without_rw_timestamp();
             stream_plan.target_columns_to_plan_mapping(&columns, user_specified_columns)

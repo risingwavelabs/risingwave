@@ -52,7 +52,7 @@ use crate::manager::{
     MetadataManager,
 };
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::{ScaleControllerRef, SourceManagerRef};
+use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
 /// [`crate::barrier::worker::GlobalBarrierWorker`] sends barriers to all registered compute nodes and
@@ -88,8 +88,6 @@ pub(super) struct GlobalBarrierWorker<C> {
 
     active_streaming_nodes: ActiveStreamingWorkerNodes,
 
-    sink_manager: SinkCoordinatorManager,
-
     control_stream_manager: ControlStreamManager,
 
     term_id: String,
@@ -98,7 +96,6 @@ pub(super) struct GlobalBarrierWorker<C> {
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     pub(super) async fn new_inner(
         env: MetaSrvEnv,
-        sink_manager: SinkCoordinatorManager,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         context: Arc<C>,
     ) -> Self {
@@ -124,7 +121,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             completing_task: CompletingTask::None,
             request_rx,
             active_streaming_nodes,
-            sink_manager,
             control_stream_manager,
             term_id: "uninitialized".into(),
         }
@@ -143,6 +139,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         barrier_scheduler: schedule::BarrierScheduler,
+        refresh_manager: GlobalRefreshManagerRef,
     ) -> Self {
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
 
@@ -155,9 +152,11 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             scale_controller,
             env.clone(),
             barrier_scheduler,
+            refresh_manager,
+            sink_manager,
         ));
 
-        Self::new_inner(env, sink_manager, request_rx, context).await
+        Self::new_inner(env, request_rx, context).await
     }
 
     pub fn start(self) -> (JoinHandle<()>, Sender<()>) {
@@ -176,7 +175,9 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             .env
             .system_params_reader()
             .await
-            .pause_on_next_bootstrap();
+            .pause_on_next_bootstrap()
+            || self.env.opts.pause_on_next_bootstrap_offline;
+
         if paused {
             warn!(
                 "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
@@ -282,7 +283,14 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 if result_tx.send(progress).is_err() {
                                     error!("failed to send get ddl progress");
                                 }
-                            }// Handle adhoc recovery triggered by user.
+                            }
+                            BarrierManagerRequest::GetCdcProgress(result_tx) => {
+                                let progress = self.checkpoint_control.gen_cdc_progress();
+                                if result_tx.send(progress).is_err() {
+                                    error!("failed to send get ddl progress");
+                                }
+                            }
+                            // Handle adhoc recovery triggered by user.
                             BarrierManagerRequest::AdhocRecovery(sender) => {
                                 self.adhoc_recovery().await;
                                 if sender.send(()).is_err() {
@@ -374,17 +382,28 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }));
                                 Self::report_collect_failure(&self.env, &error);
                                 self.context.notify_creating_job_failed(Some(database_id), format!("{}", error.as_report())).await;
-                                match self.context.reload_database_runtime_info(database_id).await? { Some(runtime_info) => {
-                                    runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
-                                        warn!(%database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
-                                    })?;
-                                    entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
-                                } _ => {
-                                    info!(%database_id, "database removed after reloading empty runtime info");
-                                    // mark ready to unblock subsequent request
-                                    self.context.mark_ready(MarkReadyOptions::Database(database_id));
-                                    entering_initializing.remove();
-                                }}
+                                match self.context.reload_database_runtime_info(database_id).await.and_then(|runtime_info| {
+                                    runtime_info.map(|runtime_info| {
+                                        runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
+                                            warn!(%database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
+                                        })?;
+                                        Ok(runtime_info)
+                                    })
+                                    .transpose()
+                                }) {
+                                    Ok(Some(runtime_info)) => {
+                                        entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
+                                    }
+                                    Ok(None) => {
+                                        info!(%database_id, "database removed after reloading empty runtime info");
+                                        // mark ready to unblock subsequent request
+                                        self.context.mark_ready(MarkReadyOptions::Database(database_id));
+                                        entering_initializing.remove();
+                                    }
+                                    Err(e) => {
+                                        entering_initializing.fail_reload_runtime_info(e);
+                                    }
+                                }
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
@@ -751,6 +770,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             self.context
                 .notify_creating_job_failed(None, recovery_reason.clone())
                 .await;
+
             let runtime_info_snapshot = self
                 .context
                 .reload_runtime_info()
@@ -770,10 +790,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut background_jobs,
                 hummock_version_stats,
                 database_infos,
-                mut cdc_table_snapshot_split_assignment,
+                mut cdc_table_snapshot_splits,
             } = runtime_info_snapshot;
 
-            self.sink_manager.reset().await;
             let term_id = Uuid::new_v4().to_string();
 
 
@@ -800,6 +819,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         jobs,
                         &mut state_table_committed_epochs,
                         &mut state_table_log_epochs,
+                        &fragment_relations,
                         &mut edges,
                         &stream_actors,
                         &mut source_splits,
@@ -807,7 +827,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &mut mv_depended_subscriptions,
                         is_paused,
                         &hummock_version_stats,
-                        &mut cdc_table_snapshot_split_assignment,
+                        &mut cdc_table_snapshot_splits,
                     );
                     let node_to_collect = match result {
                         Ok(info) => {

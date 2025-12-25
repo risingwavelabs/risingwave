@@ -18,7 +18,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
-use super::util::execute_with_long_running_notification;
+use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
 use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
@@ -55,12 +55,11 @@ pub async fn handle_drop_index(
                 index.clone()
             }
             Err(err) => {
-                match err {
-                    CatalogError::NotFound("index", _) => {
-                        // index not found, try to find table below to give a better error message
-                    }
-                    _ => return Err(err.into()),
-                };
+                if err.is_not_found("index") {
+                    // index not found, try to find table below to give a better error message
+                } else {
+                    return Err(err.into());
+                }
                 return match reader.get_created_table_by_name(db_name, schema_path, &index_name) {
                     Ok((table, _)) => match table.table_type() {
                         TableType::Index => unreachable!(),
@@ -74,13 +73,10 @@ pub async fn handle_drop_index(
                                     index_name
                                 ))
                                 .into())
+                        } else if e.is_not_found("table") {
+                            Err(CatalogError::not_found("index", index_name).into())
                         } else {
-                            match e {
-                                CatalogError::NotFound("table", name) => {
-                                    Err(CatalogError::NotFound("index", name).into())
-                                }
-                                _ => Err(e.into()),
-                            }
+                            Err(e.into())
                         }
                     }
                 };
@@ -106,6 +102,7 @@ pub async fn handle_drop_index(
             catalog_writer.drop_index(index_id, cascade),
             &session,
             "DROP INDEX",
+            LongRunningNotificationAction::SuggestRecover,
         )
         .await?;
     }

@@ -93,6 +93,7 @@ use risingwave_pb::meta::list_actor_states_response::ActorState;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
+use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::meta_member_service_client::MetaMemberServiceClient;
@@ -642,6 +643,22 @@ impl MetaClient {
         };
 
         self.inner.alter_parallelism(request).await?;
+        Ok(())
+    }
+
+    pub async fn alter_streaming_job_config(
+        &self,
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> Result<()> {
+        let request = AlterStreamingJobConfigRequest {
+            job_id,
+            entries_to_add,
+            keys_to_remove,
+        };
+
+        self.inner.alter_streaming_job_config(request).await?;
         Ok(())
     }
 
@@ -1496,6 +1513,24 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_connection_connector_props(
+        &self,
+        connection_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> Result<()> {
+        let req = AlterConnectorPropsRequest {
+            object_id: connection_id,
+            changed_props: changed_props.into_iter().collect(),
+            changed_secret_refs: changed_secret_refs.into_iter().collect(),
+            connector_conn_ref: None, // Connections don't reference other connections
+            object_type: AlterConnectorPropsObject::Connection as i32,
+            extra_options: None,
+        };
+        let _resp = self.inner.alter_connector_props(req).await?;
+        Ok(())
+    }
+
     pub async fn set_system_param(
         &self,
         param: String,
@@ -1805,6 +1840,12 @@ impl MetaClient {
         let request = ListCdcProgressRequest {};
         let resp = self.inner.list_cdc_progress(request).await?;
         Ok(resp.cdc_progress)
+    }
+
+    pub async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>> {
+        let request = ListRefreshTableStatesRequest {};
+        let resp = self.inner.list_refresh_table_states(request).await?;
+        Ok(resp.states)
     }
 
     pub async fn create_iceberg_table(
@@ -2458,6 +2499,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, recover, RecoverRequest, RecoverResponse }
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
+            ,{ stream_client, list_refresh_table_states, ListRefreshTableStatesRequest, ListRefreshTableStatesResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, get_fragment_vnodes, GetFragmentVnodesRequest, GetFragmentVnodesResponse }
@@ -2470,6 +2512,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_streaming_job_config, AlterStreamingJobConfigRequest, AlterStreamingJobConfigResponse }
             ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }

@@ -591,6 +591,7 @@ pub(crate) mod tests {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
             vector_index_info: None,
             cdc_table_type: None,
         };
@@ -729,7 +730,6 @@ pub(crate) mod tests {
             worker_node_selector,
             catalog_reader,
             None,
-            "UTC".to_owned(),
             batch_exchange_node.clone(),
         )
         .unwrap();

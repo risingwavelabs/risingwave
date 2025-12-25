@@ -13,14 +13,17 @@
 // limitations under the License.
 
 use std::collections::{BTreeSet, HashMap, HashSet};
+use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX};
+use risingwave_common::catalog::{
+    FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX,
+};
 use risingwave_common::hash::{ActorMapping, VnodeBitmapExt, WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::id::{JobId, SubscriptionId};
-use risingwave_common::types::Datum;
+use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
@@ -63,12 +66,13 @@ use sea_orm::{
     RelationTrait, Set, Statement,
 };
 use thiserror_ext::AsReport;
+use tracing::warn;
 
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo};
 use crate::controller::ObjectModel;
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::scale::resolve_streaming_job_definition;
-use crate::model::FragmentDownstreamRelation;
+use crate::model::{FragmentDownstreamRelation, StreamContext};
 use crate::{MetaError, MetaResult};
 
 /// This function will construct a query using recursive cte to find all objects[(id, `obj_type`)] that are used by the given object.
@@ -999,6 +1003,90 @@ where
     Ok(index_table_ids)
 }
 
+/// `get_iceberg_related_object_ids` returns the related object ids of the iceberg source, sink and internal tables.
+pub async fn get_iceberg_related_object_ids<C>(
+    object_id: ObjectId,
+    db: &C,
+) -> MetaResult<Vec<ObjectId>>
+where
+    C: ConnectionTrait,
+{
+    let object = Object::find_by_id(object_id)
+        .one(db)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("object", object_id))?;
+    if object.obj_type != ObjectType::Table {
+        return Ok(vec![]);
+    }
+
+    let table = Table::find_by_id(object_id.as_table_id())
+        .one(db)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+    if !matches!(table.engine, Some(table::Engine::Iceberg)) {
+        return Ok(vec![]);
+    }
+
+    let database_id = object.database_id.unwrap();
+    let schema_id = object.schema_id.unwrap();
+
+    let mut related_objects = vec![];
+
+    let iceberg_sink_name = format!("{}{}", ICEBERG_SINK_PREFIX, table.name);
+    let iceberg_sink_id = Sink::find()
+        .inner_join(Object)
+        .select_only()
+        .column(sink::Column::SinkId)
+        .filter(
+            object::Column::DatabaseId
+                .eq(database_id)
+                .and(object::Column::SchemaId.eq(schema_id))
+                .and(sink::Column::Name.eq(&iceberg_sink_name)),
+        )
+        .into_tuple::<SinkId>()
+        .one(db)
+        .await?;
+    if let Some(sink_id) = iceberg_sink_id {
+        related_objects.push(sink_id.as_object_id());
+        let sink_internal_tables = get_internal_tables_by_id(sink_id.as_job_id(), db).await?;
+        related_objects.extend(
+            sink_internal_tables
+                .into_iter()
+                .map(|tid| tid.as_object_id()),
+        );
+    } else {
+        warn!(
+            "iceberg table {} missing sink {}",
+            table.name, iceberg_sink_name
+        );
+    }
+
+    let iceberg_source_name = format!("{}{}", ICEBERG_SOURCE_PREFIX, table.name);
+    let iceberg_source_id = Source::find()
+        .inner_join(Object)
+        .select_only()
+        .column(source::Column::SourceId)
+        .filter(
+            object::Column::DatabaseId
+                .eq(database_id)
+                .and(object::Column::SchemaId.eq(schema_id))
+                .and(source::Column::Name.eq(&iceberg_source_name)),
+        )
+        .into_tuple::<SourceId>()
+        .one(db)
+        .await?;
+    if let Some(source_id) = iceberg_source_id {
+        related_objects.push(source_id.as_object_id());
+    } else {
+        warn!(
+            "iceberg table {} missing source {}",
+            table.name, iceberg_source_name
+        );
+    }
+
+    Ok(related_objects)
+}
+
 #[derive(Clone, DerivePartialModel, FromQueryResult)]
 #[sea_orm(entity = "UserPrivilege")]
 pub struct PartialUserPrivilege {
@@ -1160,8 +1248,6 @@ where
         .map(|(grantee, _, _, _)| *grantee)
         .collect::<HashSet<_>>();
 
-    let internal_table_ids = get_internal_tables_by_id(object_id.as_job_id(), db).await?;
-
     for (grantee, granted_by, action, with_grant_option) in default_privileges {
         UserPrivilege::insert(user_privilege::ActiveModel {
             user_id: Set(grantee),
@@ -1173,19 +1259,40 @@ where
         })
         .exec(db)
         .await?;
-        if action == Action::Select && !internal_table_ids.is_empty() {
+        if action == Action::Select {
             // Grant SELECT privilege for internal tables if the action is SELECT.
-            for internal_table_id in &internal_table_ids {
-                UserPrivilege::insert(user_privilege::ActiveModel {
-                    user_id: Set(grantee),
-                    oid: Set(internal_table_id.as_object_id()),
-                    granted_by: Set(granted_by),
-                    action: Set(Action::Select),
-                    with_grant_option: Set(with_grant_option),
-                    ..Default::default()
-                })
-                .exec(db)
-                .await?;
+            let internal_table_ids = get_internal_tables_by_id(object_id.as_job_id(), db).await?;
+            if !internal_table_ids.is_empty() {
+                for internal_table_id in &internal_table_ids {
+                    UserPrivilege::insert(user_privilege::ActiveModel {
+                        user_id: Set(grantee),
+                        oid: Set(internal_table_id.as_object_id()),
+                        granted_by: Set(granted_by),
+                        action: Set(Action::Select),
+                        with_grant_option: Set(with_grant_option),
+                        ..Default::default()
+                    })
+                    .exec(db)
+                    .await?;
+                }
+            }
+
+            // Additionally, grant SELECT privilege for iceberg related objects if the action is SELECT.
+            let iceberg_privilege_object_ids =
+                get_iceberg_related_object_ids(object_id, db).await?;
+            if !iceberg_privilege_object_ids.is_empty() {
+                for iceberg_object_id in &iceberg_privilege_object_ids {
+                    UserPrivilege::insert(user_privilege::ActiveModel {
+                        user_id: Set(grantee),
+                        oid: Set(*iceberg_object_id),
+                        granted_by: Set(granted_by),
+                        action: Set(action),
+                        with_grant_option: Set(with_grant_option),
+                        ..Default::default()
+                    })
+                    .exec(db)
+                    .await?;
+                }
             }
         }
     }
@@ -1275,7 +1382,7 @@ pub fn compose_dispatchers(
                     )
                     .to_protobuf(),
                 ),
-                dispatcher_id: target_fragment_id.as_raw_id() as _,
+                dispatcher_id: target_fragment_id,
                 downstream_actor_id: target_fragment_actors.keys().copied().collect(),
             };
             source_fragment_actors
@@ -1289,7 +1396,7 @@ pub fn compose_dispatchers(
                 dist_key_indices,
                 output_mapping: output_mapping.into(),
                 hash_mapping: None,
-                dispatcher_id: target_fragment_id.as_raw_id() as _,
+                dispatcher_id: target_fragment_id,
                 downstream_actor_id: target_fragment_actors.keys().copied().collect(),
             };
             source_fragment_actors
@@ -1312,7 +1419,7 @@ pub fn compose_dispatchers(
                     dist_key_indices: dist_key_indices.clone(),
                     output_mapping: output_mapping.clone().into(),
                     hash_mapping: None,
-                    dispatcher_id: target_fragment_id.as_raw_id() as _,
+                    dispatcher_id: target_fragment_id,
                     downstream_actor_id: vec![downstream_actor_id],
                 },
             )
@@ -2166,15 +2273,19 @@ pub fn build_select_node_list(
 
     for to_col in to {
         let to_col = to_col.column_desc.as_ref().unwrap();
-        let to_col_type = to_col.column_type.clone();
+        let to_col_type_ref = to_col.column_type.as_ref().unwrap();
+        let to_col_type = DataType::from(to_col_type_ref);
         if let Some(from_idx) = idx_by_col_id.get(&to_col.column_id) {
-            let from_col_type = from[*from_idx]
-                .column_desc
-                .as_ref()
-                .unwrap()
-                .column_type
-                .clone();
-            if to_col_type != from_col_type {
+            let from_col_type = DataType::from(
+                from[*from_idx]
+                    .column_desc
+                    .as_ref()
+                    .unwrap()
+                    .column_type
+                    .as_ref()
+                    .unwrap(),
+            );
+            if !to_col_type.equals_datatype(&from_col_type) {
                 return Err(anyhow!(
                     "Column type mismatch: {:?} != {:?}",
                     from_col_type,
@@ -2184,7 +2295,7 @@ pub fn build_select_node_list(
             }
             exprs.push(PbExprNode {
                 function_type: expr_node::Type::Unspecified.into(),
-                return_type: to_col_type,
+                return_type: Some(to_col_type_ref.clone()),
                 rex_node: Some(expr_node::RexNode::InputRef(*from_idx as _)),
             });
         } else {
@@ -2199,7 +2310,7 @@ pub fn build_select_node_list(
                     let null = Datum::None.to_protobuf();
                     PbExprNode {
                         function_type: expr_node::Type::Unspecified.into(),
-                        return_type: to_col_type,
+                        return_type: Some(to_col_type_ref.clone()),
                         rex_node: Some(expr_node::RexNode::Constant(null)),
                     }
                 };
@@ -2213,7 +2324,17 @@ pub fn build_select_node_list(
 #[derive(Clone, Debug, Default)]
 pub struct StreamingJobExtraInfo {
     pub timezone: Option<String>,
+    pub config_override: Arc<str>,
     pub job_definition: String,
+}
+
+impl StreamingJobExtraInfo {
+    pub fn stream_context(&self) -> StreamContext {
+        StreamContext {
+            timezone: self.timezone.clone(),
+            config_override: self.config_override.clone(),
+        }
+    }
 }
 
 pub async fn get_streaming_job_extra_info<C>(
@@ -2223,11 +2344,12 @@ pub async fn get_streaming_job_extra_info<C>(
 where
     C: ConnectionTrait,
 {
-    let timezone_pairs: Vec<(JobId, Option<String>)> = StreamingJob::find()
+    let pairs: Vec<(JobId, Option<String>, Option<String>)> = StreamingJob::find()
         .select_only()
         .columns([
             streaming_job::Column::JobId,
             streaming_job::Column::Timezone,
+            streaming_job::Column::ConfigOverride,
         ])
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
         .into_tuple()
@@ -2238,14 +2360,15 @@ where
 
     let mut definitions = resolve_streaming_job_definition(txn, &job_ids).await?;
 
-    let result = timezone_pairs
+    let result = pairs
         .into_iter()
-        .map(|(job_id, timezone)| {
+        .map(|(job_id, timezone, config_override)| {
             let job_definition = definitions.remove(&job_id).unwrap_or_default();
             (
                 job_id,
                 StreamingJobExtraInfo {
                     timezone,
+                    config_override: config_override.unwrap_or_default().into(),
                     job_definition,
                 },
             )

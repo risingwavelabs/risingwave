@@ -401,6 +401,17 @@ impl Catalog for JniCatalog {
         })?
     }
 
+    async fn register_table(
+        &self,
+        _table_ident: &TableIdent,
+        _metadata_location: String,
+    ) -> iceberg::Result<Table> {
+        Err(iceberg::Error::new(
+            iceberg::ErrorKind::Unexpected,
+            "register_table is not supported by JniCatalog",
+        ))
+    }
+
     /// Check if a table exists in the catalog.
     async fn table_exists(&self, table: &TableIdent) -> iceberg::Result<bool> {
         execute_with_jni_env(self.jvm, |env| {

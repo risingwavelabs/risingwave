@@ -22,7 +22,7 @@ use futures_async_stream::for_await;
 use parking_lot::RwLock;
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_response::StatementType;
-use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     AlterDatabaseParam, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
@@ -62,6 +62,7 @@ use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
 use risingwave_pb::meta::list_iceberg_tables_response::IcebergTable;
 use risingwave_pb::meta::list_object_dependencies_response::PbObjectDependencies;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
+use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
@@ -80,7 +81,7 @@ use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, FragmentId, SchemaId, SecretId, SinkId};
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
@@ -96,13 +97,14 @@ pub struct LocalFrontend {
 }
 
 impl SessionManager for LocalFrontend {
+    type Error = RwError;
     type Session = SessionImpl;
 
     fn create_dummy_session(
         &self,
         _database_id: DatabaseId,
         _user_name: u32,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    ) -> std::result::Result<Arc<Self::Session>, Self::Error> {
         unreachable!()
     }
 
@@ -111,7 +113,7 @@ impl SessionManager for LocalFrontend {
         _database: &str,
         _user_name: &str,
         _peer_addr: AddressRef,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    ) -> std::result::Result<Arc<Self::Session>, Self::Error> {
         Ok(self.session_ref())
     }
 
@@ -685,6 +687,15 @@ impl CatalogWriter for MockCatalogWriter {
         todo!()
     }
 
+    async fn alter_config(
+        &self,
+        _job_id: JobId,
+        _entries_to_add: HashMap<String, String>,
+        _keys_to_remove: Vec<String>,
+    ) -> Result<()> {
+        todo!()
+    }
+
     async fn alter_swap_rename(&self, _object: alter_swap_rename_request::Object) -> Result<()> {
         todo!()
     }
@@ -1123,6 +1134,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
+    async fn list_refresh_table_states(&self) -> RpcResult<Vec<RefreshTableState>> {
+        unimplemented!()
+    }
+
     async fn get_hummock_current_version(&self) -> RpcResult<HummockVersion> {
         Ok(HummockVersion::default())
     }
@@ -1152,7 +1167,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     }
 
     async fn list_event_log(&self) -> RpcResult<Vec<EventLog>> {
-        unimplemented!()
+        Ok(vec![])
     }
 
     async fn list_compact_task_assignment(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
@@ -1238,6 +1253,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _connector_conn_ref: Option<ConnectionId>,
     ) -> RpcResult<()> {
         unimplemented!()
+    }
+
+    async fn alter_connection_connector_props(
+        &self,
+        _connection_id: u32,
+        _changed_props: BTreeMap<String, String>,
+        _changed_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {

@@ -88,9 +88,10 @@ use risingwave_common::{
 };
 use risingwave_pb::catalog::PbSinkType;
 use risingwave_pb::connector_service::{PbSinkParam, SinkMetadata, TableSchema};
+use risingwave_pb::id::ExecutorId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_rpc_client::error::RpcError;
-use sea_orm::DatabaseConnection;
+use starrocks::STARROCKS_SINK;
 use thiserror::Error;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -101,10 +102,10 @@ use self::clickhouse::CLICKHOUSE_SINK;
 use self::deltalake::DELTALAKE_SINK;
 use self::iceberg::ICEBERG_SINK;
 use self::mock_coordination_client::{MockMetaClient, SinkCoordinationRpcClientEnum};
-use self::starrocks::STARROCKS_SINK;
 use crate::WithPropertiesExt;
 use crate::connector_common::IcebergSinkCompactionUpdate;
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::sink::boxed::{BoxSinglePhaseCoordinator, BoxTwoPhaseCoordinator};
 use crate::sink::catalog::desc::SinkDesc;
 use crate::sink::catalog::{SinkCatalog, SinkId};
 use crate::sink::decouple_checkpoint_log_sink::ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL;
@@ -563,7 +564,7 @@ impl SinkMetrics {
 #[derive(Clone)]
 pub struct SinkWriterParam {
     // TODO(eric): deprecate executor_id
-    pub executor_id: u64,
+    pub executor_id: ExecutorId,
     pub vnode_bitmap: Option<Bitmap>,
     pub meta_client: Option<SinkMetaClient>,
     // The val has two effect:
@@ -687,8 +688,6 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
     const SINK_NAME: &'static str;
 
     type LogSinker: LogSinker;
-    #[expect(deprecated)]
-    type Coordinator: SinkCommitCoordinator = NoSinkCommitCoordinator;
 
     fn set_default_commit_checkpoint_interval(
         desc: &mut SinkDesc,
@@ -759,9 +758,8 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
+    ) -> Result<SinkCommitCoordinator> {
         Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }
@@ -814,14 +812,17 @@ pub type SinkCommittedEpochSubscriber = Arc<
         + 'static,
 >;
 
+pub enum SinkCommitCoordinator {
+    SinglePhase(BoxSinglePhaseCoordinator),
+    TwoPhase(BoxTwoPhaseCoordinator),
+}
+
 #[async_trait]
-pub trait SinkCommitCoordinator {
-    /// Initialize the sink committer coordinator, return the log store rewind start offset.
-    async fn init(&mut self, subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>>;
-    /// After collecting the metadata from each sink writer, a coordinator will call `commit` with
-    /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
-    /// to be passed between different gRPC node, so in this general trait, the metadata is
-    /// serialized bytes.
+pub trait SinglePhaseCommitCoordinator {
+    /// Initialize the sink committer coordinator.
+    async fn init(&mut self) -> Result<()>;
+
+    /// Commit directly using single-phase strategy.
     async fn commit(
         &mut self,
         epoch: u64,
@@ -830,37 +831,24 @@ pub trait SinkCommitCoordinator {
     ) -> Result<()>;
 }
 
-#[deprecated]
-/// A place holder struct of `SinkCommitCoordinator` for sink without coordinator.
-///
-/// It can never be constructed because it holds a never type, and therefore it's safe to
-/// mark all its methods as unreachable.
-///
-/// Explicitly mark this struct as `deprecated` so that when developers accidentally declare it explicitly as
-/// the associated type `Coordinator` when implementing `Sink` trait, they can be warned, and remove the explicit
-/// declaration.
-///
-/// Note:
-///     When we implement a sink without coordinator, don't explicitly write `type Coordinator = NoSinkCommitCoordinator`.
-///     Just remove the explicit declaration and use the default associated type, and besides, don't explicitly implement
-///     `fn new_coordinator(...)` and use the default implementation.
-pub struct NoSinkCommitCoordinator(!);
-
-#[expect(deprecated)]
 #[async_trait]
-impl SinkCommitCoordinator for NoSinkCommitCoordinator {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        unreachable!()
-    }
+pub trait TwoPhaseCommitCoordinator {
+    /// Initialize the sink committer coordinator.
+    async fn init(&mut self) -> Result<()>;
 
-    async fn commit(
+    /// Return serialized commit metadata to be passed to `commit`.
+    async fn pre_commit(
         &mut self,
-        _epoch: u64,
-        _metadata: Vec<SinkMetadata>,
-        _add_columns: Option<Vec<Field>>,
-    ) -> Result<()> {
-        unreachable!()
-    }
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+        add_columns: Option<Vec<Field>>,
+    ) -> Result<Vec<u8>>;
+
+    /// Idempotent implementation is required, because `commit` in the same epoch could be called multiple times.
+    async fn commit(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()>;
+
+    /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
+    async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>);
 }
 
 impl SinkImpl {

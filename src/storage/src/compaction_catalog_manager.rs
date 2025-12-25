@@ -509,7 +509,10 @@ pub type CompactionCatalogAgentRef = Arc<CompactionCatalogAgent>;
 fn build_watermark_col_serde(
     table_catalog: &Table,
 ) -> Option<(OrderedRowSerde, OrderedRowSerde, usize)> {
-    match table_catalog.clean_watermark_index_in_pk {
+    // Get clean watermark PK index using the helper method
+    let clean_watermark_index_in_pk = table_catalog.get_clean_watermark_index_in_pk_compat();
+
+    match clean_watermark_index_in_pk {
         None => {
             // non watermark table or watermark column is the first column (pk_prefix_watermark)
             None
@@ -541,14 +544,8 @@ fn build_watermark_col_serde(
 
             assert_eq!(pk_data_types.len(), pk_order_types.len());
             let pk_serde = OrderedRowSerde::new(pk_data_types, pk_order_types);
-            let watermark_col_serde = pk_serde
-                .index(clean_watermark_index_in_pk as usize)
-                .into_owned();
-            Some((
-                pk_serde,
-                watermark_col_serde,
-                clean_watermark_index_in_pk as usize,
-            ))
+            let watermark_col_serde = pk_serde.index(clean_watermark_index_in_pk).into_owned();
+            Some((pk_serde, watermark_col_serde, clean_watermark_index_in_pk))
         }
     }
 }
@@ -677,11 +674,12 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
             refreshable: false,
             vector_index_info: None,
             cdc_table_type: None,
-            refresh_state: Some(risingwave_pb::catalog::RefreshState::Idle as i32),
         }
     }
 
