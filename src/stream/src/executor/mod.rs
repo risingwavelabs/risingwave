@@ -338,7 +338,6 @@ pub struct AddMutation {
     pub added_actors: HashSet<ActorId>,
     // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
     pub splits: SplitAssignments,
-    pub pause: bool,
     /// (`upstream_mv_table_id`,  `subscriber_id`)
     pub subscriptions_to_add: Vec<(TableId, SubscriberId)>,
     /// nodes which should start backfill
@@ -567,10 +566,7 @@ impl Barrier {
 
     /// Whether this barrier requires the executor to pause its data stream on startup.
     pub fn is_pause_on_startup(&self) -> bool {
-        match self.mutation.as_deref() {
-            Some(Mutation::Add(AddMutation { pause, .. })) => *pause,
-            _ => false,
-        }
+        false
     }
 
     pub fn is_backfill_pause_on_startup(&self, backfill_fragment_id: FragmentId) -> bool {
@@ -735,9 +731,8 @@ impl Mutation {
         use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
         use risingwave_pb::stream_plan::{
             PbAddMutation, PbConnectorPropsChangeMutation, PbDispatchers,
-            PbDropSubscriptionsMutation, PbPauseMutation, PbResumeMutation, PbSinkAddColumns,
-            PbSourceChangeSplitMutation, PbStartFragmentBackfillMutation, PbStopMutation,
-            PbThrottleMutation, PbUpdateMutation,
+            PbDropSubscriptionsMutation, PbSinkAddColumns, PbSourceChangeSplitMutation,
+            PbStartFragmentBackfillMutation, PbStopMutation, PbThrottleMutation, PbUpdateMutation,
         };
         let actor_splits_to_protobuf = |actor_splits: &SplitAssignments| {
             actor_splits
@@ -816,7 +811,6 @@ impl Mutation {
                 adds,
                 added_actors,
                 splits,
-                pause,
                 subscriptions_to_add,
                 backfill_nodes_to_pause,
                 actor_cdc_table_snapshot_splits,
@@ -835,7 +829,6 @@ impl Mutation {
                     .collect(),
                 added_actors: added_actors.iter().copied().collect(),
                 actor_splits: actor_splits_to_protobuf(splits),
-                pause: *pause,
                 subscriptions_to_add: subscriptions_to_add
                     .iter()
                     .map(|(table_id, subscriber_id)| SubscriptionUpstreamInfo {
@@ -877,8 +870,9 @@ impl Mutation {
                         .collect(),
                 })
             }
-            Mutation::Pause => PbMutation::Pause(PbPauseMutation {}),
-            Mutation::Resume => PbMutation::Resume(PbResumeMutation {}),
+            Mutation::Pause | Mutation::Resume => {
+                unreachable!()
+            },
             Mutation::Throttle(changes) => PbMutation::Throttle(PbThrottleMutation {
                 actor_throttle: changes
                     .iter()
@@ -1019,7 +1013,6 @@ impl Mutation {
                         )
                     })
                     .collect(),
-                pause: add.pause,
                 subscriptions_to_add: add
                     .subscriptions_to_add
                     .iter()
@@ -1061,8 +1054,6 @@ impl Mutation {
                 }
                 Mutation::SourceChangeSplit(change_splits.into_iter().collect())
             }
-            PbMutation::Pause(_) => Mutation::Pause,
-            PbMutation::Resume(_) => Mutation::Resume,
             PbMutation::Throttle(changes) => Mutation::Throttle(
                 changes
                     .actor_throttle

@@ -96,6 +96,24 @@ impl GlobalBarrierManager {
         Ok(())
     }
 
+    pub async fn pause(&self) -> MetaResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(BarrierManagerRequest::Pause(tx))
+            .context("failed to send pause request")?;
+        rx.await.context("failed to wait pause")?;
+        Ok(())
+    }
+
+    pub async fn resume(&self) -> MetaResult<()> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(BarrierManagerRequest::Resume(tx))
+            .context("failed to send resume request")?;
+        rx.await.context("failed to wait resume")?;
+        Ok(())
+    }
+
     pub async fn update_database_barrier(
         &self,
         database_id: DatabaseId,
