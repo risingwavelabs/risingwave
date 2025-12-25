@@ -599,6 +599,8 @@ impl TableCatalog {
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
+            #[expect(deprecated)]
+            cleaned_by_watermark: false,
             stream_job_status: self.stream_job_status.to_proto().into(),
             create_type: self.create_type.to_proto().into(),
             description: self.description.clone(),
@@ -936,6 +938,8 @@ mod tests {
             dist_key_in_pk: vec![0],
             cardinality: None,
             created_at_epoch: None,
+            #[expect(deprecated)]
+            cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_owned()),
