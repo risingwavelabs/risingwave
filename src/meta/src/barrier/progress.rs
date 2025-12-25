@@ -52,7 +52,7 @@ pub(super) struct PendingBackfillFragments {
 }
 
 /// Progress of all actors containing backfill executors while creating mview.
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct Progress {
     job_id: JobId,
     // `states` and `done_count` decides whether the progress is done. See `is_done`.
@@ -272,7 +272,6 @@ impl Progress {
 ///    On recovery, the stream manager will stop managing the job.
 /// 2. if `is_recovered` is true, it is a "Recovered" tracking job.
 ///    On recovery, the barrier manager will recover and start managing the job.
-#[derive(Clone)]
 pub struct TrackingJob {
     job_id: JobId,
     is_recovered: bool,
@@ -326,6 +325,10 @@ impl TrackingJob {
         }
     }
 
+    pub(crate) fn job_id(&self) -> JobId {
+        self.job_id
+    }
+
     /// Notify the metadata manager that the job is finished.
     pub(crate) async fn finish(
         self,
@@ -360,6 +363,7 @@ pub(super) struct StagingCommitInfo {
     pub finished_jobs: Vec<TrackingJob>,
     /// Table IDs whose locality provider state tables need to be truncated
     pub table_ids_to_truncate: Vec<TableId>,
+    pub finished_cdc_table_backfill: Vec<JobId>,
 }
 
 pub(super) enum UpdateProgressResult {
@@ -372,7 +376,7 @@ pub(super) enum UpdateProgressResult {
     BackfillNodeFinished(PendingBackfillFragments),
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub(super) struct CreateMviewProgressTracker {
     job_id: JobId,
     definition: String,
@@ -381,7 +385,7 @@ pub(super) struct CreateMviewProgressTracker {
     status: CreateMviewStatus,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 enum CreateMviewStatus {
     Backfilling {
         /// Progress of the create-mview DDL.
@@ -433,9 +437,12 @@ impl CreateMviewProgressTracker {
                     version_stats,
                     backfill_order_state,
                 );
+                let pending_backfill_nodes = progress
+                    .backfill_order_state
+                    .current_backfill_node_fragment_ids();
                 CreateMviewStatus::Backfilling {
                     progress,
-                    pending_backfill_nodes: vec![],
+                    pending_backfill_nodes,
                     table_ids_to_truncate: vec![],
                 }
             };
@@ -628,6 +635,9 @@ impl CreateMviewProgressTracker {
             upstream_total_key_count,
             backfill_order_state,
         );
+        let pending_backfill_nodes = progress
+            .backfill_order_state
+            .current_backfill_node_fragment_ids();
         Self {
             job_id,
             definition,
@@ -635,7 +645,7 @@ impl CreateMviewProgressTracker {
             tracking_job,
             status: CreateMviewStatus::Backfilling {
                 progress,
-                pending_backfill_nodes: vec![],
+                pending_backfill_nodes,
                 table_ids_to_truncate: vec![],
             },
         }
@@ -672,7 +682,7 @@ impl Progress {
                 let upstream_total_key_count: u64 =
                     calculate_total_key_count(&progress_state.upstream_mv_count, version_stats);
 
-                tracing::debug!(%job_id, "updating progress for table");
+                tracing::trace!(%job_id, "updating progress for table");
                 let pending = progress_state.update(actor, new_state, upstream_total_key_count);
 
                 if progress_state.is_done() {

@@ -88,7 +88,7 @@ impl CompleteBarrierTask {
                     (
                         command_context
                             .as_ref()
-                            .map(|(command, _)| command.barrier_info.prev_epoch.value().0),
+                            .map(|(command, _)| command.barrier_info.prev_epoch()),
                         creating_job_epochs.clone(),
                     ),
                 )
@@ -196,7 +196,7 @@ impl CompleteBarrierTask {
         use risingwave_pb::meta::event_log;
         let event = event_log::EventBarrierComplete {
             prev_epoch: command_ctx.barrier_info.prev_epoch(),
-            cur_epoch: command_ctx.barrier_info.curr_epoch.value().0,
+            cur_epoch: command_ctx.barrier_info.curr_epoch(),
             duration_sec,
             command: command_ctx
                 .command

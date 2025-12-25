@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -67,14 +68,16 @@ use serde::{Deserialize, Serialize};
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{
-    FragmentRenderMap, NoShuffleEnsemble, find_fragment_no_shuffle_dags_detailed,
-    load_fragment_info, resolve_streaming_job_definition,
+    FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
+    find_fragment_no_shuffle_dags_detailed, load_fragment_context_for_jobs,
+    render_actor_assignments, resolve_streaming_job_definition,
 };
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
     get_sink_fragment_by_ids, has_table_been_migrated, rebuild_fragment_mapping,
     resolve_no_shuffle_actor_dispatcher,
 };
+use crate::error::MetaError;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
@@ -86,7 +89,7 @@ use crate::stream::UpstreamSinkInfo;
 use crate::{MetaResult, model};
 
 /// Some information of running (inflight) actors.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct InflightActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<Bitmap>,
@@ -104,15 +107,15 @@ struct ActorInfo {
     pub config_override: Arc<str>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct InflightFragmentInfo {
-    pub fragment_id: crate::model::FragmentId,
+    pub fragment_id: FragmentId,
     pub distribution_type: DistributionType,
     pub fragment_type_mask: FragmentTypeMask,
     pub vnode_count: usize,
     pub nodes: PbStreamNode,
-    pub actors: HashMap<crate::model::ActorId, InflightActorInfo>,
-    pub state_table_ids: HashSet<risingwave_common::catalog::TableId>,
+    pub actors: HashMap<ActorId, InflightActorInfo>,
+    pub state_table_ids: HashSet<TableId>,
 }
 
 #[derive(Clone, Debug)]
@@ -153,6 +156,7 @@ pub struct StreamingJobInfo {
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
     pub resource_group: String,
+    pub config_override: String,
     pub database_id: DatabaseId,
     pub schema_id: SchemaId,
 }
@@ -753,6 +757,12 @@ impl CatalogController {
         Ok(result)
     }
 
+    pub async fn count_streaming_jobs(&self) -> MetaResult<usize> {
+        let inner = self.inner.read().await;
+        let count = StreamingJob::find().count(&inner.db).await?;
+        Ok(usize::try_from(count).context("streaming job count overflow")?)
+    }
+
     pub async fn list_streaming_job_infos(&self) -> MetaResult<Vec<StreamingJobInfo>> {
         let inner = self.inner.read().await;
         let job_states = StreamingJob::find()
@@ -791,6 +801,13 @@ impl CatalogController {
                     Expr::col((database::Entity, database::Column::ResourceGroup)),
                 ),
                 "resource_group",
+            )
+            .column_as(
+                Expr::if_null(
+                    Expr::col((streaming_job::Entity, streaming_job::Column::ConfigOverride)),
+                    Expr::val(""),
+                ),
+                "config_override",
             )
             .column(object::Column::DatabaseId)
             .column(object::Column::SchemaId)
@@ -1030,25 +1047,27 @@ impl CatalogController {
         let actor_infos = {
             let info = self.env.shared_actor_infos().read_guard();
 
-            fragment_objects
-                .into_iter()
-                .flat_map(|(fragment_id, object_id, schema_id, object_type)| {
-                    let SharedFragmentInfo {
-                        fragment_id,
-                        actors,
-                        ..
-                    } = info.get_fragment(fragment_id as _).unwrap();
-                    actors.keys().map(move |actor_id| {
-                        (
-                            *actor_id as _,
-                            *fragment_id as _,
-                            object_id,
-                            schema_id,
-                            object_type,
-                        )
-                    })
-                })
-                .collect_vec()
+            let mut result = Vec::new();
+
+            for (fragment_id, object_id, schema_id, object_type) in fragment_objects {
+                let Some(fragment) = info.get_fragment(fragment_id as _) else {
+                    return Err(MetaError::unavailable(format!(
+                        "shared actor info missing for fragment {fragment_id} while listing actors"
+                    )));
+                };
+
+                for actor_id in fragment.actors.keys() {
+                    result.push((
+                        *actor_id as _,
+                        fragment.fragment_id as _,
+                        object_id,
+                        schema_id,
+                        object_type,
+                    ));
+                }
+            }
+
+            result
         };
 
         Ok(actor_infos)
@@ -1311,26 +1330,71 @@ impl CatalogController {
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<FragmentRenderMap> {
+        let loaded = self.load_fragment_context(database_id).await?;
+
+        if loaded.is_empty() {
+            return Ok(HashMap::new());
+        }
+
         let adaptive_parallelism_strategy = {
             let system_params_reader = self.env.system_params_reader().await;
             system_params_reader.adaptive_parallelism_strategy()
         };
 
+        let available_workers: BTreeMap<_, _> = worker_nodes
+            .current()
+            .values()
+            .filter(|worker| worker.is_streaming_schedulable())
+            .map(|worker| {
+                (
+                    worker.id,
+                    WorkerInfo {
+                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        resource_group: worker.resource_group(),
+                    },
+                )
+            })
+            .collect();
+
+        let RenderedGraph { fragments, .. } = render_actor_assignments(
+            self.env.actor_id_generator(),
+            &available_workers,
+            adaptive_parallelism_strategy,
+            &loaded,
+        )?;
+
+        tracing::trace!(?fragments, "reload all actors");
+
+        Ok(fragments)
+    }
+
+    /// Async load stage: collects all metadata required for rendering actor assignments.
+    pub async fn load_fragment_context(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<LoadedFragmentContext> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let database_fragment_infos = load_fragment_info(
-            &txn,
-            self.env.actor_id_generator(),
-            database_id,
-            worker_nodes,
-            adaptive_parallelism_strategy,
-        )
-        .await?;
+        let mut query = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId);
 
-        tracing::trace!(?database_fragment_infos, "reload all actors");
+        if let Some(database_id) = database_id {
+            query = query
+                .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+                .filter(object::Column::DatabaseId.eq(database_id));
+        }
 
-        Ok(database_fragment_infos)
+        let jobs: Vec<JobId> = query.into_tuple().all(&txn).await?;
+
+        let jobs: HashSet<JobId> = jobs.into_iter().collect();
+
+        if jobs.is_empty() {
+            return Ok(LoadedFragmentContext::default());
+        }
+
+        load_fragment_context_for_jobs(&txn, jobs).await
     }
 
     #[await_tree::instrument]

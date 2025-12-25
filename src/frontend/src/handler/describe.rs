@@ -43,7 +43,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
 
     Binder::validate_cross_db_reference(&session.database(), &object_name)?;
     let not_found_err =
-        CatalogError::NotFound("table, source, sink or view", object_name.to_string());
+        CatalogError::not_found("table, source, sink or view", object_name.to_string());
 
     // Vec<ColumnCatalog>, Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>, String, Option<String>
     let (columns, pk_columns, dist_columns, indices, relname, description) =
@@ -259,7 +259,7 @@ pub async fn handle_describe_fragments(
         let mut binder = Binder::new_for_system(&session);
 
         Binder::validate_cross_db_reference(&session.database(), &object_name)?;
-        let not_found_err = CatalogError::NotFound("stream job", object_name.to_string());
+        let not_found_err = CatalogError::not_found("stream job", object_name.to_string());
 
         if let Ok(relation) = binder.bind_catalog_relation_by_object_name(&object_name, true) {
             match relation {
@@ -379,7 +379,7 @@ pub async fn handle_describe_fragment(
     let distribution = &meta_client
         .get_fragment_by_id(fragment_id)
         .await?
-        .ok_or_else(|| CatalogError::NotFound("fragment", fragment_id.to_string()))?;
+        .ok_or_else(|| CatalogError::not_found("fragment", fragment_id.to_string()))?;
     let res: PgResponse<super::PgResponseStream> = generate_enhanced_fragment_string(distribution)?;
     Ok(res)
 }

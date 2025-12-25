@@ -23,10 +23,12 @@ use deltalake::aws::storage::s3_constants::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
     AWS_SECRET_ACCESS_KEY,
 };
+use deltalake::datafusion::datasource::TableProvider;
 use deltalake::kernel::transaction::CommitBuilder;
-use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
+use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType};
 use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
+use url::Url;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::DeltaLakeConvert;
@@ -37,7 +39,6 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::UnboundedSender;
@@ -49,8 +50,9 @@ use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION, Sink, SinkCommitCoordinator,
-    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterParam,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
+    SinkWriterParam,
 };
 
 pub const DEFAULT_REGION: &str = "us-east-1";
@@ -99,9 +101,15 @@ impl DeltaLakeCommon {
             DeltaTableUrl::S3(s3_path) => {
                 let storage_options = self.build_delta_lake_config_for_aws().await?;
                 deltalake::aws::register_handlers(None);
-                deltalake::open_table_with_storage_options(&s3_path, storage_options).await?
+                let url = Url::parse(&s3_path)
+                    .map_err(|e| SinkError::DeltaLake(anyhow!(e)))?;
+                deltalake::open_table_with_storage_options(url, storage_options).await?
             }
-            DeltaTableUrl::Local(local_path) => deltalake::open_table(local_path).await?,
+            DeltaTableUrl::Local(local_path) => {
+                let url = Url::parse(&format!("file://{}", local_path))
+                    .map_err(|e| SinkError::DeltaLake(anyhow!(e)))?;
+                deltalake::open_table(url).await?
+            }
             DeltaTableUrl::Gcs(gcs_path) => {
                 let mut storage_options = HashMap::new();
                 storage_options.insert(
@@ -113,7 +121,9 @@ impl DeltaLakeCommon {
                     })?,
                 );
                 deltalake::gcp::register_handlers(None);
-                deltalake::open_table_with_storage_options(gcs_path.clone(), storage_options)
+                let url = Url::parse(&gcs_path)
+                    .map_err(|e| SinkError::DeltaLake(anyhow!(e)))?;
+                deltalake::open_table_with_storage_options(url, storage_options)
                     .await?
             }
         };
@@ -327,7 +337,6 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
 }
 
 impl Sink for DeltaLakeSink {
-    type Coordinator = DeltaLakeSinkCommitter;
     type LogSinker = CoordinatedLogSinker<DeltaLakeSinkWriter>;
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
@@ -370,8 +379,9 @@ impl Sink for DeltaLakeSink {
             )));
         }
         let table = self.config.common.create_deltalake_client().await?;
-        let deltalake_fields: HashMap<&String, &DeltaLakeDataType> = table
-            .get_schema()?
+        let snapshot = table.snapshot()?;
+        let delta_schema = snapshot.schema();
+        let deltalake_fields: HashMap<&String, &DeltaLakeDataType> = delta_schema
             .fields()
             .map(|f| (f.name(), f.data_type()))
             .collect();
@@ -415,12 +425,12 @@ impl Sink for DeltaLakeSink {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
-        Ok(DeltaLakeSinkCommitter {
+    ) -> Result<SinkCommitCoordinator> {
+        let coordinator = DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
-        })
+        };
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -453,8 +463,8 @@ impl DeltaLakeSinkWriter {
     ) -> Result<Self> {
         let dl_table = config.common.create_deltalake_client().await?;
         let writer = RecordBatchWriter::for_table(&dl_table)?;
-        let dl_schema: Arc<deltalake::arrow::datatypes::Schema> =
-            Arc::new(convert_schema(dl_table.get_schema()?)?);
+        // Use TableProvider::schema() to get the arrow schema directly
+        let dl_schema: Arc<deltalake::arrow::datatypes::Schema> = dl_table.schema();
 
         Ok(Self {
             config,
@@ -476,27 +486,6 @@ impl DeltaLakeSinkWriter {
     }
 }
 
-fn convert_schema(schema: &StructType) -> Result<deltalake::arrow::datatypes::Schema> {
-    let mut builder = deltalake::arrow::datatypes::SchemaBuilder::new();
-    for field in schema.fields() {
-        let arrow_field_type = deltalake::arrow::datatypes::DataType::try_from(field.data_type())
-            .with_context(|| {
-                format!(
-                    "Failed to convert DeltaLake data type {:?} to Arrow data type for field '{}'",
-                    field.data_type(),
-                    field.name()
-                )
-            })
-            .map_err(SinkError::DeltaLake)?;
-        let dl_field = deltalake::arrow::datatypes::Field::new(
-            field.name(),
-            arrow_field_type,
-            field.is_nullable(),
-        );
-        builder.push(dl_field);
-    }
-    Ok(builder.finish())
-}
 
 #[async_trait]
 impl SinkWriter for DeltaLakeSinkWriter {
@@ -531,10 +520,10 @@ pub struct DeltaLakeSinkCommitter {
 }
 
 #[async_trait::async_trait]
-impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
         tracing::info!("DeltaLake commit coordinator inited.");
-        Ok(None)
+        Ok(())
     }
 
     async fn commit(
@@ -565,7 +554,7 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
         if write_adds.is_empty() {
             return Ok(());
         }
-        let partition_cols = self.table.metadata()?.partition_columns.clone();
+        let partition_cols = self.table.snapshot()?.metadata().partition_columns().clone();
         let partition_by = if !partition_cols.is_empty() {
             Some(partition_cols)
         } else {
@@ -633,12 +622,13 @@ mod tests {
     use deltalake::kernel::DataType as SchemaDataType;
     use deltalake::operations::create::CreateBuilder;
     use maplit::btreemap;
+    use url::Url;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
 
     use super::{DeltaLakeConfig, DeltaLakeSinkCommitter, DeltaLakeSinkWriter};
-    use crate::sink::SinkCommitCoordinator;
+    use crate::sink::SinglePhaseCommitCoordinator;
     use crate::sink::writer::SinkWriter;
 
     #[tokio::test]
@@ -713,7 +703,7 @@ mod tests {
         // dev dependency.
 
         let ctx = deltalake::datafusion::prelude::SessionContext::new();
-        let table = deltalake::open_table(path).await.unwrap();
+        let table = deltalake::open_table(Url::parse(&format!("file://{}", path)).unwrap()).await.unwrap();
         ctx.register_table("demo", std::sync::Arc::new(table))
             .unwrap();
 

@@ -182,6 +182,7 @@ where
                     match self.wait_init_notification().await {
                         Err(err) => {
                             tracing::warn!(error = %err.as_report(), "Receives meta's notification err");
+                            tokio::time::sleep(RE_SUBSCRIBE_RETRY_INTERVAL).await;
                             continue;
                         }
                         _ => {

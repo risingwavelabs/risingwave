@@ -619,6 +619,13 @@ fn update_compaction_config(target: &mut CompactionConfig, items: &[MutableConfi
             MutableConfig::EnableOptimizeL0IntervalSelection(c) => {
                 target.enable_optimize_l0_interval_selection = Some(*c);
             }
+            MutableConfig::VnodeAlignedLevelSizeThreshold(c) => {
+                target.vnode_aligned_level_size_threshold =
+                    (*c != u64::MIN && *c != u64::MAX).then_some(*c);
+            }
+            MutableConfig::MaxKvCountForXor16(c) => {
+                target.max_kv_count_for_xor16 = (*c != u64::MIN && *c != u64::MAX).then_some(*c);
+            }
         }
     }
 }

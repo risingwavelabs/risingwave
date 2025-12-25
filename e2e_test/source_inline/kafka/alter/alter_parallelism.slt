@@ -192,7 +192,7 @@ db error: ERROR: Failed to run the query
 
 Caused by:
   Invalid input syntax: cannot alter parallelism of non-shared source.
-Use `ALTER MATERIALIZED VIEW SET PARALLELISM` to alter the materialized view using the source instead.
+Use `ALTER MATERIALIZED VIEW` to alter the materialized view using the source instead.
 
 
 system ok

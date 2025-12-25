@@ -34,7 +34,7 @@ else
   RUNTIME_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-monitoring'
   MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-monitoring-and-minio-rate-limit'
 fi
-export RUST_LOG="info,risingwave_stream=info,risingwave_stream::executor::backfill=debug,risingwave_batch=info,risingwave_storage=info,risingwave_meta::barrier=debug" \
+export RUST_LOG="info,risingwave_stream=info,risingwave_stream::executor::backfill=debug,risingwave_batch=info,risingwave_storage=info,risingwave_meta::barrier=debug,risingwave_stream::executor::stream_reader=warn" \
 
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
@@ -207,6 +207,14 @@ test_sink_backfill_recovery() {
   kill_cluster
 }
 
+# Test sink backfill order validation
+test_sink_backfill_order_validation() {
+  echo "--- e2e, test_sink_backfill_order_validation"
+  risedev ci-start ci-backfill
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/sink/test_sink_backfill_order_validation.slt'
+  kill_cluster
+}
+
 test_arrangement_backfill_snapshot_and_upstream_runtime() {
   echo "--- e2e, test_arrangement_backfill_snapshot_and_upstream_runtime, $RUNTIME_CLUSTER_PROFILE"
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
@@ -288,10 +296,18 @@ test_snapshot_backfill() {
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/create_nexmark_table.slt'
 
+  # sleep for a while to let table accumulate enough data
+  sleep 10
+
   psql -h localhost -p 4566 -d dev -U root -c 'ALTER SYSTEM SET max_concurrent_creating_streaming_jobs TO 4;'
 
   TEST_NAME=nexmark_q3 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q3.slt' &
   TEST_NAME=nexmark_q7 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/nexmark/nexmark_q7.slt' &
+
+  wait
+
+  TEST_NAME=nexmark_q3 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/scale.slt' &
+  TEST_NAME=nexmark_q7 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/scale.slt' &
 
   wait
 
@@ -304,17 +320,14 @@ test_snapshot_backfill() {
 
   wait
 
-  TEST_NAME=nexmark_q3 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/scale.slt' &
-  TEST_NAME=nexmark_q7 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/scale.slt' &
-
-  wait
-
   TEST_NAME=nexmark_q3 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/drop_mv.slt' &
   TEST_NAME=nexmark_q7 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/drop_mv.slt' &
 
   wait
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/drop_nexmark_table.slt'
+
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/failed_tests.slt' --label snapshot-backfill
 
   kill_cluster
 }
@@ -427,7 +440,7 @@ test_locality_backfill() {
 
   risedev ci-start $RUNTIME_CLUSTER_PROFILE
 
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/locality_backfill/basic.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/locality_backfill/*.slt'
 
   kill_cluster
 }
@@ -438,6 +451,7 @@ main() {
   test_backfill_tombstone
   test_replication_with_column_pruning
   test_sink_backfill_recovery
+  test_sink_backfill_order_validation
   test_snapshot_backfill
 
   test_scale_in

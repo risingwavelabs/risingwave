@@ -16,7 +16,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
-use super::util::execute_with_long_running_notification;
+use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
@@ -66,6 +66,7 @@ pub async fn handle_drop_table(
         catalog_writer.drop_table(source_id.map(|id| id.as_raw_id()), table_id, cascade),
         &session,
         "DROP TABLE",
+        LongRunningNotificationAction::SuggestRecover,
     )
     .await?;
 

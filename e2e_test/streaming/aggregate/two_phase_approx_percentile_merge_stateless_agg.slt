@@ -39,9 +39,8 @@ statement ok
 recover;
 
 onlyif can-use-recover
-sleep 10s
 
-query I
+query I retry 11 backoff 1s
 select * from m1;
 ----
 -982.5779489474152 0 0 2983.5779489474152
@@ -101,7 +100,7 @@ insert into t select 0.0001, 1 from generate_series(1, 501);
 statement ok
 flush;
 
-query I
+query ????
 select
  round(p01::numeric, 6),
  round(s::numeric, 6),

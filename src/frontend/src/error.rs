@@ -91,6 +91,13 @@ pub enum ErrorCode {
         #[backtrace]
         ArrayError,
     ),
+    #[cfg(feature = "datafusion")]
+    #[error("DataFusion error: {0}")]
+    DataFusionError(
+        #[from]
+        #[backtrace]
+        datafusion_common::DataFusionError,
+    ),
     #[error("Stream error: {0}")]
     StreamError(
         #[backtrace]
@@ -128,10 +135,11 @@ pub enum ErrorCode {
     CatalogError(
         #[source]
         #[backtrace]
+        #[message]
         BoxedError,
     ),
     #[error("Protocol error: {0}")]
-    ProtocolError(String),
+    ProtocolError(#[message] String),
     #[error("Scheduler error: {0}")]
     SchedulerError(
         #[source]
@@ -168,7 +176,7 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("Permission denied: {0}")]
-    PermissionDenied(String),
+    PermissionDenied(#[message] String),
     #[error("Failed to get/set session config: {0}")]
     SessionConfig(
         #[from]

@@ -19,12 +19,13 @@ use std::sync::Arc;
 use async_recursion::async_recursion;
 use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
+use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
 use risingwave_common::config::{MetricLevel, StreamingConfig, merge_streaming_config_section};
-use risingwave_common::must_match;
 use risingwave_common::operator::{unique_executor_id, unique_operator_id};
 use risingwave_common::util::runtime::BackgroundShutdownRuntime;
+use risingwave_pb::id::{ExecutorId, GlobalOperatorId};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{self, StreamNode, StreamScanNode, StreamScanType};
@@ -42,7 +43,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    MergeExecutorInput, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
+    SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -79,13 +80,13 @@ pub(crate) struct StreamActorManager {
 }
 
 impl StreamActorManager {
-    fn get_executor_id(actor_context: &ActorContext, node: &StreamNode) -> u64 {
+    fn get_executor_id(actor_context: &ActorContext, node: &StreamNode) -> ExecutorId {
         // We assume that the operator_id of different instances from the same RelNode will be the
         // same.
         unique_executor_id(actor_context.id, node.operator_id)
     }
 
-    fn get_executor_info(node: &StreamNode, executor_id: u64) -> ExecutorInfo {
+    fn get_executor_info(node: &StreamNode, executor_id: ExecutorId) -> ExecutorInfo {
         let schema: Schema = node.fields.iter().map(Field::from).collect();
 
         let stream_key = node
@@ -107,33 +108,6 @@ impl StreamActorManager {
         }
     }
 
-    async fn create_snapshot_backfill_input(
-        &self,
-        upstream_node: &StreamNode,
-        actor_context: &ActorContextRef,
-        local_barrier_manager: &LocalBarrierManager,
-        chunk_size: usize,
-    ) -> StreamResult<MergeExecutorInput> {
-        let info = Self::get_executor_info(
-            upstream_node,
-            Self::get_executor_id(actor_context, upstream_node),
-        );
-
-        let upstream_merge = must_match!(upstream_node.get_node_body().unwrap(), NodeBody::Merge(upstream_merge) => {
-            upstream_merge
-        });
-
-        MergeExecutorBuilder::new_input(
-            local_barrier_manager.clone(),
-            self.streaming_metrics.clone(),
-            actor_context.clone(),
-            info,
-            upstream_merge,
-            chunk_size,
-        )
-        .await
-    }
-
     async fn create_snapshot_backfill_node(
         &self,
         stream_node: &StreamNode,
@@ -145,14 +119,25 @@ impl StreamActorManager {
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
         let chunk_size = actor_context.config.developer.chunk_size;
-        let upstream = self
-            .create_snapshot_backfill_input(
-                upstream_node,
-                actor_context,
-                local_barrier_manager,
-                chunk_size,
-            )
-            .await?;
+
+        let info = Self::get_executor_info(
+            upstream_node,
+            Self::get_executor_id(actor_context, upstream_node),
+        );
+
+        let NodeBody::Merge(upstream_merge) = upstream_node.get_node_body()? else {
+            bail!("expect Merge as input of SnapshotBackfill");
+        };
+
+        let upstream = MergeExecutorBuilder::new_input(
+            local_barrier_manager.clone(),
+            self.streaming_metrics.clone(),
+            actor_context.clone(),
+            info,
+            upstream_merge,
+            chunk_size,
+        )
+        .await?;
 
         let table_desc: &StorageTableDesc = node.get_table_desc()?;
 
@@ -230,22 +215,6 @@ impl StreamActorManager {
         subtasks: &mut Vec<SubtaskHandle>,
         local_barrier_manager: &LocalBarrierManager,
     ) -> StreamResult<Executor> {
-        if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
-            && let Ok(StreamScanType::SnapshotBackfill) = stream_scan.get_stream_scan_type()
-        {
-            return dispatch_state_store!(env.state_store(), store, {
-                self.create_snapshot_backfill_node(
-                    node,
-                    stream_scan,
-                    actor_context,
-                    vnode_bitmap,
-                    local_barrier_manager,
-                    store,
-                )
-                .await
-            });
-        }
-
         // The "stateful" here means that the executor may issue read operations to the state store
         // massively and continuously. Used to decide whether to apply the optimization of subtasks.
         fn is_stateful_executor(stream_node: &StreamNode) -> bool {
@@ -264,38 +233,58 @@ impl StreamActorManager {
         }
         let is_stateful = is_stateful_executor(node);
 
-        // Create the input executor before creating itself
-        let mut input = Vec::with_capacity(node.input.iter().len());
-        for input_stream_node in &node.input {
-            input.push(
-                self.create_nodes_inner(
-                    fragment_id,
-                    input_stream_node,
-                    env.clone(),
-                    store.clone(),
+        let executor = if let NodeBody::StreamScan(stream_scan) = node.get_node_body().unwrap()
+            && let Ok(StreamScanType::SnapshotBackfill) = stream_scan.get_stream_scan_type()
+        {
+            dispatch_state_store!(env.state_store(), store, {
+                self.create_snapshot_backfill_node(
+                    node,
+                    stream_scan,
                     actor_context,
-                    vnode_bitmap.clone(),
-                    has_stateful || is_stateful,
-                    subtasks,
+                    vnode_bitmap,
                     local_barrier_manager,
+                    store,
                 )
-                .await?,
-            );
-        }
+                .await
+            })?
+        } else {
+            // Create the input executor before creating itself
+            let mut input = Vec::with_capacity(node.input.iter().len());
+            for input_stream_node in &node.input {
+                input.push(
+                    self.create_nodes_inner(
+                        fragment_id,
+                        input_stream_node,
+                        env.clone(),
+                        store.clone(),
+                        actor_context,
+                        vnode_bitmap.clone(),
+                        has_stateful || is_stateful,
+                        subtasks,
+                        local_barrier_manager,
+                    )
+                    .await?,
+                );
+            }
 
-        self.generate_executor_from_inputs(
-            fragment_id,
-            node,
-            env,
-            store,
+            self.generate_executor_from_inputs(
+                fragment_id,
+                node,
+                env,
+                store,
+                actor_context,
+                vnode_bitmap,
+                local_barrier_manager,
+                input,
+            )
+            .await?
+        };
+        Ok(Self::wrap_executor(
+            executor,
             actor_context,
-            vnode_bitmap,
             has_stateful || is_stateful,
             subtasks,
-            local_barrier_manager,
-            input,
-        )
-        .await
+        ))
     }
 
     #[expect(clippy::too_many_arguments)]
@@ -307,8 +296,6 @@ impl StreamActorManager {
         store: impl StateStore,
         actor_context: &ActorContextRef,
         vnode_bitmap: Option<Bitmap>,
-        has_stateful: bool,
-        subtasks: &mut Vec<SubtaskHandle>,
         local_barrier_manager: &LocalBarrierManager,
         input: Vec<Executor>,
     ) -> StreamResult<Executor> {
@@ -345,26 +332,30 @@ impl StreamActorManager {
             config: actor_context.config.clone(),
         };
 
-        let executor = create_executor(executor_params, node, store).await?;
+        create_executor(executor_params, node, store).await
+    }
 
+    fn wrap_executor(
+        executor: Executor,
+        actor_context: &ActorContextRef,
+        has_stateful: bool,
+        subtasks: &mut Vec<SubtaskHandle>,
+    ) -> Executor {
+        let info = executor.info().clone();
         // Wrap the executor for debug purpose.
         let wrapped = WrapperExecutor::new(executor, actor_context.clone());
         let executor = (info, wrapped).into();
 
         // If there're multiple stateful executors in this actor, we will wrap it into a subtask.
-        let executor = if has_stateful {
+        if has_stateful {
             // TODO(bugen): subtask does not work with tracing spans.
             // let (subtask, executor) = subtask::wrap(executor, actor_context.id);
             // subtasks.push(subtask);
             // executor.boxed()
 
             let _ = subtasks;
-            executor
-        } else {
-            executor
-        };
-
-        Ok(executor)
+        }
+        executor
     }
 
     /// Create a chain(tree) of nodes and return the head executor.
@@ -434,10 +425,8 @@ impl StreamActorManager {
         node: Arc<StreamNode>,
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        actor_config: Arc<StreamingConfig>,
     ) -> StreamResult<Actor<DispatchExecutor>> {
-        let actor_id = actor.actor_id;
-        let actor_config = self.get_overridden_config(&actor.config_override, actor_id);
-
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
@@ -465,12 +454,10 @@ impl StreamActorManager {
             executor,
             new_output_request_rx,
             actor.dispatchers,
-            actor_id,
-            fragment_id,
-            local_barrier_manager.clone(),
-            self.streaming_metrics.clone(),
+            &actor_context,
         )
         .await?;
+
         let actor = Actor::new(
             dispatcher,
             subtasks,
@@ -490,9 +477,15 @@ impl StreamActorManager {
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
     ) -> (JoinHandle<()>, Option<JoinHandle<()>>) {
-        let monitor = tokio_metrics::TaskMonitor::new();
         let stream_actor_ref = &actor;
         let actor_id = stream_actor_ref.actor_id;
+        let actor_config = self.get_overridden_config(&actor.config_override, actor_id);
+
+        let monitor = actor_config
+            .developer
+            .enable_actor_tokio_metrics
+            .then(tokio_metrics::TaskMonitor::new);
+
         let handle = {
             let trace_span = format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
             let barrier_manager = local_barrier_manager;
@@ -505,6 +498,7 @@ impl StreamActorManager {
                     node,
                     barrier_manager.clone(),
                     new_output_request_rx,
+                    actor_config,
                 )
                 .boxed()
                 .and_then(|actor| actor.run())
@@ -523,60 +517,43 @@ impl StreamActorManager {
                     .left_future(),
                 None => actor.right_future(),
             };
-            let instrumented = monitor.instrument(traced);
+            let instrumented = match &monitor {
+                Some(m) => m.instrument(traced).left_future(),
+                None => traced.right_future(),
+            };
             // If hummock tracing is not enabled, it directly returns wrapped future.
             let may_track_hummock = instrumented.may_trace_hummock();
 
             self.runtime.spawn(may_track_hummock)
         };
 
-        let monitor_handle = if self.streaming_metrics.level >= MetricLevel::Debug
-            || self
-                .env
-                .global_config()
-                .developer
-                .enable_actor_tokio_metrics
-        {
-            tracing::info!("Tokio metrics are enabled.");
+        let enable_count_metrics = self.streaming_metrics.level >= MetricLevel::Debug;
+        let monitor_handle = if let Some(monitor) = monitor {
             let streaming_metrics = self.streaming_metrics.clone();
             let actor_monitor_task = self.runtime.spawn(async move {
-                let metrics = streaming_metrics.new_actor_metrics(actor_id);
-                loop {
-                    let task_metrics = monitor.cumulative();
-                    metrics
-                        .actor_execution_time
-                        .set(task_metrics.total_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_fast_poll_duration
-                        .set(task_metrics.total_fast_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_fast_poll_cnt
-                        .set(task_metrics.total_fast_poll_count as i64);
-                    metrics
-                        .actor_slow_poll_duration
-                        .set(task_metrics.total_slow_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_slow_poll_cnt
-                        .set(task_metrics.total_slow_poll_count as i64);
+                let metrics = streaming_metrics.new_actor_metrics(actor_id, fragment_id);
+                let mut interval = tokio::time::interval(Duration::from_secs(15));
+                for task_metrics in monitor.intervals() {
+                    interval.tick().await; // tick at the start since the first interval tick is at 0s.
                     metrics
                         .actor_poll_duration
-                        .set(task_metrics.total_poll_duration.as_secs_f64());
-                    metrics
-                        .actor_poll_cnt
-                        .set(task_metrics.total_poll_count as i64);
+                        .inc_by(task_metrics.total_poll_duration.as_nanos() as u64);
                     metrics
                         .actor_idle_duration
-                        .set(task_metrics.total_idle_duration.as_secs_f64());
-                    metrics
-                        .actor_idle_cnt
-                        .set(task_metrics.total_idled_count as i64);
+                        .inc_by(task_metrics.total_idle_duration.as_nanos() as u64);
                     metrics
                         .actor_scheduled_duration
-                        .set(task_metrics.total_scheduled_duration.as_secs_f64());
-                    metrics
-                        .actor_scheduled_cnt
-                        .set(task_metrics.total_scheduled_count as i64);
-                    tokio::time::sleep(Duration::from_secs(1)).await;
+                        .inc_by(task_metrics.total_scheduled_duration.as_nanos() as u64);
+
+                    if enable_count_metrics {
+                        metrics.actor_poll_cnt.inc_by(task_metrics.total_poll_count);
+                        metrics
+                            .actor_idle_cnt
+                            .inc_by(task_metrics.total_idled_count);
+                        metrics
+                            .actor_scheduled_cnt
+                            .inc_by(task_metrics.total_scheduled_count);
+                    }
                 }
             });
             Some(actor_monitor_task)
@@ -597,10 +574,10 @@ pub struct ExecutorParams {
     pub info: ExecutorInfo,
 
     /// Executor id, unique across all actors.
-    pub executor_id: u64,
+    pub executor_id: ExecutorId,
 
     /// Operator id, unique for each operator in fragment.
-    pub operator_id: u64,
+    pub operator_id: GlobalOperatorId,
 
     /// Information of the operator from plan node, like `StreamHashJoin { .. }`.
     // TODO: use it for `identity`

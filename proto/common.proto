@@ -64,6 +64,9 @@ message WorkerNode {
 
     // resource group for scheduling
     optional string resource_group = 7;
+
+    // Whether this is an iceberg compactor (only applicable for Compactor worker type)
+    bool is_iceberg_compactor = 8;
   }
   message Resource {
     string rw_version = 1;

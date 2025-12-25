@@ -66,9 +66,9 @@ function exit_hook() {
   fi
 
   # Otherwise, print diagnose info
-  echo "^^^ +++"
-  echo "--- Failed to run command! Dumping diagnose info..."
   if [ -f .risingwave/config/risedev-env ]; then
+    echo "^^^ +++"
+    echo "--- Failed to run command! Dumping diagnose info..."
     ./risedev diagnose || true
   fi
 }

@@ -12,13 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::AlterDatabaseParam;
+use anyhow::Context;
+use risingwave_common::catalog::{AlterDatabaseParam, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
+use risingwave_common::config::mutate::TomlTableMutateExt as _;
+use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
-use risingwave_meta_model::table::RefreshState;
-use sea_orm::DatabaseTransaction;
-use thiserror_ext::AsReport;
+use risingwave_meta_model::refresh_job::{self, RefreshState};
+use sea_orm::ActiveValue::{NotSet, Set};
+use sea_orm::prelude::DateTime;
+use sea_orm::sea_query::Expr;
+use sea_orm::{ActiveModelTrait, DatabaseTransaction};
 
 use super::*;
+use crate::error::bail_invalid_parameter;
 
 impl CatalogController {
     async fn alter_database_name(
@@ -342,6 +349,69 @@ impl CatalogController {
                             MetaError::catalog_id_not_found("source", associated_source_id)
                         })?;
                     objects.push(PbObjectInfo::Source(ObjectModel(source, src_obj).into()));
+                }
+
+                // associated sink and source for iceberg table.
+                if matches!(table.engine, Some(table::Engine::Iceberg)) {
+                    let iceberg_sink = Sink::find()
+                        .inner_join(Object)
+                        .select_only()
+                        .column(sink::Column::SinkId)
+                        .filter(
+                            object::Column::DatabaseId
+                                .eq(obj.database_id)
+                                .and(object::Column::SchemaId.eq(obj.schema_id))
+                                .and(
+                                    sink::Column::Name
+                                        .eq(format!("{}{}", ICEBERG_SINK_PREFIX, table.name)),
+                                ),
+                        )
+                        .into_tuple::<SinkId>()
+                        .one(&txn)
+                        .await?
+                        .expect("iceberg sink must exist");
+                    let sink_obj = object::ActiveModel {
+                        oid: Set(iceberg_sink.as_object_id()),
+                        owner_id: Set(new_owner),
+                        ..Default::default()
+                    }
+                    .update(&txn)
+                    .await?;
+                    let sink = Sink::find_by_id(iceberg_sink)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("sink", iceberg_sink))?;
+                    objects.push(PbObjectInfo::Sink(ObjectModel(sink, sink_obj).into()));
+
+                    let iceberg_source = Source::find()
+                        .inner_join(Object)
+                        .select_only()
+                        .column(source::Column::SourceId)
+                        .filter(
+                            object::Column::DatabaseId
+                                .eq(obj.database_id)
+                                .and(object::Column::SchemaId.eq(obj.schema_id))
+                                .and(
+                                    source::Column::Name
+                                        .eq(format!("{}{}", ICEBERG_SOURCE_PREFIX, table.name)),
+                                ),
+                        )
+                        .into_tuple::<SourceId>()
+                        .one(&txn)
+                        .await?
+                        .expect("iceberg source must exist");
+                    let source_obj = object::ActiveModel {
+                        oid: Set(iceberg_source.as_object_id()),
+                        owner_id: Set(new_owner),
+                        ..Default::default()
+                    }
+                    .update(&txn)
+                    .await?;
+                    let source = Source::find_by_id(iceberg_source)
+                        .one(&txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("source", iceberg_source))?;
+                    objects.push(PbObjectInfo::Source(ObjectModel(source, source_obj).into()));
                 }
 
                 // indexes.
@@ -919,38 +989,156 @@ impl CatalogController {
         Ok((version, database))
     }
 
-    /// Set the refresh state of a table
-    pub async fn set_table_refresh_state(
+    pub async fn alter_streaming_job_config(
         &self,
-        table_id: TableId,
-        new_state: RefreshState,
-    ) -> MetaResult<bool> {
+        job_id: JobId,
+        entries_to_add: HashMap<String, String>,
+        keys_to_remove: Vec<String>,
+    ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        // It is okay to update refresh state unconditionally because the check is done in `validate_refreshable_table` inside `RefreshManager`.
-        let active_model = table::ActiveModel {
-            table_id: Set(table_id),
-            refresh_state: Set(Some(new_state)),
-            ..Default::default()
-        };
-        if let Err(e) = active_model.update(&txn).await {
-            tracing::warn!(
-                "Failed to update table refresh state for table {}: {}",
-                table_id,
-                e.as_report()
-            );
-            let t = Table::find_by_id(table_id).all(&txn).await;
-            tracing::info!(table = ?t, "Table found");
+        let config_override: Option<String> = StreamingJob::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::ConfigOverride)
+            .into_tuple()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+        let config_override = config_override.unwrap_or_default();
+
+        let mut table: toml::Table =
+            toml::from_str(&config_override).context("invalid streaming job config")?;
+
+        // The frontend guarantees that there's no duplicated keys in `to_add` and `to_remove`.
+        for (key, value) in entries_to_add {
+            let value: toml::Value = value
+                .parse()
+                .with_context(|| format!("invalid config value for path {key}"))?;
+            table
+                .upsert(&key, value)
+                .with_context(|| format!("failed to set config path {key}"))?;
         }
+        for key in keys_to_remove {
+            table
+                .delete(&key)
+                .with_context(|| format!("failed to reset config path {key}"))?;
+        }
+
+        let updated_config_override = table.to_string();
+
+        // Validate the config override by trying to merge it to the default config.
+        {
+            let merged = merge_streaming_config_section(
+                &StreamingConfig::default(),
+                &updated_config_override,
+            )
+            .context("invalid streaming job config override")?;
+
+            // Reject unrecognized entries.
+            // Note: If these unrecognized entries are pre-existing, we also reject them here.
+            // Users are able to fix them by issuing a `RESET` first.
+            if let Some(merged) = merged {
+                let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+                if !unrecognized_keys.is_empty() {
+                    bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
+                }
+            }
+        }
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            config_override: Set(Some(updated_config_override)),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
         txn.commit().await?;
 
-        tracing::debug!(
-            table_id = %table_id,
-            new_state = ?new_state,
-            "Updated table refresh state"
-        );
+        Ok(IGNORED_NOTIFICATION_VERSION)
+    }
 
-        Ok(true)
+    pub async fn ensure_refresh_job(&self, table_id: TableId) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        let active = refresh_job::ActiveModel {
+            table_id: Set(table_id),
+            last_trigger_time: Set(None),
+            trigger_interval_secs: Set(None),
+            current_status: Set(RefreshState::Idle),
+            last_success_time: Set(None),
+        };
+        match RefreshJob::insert(active)
+            .on_conflict_do_nothing()
+            .exec(&inner.db)
+            .await
+        {
+            Ok(_) => Ok(()),
+            Err(sea_orm::DbErr::RecordNotInserted) => {
+                // This is expected when the refresh job already exists due to ON CONFLICT DO NOTHING
+                tracing::debug!("refresh job already exists for table_id={}", table_id);
+                Ok(())
+            }
+            Err(e) => Err(e.into()),
+        }
+    }
+
+    pub async fn update_refresh_job_status(
+        &self,
+        table_id: TableId,
+        status: RefreshState,
+        trigger_time: Option<DateTime>,
+        is_success: bool,
+    ) -> MetaResult<()> {
+        self.ensure_refresh_job(table_id).await?;
+        let inner = self.inner.read().await;
+
+        // expect only update trigger_time when the status changes to Refreshing
+        assert_eq!(trigger_time.is_some(), status == RefreshState::Refreshing);
+        let active = refresh_job::ActiveModel {
+            table_id: Set(table_id),
+            current_status: Set(status),
+            last_trigger_time: if trigger_time.is_some() {
+                Set(trigger_time.map(|t| t.and_utc().timestamp_millis()))
+            } else {
+                NotSet
+            },
+            last_success_time: if is_success {
+                Set(Some(chrono::Utc::now().timestamp_millis()))
+            } else {
+                NotSet
+            },
+            ..Default::default()
+        };
+        active.update(&inner.db).await?;
+        Ok(())
+    }
+
+    pub async fn reset_all_refresh_jobs_to_idle(&self) -> MetaResult<()> {
+        let inner = self.inner.read().await;
+        RefreshJob::update_many()
+            .col_expr(
+                refresh_job::Column::CurrentStatus,
+                Expr::value(RefreshState::Idle),
+            )
+            .exec(&inner.db)
+            .await?;
+        Ok(())
+    }
+
+    pub async fn update_refresh_job_interval(
+        &self,
+        table_id: TableId,
+        trigger_interval_secs: Option<i64>,
+    ) -> MetaResult<()> {
+        self.ensure_refresh_job(table_id).await?;
+        let inner = self.inner.read().await;
+        let active = refresh_job::ActiveModel {
+            table_id: Set(table_id),
+            trigger_interval_secs: Set(trigger_interval_secs),
+            ..Default::default()
+        };
+        active.update(&inner.db).await?;
+        Ok(())
     }
 }

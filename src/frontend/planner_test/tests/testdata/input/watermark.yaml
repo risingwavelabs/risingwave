@@ -102,3 +102,17 @@
     explain create materialized view mv as select t.ts, unnest(Array[1,2,3]) from t emit on window close;
   expected_outputs:
     - explain_output
+- name: asof join
+  sql: |
+    create table t1 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    create table t2 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select t1.ts as t1_ts, t2.ts as t2_ts, t1.v1 as t1_v1, t1.v2 as t1_v2, t2.v1 as t2_v1, t2.v2 as t2_v2 from t1 asof join t2 on t1.v1 = t2.v1 and t1.ts < t2.ts;
+  expected_outputs:
+  - stream_plan
+- name: asof left join
+  sql: |
+    create table t1 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    create table t2 (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select t1.ts as t1_ts, t2.ts as t2_ts, t1.v1 as t1_v1, t1.v2 as t1_v2, t2.v1 as t2_v1, t2.v2 as t2_v2 from t1 asof left join t2 on t1.v1 = t2.v1 and t1.ts < t2.ts;
+  expected_outputs:
+  - stream_plan

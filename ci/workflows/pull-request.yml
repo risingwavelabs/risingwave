@@ -43,6 +43,7 @@ anchors:
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
         propagate-environment: true
+        upload-container-logs: always
 
 other-sql-backend: &other-sql-backend
   matrix:
@@ -225,7 +226,6 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: source-test-env
-          upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     parallelism: 2
@@ -261,8 +261,8 @@ steps:
     matrix:
       setup:
         java_version:
-          - "11"
           - "17"
+          - "21"
     timeout_in_minutes: 10
     retry: *auto-retry
 
@@ -537,7 +537,7 @@ steps:
       - docker-compose#v5.5.0: *docker-compose
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"

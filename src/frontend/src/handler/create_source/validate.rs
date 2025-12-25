@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_connector::source::BATCH_POSIX_FS_CONNECTOR;
+use risingwave_connector::source::{ADBC_SNOWFLAKE_CONNECTOR, BATCH_POSIX_FS_CONNECTOR};
 
 use super::*;
 
@@ -114,6 +114,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json],
                 ),
                 ICEBERG_CONNECTOR => hashmap!(
+                    Format::None => vec![Encode::None],
+                ),
+                ADBC_SNOWFLAKE_CONNECTOR => hashmap!(
                     Format::None => vec![Encode::None],
                 ),
                 SQL_SERVER_CDC_CONNECTOR => hashmap!(
@@ -254,6 +257,22 @@ pub fn validate_compatibility(
         return Err(ErrorCode::InvalidConfigValue {
             config_entry: "cdc.source.wait.streaming.start.timeout".to_owned(),
             config_value: timeout_value.to_owned(),
+        }
+        .into());
+    }
+
+    // Validate debezium.max.queue.size for all CDC connectors
+    if (connector == MYSQL_CDC_CONNECTOR
+        || connector == POSTGRES_CDC_CONNECTOR
+        || connector == CITUS_CDC_CONNECTOR
+        || connector == MONGODB_CDC_CONNECTOR
+        || connector == SQL_SERVER_CDC_CONNECTOR)
+        && let Some(queue_size_value) = props.get("debezium.max.queue.size")
+        && queue_size_value.parse::<u32>().is_err()
+    {
+        return Err(ErrorCode::InvalidConfigValue {
+            config_entry: "debezium.max.queue.size".to_owned(),
+            config_value: queue_size_value.to_owned(),
         }
         .into());
     }

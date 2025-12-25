@@ -192,6 +192,9 @@ for_all_wrapped_id_fields! (
         AlterSetSchemaRequest {
             new_schema_id: SchemaId,
         }
+        AlterStreamingJobConfigRequest {
+            job_id: JobId,
+        }
         AlterSwapRenameRequest.ObjectNameSwapPair {
             src_object_id: ObjectId,
             dst_object_id: ObjectId,
@@ -474,6 +477,9 @@ for_all_wrapped_id_fields! (
             job_id: JobId,
             fragment_id: FragmentId,
         }
+        ListRefreshTableStatesResponse.RefreshTableState {
+            table_id: TableId,
+        }
         ListStreamingJobStatesResponse.StreamingJobState {
             table_id: JobId,
             database_id: DatabaseId,
@@ -524,11 +530,14 @@ for_all_wrapped_id_fields! (
     }
     monitor_service {
         GetProfileStatsRequest {
+            executor_ids: ExecutorId,
             dispatcher_fragment_ids: FragmentId,
         }
         GetProfileStatsResponse {
             dispatch_fragment_output_row_count: FragmentId,
             dispatch_fragment_output_blocking_duration_ns: FragmentId,
+            stream_node_output_row_count: ExecutorId,
+            stream_node_output_blocking_duration_ns: ExecutorId,
         }
         StackTraceResponse {
             barrier_worker_state: WorkerId,
@@ -576,9 +585,6 @@ for_all_wrapped_id_fields! (
             actor_splits: ActorId,
             actor_dispatchers: ActorId,
         }
-        Barrier {
-            passed_actors: ActorId,
-        }
         CdcFilterNode {
             upstream_source_id: SourceId,
         }
@@ -588,6 +594,7 @@ for_all_wrapped_id_fields! (
         }
         Dispatcher {
             downstream_actor_id: ActorId,
+            dispatcher_id: FragmentId,
         }
         DmlNode {
             table_id: TableId,
@@ -646,6 +653,9 @@ for_all_wrapped_id_fields! (
             source_id: SourceId,
             associated_table_id: TableId,
         }
+        StreamNode {
+            operator_id: StreamNodeLocalOperatorId,
+        }
         StreamScanNode {
             table_id: TableId,
         }
@@ -654,6 +664,7 @@ for_all_wrapped_id_fields! (
             associated_table_id: TableId,
         }
         SubscriptionUpstreamInfo {
+            subscriber_id: SubscriberId,
             upstream_mv_table_id: TableId,
         }
         ThrottleMutation {
@@ -668,6 +679,7 @@ for_all_wrapped_id_fields! (
         }
         UpdateMutation.DispatcherUpdate {
             actor_id: ActorId,
+            dispatcher_id: FragmentId,
             added_downstream_actor_id: ActorId,
             removed_downstream_actor_id: ActorId,
         }
@@ -728,6 +740,7 @@ for_all_wrapped_id_fields! (
         InjectBarrierRequest.BuildActorInfo {
             fragment_upstreams: FragmentId,
             actor_id: ActorId,
+            initial_subscriber_ids: SubscriberId,
         }
         InjectBarrierRequest.FragmentBuildActorInfo {
             fragment_id: FragmentId,
@@ -985,7 +998,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("plan_common.SourceRefreshMode", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.SourceRefreshMode.refresh_mode", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeStreaming", "#[derive(Eq, Hash)]")
-        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeFullRecompute", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.SourceRefreshMode.SourceRefreshModeFullReload", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.AdditionalCollectionName",
             "#[derive(Eq, Hash)]",

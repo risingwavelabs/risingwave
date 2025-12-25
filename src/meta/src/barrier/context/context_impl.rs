@@ -15,19 +15,21 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
-use risingwave_meta_model::table::RefreshState;
+use risingwave_meta_model::ActorId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::{ActorId, SourceId};
+use risingwave_pb::id::SourceId;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
+use crate::MetaResult;
+use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::command::CommandContext;
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
@@ -38,9 +40,9 @@ use crate::barrier::{
     Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
+use crate::manager::LocalNotification;
 use crate::model::FragmentDownstreamRelation;
-use crate::stream::{REFRESH_TABLE_PROGRESS_TRACKER, SourceChange, SplitState};
-use crate::{MetaError, MetaResult};
+use crate::stream::{SourceChange, SplitState};
 
 impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     #[await_tree::instrument]
@@ -89,13 +91,18 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
     #[await_tree::instrument("finish_creating_job({job})")]
     async fn finish_creating_job(&self, job: TrackingJob) -> MetaResult<()> {
+        let job_id = job.job_id();
         job.finish(&self.metadata_manager, &self.source_manager)
-            .await
+            .await?;
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::StreamingJobBackfillFinished(job_id));
+        Ok(())
     }
 
     #[await_tree::instrument("finish_cdc_table_backfill({job})")]
     async fn finish_cdc_table_backfill(&self, job: JobId) -> MetaResult<()> {
-        self.env.cdc_table_backfill_tracker.complete_job(job).await
+        CdcTableBackfillTracker::mark_complete_job(&self.env.meta_store().conn, job).await
     }
 
     #[await_tree::instrument("new_control_stream({})", node.id)]
@@ -134,17 +141,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         }
 
         for ((table_id, associated_source_id), actors) in list_finished_info {
-            let allow_yield = {
-                let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
-                let single_task_tracker =
-                    lock_handle.inner.get_mut(&table_id).ok_or_else(|| {
-                        MetaError::from(anyhow!("Table tracker not found for table {}", table_id))
-                    })?;
-                single_task_tracker.report_list_finished(actors.iter().copied());
-                let allow_yield = single_task_tracker.is_list_finished()?;
-
-                Ok::<_, MetaError>(allow_yield)
-            }?;
+            let allow_yield = self
+                .refresh_manager
+                .mark_list_stage_finished(table_id, &actors)?;
 
             if !allow_yield {
                 continue;
@@ -194,17 +193,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         }
 
         for ((table_id, associated_source_id), actors) in load_finished_info {
-            let allow_yield = {
-                let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
-                let single_task_tracker =
-                    lock_handle.inner.get_mut(&table_id).ok_or_else(|| {
-                        MetaError::from(anyhow!("Table tracker not found for table {}", table_id))
-                    })?;
-                single_task_tracker.report_load_finished(actors.iter().copied());
-                let allow_yield = single_task_tracker.is_load_finished()?;
-
-                Ok::<_, MetaError>(allow_yield)
-            }?;
+            let allow_yield = self
+                .refresh_manager
+                .mark_load_stage_finished(table_id, &actors)?;
 
             if !allow_yield {
                 continue;
@@ -244,29 +235,9 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         refresh_finished_table_job_ids: Vec<JobId>,
     ) -> MetaResult<()> {
         for job_id in refresh_finished_table_job_ids {
-            {
-                let table_id = &job_id.as_mv_table_id();
-                let mut lock_handle = REFRESH_TABLE_PROGRESS_TRACKER.lock();
-                let remove_res = lock_handle.inner.remove(table_id);
-                debug_assert!(remove_res.is_some());
+            let table_id = job_id.as_mv_table_id();
 
-                // try remove the table_id from the table_id_by_database_id
-                lock_handle
-                    .table_id_by_database_id
-                    .values_mut()
-                    .for_each(|table_ids| {
-                        table_ids.remove(table_id);
-                    });
-            }
-
-            // Update the table's refresh state back to Idle (refresh complete)
-            self.metadata_manager
-                .catalog_controller
-                .set_table_refresh_state(job_id.as_mv_table_id(), RefreshState::Idle)
-                .await
-                .context("Failed to set table refresh state to Idle")?;
-
-            tracing::info!(%job_id, "Table refresh completed, state updated to Idle");
+            self.refresh_manager.mark_refresh_complete(table_id).await?;
         }
 
         Ok(())
@@ -309,9 +280,16 @@ impl CommandContext {
             }
 
             Command::DropStreamingJobs {
+                streaming_job_ids,
                 unregistered_state_table_ids,
                 ..
             } => {
+                for job_id in streaming_job_ids {
+                    barrier_manager_context
+                        .refresh_manager
+                        .remove_progress_tracker(job_id.as_mv_table_id(), "drop_streaming_jobs");
+                }
+
                 barrier_manager_context
                     .hummock_manager
                     .unregister_table_ids(unregistered_state_table_ids.iter().cloned())
@@ -327,9 +305,11 @@ impl CommandContext {
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(SourceChange::UpdateSourceProps {
+                        // Only sources are managed in source manager. Convert object IDs to source IDs and let
+                        // source manager ignore unknown/unregistered sources.
                         source_id_map_new_props: obj_id_map_props
                             .iter()
-                            .map(|(source_id, props)| (source_id.as_source_id(), props.clone()))
+                            .map(|(object_id, props)| (object_id.as_source_id(), props.clone()))
                             .collect(),
                     })
                     .await;
@@ -502,26 +482,7 @@ impl CommandContext {
                     .await?
             }
             Command::DropSubscription { .. } => {}
-            Command::MergeSnapshotBackfillStreamingJobs(_) => {}
-            Command::StartFragmentBackfill { .. } => {}
-            Command::Refresh { table_id, .. } => {
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .set_table_refresh_state(*table_id, RefreshState::Refreshing)
-                    .await?;
-            }
-            Command::ListFinish { .. } => {
-                // List stage completed, table remains in Refreshing state
-                // The next stage will be load completion
-            }
-            Command::LoadFinish { table_id, .. } => {
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .set_table_refresh_state(*table_id, RefreshState::Finishing)
-                    .await?;
-            }
+            Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
         }
 
         Ok(())

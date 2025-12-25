@@ -28,9 +28,7 @@ use risingwave_pb::catalog::PbSource;
 use risingwave_pb::connector_service::{PbSourceType, PbTableSchema, SourceType, TableSchema};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
-use risingwave_pb::source::{
-    PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration,
-};
+use risingwave_pb::source::{PbCdcTableSnapshotSplit, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::StreamCdcScanOptions;
 use simd_json::prelude::ArrayTrait;
 pub use source::*;
@@ -238,60 +236,32 @@ impl<T: CdcSourceTypeTrait> CdcProperties<T> {
     }
 }
 
-pub type CdcTableSnapshotSplitAssignment = HashMap<ActorId, Vec<CdcTableSnapshotSplitRaw>>;
-
 pub const INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID: u64 = 0;
 pub const INITIAL_CDC_SPLIT_ASSIGNMENT_GENERATION_ID: u64 = 1;
 
 #[derive(Clone, Debug, PartialEq, Default)]
 pub struct CdcTableSnapshotSplitAssignmentWithGeneration {
-    pub splits: HashMap<ActorId, Vec<CdcTableSnapshotSplitRaw>>,
-    pub generation: u64,
+    pub splits: HashMap<ActorId, (Vec<CdcTableSnapshotSplitRaw>, u64)>,
 }
 
 impl CdcTableSnapshotSplitAssignmentWithGeneration {
-    pub fn new(splits: HashMap<ActorId, Vec<CdcTableSnapshotSplitRaw>>, generation: u64) -> Self {
-        Self { splits, generation }
+    pub fn new(splits: HashMap<ActorId, (Vec<CdcTableSnapshotSplitRaw>, u64)>) -> Self {
+        Self { splits }
     }
 
     pub fn empty() -> Self {
         Self {
             splits: HashMap::default(),
-            generation: INVALID_CDC_SPLIT_ASSIGNMENT_GENERATION_ID,
         }
     }
 }
 
-pub fn build_pb_actor_cdc_table_snapshot_splits_with_generation(
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
-) -> PbCdcTableSnapshotSplitsWithGeneration {
-    let splits =
-        build_pb_actor_cdc_table_snapshot_splits(cdc_table_snapshot_split_assignment.splits);
-    PbCdcTableSnapshotSplitsWithGeneration {
-        splits,
-        generation: cdc_table_snapshot_split_assignment.generation,
+pub fn build_cdc_table_snapshot_split(s: &CdcTableSnapshotSplitRaw) -> PbCdcTableSnapshotSplit {
+    PbCdcTableSnapshotSplit {
+        split_id: s.split_id,
+        left_bound_inclusive: s.left_bound_inclusive.clone(),
+        right_bound_exclusive: s.right_bound_exclusive.clone(),
     }
-}
-
-pub fn build_pb_actor_cdc_table_snapshot_splits(
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignment,
-) -> HashMap<ActorId, PbCdcTableSnapshotSplits> {
-    cdc_table_snapshot_split_assignment
-        .into_iter()
-        .map(|(actor_id, splits)| {
-            let splits = PbCdcTableSnapshotSplits {
-                splits: splits
-                    .into_iter()
-                    .map(|s| PbCdcTableSnapshotSplit {
-                        split_id: s.split_id,
-                        left_bound_inclusive: s.left_bound_inclusive,
-                        right_bound_exclusive: s.right_bound_exclusive,
-                    })
-                    .collect(),
-            };
-            (actor_id, splits)
-        })
-        .collect()
 }
 
 pub fn build_actor_cdc_table_snapshot_splits_with_generation(
@@ -301,6 +271,7 @@ pub fn build_actor_cdc_table_snapshot_splits_with_generation(
         .splits
         .into_iter()
         .map(|(actor_id, splits)| {
+            let generation = splits.generation;
             let splits = splits
                 .splits
                 .into_iter()
@@ -310,11 +281,10 @@ pub fn build_actor_cdc_table_snapshot_splits_with_generation(
                     right_bound_exclusive: s.right_bound_exclusive,
                 })
                 .collect();
-            (actor_id, splits)
+            (actor_id, (splits, generation))
         })
         .collect();
-    let generation = pb_cdc_table_snapshot_split_assignment.generation;
-    CdcTableSnapshotSplitAssignmentWithGeneration { splits, generation }
+    CdcTableSnapshotSplitAssignmentWithGeneration { splits }
 }
 
 #[derive(Debug, Clone, Hash, PartialEq)]

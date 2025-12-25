@@ -78,6 +78,8 @@ pub enum Components {
     Udf,
     NoDefaultFeatures,
     Moat,
+    DataFusion,
+    Adbc,
 }
 
 impl Components {
@@ -103,6 +105,8 @@ impl Components {
             Self::Udf => "[Build] Enable UDF",
             Self::NoDefaultFeatures => "[Build] Disable default features",
             Self::Moat => "[Component] Enable Moat",
+            Self::DataFusion => "[Build] Enable DataFusion",
+            Self::Adbc => "[Component] ADBC Snowflake Driver",
         }
         .into()
     }
@@ -221,6 +225,16 @@ Currently, default features are: rw-static-link, all-connectors
                 "
 Enable Moat as distributed hybrid cache service."
             }
+            Self::DataFusion => {
+                "
+Enable DataFusion as the optional query engine for Iceberg tables."
+            }
+            Self::Adbc => {
+                "
+Enable ADBC (Arrow Database Connectivity) Snowflake driver support.
+Required if you want to use ADBC Snowflake source.
+This will download the ADBC Snowflake driver shared library (.so/.dylib)."
+            }
         }
         .into()
     }
@@ -247,6 +261,8 @@ Enable Moat as distributed hybrid cache service."
             "ENABLE_UDF" => Some(Self::Udf),
             "DISABLE_DEFAULT_FEATURES" => Some(Self::NoDefaultFeatures),
             "ENABLE_MOAT" => Some(Self::Moat),
+            "ENABLE_DATAFUSION" => Some(Self::DataFusion),
+            "ENABLE_ADBC" => Some(Self::Adbc),
             _ => None,
         }
     }
@@ -273,6 +289,8 @@ Enable Moat as distributed hybrid cache service."
             Self::Udf => "ENABLE_UDF",
             Self::NoDefaultFeatures => "DISABLE_DEFAULT_FEATURES",
             Self::Moat => "ENABLE_MOAT",
+            Self::DataFusion => "ENABLE_DATAFUSION",
+            Self::Adbc => "ENABLE_ADBC",
         }
         .into()
     }

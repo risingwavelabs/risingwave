@@ -10,10 +10,10 @@ CREATE TABLE t2 (k2 INT);
 sleep 5s
 
 statement ok
-INSERT INTO t1 VALUES (1);
+INSERT INTO t2 VALUES (1);
 
 statement ok
-INSERT INTO t2 VALUES (1);
+INSERT INTO t1 VALUES (1);
 
 query I
 SELECT count(*) FROM t1 join t2 on t1.k1=t2.k2;

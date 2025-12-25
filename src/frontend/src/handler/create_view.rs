@@ -52,7 +52,7 @@ pub async fn handle_create_view(
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let super::query::BatchQueryPlanResult {
+        let super::query::RwBatchQueryPlanResult {
             schema,
             dependent_relations,
             ..
@@ -60,7 +60,8 @@ pub async fn handle_create_view(
             &session,
             context.into(),
             Statement::Query(Box::new(query.clone())),
-        )?;
+        )?
+        .unwrap_rw()?;
 
         (dependent_relations, schema)
     };
@@ -104,6 +105,8 @@ pub async fn handle_create_view(
         owner: session.user_id(),
         sql: format!("{}", query),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
+        created_at_epoch: None,
+        created_at_cluster_version: None,
     };
 
     let catalog_writer = session.catalog_writer()?;
