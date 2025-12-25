@@ -324,6 +324,22 @@ impl Binder {
             .into());
         }
 
+        // Check for duplicate column names in the SELECT clause
+        {
+            let mut seen_names = HashMap::new();
+            for (idx, field) in fields.iter().enumerate() {
+                if field.name != UNNAMED_COLUMN {
+                    if seen_names.insert(field.name.clone(), idx).is_some() {
+                        return Err(ErrorCode::InvalidInputSyntax(format!(
+                            "column \"{}\" specified more than once",
+                            field.name
+                        ))
+                        .into());
+                    }
+                }
+            }
+        }
+
         Ok(BoundSelect {
             distinct,
             select_items,
