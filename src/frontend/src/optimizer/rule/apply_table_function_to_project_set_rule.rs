@@ -49,6 +49,8 @@ use crate::optimizer::plan_node::{
 ///
 /// The resulting `ProjectSet` is stateless in streaming, and its hidden `projected_row_id` can be
 /// used to derive ordinality.
+///
+/// [`TableFunctionToProjectSetRule`]: crate::optimizer::rule::TableFunctionToProjectSetRule
 pub struct ApplyTableFunctionToProjectSetRule {}
 
 impl Rule<Logical> for ApplyTableFunctionToProjectSetRule {
@@ -67,10 +69,7 @@ impl Rule<Logical> for ApplyTableFunctionToProjectSetRule {
         let right_project_set: &LogicalProjectSet = right_project_input.as_logical_project_set()?;
         let right_project_set_input = right_project_set.input();
         let right_values: &LogicalValues = right_project_set_input.as_logical_values()?;
-        if right_values.schema().len() != 0
-            || right_values.rows().len() != 1
-            || !right_values.rows()[0].is_empty()
-        {
+        if !right_values.is_empty_scalar() {
             return None;
         }
 

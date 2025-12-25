@@ -202,7 +202,7 @@ impl Planner {
     /// Helper to create a dummy node as child of [`LogicalProject`].
     /// For example, `select 1+2, 3*4` will be `Project([1+2, 3+4]) - Values([[]])`.
     fn create_dummy_values(&self) -> PlanRef {
-        LogicalValues::create(vec![vec![]], Schema::default(), self.ctx.clone())
+        LogicalValues::create_empty_scalar(self.ctx.clone())
     }
 
     /// Helper to create an `EXISTS` boolean operator with the given `input`.
