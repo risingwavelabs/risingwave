@@ -328,14 +328,14 @@ impl Binder {
         {
             let mut seen_names = HashMap::new();
             for (idx, field) in fields.iter().enumerate() {
-                if field.name != UNNAMED_COLUMN {
-                    if seen_names.insert(field.name.clone(), idx).is_some() {
-                        return Err(ErrorCode::InvalidInputSyntax(format!(
-                            "column \"{}\" specified more than once",
-                            field.name
-                        ))
-                        .into());
-                    }
+                if field.name != UNNAMED_COLUMN
+                    && seen_names.insert(field.name.clone(), idx).is_some()
+                {
+                    return Err(ErrorCode::InvalidInputSyntax(format!(
+                        "column \"{}\" specified more than once",
+                        field.name
+                    ))
+                    .into());
                 }
             }
         }
