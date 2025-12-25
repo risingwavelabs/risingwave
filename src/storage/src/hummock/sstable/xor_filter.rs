@@ -435,7 +435,10 @@ impl XorFilterReader {
             XorFilter::BlockXor16(reader) => reader
                 .filters
                 .iter()
-                .map(|filter| filter.1.fingerprints.len() * std::mem::size_of::<u16>())
+                .map(|filter| {
+                    filter.0.len() + // smallest_key size
+                    filter.1.fingerprints.len() * std::mem::size_of::<u16>()
+                })
                 .sum(),
         }
     }
