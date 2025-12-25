@@ -199,15 +199,9 @@ impl Inner {
                     }
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
-                        match mutation {
-                            Mutation::Pause => {
-                                self.is_paused = true;
-                            }
-                            Mutation::Resume => {
-                                self.is_paused = false;
-                            }
-                            _ => (),
-                        }
+                        mutation.on_new_pause_resume(|new_pause| {
+                            self.is_paused = new_pause;
+                        });
                     }
 
                     yield Message::Barrier(barrier);

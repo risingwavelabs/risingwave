@@ -998,8 +998,6 @@ impl InflightDatabaseInfo {
             }
             Some(command) => match command {
                 Command::Flush
-                | Command::Pause
-                | Command::Resume
                 | Command::DropStreamingJobs { .. }
                 | Command::RescheduleFragment { .. }
                 | Command::SourceChangeSplit { .. }

@@ -372,15 +372,20 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             return false;
         };
 
-        match mutation {
-            Mutation::Pause => {
+        let mut pause_resume = None;
+        mutation.on_new_pause_resume(|new_pause| {
+            pause_resume = Some(new_pause);
+        });
+        if let Some(new_pause) = pause_resume {
+            if new_pause {
                 stream.pause_stream();
-                false
-            }
-            Mutation::Resume => {
+            } else {
                 stream.resume_stream();
-                false
             }
+            return false;
+        }
+
+        match mutation {
             Mutation::RefreshStart {
                 associated_source_id,
                 ..

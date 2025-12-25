@@ -477,15 +477,20 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     post_flush.post_yield_barrier().await?;
 
                     if let Some(mutation) = mutation.as_deref() {
-                        match mutation {
-                            Mutation::Pause => {
+                        let mut pause_resume = None;
+                        mutation.on_new_pause_resume(|new_pause| {
+                            pause_resume = Some(new_pause);
+                        });
+                        if let Some(new_pause) = pause_resume {
+                            if new_pause {
                                 log_writer.pause()?;
                                 is_paused = true;
-                            }
-                            Mutation::Resume => {
+                            } else {
                                 log_writer.resume()?;
                                 is_paused = false;
                             }
+                        }
+                        match mutation {
                             Mutation::Throttle(actor_to_apply) => {
                                 if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
                                     tracing::info!(

@@ -26,7 +26,6 @@ use fail::fail_point;
 use futures::future::{BoxFuture, join_all};
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
@@ -609,7 +608,6 @@ impl ControlStreamManager {
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<JobId, String>,
         mv_depended_subscriptions: &mut HashMap<TableId, HashMap<SubscriptionId, u64>>,
-        is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
@@ -631,7 +629,6 @@ impl ControlStreamManager {
         fn build_mutation(
             splits: &HashMap<ActorId, Vec<SplitImpl>>,
             cdc_table_snapshot_split_assignment: HashMap<ActorId, PbCdcTableSnapshotSplits>,
-            is_paused: bool,
         ) -> Mutation {
             Mutation::Add(AddMutation {
                 // Actors built during recovery is not treated as newly added actors.
@@ -641,7 +638,6 @@ impl ControlStreamManager {
                 actor_cdc_table_snapshot_splits: Some(PbCdcTableSnapshotSplitsWithGeneration {
                     splits: cdc_table_snapshot_split_assignment,
                 }),
-                pause: is_paused,
                 subscriptions_to_add: Default::default(),
                 // TODO(kwannoel): recover using backfill order plan
                 backfill_nodes_to_pause: Default::default(),
@@ -884,7 +880,6 @@ impl ControlStreamManager {
             let mutation = build_mutation(
                 &database_job_source_splits,
                 cdc_table_snapshot_split_assignment,
-                is_paused,
             );
 
             let node_to_collect = self.inject_barrier(
@@ -929,13 +924,9 @@ impl ControlStreamManager {
                 !cdc_table_snapshot_splits.contains_key(&job_id),
                 "snapshot backfill job {job_id} should not have cdc backfill"
             );
-            if is_paused {
-                bail!("should not pause when having snapshot backfill job {job_id}");
-            }
             let mutation = build_mutation(
                 &database_job_source_splits,
                 Default::default(), // no cdc backfill job for
-                false,
             );
 
             creating_streaming_job_controls.insert(
@@ -981,7 +972,7 @@ impl ControlStreamManager {
             database_jobs.into_values(),
             self.env.shared_actor_infos().clone(),
         );
-        let database_state = BarrierWorkerState::recovery(new_epoch, is_paused);
+        let database_state = BarrierWorkerState::recovery(new_epoch);
         Ok(DatabaseInitialBarrierCollector {
             database_id,
             node_to_collect,

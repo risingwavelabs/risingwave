@@ -231,7 +231,9 @@ impl CheckpointControl {
                             .insert(DatabaseCheckpointControlStatus::Running(new_database))
                             .expect_running("just initialized as running")
                     }
-                    Command::Flush | Command::Pause | Command::Resume => {
+                    Command::Flush
+                    | Command::DropStreamingJobs { .. }
+                    | Command::DropSubscription { .. } => {
                         for mut notifier in notifiers {
                             notifier.notify_started();
                             notifier.notify_collected();
@@ -1016,22 +1018,6 @@ impl DatabaseCheckpointControl {
             }
             return Ok(());
         };
-
-        if let Some(Command::CreateStreamingJob {
-            job_type: CreateStreamingJobType::SnapshotBackfill(_),
-            ..
-        }) = &command
-            && self.state.is_paused()
-        {
-            warn!("cannot create streaming job with snapshot backfill when paused");
-            for notifier in notifiers {
-                notifier.notify_start_failed(
-                    anyhow!("cannot create streaming job with snapshot backfill when paused",)
-                        .into(),
-                );
-            }
-            return Ok(());
-        }
 
         let barrier_info = self.state.next_barrier_info(checkpoint, curr_epoch);
         // Tracing related stuff
