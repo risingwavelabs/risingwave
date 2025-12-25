@@ -88,27 +88,16 @@
     where ord > 1;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.x, t.arr, Unnest($0), (projected_row_id + 1:Int64) as $expr1] }
-      └─BatchHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: all }
-        ├─BatchExchange { order: [], dist: HashShard(t.arr) }
-        │ └─BatchScan { table: t, columns: [t.x, t.arr], distribution: SomeShard }
-        └─BatchFilter { predicate: ((projected_row_id + 1:Int64) > 1:Int32) }
-          └─BatchProjectSet { select_list: [$0, Unnest($0)] }
-            └─BatchHashAgg { group_key: [t.arr], aggs: [] }
-              └─BatchExchange { order: [], dist: HashShard(t.arr) }
-                └─BatchScan { table: t, columns: [t.arr], distribution: SomeShard }
+    └─BatchProject { exprs: [t.x, t.arr, Unnest($1), (projected_row_id + 1:Int64) as $expr1] }
+      └─BatchFilter { predicate: ((projected_row_id + 1:Int64) > 1:Int32) }
+        └─BatchProjectSet { select_list: [$0, $1, Unnest($1)] }
+          └─BatchScan { table: t, columns: [t.x, t.arr], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, arr, val, ord, t._row_id(hidden), projected_row_id(hidden)], stream_key: [t._row_id, projected_row_id, arr], pk_columns: [t._row_id, projected_row_id, arr], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.x, t.arr, Unnest($0), (projected_row_id + 1:Int64) as $expr1, t._row_id, projected_row_id] }
-      └─StreamHashJoin { type: Inner, predicate: t.arr IS NOT DISTINCT FROM t.arr, output: [t.x, t.arr, projected_row_id, t.arr, Unnest($0), t._row_id] }
-        ├─StreamExchange { dist: HashShard(t.arr) }
-        │ └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamFilter { predicate: ((projected_row_id + 1:Int64) > 1:Int32) }
-          └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-            └─StreamProject { exprs: [t.arr], noop_update_hint: true }
-              └─StreamHashAgg { group_key: [t.arr], aggs: [count] }
-                └─StreamExchange { dist: HashShard(t.arr) }
-                  └─StreamTableScan { table: t, columns: [t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamMaterialize { columns: [x, arr, val, ord, t._row_id(hidden), projected_row_id(hidden)], stream_key: [t._row_id, projected_row_id], pk_columns: [t._row_id, projected_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.x, t.arr, Unnest($1), (projected_row_id + 1:Int64) as $expr1, t._row_id, projected_row_id] }
+      └─StreamFilter { predicate: ((projected_row_id + 1:Int64) > 1:Int32) }
+        └─StreamProjectSet { select_list: [$0, $1, Unnest($1), $2] }
+          └─StreamTableScan { table: t, columns: [t.x, t.arr, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: correlated arg uses array concat (int[] || int)
   sql: |
     create table t(x int , arr int[]);

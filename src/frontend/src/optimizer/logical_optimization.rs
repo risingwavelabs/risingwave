@@ -607,14 +607,14 @@ impl LogicalOptimizer {
         // Simple Unnesting.
         plan = plan.optimize_by_rules(&SIMPLE_UNNESTING)?;
         debug_assert!(!HasMaxOneRowApply().visit(plan.clone()));
-        // Predicate push down before translate apply, because we need to calculate the domain
-        // and predicate push down can reduce the size of domain.
-        plan = Self::predicate_pushdown(plan, explain_trace, ctx);
         // In order to unnest values with correlated input ref, we need to extract project first.
         plan = plan.optimize_by_rules(&VALUES_EXTRACT_PROJECT)?;
         // Eliminate lateral table-function apply into a unary ProjectSet when possible, so that we
         // can avoid the Domain/Distinct introduced by general apply translation.
         plan = plan.optimize_by_rules(&APPLY_TABLE_FUNCTION_TO_PROJECT_SET)?;
+        // Predicate push down after translate apply, because we need to calculate the domain
+        // and predicate push down can reduce the size of domain.
+        plan = Self::predicate_pushdown(plan, explain_trace, ctx);
         // General Unnesting.
         // Translate Apply, push Apply down the plan and finally replace Apply with regular inner
         // join.
