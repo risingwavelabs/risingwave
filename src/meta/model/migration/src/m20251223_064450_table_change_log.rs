@@ -1,5 +1,6 @@
 use sea_orm_migration::prelude::*;
 
+use crate::m20230908_072257_init::Object;
 use crate::utils::ColumnDefExt;
 
 #[derive(DeriveMigrationName)]
@@ -42,6 +43,14 @@ impl MigrationTrait for Migration {
                         Index::create()
                             .col(HummockTableChangeLog::TableId)
                             .col(HummockTableChangeLog::CheckpointEpoch),
+                    )
+                    .foreign_key(
+                        &mut ForeignKey::create()
+                            .name("FK_hummock_table_change_log_table_id")
+                            .from(HummockTableChangeLog::Table, HummockTableChangeLog::TableId)
+                            .to(Object::Table, Object::Oid)
+                            .on_delete(ForeignKeyAction::Cascade)
+                            .to_owned(),
                     )
                     .to_owned(),
             )
