@@ -15,7 +15,7 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::{Div, Mul};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use arrow_array::ArrayRef;
 use num_traits::abs;
@@ -83,6 +83,19 @@ impl IcebergArrowConvert {
         array: &arrow_array::ArrayRef,
     ) -> Result<ArrayImpl, ArrayError> {
         FromArrow::from_array(self, field, array)
+    }
+
+    /// A helper function to convert an Arrow array to RisingWave array without knowing the field.
+    /// It will use the datatype from arrow array to infer the RisingWave data type.
+    ///
+    /// The difference between this function and `array_from_arrow_array` is that `array_from_arrow_array` will try using `ARROW:extension:name` field metadata to determine the RisingWave data type for extension types.
+    pub fn array_from_arrow_array_raw(
+        &self,
+        array: &arrow_array::ArrayRef,
+    ) -> Result<ArrayImpl, ArrayError> {
+        static FIELD_DUMMY: LazyLock<arrow_schema::Field> =
+            LazyLock::new(|| arrow_schema::Field::new("dummy", arrow_schema::DataType::Null, true));
+        FromArrow::from_array(self, &FIELD_DUMMY, array)
     }
 }
 

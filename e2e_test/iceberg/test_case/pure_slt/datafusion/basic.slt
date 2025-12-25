@@ -170,10 +170,10 @@ FLUSH;
 # # Test that no data is missing:
 # # We set snapshot=false for the iceberg sink,
 # # So atomic DDL should be used to avoid data loss.
-# query ??
-# select min(id), count(id) from datagen_t;
-# ----
-# 1	1000
+query ??
+select min(id), count(id) from datagen_t;
+----
+1	1000
 
 statement ok
 DROP TABLE datagen_t
@@ -195,10 +195,10 @@ select * from t_without_pk;
 ----
 xxx
 
-# query ?
-# select count(_row_id) from t_without_pk;
-# ----
-# 1
+query ?
+select count(_row_id) from t_without_pk;
+----
+1
 
 statement ok
 DROP TABLE t_without_pk

@@ -24,7 +24,9 @@ use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
-use datafusion::physical_plan::{DisplayAs, ExecutionPlan, Partitioning, PlanProperties};
+use datafusion::physical_plan::{
+    DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
+};
 use datafusion::prelude::Expr;
 use datafusion_common::{DataFusionError, exec_err, internal_err, not_impl_err};
 use futures::{StreamExt, TryStreamExt};
@@ -67,11 +69,24 @@ struct IcebergScanInner {
 impl DisplayAs for IcebergScan {
     fn fmt_as(
         &self,
-        _: datafusion::physical_plan::DisplayFormatType,
+        format_type: DisplayFormatType,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
-        // TODO: improve the display format
-        write!(f, "{:?}", self)
+        let scan_type = self.inner.iceberg_scan_type.as_str_name();
+        if format_type == DisplayFormatType::TreeRender {
+            writeln!(f, "{}", self.inner.table.identifier())?;
+            writeln!(f, "iceberg_scan_type={}", scan_type)?;
+            return Ok(());
+        }
+
+        write!(f, "IcebergScan: ")?;
+        write!(f, "iceberg_scan_type={}", scan_type)?;
+        write!(f, ", table={}", self.inner.table.identifier())?;
+        if format_type == DisplayFormatType::Verbose {
+            write!(f, ", snapshot_id={:?}", self.inner.snapshot_id)?;
+            write!(f, ", column_names={:?}", self.inner.column_names)?;
+        }
+        Ok(())
     }
 }
 
@@ -171,8 +186,15 @@ impl IcebergScan {
             need_file_path_and_pos,
             plan_properties,
         };
-        let scan_tasks = inner.list_iceberg_scan_task().try_collect().await?;
-        inner.tasks = IcebergSplitEnumerator::split_n_vecs(scan_tasks, batch_parallelism);
+        let scan_tasks = inner
+            .list_iceberg_scan_task()
+            .try_collect::<Vec<_>>()
+            .await?;
+        if scan_tasks.len() <= batch_parallelism {
+            inner.tasks = scan_tasks.into_iter().map(|task| vec![task]).collect();
+        } else {
+            inner.tasks = IcebergSplitEnumerator::split_n_vecs(scan_tasks, batch_parallelism);
+        }
         inner.plan_properties.partitioning = Partitioning::UnknownPartitioning(inner.tasks.len());
 
         Ok(Self {
