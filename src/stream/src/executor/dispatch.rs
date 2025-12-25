@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs::write;
 use std::future::{Future, pending};
 use std::iter::repeat_with;
 use std::ops::{Deref, DerefMut};
@@ -20,6 +21,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::{FutureExt, TryStreamExt};
+use futures::future::select;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -30,6 +32,7 @@ use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
+use rw_futures_util::drop_either_future;
 use smallvec::{SmallVec, smallvec};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::Instant;
@@ -652,29 +655,13 @@ impl StreamConsumer for DispatchExecutor {
     }
 }
 
-async fn write_message_to_buffer(
-    max_barrier_count_per_batch: u32,
-    input: &mut Peekable<BoxedMessageStream>,
-    buffer: &mut VecDeque<MessageBatch>,
-    end_of_stream: &mut bool,
-) -> StreamResult<()>{
-    match try_batch_barriers(max_barrier_count_per_batch, input).await? {
-        Some(message) => {
-            buffer.push_back(message);
-        }
-        None => {
-            *end_of_stream = true;
-        }
-    }
-    Ok(())
-}
-
 // make sure the buffer is not empty when calling this function
 // divide the logistics of dispatching data to downstream from sending barriers to localbarriermanager
 async fn dispatch_message_to_downstream(
     buffer: &mut VecDeque<MessageBatch>,
     inner: &mut DispatchExecutorInner,
 ) -> StreamResult<()>{
+    // TODO: restore the message when this future is droped
     let msg = buffer.pop_back().expect("buffer is not empty when reading message");
     match msg {
         chunk @ MessageBatch::Chunk(_) => {
@@ -717,7 +704,30 @@ impl StreamConsumer for DispatchExecutorForSyncLogStore {
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
         let max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
-        
+        #[try_stream]
+        async move {
+            let mut input = self.input.execute().peekable();
+            let mut end_of_stream = false;
+            let mut buffer: VecDeque<MessageBatch> = VecDeque::new();
+            loop {
+                let select_result = {
+                    let read_future = async {
+                        let 
+                    };
+                    pin_mut!(read_future);
+                    let write_future = async {
+                        if buffer.is_empty() {
+                            pending().await
+                        } else {
+                            dispatch_message_to_downstream(&mut buffer, &mut self.inner).await
+                        }
+                    };
+                    pin_mut!(write_future);
+                    let output = select(write_future, read_future).await;
+                    drop_either_future(output)
+                };
+            }
+        }
     }
 
 }
