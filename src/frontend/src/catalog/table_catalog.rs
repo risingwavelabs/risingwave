@@ -165,9 +165,6 @@ pub struct TableCatalog {
 
     pub initialized_at_epoch: Option<Epoch>,
 
-    /// Indicate whether to use watermark cache for state table.
-    pub cleaned_by_watermark: bool,
-
     /// Indicate whether to create table in background or foreground.
     pub create_type: CreateType,
 
@@ -342,11 +339,6 @@ impl TableCatalog {
 
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
-        self
-    }
-
-    pub fn with_cleaned_by_watermark(mut self, cleaned_by_watermark: bool) -> Self {
-        self.cleaned_by_watermark = cleaned_by_watermark;
         self
     }
 
@@ -607,7 +599,6 @@ impl TableCatalog {
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
-            cleaned_by_watermark: self.cleaned_by_watermark,
             stream_job_status: self.stream_job_status.to_proto().into(),
             create_type: self.create_type.to_proto().into(),
             description: self.description.clone(),
@@ -844,7 +835,6 @@ impl From<PbTable> for TableCatalog {
                 .unwrap_or_else(Cardinality::unknown),
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
-            cleaned_by_watermark: tb.cleaned_by_watermark,
             create_type: CreateType::from_proto(create_type),
             stream_job_status: StreamJobStatus::from_proto(stream_job_status),
             description: tb.description,
@@ -946,7 +936,6 @@ mod tests {
             dist_key_in_pk: vec![0],
             cardinality: None,
             created_at_epoch: None,
-            cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
             description: Some("description".to_owned()),
@@ -1021,7 +1010,6 @@ mod tests {
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
                 initialized_at_epoch: None,
-                cleaned_by_watermark: false,
                 stream_job_status: StreamJobStatus::Created,
                 create_type: CreateType::Foreground,
                 description: Some("description".to_owned()),
