@@ -217,6 +217,19 @@ impl IcebergFileScanTask {
         }
     }
 
+    pub fn add_project_field_ids(&mut self, project_field_ids: Vec<i32>) {
+        match self {
+            IcebergFileScanTask::Data(file_scan_tasks)
+            | IcebergFileScanTask::EqualityDelete(file_scan_tasks)
+            | IcebergFileScanTask::PositionDelete(file_scan_tasks) => {
+                for task in file_scan_tasks.iter_mut() {
+                    task.project_field_ids = project_field_ids.clone();
+                }
+            }
+            IcebergFileScanTask::CountStar(_) => {}
+        }
+    }
+
     /// Splits the current `IcebergFileScanTask` into multiple smaller tasks.
     ///
     /// # Parameters
@@ -366,6 +379,7 @@ pub struct IcebergTaskParameters {
     pub position_delete_tasks: IcebergFileScanTask,
     pub count: u64,
     pub snapshot_id: Option<i64>,
+    pub name_to_field_id: HashMap<String, i32>,
 }
 
 #[async_trait]
@@ -460,6 +474,7 @@ impl IcebergSplitEnumerator {
                     position_delete_tasks: IcebergFileScanTask::PositionDelete(vec![]),
                     count: 0,
                     snapshot_id: None,
+                    name_to_field_id: HashMap::default(),
                 });
             }
         };
@@ -476,6 +491,15 @@ impl IcebergSplitEnumerator {
             })
             .cloned()
             .collect_vec();
+        let name_to_field_id: HashMap<String, i32> = require_names
+            .iter()
+            .filter_map(|name| {
+                match table_schema.field_id_by_name(name) {
+                    Some(field_id) => Some((name.clone(), field_id)),
+                    None => None,
+                }
+            })
+            .collect();
 
         let scan = table
             .scan()
@@ -514,7 +538,9 @@ impl IcebergSplitEnumerator {
                         }
                         if !equality_delete_set.contains(&delete.data_file_path) {
                             equality_delete_set.insert(delete.data_file_path.clone());
-                            equality_delete_file_scan_tasks.push(delete.as_ref().clone());
+                            let mut delete_file_scan_task = delete.as_ref().clone();
+                            delete_file_scan_task.project_field_ids = delete_file_scan_task.equality_ids.clone().unwrap_or_default();
+                            equality_delete_file_scan_tasks.push(delete_file_scan_task);
                         }
                     }
                     DataContentType::PositionDeletes => {
@@ -552,6 +578,7 @@ impl IcebergSplitEnumerator {
             ),
             count: count_sum,
             snapshot_id: Some(snapshot_id),
+            name_to_field_id,
         })
     }
 }

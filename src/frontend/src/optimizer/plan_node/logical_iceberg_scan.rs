@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -38,7 +40,7 @@ use crate::optimizer::plan_node::{
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalIcebergScan` is only used by batch queries. At the beginning of the batch query optimization, `LogicalSource` with a iceberg property would be converted into a `LogicalIcebergScan`.
-#[derive(Debug, Clone, PartialEq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogicalIcebergScan {
     pub base: PlanBase<Logical>,
     pub logical_source: LogicalSource,
@@ -46,12 +48,27 @@ pub struct LogicalIcebergScan {
     pub iceberg_file_scan_task: Option<Arc<IcebergFileScanTask>>,
     pub count: u64,
     pub snapshot_id: Option<i64>,
+    pub name_to_field_id: HashMap<String, i32>,
+}
+
+impl Hash for LogicalIcebergScan {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.base.hash(state);
+        self.logical_source.hash(state);
+        self.predicate.hash(state);
+        self.count.hash(state);
+        self.snapshot_id.hash(state);
+        for (k, v) in &self.name_to_field_id {
+            k.hash(state);
+            v.hash(state);
+        }    
+    }
 }
 
 impl Eq for LogicalIcebergScan {}
 
 impl LogicalIcebergScan {
-    pub fn new(logical_source: &LogicalSource, snapshot_id: Option<i64>) -> Self {
+    pub fn new(logical_source: &LogicalSource, snapshot_id: Option<i64>, name_to_field_id: HashMap<String, i32>) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
         let base = PlanBase::new_logical_with_core(&logical_source.core);
         assert!(logical_source.output_exprs.is_none());
@@ -62,6 +79,7 @@ impl LogicalIcebergScan {
             iceberg_file_scan_task: None,
             count: 0,
             snapshot_id,
+            name_to_field_id
         }
     }
 
@@ -70,6 +88,7 @@ impl LogicalIcebergScan {
         iceberg_file_scan_task: IcebergFileScanTask,
         count: u64,
         snapshot_id: Option<i64>,
+        name_to_field_id: HashMap<String, i32>
     ) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
         let base = PlanBase::new_logical_with_core(&logical_source.core);
@@ -82,6 +101,7 @@ impl LogicalIcebergScan {
             iceberg_file_scan_task: Some(Arc::new(iceberg_file_scan_task)),
             count,
             snapshot_id,
+            name_to_field_id
         }
     }
 
@@ -97,6 +117,7 @@ impl LogicalIcebergScan {
             iceberg_file_scan_task: self.iceberg_file_scan_task.clone(),
             count: self.count,
             snapshot_id: self.snapshot_id,
+            name_to_field_id: self.name_to_field_id.clone(),
         }
     }
 
@@ -104,7 +125,8 @@ impl LogicalIcebergScan {
         &self,
         iceberg_file_scan_task: IcebergFileScanTask,
         count: u64,
-        snapshot_id: Option<i64>
+        snapshot_id: Option<i64>,
+        name_to_field_id: HashMap<String, i32>,
     ) -> Self {
         Self {
             base: self.base.clone(),
@@ -113,6 +135,7 @@ impl LogicalIcebergScan {
             iceberg_file_scan_task: Some(Arc::new(iceberg_file_scan_task)),
             count,
             snapshot_id,
+            name_to_field_id
         }
     }
 
@@ -146,6 +169,7 @@ impl LogicalIcebergScan {
             ))),
             count: 0,
             snapshot_id: logical_iceberg_scan.snapshot_id,
+            name_to_field_id: HashMap::new(),
         }
     }
 
@@ -170,6 +194,19 @@ impl LogicalIcebergScan {
             core.row_id_index = None;
         }
         let base = PlanBase::new_logical_with_core(&core);
+        // add new columns for iceberg scan task
+        let iceberg_file_scan_task = if !self.name_to_field_id.is_empty() {
+            let fields_id:Vec<_> = core.column_catalog.iter().filter_map(|col| {
+                self.name_to_field_id.get(&col.name).cloned()
+            }).collect();
+            let mut iceberg_file_scan_task= self.iceberg_file_scan_task.clone();
+            iceberg_file_scan_task.as_mut().map(|tasks| {
+                tasks.add_project_field_ids(fields_id);
+                tasks
+            }).cloned()
+        } else {
+            self.iceberg_file_scan_task.clone()
+        };
 
         LogicalIcebergScan {
             base,
@@ -178,9 +215,10 @@ impl LogicalIcebergScan {
                 ..self.logical_source.clone()
             },
             predicate: self.predicate.clone(),
-            iceberg_file_scan_task: self.iceberg_file_scan_task.clone(),
+            iceberg_file_scan_task,
             count: self.count,
             snapshot_id: self.snapshot_id,
+            name_to_field_id: self.name_to_field_id.clone(),
         }
     }
 }

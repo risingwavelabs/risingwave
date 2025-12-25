@@ -17,6 +17,8 @@
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
 
+use std::collections::HashMap;
+
 use chrono::Datelike;
 use iceberg::expr::{Predicate as IcebergPredicate, Reference};
 use iceberg::spec::Datum as IcebergDatum;
@@ -89,9 +91,10 @@ impl FallibleRule<Logical> for PopulateIcebergTaskAndTransformDeleteRule {
             position_delete_tasks,
             count,
             snapshot_id,
+            name_to_field_id,
         } = delete_parameters;
         let mut iceberg_scan: PlanRef = scan
-            .clone_with_iceberg_file_scan_task(data_tasks, count, snapshot_id)
+            .clone_with_iceberg_file_scan_task(data_tasks, count, snapshot_id, name_to_field_id.clone())
             .into();
 
         if !equality_delete_columns.is_empty() {
@@ -101,6 +104,7 @@ impl FallibleRule<Logical> for PopulateIcebergTaskAndTransformDeleteRule {
                 equality_delete_tasks,
                 iceberg_scan,
                 snapshot_id,
+                name_to_field_id.clone(),
             )?;
         }
         if !position_delete_tasks.is_empty() {
@@ -109,6 +113,7 @@ impl FallibleRule<Logical> for PopulateIcebergTaskAndTransformDeleteRule {
                 iceberg_scan,
                 position_delete_tasks,
                 snapshot_id,
+                name_to_field_id,
             )?;
         }
 
@@ -383,6 +388,7 @@ fn build_equality_delete_hashjoin_scan(
     equality_delete_tasks: IcebergFileScanTask,
     data_iceberg_scan: PlanRef,
     snapshot_id: Option<i64>,
+    name_to_field_id: HashMap<String, i32>,
 ) -> Result<PlanRef> {
     // equality delete scan
     let column_catalog_map = source
@@ -390,7 +396,7 @@ fn build_equality_delete_hashjoin_scan(
         .column_catalog
         .iter()
         .map(|c| (&c.column_desc.name, c))
-        .collect::<std::collections::HashMap<_, _>>();
+        .collect::<HashMap<_, _>>();
     let column_catalog: Vec<_> = delete_column_names
         .iter()
         .chain(std::iter::once(
@@ -405,6 +411,7 @@ fn build_equality_delete_hashjoin_scan(
         equality_delete_tasks,
         0,
         snapshot_id,
+        name_to_field_id
     );
 
     let data_columns_len = data_iceberg_scan.schema().len();
@@ -483,6 +490,7 @@ fn build_position_delete_hashjoin_scan(
     data_iceberg_scan: PlanRef,
     position_delete_tasks: IcebergFileScanTask,
     snapshot_id: Option<i64>,
+    name_to_field_id: HashMap<String, i32>,
 ) -> Result<PlanRef> {
     // FILE_PATH, FILE_POS
     let column_catalog = source
@@ -501,6 +509,7 @@ fn build_position_delete_hashjoin_scan(
         position_delete_tasks,
         0,
         snapshot_id,
+        name_to_field_id
     );
     let data_columns_len = data_iceberg_scan.schema().len();
 
