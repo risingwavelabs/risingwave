@@ -1661,10 +1661,7 @@ pub async fn create_iceberg_engine_table(
                     with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
                     with_common.insert("catalog.uri".to_owned(), catalog_uri);
                     with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user);
-                    with_common.insert(
-                        "catalog.jdbc.password".to_owned(),
-                        meta_store_password,
-                    );
+                    with_common.insert("catalog.jdbc.password".to_owned(), meta_store_password);
                     with_common.insert("catalog.name".to_owned(), iceberg_catalog_name);
                 }
 
