@@ -32,6 +32,7 @@ pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 use risingwave_common::bail;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 pub mod jdbc_jni_client;
 pub mod log_store;
 pub mod mock_coordination_client;
@@ -827,7 +828,7 @@ pub trait SinglePhaseCommitCoordinator {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<()>;
 }
 
@@ -841,11 +842,16 @@ pub trait TwoPhaseCommitCoordinator {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<Vec<u8>>;
 
     /// Idempotent implementation is required, because `commit` in the same epoch could be called multiple times.
-    async fn commit(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()>;
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        commit_metadata: Vec<u8>,
+        schema_change: Option<PbSinkSchemaChange>,
+    ) -> Result<()>;
 
     /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>);

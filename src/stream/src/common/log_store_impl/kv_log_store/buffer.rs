@@ -20,8 +20,8 @@ use await_tree::InstrumentAwait;
 use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::Field;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOffset};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use tokio::sync::Notify;
 
 use crate::common::log_store_impl::kv_log_store::{
@@ -48,7 +48,7 @@ pub(crate) enum LogStoreBufferItem {
     Barrier {
         is_checkpoint: bool,
         next_epoch: u64,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
         is_stop: bool,
     },
 }
@@ -299,7 +299,7 @@ impl LogStoreBufferSender {
         epoch: u64,
         is_checkpoint: bool,
         next_epoch: u64,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
         is_stop: bool,
     ) {
         self.buffer.inner().add_item(
@@ -307,7 +307,7 @@ impl LogStoreBufferSender {
             LogStoreBufferItem::Barrier {
                 is_checkpoint,
                 next_epoch,
-                add_columns,
+                schema_change,
                 is_stop,
             },
         );

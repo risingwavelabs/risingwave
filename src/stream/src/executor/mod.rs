@@ -32,7 +32,7 @@ use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::row::OwnedRow;
@@ -50,8 +50,8 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch, PbWatermark,
-    SubscriptionUpstreamInfo,
+    PbBarrier, PbBarrierMutation, PbDispatcher, PbSinkSchemaChange, PbStreamMessageBatch,
+    PbWatermark, SubscriptionUpstreamInfo,
 };
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
@@ -327,7 +327,7 @@ pub struct UpdateMutation {
     pub actor_splits: SplitAssignments,
     pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
-    pub sink_add_columns: HashMap<SinkId, Vec<Field>>,
+    pub sink_schema_change: HashMap<SinkId, PbSinkSchemaChange>,
     pub subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
 }
 
@@ -654,13 +654,13 @@ impl Barrier {
             })
     }
 
-    pub fn as_sink_add_columns(&self, sink_id: SinkId) -> Option<Vec<Field>> {
+    pub fn as_sink_schema_change(&self, sink_id: SinkId) -> Option<PbSinkSchemaChange> {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
                 Mutation::Update(UpdateMutation {
-                    sink_add_columns, ..
-                }) => sink_add_columns.get(&sink_id).cloned(),
+                    sink_schema_change, ..
+                }) => sink_schema_change.get(&sink_id).cloned(),
                 _ => None,
             })
     }
@@ -735,7 +735,7 @@ impl Mutation {
         use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
         use risingwave_pb::stream_plan::{
             PbAddMutation, PbConnectorPropsChangeMutation, PbDispatchers,
-            PbDropSubscriptionsMutation, PbPauseMutation, PbResumeMutation, PbSinkAddColumns,
+            PbDropSubscriptionsMutation, PbPauseMutation, PbResumeMutation,
             PbSourceChangeSplitMutation, PbStartFragmentBackfillMutation, PbStopMutation,
             PbThrottleMutation, PbUpdateMutation,
         };
@@ -769,7 +769,7 @@ impl Mutation {
                 actor_splits,
                 actor_new_dispatchers,
                 actor_cdc_table_snapshot_splits,
-                sink_add_columns,
+                sink_schema_change,
                 subscriptions_to_drop,
             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
@@ -799,16 +799,9 @@ impl Mutation {
                         })
                     }).collect()
                 }),
-                sink_add_columns: sink_add_columns
+                sink_schema_change: sink_schema_change
                     .iter()
-                    .map(|(sink_id, add_columns)| {
-                        (
-                            *sink_id,
-                            PbSinkAddColumns {
-                                fields: add_columns.iter().map(|field| field.to_prost()).collect(),
-                            },
-                        )
-                    })
+                    .map(|(sink_id, change)| ((*sink_id).as_raw_id(), change.clone()))
                     .collect(),
                 subscriptions_to_drop: subscriptions_to_drop.clone(),
             }),
@@ -983,15 +976,10 @@ impl Mutation {
                             .clone()
                             .unwrap_or_default(),
                     ),
-                sink_add_columns: update
-                    .sink_add_columns
+                sink_schema_change: update
+                    .sink_schema_change
                     .iter()
-                    .map(|(sink_id, add_columns)| {
-                        (
-                            *sink_id,
-                            add_columns.fields.iter().map(Field::from_prost).collect(),
-                        )
-                    })
+                    .map(|(sink_id, change)| (SinkId::from(*sink_id), change.clone()))
                     .collect(),
                 subscriptions_to_drop: update.subscriptions_to_drop.clone(),
             }),

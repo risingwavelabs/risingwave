@@ -404,6 +404,11 @@ derive_from_blob!(
     risingwave_pb::plan_common::PbSourceRefreshMode
 );
 
+derive_from_blob!(
+    SinkSchemachange,
+    risingwave_pb::stream_plan::PbSinkSchemaChange
+);
+
 derive_array_from_blob!(
     TypePairArray,
     risingwave_pb::stream_plan::dispatch_output_mapping::TypePair,
