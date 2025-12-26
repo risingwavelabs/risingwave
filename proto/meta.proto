@@ -587,6 +587,7 @@ message MetaSnapshot {
   repeated FragmentWorkerSlotMapping serving_worker_slot_mappings = 22;
 
   SnapshotVersion version = 13;
+  map<uint32, hummock.TableChangeLog> table_change_logs = 26;
 }
 
 message Object {

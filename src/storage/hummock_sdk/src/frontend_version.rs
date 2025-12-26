@@ -23,7 +23,8 @@ use risingwave_pb::hummock::{
 };
 
 use crate::change_log::{
-    ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLogCommon, resolve_pb_log_epochs,
+    ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLogCommon, TableChangeLogs,
+    resolve_pb_log_epochs,
 };
 use crate::version::{HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo};
 use crate::{HummockVersionId, INVALID_VERSION_ID};
@@ -36,12 +37,11 @@ pub struct FrontendHummockVersion {
 }
 
 impl FrontendHummockVersion {
-    pub fn from_version(version: &HummockVersion) -> Self {
+    pub fn from_version(version: &HummockVersion, table_change_logs: &TableChangeLogs) -> Self {
         Self {
             id: version.id,
             state_table_info: version.state_table_info.clone(),
-            table_change_log: version
-                .table_change_log
+            table_change_log: table_change_logs
                 .iter()
                 .map(|(table_id, change_log)| {
                     (
@@ -140,6 +140,7 @@ impl FrontendHummockVersion {
             &delta.removed_table_id,
             &delta.state_table_info_delta,
             &changed_table_info,
+            false,
         );
     }
 }
