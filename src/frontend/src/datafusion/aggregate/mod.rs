@@ -201,7 +201,7 @@ use datafusion::functions_aggregate::variance::{var_pop_udaf, var_samp_udaf};
 use datafusion::logical_expr::expr::{
     AggregateFunction as DFAggregateFunction, AggregateFunctionParams as DFAggregateFunctionParams,
 };
-use datafusion::logical_expr::{AggregateUDF, Signature, SortExpr, TypeSignature, Volatility};
+use datafusion::logical_expr::{AggregateUDF, Signature, TypeSignature, Volatility};
 use datafusion::prelude::{Expr as DFExpr, lit};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -209,7 +209,9 @@ use risingwave_expr::aggregate::{AggArgs, AggType, BoxedAggregateFunction, PbAgg
 use risingwave_expr::expr::LiteralExpression;
 
 use crate::datafusion::aggregate::orderby::ProjectionOrderBy;
-use crate::datafusion::{CastExecutor, ColumnTrait, RwDataTypeDataFusionExt, convert_expr};
+use crate::datafusion::{
+    CastExecutor, ColumnTrait, RwDataTypeDataFusionExt, convert_column_order, convert_expr,
+};
 use crate::error::Result as RwResult;
 use crate::expr::Expr;
 use crate::optimizer::plan_node::PlanAggCall;
@@ -251,15 +253,8 @@ pub fn convert_agg_call(
     let order_by = agg
         .order_by
         .iter()
-        .map(|order| {
-            let expr = DFExpr::Column(input_columns.column(order.column_index));
-            Ok(SortExpr::new(
-                expr,
-                order.order_type.is_ascending(),
-                order.order_type.nulls_are_first(),
-            ))
-        })
-        .collect::<RwResult<Vec<_>>>()?;
+        .map(|order| convert_column_order(order, input_columns))
+        .collect::<Vec<_>>();
     Ok(DFAggregateFunction {
         func,
         params: DFAggregateFunctionParams {

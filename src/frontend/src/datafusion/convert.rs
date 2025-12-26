@@ -16,6 +16,7 @@ use std::sync::Arc;
 
 use datafusion::arrow::array::ArrayRef as DFArrayRef;
 use datafusion::arrow::datatypes::DataType as DFDataType;
+use datafusion::logical_expr::SortExpr;
 use datafusion::prelude::Expr as DFExpr;
 use datafusion_common::{Column, DFSchema, JoinType as DFJoinType, ScalarValue};
 use risingwave_common::array::DataChunk;
@@ -24,6 +25,7 @@ use risingwave_common::bail_not_implemented;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema as RwSchema;
 use risingwave_common::types::{DataType as RwDataType, ScalarImpl};
+use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::plan_common::JoinType as RwJoinType;
 
 use crate::datafusion::convert_function_call;
@@ -106,6 +108,18 @@ pub fn convert_join_type(join_type: RwJoinType) -> RwResult<DFJoinType> {
             join_type
         ),
     }
+}
+
+pub fn convert_column_order(
+    column_order: &ColumnOrder,
+    input_columns: &impl ColumnTrait,
+) -> SortExpr {
+    let expr = DFExpr::Column(input_columns.column(column_order.column_index));
+    SortExpr::new(
+        expr,
+        column_order.order_type.is_ascending(),
+        column_order.order_type.nulls_are_first(),
+    )
 }
 
 pub fn create_data_chunk(

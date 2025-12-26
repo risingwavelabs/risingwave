@@ -329,19 +329,14 @@ fn gen_batch_query_plan(
 
     #[cfg(feature = "datafusion")]
     {
-        use crate::optimizer::{LogicalIcebergScanExt, LogicalPlanToDataFusionExt};
+        use crate::optimizer::LogicalIcebergScanExt;
 
         if session.config().enable_datafusion_engine()
             && optimized_logical.plan.contains_iceberg_scan()
         {
-            tracing::debug!(
-                "Converting RisingWave logical plan to DataFusion plan:\nRisingWave Plan: {:?}",
-                optimized_logical
-            );
-            let df_plan = optimized_logical.plan.to_datafusion_logical_plan()?;
-            tracing::debug!("Converted DataFusion plan:\nDataFusion Plan: {:?}", df_plan);
+            let plan = optimized_logical.gen_datafusion_logical_plan()?;
             return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
-                plan: df_plan,
+                plan,
                 schema,
                 stmt_type,
             }));

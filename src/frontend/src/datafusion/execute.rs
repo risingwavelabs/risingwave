@@ -49,7 +49,6 @@ pub async fn execute_datafusion_plan(
     let df_config = create_config(session.as_ref());
     let ctx = DFSessionContext::new_with_config(df_config);
     let state = ctx.state();
-    tracing::debug!("Datafusion state: {:?}", state);
 
     let pg_descs: Vec<PgFieldDescriptor> = plan.schema.fields().iter().map(to_pg_field).collect();
     let column_types = plan.schema.fields().iter().map(|f| f.data_type()).collect();
