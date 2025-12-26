@@ -18,7 +18,7 @@ use chrono::prelude::Local;
 use futures::future::try_join_all;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::ProfilingResponse;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_rpc_client::MonitorClientPool;
 use thiserror_ext::AsReport;
 use tokio::fs::{File, create_dir_all};
 use tokio::io::AsyncWriteExt;
@@ -33,7 +33,7 @@ pub async fn cpu_profile(context: &CtlContext, sleep_s: u64) -> anyhow::Result<(
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = ComputeClientPool::adhoc();
+    let clients = MonitorClientPool::adhoc();
 
     let profile_root_path = std::env::var("PREFIX_PROFILING").unwrap_or_else(|_| {
         tracing::info!("PREFIX_PROFILING is not set, using current directory");
@@ -96,7 +96,7 @@ pub async fn heap_profile(context: &CtlContext, dir: Option<String>) -> anyhow::
         .into_iter()
         .filter(|w| w.r#type() == WorkerType::ComputeNode);
 
-    let clients = ComputeClientPool::adhoc();
+    let clients = MonitorClientPool::adhoc();
 
     let mut profile_futs = vec![];
 
