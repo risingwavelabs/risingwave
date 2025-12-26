@@ -12,16 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+use std::hash::Hash;
 use std::rc::Rc;
+use std::sync::Arc;
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+use risingwave_common::types::DataType;
+use risingwave_connector::source::iceberg::IcebergFileScanTask;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
 use super::{
     ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject, PlanBase,
-    PredicatePushdown, ToBatch, ToStream, generic,
+    PredicatePushdown, ToBatch, ToStream,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
@@ -34,42 +40,150 @@ use crate::optimizer::plan_node::{
 use crate::utils::{ColIndexMapping, Condition};
 
 /// `LogicalIcebergScan` is only used by batch queries. At the beginning of the batch query optimization, `LogicalSource` with a iceberg property would be converted into a `LogicalIcebergScan`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogicalIcebergScan {
     pub base: PlanBase<Logical>,
-    pub core: generic::Source,
-    pub iceberg_scan_type: IcebergScanType,
+    pub logical_source: LogicalSource,
+    pub predicate: Condition,
+    pub iceberg_file_scan_task: Option<Arc<IcebergFileScanTask>>,
+    pub count: u64,
     pub snapshot_id: Option<i64>,
+    pub name_to_field_id: HashMap<String, i32>,
 }
+
+impl Hash for LogicalIcebergScan {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.base.hash(state);
+        self.logical_source.hash(state);
+        self.predicate.hash(state);
+        self.count.hash(state);
+        self.snapshot_id.hash(state);
+        for (k, v) in &self.name_to_field_id {
+            k.hash(state);
+            v.hash(state);
+        }
+    }
+}
+
+impl Eq for LogicalIcebergScan {}
 
 impl LogicalIcebergScan {
     pub fn new(
         logical_source: &LogicalSource,
-        iceberg_scan_type: IcebergScanType,
         snapshot_id: Option<i64>,
+        name_to_field_id: HashMap<String, i32>,
     ) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
+        let base = PlanBase::new_logical_with_core(&logical_source.core);
+        assert!(logical_source.output_exprs.is_none());
+        LogicalIcebergScan {
+            base,
+            logical_source: logical_source.clone(),
+            predicate: Condition::true_cond(),
+            iceberg_file_scan_task: None,
+            count: 0,
+            snapshot_id,
+            name_to_field_id,
+        }
+    }
 
-        let core = logical_source.core.clone();
-        let base = PlanBase::new_logical_with_core(&core);
-
+    pub fn new_with_iceberg_file_scan_task(
+        logical_source: &LogicalSource,
+        iceberg_file_scan_task: IcebergFileScanTask,
+        count: u64,
+        snapshot_id: Option<i64>,
+        name_to_field_id: HashMap<String, i32>,
+    ) -> Self {
+        assert!(logical_source.core.is_iceberg_connector());
+        let base = PlanBase::new_logical_with_core(&logical_source.core);
         assert!(logical_source.output_exprs.is_none());
 
         LogicalIcebergScan {
             base,
-            core,
-            iceberg_scan_type,
+            logical_source: logical_source.clone(),
+            predicate: Condition::true_cond(),
+            iceberg_file_scan_task: Some(Arc::new(iceberg_file_scan_task)),
+            count,
             snapshot_id,
+            name_to_field_id,
+        }
+    }
+
+    pub fn predicate(&self) -> Condition {
+        self.predicate.clone()
+    }
+
+    pub fn clone_with_predicate(&self, predicate: Condition) -> Self {
+        Self {
+            base: self.base.clone(),
+            logical_source: self.logical_source.clone(),
+            predicate,
+            iceberg_file_scan_task: self.iceberg_file_scan_task.clone(),
+            count: self.count,
+            snapshot_id: self.snapshot_id,
+            name_to_field_id: self.name_to_field_id.clone(),
+        }
+    }
+
+    pub fn clone_with_iceberg_file_scan_task(
+        &self,
+        iceberg_file_scan_task: IcebergFileScanTask,
+        count: u64,
+        snapshot_id: Option<i64>,
+        name_to_field_id: HashMap<String, i32>,
+    ) -> Self {
+        Self {
+            base: self.base.clone(),
+            logical_source: self.logical_source.clone(),
+            predicate: self.predicate.clone(),
+            iceberg_file_scan_task: Some(Arc::new(iceberg_file_scan_task)),
+            count,
+            snapshot_id,
+            name_to_field_id,
+        }
+    }
+
+    pub fn iceberg_scan_type(&self) -> Result<IcebergScanType> {
+        match self.iceberg_file_scan_task.as_ref() {
+            Some(task) => Ok(task.get_iceberg_scan_type()),
+            None => Err(crate::error::ErrorCode::BindError(
+                "Iceberg file scan task is missing in LogicalIcebergScan".to_owned(),
+            )
+            .into()),
+        }
+    }
+
+    pub fn new_count_star_with_logical_iceberg_scan(
+        logical_iceberg_scan: &LogicalIcebergScan,
+    ) -> Self {
+        let mut logical_source = logical_iceberg_scan.logical_source.clone();
+        logical_source.core.column_catalog = vec![ColumnCatalog::visible(ColumnDesc::named(
+            "count",
+            ColumnId::first_user_column(),
+            DataType::Int64,
+        ))];
+        let base = PlanBase::new_logical_with_core(&logical_source.core);
+
+        LogicalIcebergScan {
+            base,
+            logical_source,
+            predicate: Condition::true_cond(),
+            iceberg_file_scan_task: Some(Arc::new(IcebergFileScanTask::CountStar(
+                logical_iceberg_scan.count,
+            ))),
+            count: 0,
+            snapshot_id: logical_iceberg_scan.snapshot_id,
+            name_to_field_id: HashMap::new(),
         }
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
-        self.core.catalog.clone()
+        self.logical_source.core.catalog.clone()
     }
 
     pub fn clone_with_required_cols(&self, required_cols: &[usize]) -> Self {
         assert!(!required_cols.is_empty());
-        let mut core = self.core.clone();
+        let mut core = self.logical_source.core.clone();
         let mut has_row_id = false;
         core.column_catalog = required_cols
             .iter()
@@ -84,12 +198,33 @@ impl LogicalIcebergScan {
             core.row_id_index = None;
         }
         let base = PlanBase::new_logical_with_core(&core);
+        // add new columns for iceberg scan task
+        let iceberg_file_scan_task = if !self.name_to_field_id.is_empty() {
+            let fields_id: Vec<_> = core
+                .column_catalog
+                .iter()
+                .filter_map(|col| self.name_to_field_id.get(&col.name).cloned())
+                .collect();
+            let mut iceberg_file_scan_task = self.iceberg_file_scan_task.clone();
+            if let Some(tasks) = iceberg_file_scan_task.as_mut() {
+                Arc::make_mut(tasks).add_project_field_ids(fields_id);
+            }
+            iceberg_file_scan_task
+        } else {
+            self.iceberg_file_scan_task.clone()
+        };
 
         LogicalIcebergScan {
             base,
-            core,
-            iceberg_scan_type: self.iceberg_scan_type,
+            logical_source: LogicalSource {
+                core,
+                ..self.logical_source.clone()
+            },
+            predicate: self.predicate.clone(),
+            iceberg_file_scan_task,
+            count: self.count,
             snapshot_id: self.snapshot_id,
+            name_to_field_id: self.name_to_field_id.clone(),
         }
     }
 }
@@ -102,7 +237,13 @@ impl Distill for LogicalIcebergScan {
             vec![
                 ("source", src),
                 ("columns", column_names_pretty(self.schema())),
-                ("iceberg_scan_type", Pretty::debug(&self.iceberg_scan_type)),
+                (
+                    "iceberg_scan_type",
+                    match self.iceberg_file_scan_task.as_deref() {
+                        Some(task) => Pretty::debug(&task.get_iceberg_scan_type()),
+                        None => Pretty::debug(&"NoType"),
+                    },
+                ),
             ]
         } else {
             vec![]
@@ -141,9 +282,16 @@ impl PredicatePushdown for LogicalIcebergScan {
 
 impl ToBatch for LogicalIcebergScan {
     fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
-        let plan =
-            BatchIcebergScan::new(self.core.clone(), self.iceberg_scan_type, self.snapshot_id)
-                .into();
+        let plan = BatchIcebergScan::new(
+            self.logical_source.core.clone(),
+            self.iceberg_file_scan_task.as_ref().ok_or_else(|| {
+                crate::error::ErrorCode::BindError(
+                    "Iceberg file scan task is missing in LogicalIcebergScan when converting to BatchIcebergScan".to_owned(),
+                )
+            })?.clone(),
+            self.snapshot_id
+        )
+        .into();
         Ok(plan)
     }
 }
