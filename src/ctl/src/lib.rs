@@ -914,9 +914,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Profile(ProfileCommands::Cpu {
             sleep,
             worker_types,
-        }) => {
-            cmd_impl::profile::cpu_profile(context, sleep, worker_types).await?
-        }
+        }) => cmd_impl::profile::cpu_profile(context, sleep, worker_types).await?,
         Commands::Profile(ProfileCommands::Heap { dir, worker_types }) => {
             cmd_impl::profile::heap_profile(context, dir, worker_types).await?
         }
