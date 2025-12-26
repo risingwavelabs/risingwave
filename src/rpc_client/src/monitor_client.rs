@@ -1,3 +1,17 @@
+// Copyright 2025 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -18,6 +32,9 @@ use crate::channel::{Channel, WrappedChannelExt};
 use crate::error::{Result, RpcError};
 use crate::{RpcClient, RpcClientPool};
 
+/// Client for monitoring and profiling.
+///
+/// Currently can be applied to compute nodes and compactor nodes.
 #[derive(Clone)]
 pub struct MonitorClient {
     pub monitor_client: MonitorServiceClient<Channel>,
@@ -36,13 +53,13 @@ impl MonitorClient {
         })
     }
 
-    pub async fn stack_trace(&self, req: StackTraceRequest) -> Result<StackTraceResponse> {
+    pub async fn await_tree(&self, req: StackTraceRequest) -> Result<StackTraceResponse> {
         Ok(self
             .monitor_client
             .clone()
             .stack_trace(req)
             .await
-            .map_err(RpcError::from_compute_status)?
+            .map_err(RpcError::from_monitor_status)?
             .into_inner())
     }
 
@@ -52,7 +69,7 @@ impl MonitorClient {
             .clone()
             .get_streaming_stats(GetStreamingStatsRequest::default())
             .await
-            .map_err(RpcError::from_compute_status)?
+            .map_err(RpcError::from_monitor_status)?
             .into_inner())
     }
 
@@ -62,7 +79,7 @@ impl MonitorClient {
             .clone()
             .profiling(ProfilingRequest { sleep_s })
             .await
-            .map_err(RpcError::from_compute_status)?
+            .map_err(RpcError::from_monitor_status)?
             .into_inner())
     }
 
@@ -72,7 +89,7 @@ impl MonitorClient {
             .clone()
             .heap_profiling(HeapProfilingRequest { dir })
             .await
-            .map_err(RpcError::from_compute_status)?
+            .map_err(RpcError::from_monitor_status)?
             .into_inner())
     }
 
@@ -82,7 +99,7 @@ impl MonitorClient {
             .clone()
             .list_heap_profiling(ListHeapProfilingRequest {})
             .await
-            .map_err(RpcError::from_compute_status)?
+            .map_err(RpcError::from_monitor_status)?
             .into_inner())
     }
 
@@ -92,7 +109,7 @@ impl MonitorClient {
             .clone()
             .analyze_heap(AnalyzeHeapRequest { path })
             .await
-            .map_err(RpcError::from_compute_status)?
+            .map_err(RpcError::from_monitor_status)?
             .into_inner())
     }
 }
