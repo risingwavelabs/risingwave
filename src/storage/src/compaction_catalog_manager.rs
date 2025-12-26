@@ -515,6 +515,7 @@ fn build_watermark_col_serde(
     match clean_watermark_index_in_pk {
         None => {
             // non watermark table or watermark column is the first column (pk_prefix_watermark)
+            // TODO(ttl): if the watermark column is in the value, we may also get a `None` here, support it.
             None
         }
 
