@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::is_system_schema;
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
@@ -25,11 +26,17 @@ impl Binder {
         let (_schema_name, table_name, column_name) = match idents {
             [column] => (None, None, column.real_value()),
             [table, column] => (None, Some(table.real_value()), column.real_value()),
-            [schema, table, column] => (
-                Some(schema.real_value()),
-                Some(table.real_value()),
-                column.real_value(),
-            ),
+            [schema, table, column] => {
+                let schema_name = schema.real_value();
+                let schema_path = self.bind_schema_path(Some(&schema_name));
+                let table_name = table.real_value();
+                if !is_system_schema(&schema_name) {
+                    self.catalog
+                        .get_id_by_class_name(&self.db_name, schema_path, &table_name)?;
+                }
+
+                (Some(schema_name), Some(table_name), column.real_value())
+            }
             _ => {
                 return Err(
                     ErrorCode::InternalError(format!("Too many idents: {:?}", idents)).into(),
