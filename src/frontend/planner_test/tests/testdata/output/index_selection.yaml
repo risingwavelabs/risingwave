@@ -969,3 +969,28 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchLimit { limit: 10, offset: 0 }
           └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1) AND idx1.b = Int32(2)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
+- name: topn index selection for scan with output column idx
+  sql: |
+    create table t (c int, b int, a int);
+    create index idx on t(a, b desc, c desc);
+    select b from t where a = 1 order by b desc, c desc limit 1;
+  batch_plan: |-
+    BatchProject { exprs: [idx.b] }
+    └─BatchProject { exprs: [idx.b, idx.c] }
+      └─BatchSort { order: [idx.b DESC, idx.c DESC] }
+        └─BatchTopN { order: [idx.a ASC, idx.b DESC, idx.c DESC], limit: 1, offset: 0 }
+          └─BatchExchange { order: [], dist: Single }
+            └─BatchLimit { limit: 1, offset: 0 }
+              └─BatchScan { table: idx, columns: [idx.c, idx.b, idx.a], scan_ranges: [idx.a = Int32(1)], limit: 1, distribution: UpstreamHashShard(idx.a) }
+- name: topn index selection for scan with output column idx
+  sql: |
+    create table t (c int, b int, a int, primary key (a, b, c));
+    select b from t where a = 1 order by b, c limit 1;
+  batch_plan: |-
+    BatchProject { exprs: [t.b] }
+    └─BatchProject { exprs: [t.b, t.c] }
+      └─BatchSort { order: [t.b ASC, t.c ASC] }
+        └─BatchTopN { order: [t.a ASC, t.b ASC, t.c ASC], limit: 1, offset: 0 }
+          └─BatchExchange { order: [], dist: Single }
+            └─BatchLimit { limit: 1, offset: 0 }
+              └─BatchScan { table: t, columns: [t.c, t.b, t.a], scan_ranges: [t.a = Int32(1)], limit: 1, distribution: UpstreamHashShard(t.a, t.b, t.c) }
