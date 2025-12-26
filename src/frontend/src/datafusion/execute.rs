@@ -14,12 +14,9 @@
 
 use std::sync::Arc;
 
-use datafusion::arrow::datatypes::Field;
 use datafusion::config::ConfigOptions;
 use datafusion::physical_plan::execute_stream;
 use datafusion::prelude::{SessionConfig as DFSessionConfig, SessionContext as DFSessionContext};
-use datafusion_common::DFSchema;
-use datafusion_common::arrow::datatypes::DataType as DFDataType;
 use futures_async_stream::for_await;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
@@ -28,14 +25,11 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::catalog::Schema as RwSchema;
 use risingwave_common::error::BoxedError;
-use risingwave_common::types::DataType as RwDataType;
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::{BoxedExpression, build_from_prost};
 use tokio::sync::mpsc;
 
 use crate::PgResponseStream;
-use crate::error::{ErrorCode, Result as RwResult};
-use crate::expr::{Expr, ExprImpl, InputRef};
+use crate::datafusion::CastExecutor;
+use crate::error::Result as RwResult;
 use crate::handler::RwPgResponse;
 use crate::handler::util::{DataChunkToRowSetAdapter, to_pg_field};
 use crate::scheduler::SchedulerError;
@@ -55,6 +49,7 @@ pub async fn execute_datafusion_plan(
     let df_config = create_config(session.as_ref());
     let ctx = DFSessionContext::new_with_config(df_config);
     let state = ctx.state();
+    tracing::debug!("Datafusion state: {:?}", state);
 
     let pg_descs: Vec<PgFieldDescriptor> = plan.schema.fields().iter().map(to_pg_field).collect();
     let column_types = plan.schema.fields().iter().map(|f| f.data_type()).collect();
@@ -66,6 +61,7 @@ pub async fn execute_datafusion_plan(
         &ConfigOptions::default(),
         |_, _| {},
     )?;
+    let df_plan = state.optimizer().optimize(df_plan, &state, |_, _| {})?;
     let physical_plan = state
         .query_planner()
         .create_physical_plan(&df_plan, &state)
@@ -143,88 +139,6 @@ pub async fn execute_datafusion_plan(
         .into())
 }
 
-#[derive(Debug)]
-pub struct CastExecutor {
-    executors: Vec<Option<BoxedExpression>>,
-}
-
-impl CastExecutor {
-    pub fn new(df_schema: &DFSchema, rw_schema: &RwSchema) -> RwResult<Self> {
-        let mut executors = Vec::with_capacity(df_schema.fields().len());
-        for (i, (df_field, rw_field)) in df_schema
-            .fields()
-            .iter()
-            .zip_eq_fast(rw_schema.fields().iter())
-            .enumerate()
-        {
-            let target_type = rw_field.data_type();
-            let source_type = IcebergArrowConvert.type_from_field(df_field)?;
-
-            if source_type == target_type {
-                executors.push(None);
-            } else {
-                let cast_executor = build_single_cast_executor(i, source_type, target_type)?;
-                executors.push(Some(cast_executor));
-            }
-        }
-        Ok(CastExecutor { executors })
-    }
-
-    pub fn from_iter(
-        source_types: impl ExactSizeIterator<Item = DFDataType>,
-        target_types: impl ExactSizeIterator<Item = RwDataType>,
-    ) -> RwResult<Self> {
-        if source_types.len() != target_types.len() {
-            return Err(ErrorCode::InternalError(format!(
-                "source types length {} not equal to target types length {}",
-                source_types.len(),
-                target_types.len()
-            ))
-            .into());
-        }
-        let mut executors = Vec::with_capacity(target_types.len());
-        for (i, (source_type, target_type)) in source_types.zip_eq_fast(target_types).enumerate() {
-            let source_type =
-                IcebergArrowConvert.type_from_field(&Field::new("", source_type.clone(), true))?;
-
-            if source_type == target_type {
-                executors.push(None);
-            } else {
-                let cast_executor = build_single_cast_executor(i, source_type, target_type)?;
-                executors.push(Some(cast_executor));
-            }
-        }
-        Ok(CastExecutor { executors })
-    }
-
-    pub async fn execute(&self, chunk: DataChunk) -> RwResult<DataChunk> {
-        let mut arrays = Vec::with_capacity(chunk.columns().len());
-        for (exe, col) in self.executors.iter().zip_eq_fast(chunk.columns()) {
-            if let Some(exe) = exe {
-                arrays.push(exe.eval(&chunk).await?);
-            } else {
-                arrays.push(col.clone());
-            }
-        }
-        Ok(DataChunk::new(arrays, chunk.into_parts_v2().1))
-    }
-}
-
-fn build_single_cast_executor(
-    idx: usize,
-    source_type: RwDataType,
-    target_type: RwDataType,
-) -> RwResult<BoxedExpression> {
-    let expr: ExprImpl = InputRef::new(idx, source_type).into();
-    let expr = expr.cast_explicit(&target_type)?;
-    let res = build_from_prost(
-        &expr
-            .try_to_expr_proto()
-            .map_err(ErrorCode::InvalidInputSyntax)?,
-    )?;
-    Ok(res)
-}
-
 fn create_config(session: &SessionImpl) -> DFSessionConfig {
     let rw_config = session.config();
 
@@ -233,5 +147,6 @@ fn create_config(session: &SessionImpl) -> DFSessionConfig {
         df_config = df_config.with_target_partitions(batch_parallelism.get().try_into().unwrap());
     }
     df_config = df_config.with_batch_size(session.env().batch_config().developer.chunk_size);
+
     df_config
 }

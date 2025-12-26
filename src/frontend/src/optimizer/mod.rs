@@ -892,6 +892,12 @@ impl LogicalPlanRoot {
         )
         .into();
 
+        let ttl_watermark_indices = watermark_descs
+            .iter()
+            .filter(|d| d.with_ttl)
+            .map(|d| d.watermark_idx as usize)
+            .collect_vec();
+
         // Add WatermarkFilter node.
         if !watermark_descs.is_empty() {
             stream_plan = StreamWatermarkFilter::new(stream_plan, watermark_descs).into();
@@ -978,6 +984,7 @@ impl LogicalPlanRoot {
             conflict_behavior,
             version_column_indices,
             pk_column_indices,
+            ttl_watermark_indices,
             row_id_index,
             version,
             retention_seconds,

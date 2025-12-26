@@ -12,11 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
+use datafusion::arrow::array::ArrayRef as DFArrayRef;
 use datafusion::arrow::datatypes::DataType as DFDataType;
 use datafusion::prelude::Expr as DFExpr;
 use datafusion_common::{Column, DFSchema, JoinType as DFJoinType, ScalarValue};
+use risingwave_common::array::DataChunk;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::Schema as RwSchema;
 use risingwave_common::types::{DataType as RwDataType, ScalarImpl};
 use risingwave_pb::plan_common::JoinType as RwJoinType;
@@ -28,10 +33,7 @@ use crate::expr::{Expr, ExprImpl};
 pub fn convert_expr(expr: &ExprImpl, input_columns: &impl ColumnTrait) -> RwResult<DFExpr> {
     match expr {
         ExprImpl::Literal(lit) => {
-            let scalar = match lit.get_data() {
-                None => ScalarValue::Null,
-                Some(sv) => convert_scalar_value(sv, lit.return_type())?,
-            };
+            let scalar = convert_scalar_value(lit.get_data(), lit.return_type())?;
             Ok(DFExpr::Literal(scalar, None))
         }
         ExprImpl::InputRef(input_ref) => {
@@ -42,28 +44,46 @@ pub fn convert_expr(expr: &ExprImpl, input_columns: &impl ColumnTrait) -> RwResu
     }
 }
 
-pub fn convert_scalar_value(sv: &ScalarImpl, data_type: RwDataType) -> RwResult<ScalarValue> {
+pub fn convert_scalar_value(
+    sv: &Option<ScalarImpl>,
+    data_type: RwDataType,
+) -> RwResult<ScalarValue> {
     match (sv, &data_type) {
-        (ScalarImpl::Bool(v), RwDataType::Boolean) => Ok(ScalarValue::Boolean(Some(*v))),
-        (ScalarImpl::Int16(v), RwDataType::Int16) => Ok(ScalarValue::Int16(Some(*v))),
-        (ScalarImpl::Int32(v), RwDataType::Int32) => Ok(ScalarValue::Int32(Some(*v))),
-        (ScalarImpl::Int64(v), RwDataType::Int64) => Ok(ScalarValue::Int64(Some(*v))),
-        (ScalarImpl::Float32(v), RwDataType::Float32) => {
+        (Some(ScalarImpl::Bool(v)), RwDataType::Boolean) => Ok(ScalarValue::Boolean(Some(*v))),
+        (None, RwDataType::Boolean) => Ok(ScalarValue::Boolean(None)),
+        (Some(ScalarImpl::Int16(v)), RwDataType::Int16) => Ok(ScalarValue::Int16(Some(*v))),
+        (None, RwDataType::Int16) => Ok(ScalarValue::Int16(None)),
+        (Some(ScalarImpl::Int32(v)), RwDataType::Int32) => Ok(ScalarValue::Int32(Some(*v))),
+        (None, RwDataType::Int32) => Ok(ScalarValue::Int32(None)),
+        (Some(ScalarImpl::Int64(v)), RwDataType::Int64) => Ok(ScalarValue::Int64(Some(*v))),
+        (None, RwDataType::Int64) => Ok(ScalarValue::Int64(None)),
+        (Some(ScalarImpl::Float32(v)), RwDataType::Float32) => {
             Ok(ScalarValue::Float32(Some(v.into_inner())))
         }
-        (ScalarImpl::Float64(v), RwDataType::Float64) => {
+        (None, RwDataType::Float32) => Ok(ScalarValue::Float32(None)),
+        (Some(ScalarImpl::Float64(v)), RwDataType::Float64) => {
             Ok(ScalarValue::Float64(Some(v.into_inner())))
         }
-        (ScalarImpl::Utf8(v), RwDataType::Varchar) => Ok(ScalarValue::Utf8(Some(v.to_string()))),
-        (ScalarImpl::Bytea(v), RwDataType::Bytea) => Ok(ScalarValue::Binary(Some(v.to_vec()))),
+        (None, RwDataType::Float64) => Ok(ScalarValue::Float64(None)),
+        (Some(ScalarImpl::Utf8(v)), RwDataType::Varchar) => {
+            Ok(ScalarValue::Utf8(Some(v.to_string())))
+        }
+        (None, RwDataType::Varchar) => Ok(ScalarValue::Utf8(None)),
+        (Some(ScalarImpl::Bytea(v)), RwDataType::Bytea) => {
+            Ok(ScalarValue::Binary(Some(v.to_vec())))
+        }
+        (None, RwDataType::Bytea) => Ok(ScalarValue::Binary(None)),
         // For other types, use fallback conversion via IcebergArrowConvert to ensure consistency
         _ => convert_scalar_value_fallback(sv, data_type),
     }
 }
 
-fn convert_scalar_value_fallback(sv: &ScalarImpl, data_type: RwDataType) -> RwResult<ScalarValue> {
+fn convert_scalar_value_fallback(
+    sv: &Option<ScalarImpl>,
+    data_type: RwDataType,
+) -> RwResult<ScalarValue> {
     let mut array_builder = data_type.create_array_builder(1);
-    array_builder.append(Some(sv));
+    array_builder.append(sv.as_ref());
     let array = array_builder.finish();
     let arrow_field = IcebergArrowConvert.to_arrow_field("", &data_type)?;
     let array = IcebergArrowConvert.to_arrow_array(arrow_field.data_type(), &array)?;
@@ -86,6 +106,18 @@ pub fn convert_join_type(join_type: RwJoinType) -> RwResult<DFJoinType> {
             join_type
         ),
     }
+}
+
+pub fn create_data_chunk(
+    arrays: impl ExactSizeIterator<Item = DFArrayRef>,
+    size: usize,
+) -> RwResult<DataChunk> {
+    let mut columns = Vec::with_capacity(arrays.len());
+    for array in arrays {
+        let column = Arc::new(IcebergArrowConvert.array_from_arrow_array_raw(&array)?);
+        columns.push(column);
+    }
+    Ok(DataChunk::new(columns, Bitmap::ones(size)))
 }
 
 pub trait ColumnTrait {
@@ -187,6 +219,144 @@ impl ColumnTrait for ConcatColumns<'_> {
                 .field(index - self.left_len)
                 .data_type()
                 .clone()
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use datafusion::arrow::datatypes::{Field as DFField, Schema as ArrowSchema};
+    use risingwave_common::catalog::Field as RwField;
+    use risingwave_common::types::ScalarImpl;
+
+    use super::*;
+    use crate::expr::{ExprImpl, InputRef, Literal};
+
+    fn create_input_columns(fields: Vec<(String, RwDataType, DFDataType)>) -> (RwSchema, DFSchema) {
+        let rw_fields = fields
+            .iter()
+            .map(|(name, rw_type, _)| RwField::new(name.clone(), rw_type.clone()))
+            .collect();
+        let rw_schema = RwSchema::new(rw_fields);
+
+        let arrow_fields = fields
+            .iter()
+            .map(|(name, _, df_type)| DFField::new(name.clone(), df_type.clone(), true))
+            .collect::<Vec<_>>();
+        let arrow_schema = ArrowSchema::new(arrow_fields);
+        let df_schema = DFSchema::try_from(Arc::new(arrow_schema)).unwrap();
+
+        (rw_schema, df_schema)
+    }
+
+    #[test]
+    fn test_convert_scalar_value_int32() {
+        assert_eq!(
+            convert_scalar_value(&Some(ScalarImpl::Int32(1000)), RwDataType::Int32).unwrap(),
+            ScalarValue::Int32(Some(1000))
+        );
+        assert_eq!(
+            convert_scalar_value(&None, RwDataType::Int32).unwrap(),
+            ScalarValue::Int32(None)
+        );
+    }
+
+    #[test]
+    fn test_convert_scalar_value_varchar() {
+        let s: Box<str> = "hello".into();
+        assert_eq!(
+            convert_scalar_value(&Some(ScalarImpl::Utf8(s)), RwDataType::Varchar).unwrap(),
+            ScalarValue::Utf8(Some("hello".to_owned()))
+        );
+        assert_eq!(
+            convert_scalar_value(&None, RwDataType::Varchar).unwrap(),
+            ScalarValue::Utf8(None)
+        );
+    }
+
+    #[test]
+    fn test_convert_scalar_value_bytea() {
+        let bytes: Box<[u8]> = vec![1, 2, 3].into_boxed_slice();
+        assert_eq!(
+            convert_scalar_value(&Some(ScalarImpl::Bytea(bytes)), RwDataType::Bytea).unwrap(),
+            ScalarValue::Binary(Some(vec![1, 2, 3]))
+        );
+        assert_eq!(
+            convert_scalar_value(&None, RwDataType::Bytea).unwrap(),
+            ScalarValue::Binary(None)
+        );
+    }
+
+    #[test]
+    fn test_convert_expr_literal_int32() {
+        let expr = ExprImpl::from(Literal::new(Some(ScalarImpl::Int32(42)), RwDataType::Int32));
+        let (rw_schema, df_schema) = create_input_columns(vec![]);
+        let columns = InputColumns::new(&df_schema, &rw_schema);
+
+        let result = convert_expr(&expr, &columns).unwrap();
+        match result {
+            DFExpr::Literal(scalar, _) => {
+                assert_eq!(scalar, ScalarValue::Int32(Some(42)));
+            }
+            _ => panic!("Expected literal expression"),
+        }
+    }
+
+    #[test]
+    fn test_convert_expr_literal_null() {
+        let expr = ExprImpl::from(Literal::new(None, RwDataType::Int32));
+        let (rw_schema, df_schema) = create_input_columns(vec![]);
+        let columns = InputColumns::new(&df_schema, &rw_schema);
+
+        let result = convert_expr(&expr, &columns).unwrap();
+        match result {
+            DFExpr::Literal(scalar, _) => {
+                assert_eq!(scalar, ScalarValue::Int32(None));
+            }
+            _ => panic!("Expected literal expression"),
+        }
+    }
+
+    #[test]
+    fn test_convert_expr_input_ref() {
+        let (rw_schema, df_schema) = create_input_columns(vec![(
+            "col1".to_owned(),
+            RwDataType::Int32,
+            DFDataType::Int32,
+        )]);
+        let columns = InputColumns::new(&df_schema, &rw_schema);
+
+        let expr = ExprImpl::from(InputRef::new(0, RwDataType::Int32));
+        let result = convert_expr(&expr, &columns).unwrap();
+
+        match result {
+            DFExpr::Column(col) => {
+                assert_eq!(col.name, "col1");
+            }
+            _ => panic!("Expected column expression"),
+        }
+    }
+
+    #[test]
+    fn test_convert_expr_input_ref_multiple_columns() {
+        let (rw_schema, df_schema) = create_input_columns(vec![
+            ("col0".to_owned(), RwDataType::Int32, DFDataType::Int32),
+            ("col1".to_owned(), RwDataType::Varchar, DFDataType::Utf8),
+            ("col2".to_owned(), RwDataType::Float64, DFDataType::Float64),
+        ]);
+        let columns = InputColumns::new(&df_schema, &rw_schema);
+
+        // Test accessing different columns
+        for i in 0..3 {
+            let expr = ExprImpl::from(InputRef::new(i, rw_schema.fields[i].data_type()));
+            let result = convert_expr(&expr, &columns).unwrap();
+
+            match result {
+                DFExpr::Column(col) => {
+                    assert_eq!(col.name, format!("col{}", i));
+                }
+                _ => panic!("Expected column expression at index {}", i),
+            }
         }
     }
 }

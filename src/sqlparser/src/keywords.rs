@@ -530,6 +530,7 @@ define_keywords!(
     TRUE,
     TRUNCATE,
     TRY_CAST,
+    TTL,
     TYPE,
     UESCAPE,
     UNBOUNDED,
