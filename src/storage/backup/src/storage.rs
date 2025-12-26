@@ -21,6 +21,7 @@ use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{
     InMemObjectStore, MonitoredObjectStore, ObjectError, ObjectStoreImpl, ObjectStoreRef,
 };
+use tokio::sync::RwLock;
 
 use crate::meta_snapshot::{MetaSnapshot, Metadata};
 use crate::{
@@ -42,7 +43,7 @@ pub trait MetaSnapshotStorage: 'static + Sync + Send {
     async fn get<S: Metadata>(&self, id: MetaSnapshotId) -> BackupResult<MetaSnapshot<S>>;
 
     /// Gets local snapshot manifest.
-    fn manifest(&self) -> Arc<MetaSnapshotManifest>;
+    async fn manifest(&self) -> Arc<MetaSnapshotManifest>;
 
     /// Refreshes local snapshot manifest.
     async fn refresh_manifest(&self) -> BackupResult<()>;
@@ -55,7 +56,7 @@ pub trait MetaSnapshotStorage: 'static + Sync + Send {
 pub struct ObjectStoreMetaSnapshotStorage {
     path: String,
     store: ObjectStoreRef,
-    manifest: Arc<parking_lot::RwLock<Arc<MetaSnapshotManifest>>>,
+    manifest: Arc<RwLock<Arc<MetaSnapshotManifest>>>,
 }
 
 // TODO #6482: purge stale snapshots that is not in manifest.
@@ -70,13 +71,12 @@ impl ObjectStoreMetaSnapshotStorage {
         Ok(instance)
     }
 
-    async fn update_manifest(&self, new_manifest: MetaSnapshotManifest) -> BackupResult<()> {
+    async fn update_manifest(&self, new_manifest: &MetaSnapshotManifest) -> BackupResult<()> {
         let bytes =
-            serde_json::to_vec(&new_manifest).map_err(|e| BackupError::Encoding(e.into()))?;
+            serde_json::to_vec(new_manifest).map_err(|e| BackupError::Encoding(e.into()))?;
         self.store
             .upload(&self.get_manifest_path(), bytes.into())
             .await?;
-        *self.manifest.write() = Arc::new(new_manifest);
         Ok(())
     }
 
@@ -126,7 +126,8 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
         self.store.upload(&path, snapshot.encode()?.into()).await?;
 
         // update manifest last
-        let mut new_manifest = (**self.manifest.read()).clone();
+        let mut gurad = self.manifest.write().await;
+        let mut new_manifest = (**gurad).clone();
         new_manifest.manifest_id += 1;
         new_manifest
             .snapshot_metadata
@@ -136,7 +137,8 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
                 snapshot.format_version,
                 remarks,
             ));
-        self.update_manifest(new_manifest).await?;
+        self.update_manifest(&new_manifest).await?;
+        *gurad = Arc::new(new_manifest);
         Ok(())
     }
 
@@ -146,13 +148,13 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
         MetaSnapshot::decode(&data)
     }
 
-    fn manifest(&self) -> Arc<MetaSnapshotManifest> {
-        self.manifest.read().clone()
+    async fn manifest(&self) -> Arc<MetaSnapshotManifest> {
+        self.manifest.read().await.clone()
     }
 
     async fn refresh_manifest(&self) -> BackupResult<()> {
         if let Some(manifest) = self.get_manifest().await? {
-            let mut guard = self.manifest.write();
+            let mut guard = self.manifest.write().await;
             if manifest.manifest_id > guard.manifest_id {
                 *guard = Arc::new(manifest);
             }
@@ -163,13 +165,16 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
     async fn delete(&self, ids: &[MetaSnapshotId]) -> BackupResult<()> {
         // update manifest first
         let to_delete: HashSet<MetaSnapshotId> = HashSet::from_iter(ids.iter().cloned());
-        let mut new_manifest = (**self.manifest.read()).clone();
-        new_manifest.manifest_id += 1;
-        new_manifest
-            .snapshot_metadata
-            .retain(|m| !to_delete.contains(&m.id));
-        self.update_manifest(new_manifest).await?;
-
+        {
+            let mut gurad = self.manifest.write().await;
+            let mut new_manifest = (**gurad).clone();
+            new_manifest.manifest_id += 1;
+            new_manifest
+                .snapshot_metadata
+                .retain(|m| !to_delete.contains(&m.id));
+            self.update_manifest(&new_manifest).await?;
+            *gurad = Arc::new(new_manifest);
+        }
         let paths = ids
             .iter()
             .map(|id| self.get_snapshot_path(*id))
