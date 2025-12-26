@@ -215,6 +215,7 @@ mod tests {
                 )),
                 ..Default::default()
             }),
+            HashMap::default(),
             unbounded_channel().0,
         )
     }
