@@ -33,9 +33,9 @@ import { Fragment, useEffect, useState } from "react"
 import SpinnerOverlay from "../components/SpinnerOverlay"
 import Title from "../components/Title"
 import api from "../lib/api/api"
-import { getClusterInfoComputeNode } from "../lib/api/cluster"
+import { getClusterInfoProfileWorkers } from "../lib/api/cluster"
 import useFetch from "../lib/api/fetch"
-import { WorkerNode } from "../proto/gen/common"
+import { WorkerNode, WorkerType } from "../proto/gen/common"
 import { ListHeapProfilingResponse } from "../proto/gen/monitor_service"
 
 const SIDEBAR_WIDTH = 200
@@ -46,9 +46,9 @@ interface FileList {
 }
 
 export default function HeapProfiling() {
-  const { response: computeNodes } = useFetch(getClusterInfoComputeNode)
+  const { response: workerNodes } = useFetch(getClusterInfoProfileWorkers)
 
-  const [computeNodeId, setComputeNodeId] = useState<number>()
+  const [workerNodeId, setWorkerNodeId] = useState<number>()
   const [displayInfo, setDisplayInfo] = useState<string | undefined>("")
   const [profileList, setProfileList] = useState<
     ListHeapProfilingResponse | undefined
@@ -62,33 +62,33 @@ export default function HeapProfiling() {
   >()
 
   useEffect(() => {
-    if (computeNodes && !computeNodeId && computeNodes.length > 0) {
-      setComputeNodeId(computeNodes[0].id)
+    if (workerNodes && !workerNodeId && workerNodes.length > 0) {
+      setWorkerNodeId(workerNodes[0].id)
     }
-  }, [computeNodes, computeNodeId])
+  }, [workerNodes, workerNodeId])
 
   async function getProfileList(
-    computeNodes: WorkerNode[] | undefined,
-    computeNodeId: number | undefined
+    workerNodes: WorkerNode[] | undefined,
+    workerNodeId: number | undefined
   ) {
-    if (computeNodes && computeNodeId && computeNodes.length > 0) {
+    if (workerNodes && workerNodeId && workerNodes.length > 0) {
       try {
         let list: ListHeapProfilingResponse =
           ListHeapProfilingResponse.fromJSON(
-            await api.get(`/monitor/list_heap_profile/${computeNodeId}`)
+            await api.get(`/monitor/list_heap_profile/${workerNodeId}`)
           )
         setProfileList(list)
       } catch (e: any) {
         console.error(e)
-        let result = `Getting Profiling File List\n\nError: ${e.message}\n${e.cause}`
+        let result = `Getting Profiling File List from ${getWorkerLabel(workerNodeId)}\n\nError: ${e.message}\n${e.cause}`
         setDisplayInfo(result)
       }
     }
   }
 
   useEffect(() => {
-    getProfileList(computeNodes, computeNodeId)
-  }, [computeNodes, computeNodeId])
+    getProfileList(workerNodes, workerNodeId)
+  }, [workerNodes, workerNodeId])
 
   useEffect(() => {
     if (!profileList) {
@@ -120,10 +120,12 @@ export default function HeapProfiling() {
 
   async function dumpProfile() {
     try {
-      await api.get(`/monitor/dump_heap_profile/${computeNodeId}`)
-      getProfileList(computeNodes, computeNodeId)
+      await api.get(`/monitor/dump_heap_profile/${workerNodeId}`)
+      getProfileList(workerNodes, workerNodeId)
     } catch (e: any) {
-      setDisplayInfo(`Dumping heap profile.\n\nError: ${e.message}\n${e.cause}`)
+      setDisplayInfo(
+        `Dumping heap profile on ${getWorkerLabel(workerNodeId)}.\n\nError: ${e.message}\n${e.cause}`
+      )
     }
   }
 
@@ -143,17 +145,18 @@ export default function HeapProfiling() {
       analyzeTargetFileName
     )
 
+    const workerLabel = getWorkerLabel(workerNodeId)
     setDisplayInfo(
-      `Analyzing ${analyzeTargetFileName} from Compute Node ${computeNodeId}`
+      `Analyzing ${analyzeTargetFileName} from ${workerLabel}`
     )
 
-    const title = `Collapsed Profiling of Compute Node ${computeNodeId} for ${analyzeTargetFileName}`
+    const title = `Collapsed Profiling of ${workerLabel} for ${analyzeTargetFileName}`
 
     let result
     try {
       let analyzeFilePathBase64 = base64url(analyzeFilePath)
       const url = api.urlFor(
-        `/monitor/analyze/${computeNodeId}/${analyzeFilePathBase64}`
+        `/monitor/analyze/${workerNodeId}/${analyzeFilePathBase64}`
       )
       const res = await fetch(url)
       if (!res.ok) {
@@ -167,6 +170,46 @@ export default function HeapProfiling() {
     }
 
     setDisplayInfo(result)
+  }
+
+  const workerTypeOrder = [
+    WorkerType.WORKER_TYPE_FRONTEND,
+    WorkerType.WORKER_TYPE_COMPUTE_NODE,
+    WorkerType.WORKER_TYPE_COMPACTOR,
+  ]
+  const workerTypeLabel = (workerType: WorkerType) => {
+    switch (workerType) {
+      case WorkerType.WORKER_TYPE_FRONTEND:
+        return "Frontend"
+      case WorkerType.WORKER_TYPE_COMPUTE_NODE:
+        return "Compute"
+      case WorkerType.WORKER_TYPE_COMPACTOR:
+        return "Compactor"
+      default:
+        return "Other"
+    }
+  }
+  const groupedWorkerNodes = (workerNodes ?? []).reduce(
+    (groups, node) => {
+      const list = groups.get(node.type) ?? []
+      list.push(node)
+      groups.set(node.type, list)
+      return groups
+    },
+    new Map<WorkerType, WorkerNode[]>()
+  )
+  for (const nodes of groupedWorkerNodes.values()) {
+    nodes.sort((a, b) => a.id - b.id)
+  }
+  const getWorkerLabel = (nodeId: number | undefined) => {
+    if (nodeId === undefined) {
+      return "Worker Node"
+    }
+    const node = (workerNodes ?? []).find((n) => n.id === nodeId)
+    if (!node) {
+      return `Worker Node ${nodeId}`
+    }
+    return `Worker Node ${nodeId} (${workerTypeLabel(node.type)})`
   }
 
   const retVal = (
@@ -183,18 +226,30 @@ export default function HeapProfiling() {
           <FormControl>
             <FormLabel textColor="blue.500">Dump Heap Profile</FormLabel>
             <VStack>
-              <FormLabel>Compute Nodes</FormLabel>
+              <FormLabel>Worker Nodes</FormLabel>
               <Select
                 onChange={(event) =>
-                  setComputeNodeId(parseInt(event.target.value))
+                  setWorkerNodeId(parseInt(event.target.value))
                 }
               >
-                {computeNodes &&
-                  computeNodes.map((n) => (
-                    <option value={n.id} key={n.id}>
-                      ({n.id}) {n.host?.host}:{n.host?.port}
-                    </option>
-                  ))}
+                {workerTypeOrder.flatMap((workerType) => {
+                  const nodes = groupedWorkerNodes.get(workerType)
+                  if (!nodes || nodes.length === 0) {
+                    return []
+                  }
+                  return (
+                    <optgroup
+                      key={workerType}
+                      label={workerTypeLabel(workerType)}
+                    >
+                      {nodes.map((n) => (
+                        <option value={n.id} key={n.id}>
+                          ({n.id}) {n.host?.host}:{n.host?.port}
+                        </option>
+                      ))}
+                    </optgroup>
+                  )
+                })}
               </Select>
               <Button onClick={(_) => dumpProfile()} width="full">
                 Dump
@@ -249,7 +304,7 @@ export default function HeapProfiling() {
                 renderWhitespace: "boundary",
                 wordWrap: "on",
               }}
-              defaultValue='Select a compute node and target profiling result file and click "Analyze"...'
+              defaultValue='Select a worker node and target profiling result file and click "Analyze"...'
               value={displayInfo}
             ></Editor>
           )}
