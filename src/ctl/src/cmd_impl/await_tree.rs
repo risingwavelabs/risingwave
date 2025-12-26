@@ -70,7 +70,7 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<Ana
     let mut summary = AnalyzeSummary::new();
     for cn in compute_nodes {
         let client = clients.get(&cn).await?;
-        let response = client.stack_trace(req).await?;
+        let response = client.await_tree(req).await?;
         let partial_summary = AnalyzeSummary::from_traces(&response.actor_traces)?;
         summary.merge_other(&partial_summary);
     }

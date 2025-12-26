@@ -79,7 +79,7 @@ pub async fn dump_worker_node_await_tree(
 
     for worker_node in worker_nodes {
         let client = clients.get(worker_node).await?;
-        let result = client.stack_trace(req).await?;
+        let result = client.await_tree(req).await?;
 
         all.merge_other(result);
     }
