@@ -59,6 +59,7 @@ enum Commands {
 pub enum Components {
     #[clap(name = "minio")]
     Minio,
+    Rustfs,
     Lakekeeper,
     Hdfs,
     PrometheusAndGrafana,
@@ -86,6 +87,7 @@ impl Components {
     pub fn title(&self) -> String {
         match self {
             Self::Minio => "[Component] Hummock: MinIO + MinIO-CLI",
+            Self::Rustfs => "[Component] Hummock: RustFS (S3-compatible)",
             Self::Lakekeeper => "[Component] Apache Iceberg: Lakekeeper REST Catalog",
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
@@ -116,6 +118,10 @@ impl Components {
             Self::Minio => {
                 "
 Required by Hummock state store."
+            }
+            Self::Rustfs => {
+                "
+Required by Hummock state store. Alternative S3-compatible object store."
             }
             Self::Lakekeeper => {
                 "
@@ -242,6 +248,7 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
     pub fn from_env(env: impl AsRef<str>) -> Option<Self> {
         match env.as_ref() {
             "ENABLE_MINIO" => Some(Self::Minio),
+            "ENABLE_RUSTFS" => Some(Self::Rustfs),
             "ENABLE_LAKEKEEPER" => Some(Self::Lakekeeper),
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
@@ -270,6 +277,7 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
     pub fn env(&self) -> String {
         match self {
             Self::Minio => "ENABLE_MINIO",
+            Self::Rustfs => "ENABLE_RUSTFS",
             Self::Lakekeeper => "ENABLE_LAKEKEEPER",
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",

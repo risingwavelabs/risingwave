@@ -1,0 +1,62 @@
+extend = "common.toml"
+
+[env]
+RUSTFS_SYSTEM = "${SYSTEM}"
+# RustFS download URL based on the architecture
+# Based on the pattern from rustfs repository: https://github.com/rustfs/rustfs
+RUSTFS_VERSION = { value = "latest", condition = { env_not_set = ["RUSTFS_VERSION"] } }
+RUSTFS_DOWNLOAD_URL = { value = "https://github.com/rustfs/rustfs/releases/download/${RUSTFS_VERSION}/rustfs-${RUSTFS_SYSTEM}.tar.gz", condition = { env_not_set = ["RUSTFS_DOWNLOAD_URL"] } }
+
+[tasks.download-rustfs]
+private = true
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [
+    "ENABLE_RUSTFS",
+], files_not_exist = [
+    "${PREFIX_BIN}/rustfs",
+] }
+description = "Download and extract RustFS"
+script = '''
+#!/usr/bin/env bash
+set -e
+if [ -f "${PREFIX_BIN}/rustfs" ]; then
+    exit 0
+fi
+echo "RustFS not found, downloading from ${RUSTFS_DOWNLOAD_URL}"
+# Try to download from GitHub releases
+if curl -fL -o "${PREFIX_TMP}/rustfs.tar.gz" "${RUSTFS_DOWNLOAD_URL}"; then
+    tar -xzf "${PREFIX_TMP}/rustfs.tar.gz" -C "${PREFIX_TMP}"
+    chmod +x "${PREFIX_TMP}/rustfs"
+    mv "${PREFIX_TMP}/rustfs" "${PREFIX_BIN}/rustfs"
+    rm -f "${PREFIX_TMP}/rustfs.tar.gz"
+else
+    # Fallback: build from source
+    echo "Failed to download RustFS binary, building from source..."
+    rm -rf "${PREFIX_TMP}/rustfs-src"
+    git clone https://github.com/rustfs/rustfs.git "${PREFIX_TMP}/rustfs-src"
+    cd "${PREFIX_TMP}/rustfs-src"
+    cargo build --release
+    mv target/release/rustfs "${PREFIX_BIN}/rustfs"
+    chmod +x "${PREFIX_BIN}/rustfs"
+    cd -
+    rm -rf "${PREFIX_TMP}/rustfs-src"
+fi
+
+"${PREFIX_BIN}/rustfs" --version
+'''
+
+[tasks.remove-rustfs]
+private = true
+dependencies = ["prepare"]
+condition = { env_set = ["ENABLE_RUSTFS"], files_exist = ["${PREFIX_BIN}/rustfs"] }
+script = '''
+#!/usr/bin/env bash
+set -e
+rm -f "${PREFIX_BIN}/rustfs"
+'''
+
+[tasks.update-rustfs]
+dependencies = ["prepare", "remove-rustfs", "download-rustfs"]
+condition = { env_set = ["ENABLE_RUSTFS"] }
+description = "Update RustFS binary"
