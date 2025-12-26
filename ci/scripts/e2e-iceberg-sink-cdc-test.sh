@@ -117,7 +117,7 @@ risedev psql -c "create table t (
 
 sleep 3
 
-echo "Creating Iceberg sink with auto schema change..."
+echo "Creating Iceberg sink..."
 risedev psql -c "
 CREATE SINK s1 from t WITH (
     connector = 'iceberg',
@@ -135,7 +135,6 @@ CREATE SINK s1 from t WITH (
     commit_checkpoint_interval = 2,
     primary_key = 'id',
     force_append_only='true',
-    auto.schema.change = 'true',
     is_exactly_once = 'false',
 );"
 

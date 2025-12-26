@@ -2483,10 +2483,14 @@ fn check_compatibility(
 }
 
 /// Try to match our schema with iceberg schema.
+/// Allows RisingWave schema to be a superset of Iceberg schema to support schema evolution.
+/// The Iceberg schema must be compatible with a subset of RisingWave schema fields.
 pub fn try_matches_arrow_schema(rw_schema: &Schema, arrow_schema: &ArrowSchema) -> Result<()> {
-    if rw_schema.fields.len() != arrow_schema.fields().len() {
+    // Allow RisingWave schema to have more fields than Iceberg schema to support schema evolution
+    // New columns will be added to Iceberg table via commit_schema_change
+    if rw_schema.fields.len() < arrow_schema.fields().len() {
         bail!(
-            "Schema length mismatch, risingwave is {}, and iceberg is {}",
+            "Schema mismatch: RisingWave schema has fewer fields ({}) than Iceberg schema ({})",
             rw_schema.fields.len(),
             arrow_schema.fields.len()
         );
@@ -2748,6 +2752,41 @@ mod test {
             ),
         ]);
         try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
+    }
+
+    #[test]
+    fn test_schema_evolution_superset() {
+        use arrow_schema_iceberg::{DataType as ArrowDataType, Field as ArrowField};
+
+        use super::*;
+
+        // Test that RisingWave schema can be a superset of Iceberg schema
+        // This supports schema evolution where new columns are added to RisingWave table
+        // before they are added to Iceberg table via commit_schema_change
+        let risingwave_schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "id"),
+            Field::with_name(DataType::Int32, "v1"),
+            Field::with_name(DataType::Int32, "v2"), // Extra column not in Iceberg
+        ]);
+        let arrow_schema = ArrowSchema::new(vec![
+            ArrowField::new("id", ArrowDataType::Int32, false),
+            ArrowField::new("v1", ArrowDataType::Int32, false),
+        ]);
+
+        // This should succeed - RisingWave has more columns than Iceberg
+        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
+
+        // Test that Iceberg schema cannot be larger than RisingWave schema
+        let risingwave_schema = Schema::new(vec![
+            Field::with_name(DataType::Int32, "id"),
+        ]);
+        let arrow_schema = ArrowSchema::new(vec![
+            ArrowField::new("id", ArrowDataType::Int32, false),
+            ArrowField::new("v1", ArrowDataType::Int32, false),
+        ]);
+
+        // This should fail - Iceberg has more columns than RisingWave
+        assert!(try_matches_arrow_schema(&risingwave_schema, &arrow_schema).is_err());
     }
 
     #[test]
