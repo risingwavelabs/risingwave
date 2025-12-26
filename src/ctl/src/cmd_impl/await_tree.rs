@@ -16,7 +16,7 @@ use risingwave_common::util::StackTraceResponseExt;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::StackTraceRequest;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_rpc_client::{ComputeClientPool, MonitorClientPool};
 use rw_diagnose_tools::await_tree::AnalyzeSummary;
 
 use crate::CtlContext;
@@ -62,7 +62,7 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<Ana
     let compute_nodes = meta_client
         .list_worker_nodes(Some(WorkerType::ComputeNode))
         .await?;
-    let clients = ComputeClientPool::adhoc();
+    let clients = MonitorClientPool::adhoc();
 
     // request for json actor traces
     let req = StackTraceRequest::default();

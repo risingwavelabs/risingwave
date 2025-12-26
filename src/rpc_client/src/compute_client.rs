@@ -27,14 +27,6 @@ use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{
     ResizeCacheRequest, ResizeCacheResponse, ShowConfigRequest, ShowConfigResponse,
 };
-use risingwave_pb::id::PartialGraphId;
-use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
-use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
-    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
-    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
-    StackTraceResponse,
-};
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::batch_exchange_service_client::BatchExchangeServiceClient;
 use risingwave_pb::task_service::stream_exchange_service_client::StreamExchangeServiceClient;
@@ -56,14 +48,12 @@ use crate::{RpcClient, RpcClientPool};
 // - batch MPP task query execution
 // - batch exchange
 // - streaming exchange
-// - general services specific to compute node, like monitoring, profiling, debugging, etc.
 // We should consider splitting them into different clients.
 #[derive(Clone)]
 pub struct ComputeClient {
     pub batch_exchange_client: BatchExchangeServiceClient<Channel>,
     pub stream_exchange_client: StreamExchangeServiceClient<Channel>,
     pub task_client: TaskServiceClient<Channel>,
-    pub monitor_client: MonitorServiceClient<Channel>,
     pub config_client: ConfigServiceClient<Channel>,
     pub addr: HostAddr,
 }
@@ -92,14 +82,11 @@ impl ComputeClient {
             StreamExchangeServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let task_client =
             TaskServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
-        let monitor_client =
-            MonitorServiceClient::new(channel.clone()).max_decoding_message_size(usize::MAX);
         let config_client = ConfigServiceClient::new(channel);
         Self {
             batch_exchange_client,
             stream_exchange_client,
             task_client,
-            monitor_client,
             config_client,
             addr,
         }
@@ -220,66 +207,6 @@ impl ComputeClient {
             .task_client
             .clone()
             .fast_insert(req)
-            .await
-            .map_err(RpcError::from_compute_status)?
-            .into_inner())
-    }
-
-    pub async fn stack_trace(&self, req: StackTraceRequest) -> Result<StackTraceResponse> {
-        Ok(self
-            .monitor_client
-            .clone()
-            .stack_trace(req)
-            .await
-            .map_err(RpcError::from_compute_status)?
-            .into_inner())
-    }
-
-    pub async fn get_streaming_stats(&self) -> Result<GetStreamingStatsResponse> {
-        Ok(self
-            .monitor_client
-            .clone()
-            .get_streaming_stats(GetStreamingStatsRequest::default())
-            .await
-            .map_err(RpcError::from_compute_status)?
-            .into_inner())
-    }
-
-    pub async fn profile(&self, sleep_s: u64) -> Result<ProfilingResponse> {
-        Ok(self
-            .monitor_client
-            .clone()
-            .profiling(ProfilingRequest { sleep_s })
-            .await
-            .map_err(RpcError::from_compute_status)?
-            .into_inner())
-    }
-
-    pub async fn heap_profile(&self, dir: String) -> Result<HeapProfilingResponse> {
-        Ok(self
-            .monitor_client
-            .clone()
-            .heap_profiling(HeapProfilingRequest { dir })
-            .await
-            .map_err(RpcError::from_compute_status)?
-            .into_inner())
-    }
-
-    pub async fn list_heap_profile(&self) -> Result<ListHeapProfilingResponse> {
-        Ok(self
-            .monitor_client
-            .clone()
-            .list_heap_profiling(ListHeapProfilingRequest {})
-            .await
-            .map_err(RpcError::from_compute_status)?
-            .into_inner())
-    }
-
-    pub async fn analyze_heap(&self, path: String) -> Result<AnalyzeHeapResponse> {
-        Ok(self
-            .monitor_client
-            .clone()
-            .analyze_heap(AnalyzeHeapRequest { path })
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())
