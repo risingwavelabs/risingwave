@@ -36,6 +36,22 @@ export async function getClusterInfoComputeNode() {
   return res
 }
 
+export async function getClusterInfoCompactor() {
+  const res: WorkerNode[] = (await api.get("/clusters/4")).map(
+    WorkerNode.fromJSON
+  )
+  return res
+}
+
+export async function getClusterInfoProfileWorkers() {
+  const [computes, frontends, compactors] = await Promise.all([
+    getClusterInfoComputeNode(),
+    getClusterInfoFrontend(),
+    getClusterInfoCompactor(),
+  ])
+  return [...computes, ...frontends, ...compactors]
+}
+
 export async function getClusterVersion() {
   const res = await api.get("/version")
   return res
