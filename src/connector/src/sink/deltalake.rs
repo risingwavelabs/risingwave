@@ -33,12 +33,13 @@ use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::UnboundedSender;
@@ -530,13 +531,13 @@ impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<()> {
         tracing::info!("Starting DeltaLake commit in epoch {epoch}.");
-        if let Some(add_columns) = add_columns {
+        if let Some(schema_change) = schema_change {
             return Err(anyhow!(
-                "Delta lake sink not support add columns, but got: {:?}",
-                add_columns
+                "Delta lake sink does not support schema changes, but got: {:?}",
+                schema_change
             )
             .into());
         }

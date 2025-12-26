@@ -18,12 +18,14 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use bytes::BytesMut;
+use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::Deserialize;
 use serde_json::json;
 use serde_with::{DisplayFromStr, serde_as};
@@ -576,7 +578,7 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
         &mut self,
         _epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<()> {
         let paths = metadata
             .into_iter()
@@ -645,7 +647,16 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
             self.client.execute_sql_sync(vec![copy_into_sql]).await?;
         }
 
-        if let Some(add_columns) = add_columns {
+        if let Some(schema_change) = schema_change {
+            use risingwave_pb::stream_plan::sink_schema_change::PbOp as SinkSchemaChangeOp;
+            let schema_change_op = schema_change.op.ok_or_else(|| {
+                SinkError::Coordinator(anyhow!("Invalid schema change operation"))
+            })?;
+            let SinkSchemaChangeOp::AddColumns(add_columns) = schema_change_op else {
+                return Err(SinkError::Coordinator(anyhow!(
+                    "Only AddColumns schema change is supported for Redshift sink"
+                )));
+            };
             if let Some(shutdown_sender) = &self.shutdown_sender {
                 // Send shutdown signal to the periodic task before altering the table
                 shutdown_sender
@@ -656,9 +667,15 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                 self.config.schema.as_deref(),
                 &self.config.table,
                 &add_columns
+                    .fields
                     .iter()
-                    .map(|f| (f.name.clone(), f.data_type.to_string()))
-                    .collect::<Vec<_>>(),
+                    .map(|f| {
+                        (
+                            f.name.clone(),
+                            DataType::from(f.data_type.as_ref().unwrap()).to_string(),
+                        )
+                    })
+                    .collect_vec(),
             );
             let check_column_exists = |e: anyhow::Error| {
                 let err_str = e.to_report_string();
@@ -686,8 +703,14 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                     self.config.schema.as_deref(),
                     cdc_table_name,
                     &add_columns
+                        .fields
                         .iter()
-                        .map(|f| (f.name.clone(), f.data_type.to_string()))
+                        .map(|f| {
+                            (
+                                f.name.clone(),
+                                DataType::from(f.data_type.as_ref().unwrap()).to_string(),
+                            )
+                        })
                         .collect::<Vec<_>>(),
                 );
                 self.client
@@ -695,7 +718,7 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                     .await
                     .or_else(check_column_exists)?;
                 self.all_column_names
-                    .extend(add_columns.iter().map(|f| f.name.clone()));
+                    .extend(add_columns.fields.iter().map(|f| f.name.clone()));
 
                 if let Some(shutdown_sender) = self.shutdown_sender.take() {
                     let _ = shutdown_sender.send(());

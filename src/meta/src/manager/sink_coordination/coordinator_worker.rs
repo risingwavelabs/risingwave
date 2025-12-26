@@ -25,7 +25,6 @@ use futures::pin_mut;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::Field;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::boxed::BoxTwoPhaseCoordinator;
@@ -35,6 +34,7 @@ use risingwave_connector::sink::{
 };
 use risingwave_meta_model::pending_sink_state::SinkState;
 use risingwave_pb::connector_service::{SinkMetadata, coordinate_request};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
@@ -121,8 +121,8 @@ struct TwoPhaseCommitHandler {
     curr_hummock_committed_epoch: u64,
     job_committed_epoch_rx: UnboundedReceiver<u64>,
     last_committed_epoch: Option<u64>,
-    pending_epochs: VecDeque<(u64, Vec<u8>)>,
-    prepared_epochs: VecDeque<(u64, Vec<u8>)>,
+    pending_epochs: VecDeque<(u64, Vec<u8>, Option<PbSinkSchemaChange>)>,
+    prepared_epochs: VecDeque<(u64, Vec<u8>, Option<PbSinkSchemaChange>)>,
     backoff_state: Option<(RetryBackoffFuture, RetryBackoffStrategy)>,
 }
 
@@ -154,7 +154,9 @@ impl TwoPhaseCommitHandler {
             .map(|delay| Box::pin(tokio::time::sleep(delay)))
     }
 
-    async fn next_to_commit(&mut self) -> anyhow::Result<(u64, Vec<u8>)> {
+    async fn next_to_commit(
+        &mut self,
+    ) -> anyhow::Result<(u64, Vec<u8>, Option<PbSinkSchemaChange>)> {
         loop {
             let wait_backoff = async {
                 if self.prepared_epochs.is_empty() {
@@ -166,8 +168,8 @@ impl TwoPhaseCommitHandler {
 
             select! {
                 _ = wait_backoff => {
-                    let (epoch, metadata) = self.prepared_epochs.front().cloned().expect("non-empty");
-                    return Ok((epoch, metadata));
+                    let item = self.prepared_epochs.front().cloned().expect("non-empty");
+                    return Ok(item);
                 }
 
                 recv_epoch = self.job_committed_epoch_rx.recv() => {
@@ -177,41 +179,48 @@ impl TwoPhaseCommitHandler {
                         ));
                     };
                     self.curr_hummock_committed_epoch = recv_epoch;
-                    while let Some((epoch, metadata)) = self.pending_epochs.pop_front_if(|(epoch, _)| *epoch <= recv_epoch) {
-                        if let Some((last_epoch, _)) = self.prepared_epochs.back() {
+                    while let Some((epoch, metadata, schema_change)) = self.pending_epochs.pop_front_if(|(epoch, _, _)| *epoch <= recv_epoch) {
+                        if let Some((last_epoch, _, _)) = self.prepared_epochs.back() {
                             assert!(epoch > *last_epoch, "prepared epochs must be in increasing order");
                         }
-                        self.prepared_epochs.push_back((epoch, metadata));
+                        self.prepared_epochs.push_back((epoch, metadata, schema_change));
                     }
                 }
             }
         }
     }
 
-    fn push_new_item(&mut self, epoch: u64, metadata: Vec<u8>) {
+    fn push_new_item(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<u8>,
+        schema_change: Option<PbSinkSchemaChange>,
+    ) {
         if epoch > self.curr_hummock_committed_epoch {
-            if let Some((last_epoch, _)) = self.pending_epochs.back() {
+            if let Some((last_epoch, _, _)) = self.pending_epochs.back() {
                 assert!(
                     epoch > *last_epoch,
                     "pending epochs must be in increasing order"
                 );
             }
-            self.pending_epochs.push_back((epoch, metadata));
+            self.pending_epochs
+                .push_back((epoch, metadata, schema_change));
         } else {
             assert!(self.pending_epochs.is_empty());
-            if let Some((last_epoch, _)) = self.prepared_epochs.back() {
+            if let Some((last_epoch, _, _)) = self.prepared_epochs.back() {
                 assert!(
                     epoch > *last_epoch,
                     "prepared epochs must be in increasing order"
                 );
             }
-            self.prepared_epochs.push_back((epoch, metadata));
+            self.prepared_epochs
+                .push_back((epoch, metadata, schema_change));
         }
     }
 
     async fn ack_committed(&mut self, epoch: u64) -> anyhow::Result<()> {
         self.backoff_state = None;
-        let (last_epoch, _) = self.prepared_epochs.pop_front().expect("non-empty");
+        let (last_epoch, _, _) = self.prepared_epochs.pop_front().expect("non-empty");
         assert_eq!(last_epoch, epoch);
 
         commit_and_prune_epoch(&self.db, self.sink_id, epoch, self.last_committed_epoch).await?;
@@ -332,7 +341,7 @@ enum CoordinationHandleManagerEvent {
     CommitRequest {
         epoch: u64,
         metadata: SinkMetadata,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     },
     AlignInitialEpoch(u64),
 }
@@ -369,7 +378,7 @@ impl CoordinationHandleManager {
                         CoordinationHandleManagerEvent::CommitRequest {
                             epoch: request.epoch,
                             metadata: request.metadata.ok_or_else(|| anyhow!("empty sink metadata"))?,
-                            add_columns: request.add_columns.map(|add_columns| add_columns.fields.into_iter().map(|field| Field::from_prost(&field)).collect()),
+                            schema_change: request.schema_change,
                         }
                     }
                     coordinate_request::Msg::AlignInitialEpochRequest(epoch) => {
@@ -487,7 +496,7 @@ pub struct CoordinatorWorker {
 
 enum CoordinatorWorkerEvent {
     HandleManagerEvent(HandleId, CoordinationHandleManagerEvent),
-    ReadyToCommit(u64, Vec<u8>),
+    ReadyToCommit(u64, Vec<u8>, Option<PbSinkSchemaChange>),
 }
 
 impl CoordinatorWorker {
@@ -564,7 +573,7 @@ impl CoordinatorWorker {
     ) -> anyhow::Result<()> {
         assert!(matches!(self.curr_state, CoordinatorWorkerState::Running));
         if let Some(two_phase_handler) = two_phase_handler
-            && !two_phase_handler.is_empty()
+            && two_phase_handler.is_empty()
         {
             // Delay handling init requests until all pending epochs are flushed.
             self.curr_state = CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids.clone());
@@ -640,8 +649,8 @@ impl CoordinatorWorker {
             }
 
             next_item_to_commit = two_phase_next_fut => {
-                let (epoch, metadata) = next_item_to_commit?;
-                Ok(CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata))
+                let (epoch, metadata, schema_change) = next_item_to_commit?;
+                Ok(CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change))
             }
         }
     }
@@ -705,20 +714,20 @@ impl CoordinatorWorker {
                     CoordinationHandleManagerEvent::CommitRequest {
                         epoch,
                         metadata,
-                        add_columns,
-                    } => (handle_id, epoch, (metadata, add_columns)),
+                        schema_change,
+                    } => (handle_id, epoch, (metadata, schema_change)),
                     CoordinationHandleManagerEvent::AlignInitialEpoch(_) => {
                         bail!("receive AlignInitialEpoch after initialization")
                     }
                 },
-                CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata) => {
+                CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change) => {
                     let SinkCommitCoordinator::TwoPhase(coordinator) = &mut coordinator else {
                         unreachable!("should be two-phase commit coordinator");
                     };
                     let two_phase_handler = two_phase_handler.as_mut().expect("should exist");
                     let start_time = Instant::now();
                     let commit_res = run_future_with_periodic_fn(
-                        coordinator.commit(epoch, metadata),
+                        coordinator.commit(epoch, metadata, schema_change),
                         Duration::from_secs(5),
                         || {
                             warn!(
@@ -764,14 +773,14 @@ impl CoordinatorWorker {
                 let (epoch, commit_requests) = pending_epochs.pop_first().expect("non-empty");
                 let mut metadatas = Vec::with_capacity(commit_requests.requests.len());
                 let mut requests = commit_requests.requests.into_iter();
-                let (first_metadata, first_add_columns) = requests.next().expect("non-empty");
+                let (first_metadata, first_schema_change) = requests.next().expect("non-empty");
                 metadatas.push(first_metadata);
-                for (metadata, add_columns) in requests {
-                    if first_add_columns != add_columns {
+                for (metadata, schema_change) in requests {
+                    if first_schema_change != schema_change {
                         return Err(anyhow!(
-                            "got different add columns {:?} to prev add columns {:?}",
-                            add_columns,
-                            first_add_columns
+                            "got different schema change {:?} to prev schema change {:?}",
+                            schema_change,
+                            first_schema_change
                         ));
                     }
                     metadatas.push(metadata);
@@ -781,7 +790,7 @@ impl CoordinatorWorker {
                     SinkCommitCoordinator::SinglePhase(coordinator) => {
                         let start_time = Instant::now();
                         run_future_with_periodic_fn(
-                            coordinator.commit(epoch, metadatas, first_add_columns),
+                            coordinator.commit(epoch, metadatas, first_schema_change),
                             Duration::from_secs(5),
                             || {
                                 warn!(
@@ -799,20 +808,25 @@ impl CoordinatorWorker {
                     }
                     SinkCommitCoordinator::TwoPhase(coordinator) => {
                         let commit_metadata = coordinator
-                            .pre_commit(epoch, metadatas, first_add_columns)
+                            .pre_commit(epoch, metadatas, first_schema_change.clone())
                             .await?;
                         persist_pre_commit_metadata(
                             &db,
                             sink_id as _,
                             epoch,
                             commit_metadata.clone(),
+                            first_schema_change.as_ref(),
                         )
                         .await?;
                         self.handle_manager
                             .ack_commit(epoch, commit_requests.handle_ids)?;
 
                         let two_phase_handler = two_phase_handler.as_mut().expect("should exist");
-                        two_phase_handler.push_new_item(epoch, commit_metadata);
+                        two_phase_handler.push_new_item(
+                            epoch,
+                            commit_metadata,
+                            first_schema_change,
+                        );
                     }
                 }
             }
@@ -831,18 +845,18 @@ impl CoordinatorWorker {
 
         let mut metadata_iter = ordered_metadata.into_iter().peekable();
         let last_committed_epoch = metadata_iter
-            .next_if(|(_, state, _)| matches!(state, SinkState::Committed))
-            .map(|(epoch, _, _)| epoch);
+            .next_if(|(_, state, _, _)| matches!(state, SinkState::Committed))
+            .map(|(epoch, _, _, _)| epoch);
         self.prev_committed_epoch = last_committed_epoch;
 
         let pending_items = metadata_iter
-            .peeking_take_while(|(_, state, _)| matches!(state, SinkState::Pending))
-            .map(|(epoch, _, metadata)| (epoch, metadata))
+            .peeking_take_while(|(_, state, _, _)| matches!(state, SinkState::Pending))
+            .map(|(epoch, _, metadata, schema_change)| (epoch, metadata, schema_change))
             .collect_vec();
 
         let mut aborted_epochs = vec![];
 
-        for (epoch, state, metadata) in metadata_iter {
+        for (epoch, state, metadata, _) in metadata_iter {
             match state {
                 SinkState::Aborted => {
                     coordinator.abort(epoch, metadata).await;
@@ -869,8 +883,8 @@ impl CoordinatorWorker {
             last_committed_epoch,
         );
 
-        for (epoch, metadata) in pending_items {
-            two_phase_handler.push_new_item(epoch, metadata);
+        for (epoch, metadata, schema_change) in pending_items {
+            two_phase_handler.push_new_item(epoch, metadata, schema_change);
         }
 
         Ok(two_phase_handler)

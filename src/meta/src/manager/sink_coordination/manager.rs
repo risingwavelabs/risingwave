@@ -408,7 +408,6 @@ mod tests {
     use itertools::Itertools;
     use rand::seq::SliceRandom;
     use risingwave_common::bitmap::BitmapBuilder;
-    use risingwave_common::catalog::Field;
     use risingwave_common::hash::VirtualNode;
     use risingwave_connector::sink::catalog::{SinkId, SinkType};
     use risingwave_connector::sink::{
@@ -417,6 +416,7 @@ mod tests {
     };
     use risingwave_pb::connector_service::SinkMetadata;
     use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
+    use risingwave_pb::stream_plan::PbSinkSchemaChange;
     use risingwave_rpc_client::CoordinatorStreamHandle;
     use sea_orm::{ConnectionTrait, Database, DatabaseConnection};
     use tokio::sync::mpsc::unbounded_channel;
@@ -456,7 +456,7 @@ mod tests {
             &mut self,
             epoch: u64,
             metadata: Vec<SinkMetadata>,
-            _add_columns: Option<Vec<Field>>,
+            _schema_change: Option<PbSinkSchemaChange>,
         ) -> risingwave_connector::sink::Result<()> {
             (self.f)(epoch, metadata, &mut self.context)
         }
@@ -1431,7 +1431,7 @@ mod tests {
             &mut self,
             epoch: u64,
             metadata: Vec<SinkMetadata>,
-            _add_columns: Option<Vec<Field>>,
+            _schema_change: Option<PbSinkSchemaChange>,
         ) -> risingwave_connector::sink::Result<Vec<u8>> {
             (self.pre_commit)(epoch, metadata)
         }
@@ -1440,6 +1440,7 @@ mod tests {
             &mut self,
             epoch: u64,
             commit_metadata: Vec<u8>,
+            _schema_change: Option<PbSinkSchemaChange>,
         ) -> risingwave_connector::sink::Result<()> {
             (self.commit)(epoch, commit_metadata)
         }

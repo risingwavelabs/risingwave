@@ -175,7 +175,7 @@ impl MockSinkCoordinationRpcClient {
                                     let metadata = coordinator
                                         .pre_commit(epoch, vec![metadata.unwrap()], None)
                                         .await?;
-                                    coordinator.commit(epoch, metadata).await?;
+                                    coordinator.commit(epoch, metadata, None).await?;
                                 }
                             }
                         };
