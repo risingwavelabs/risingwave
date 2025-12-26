@@ -453,13 +453,10 @@ where
 
                 // Update snapshot read chunk builder.
                 if let Some(mutation) = barrier.mutation.as_deref() {
+                    mutation.on_new_pause_resume(|new_pause| {
+                        global_pause = new_pause;
+                    });
                     match mutation {
-                        Mutation::Pause => {
-                            global_pause = true;
-                        }
-                        Mutation::Resume => {
-                            global_pause = false;
-                        }
                         Mutation::StartFragmentBackfill { fragment_ids } if backfill_paused => {
                             if fragment_ids.contains(&self.fragment_id) {
                                 backfill_paused = false;

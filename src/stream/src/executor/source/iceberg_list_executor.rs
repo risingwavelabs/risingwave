@@ -228,11 +228,13 @@ impl<S: StateStore> IcebergListExecutor<S> {
                     Either::Left(msg) => match &msg {
                         Message::Barrier(barrier) => {
                             if let Some(mutation) = barrier.mutation.as_deref() {
-                                match mutation {
-                                    Mutation::Pause => stream.pause_stream(),
-                                    Mutation::Resume => stream.resume_stream(),
-                                    _ => (),
-                                }
+                                mutation.on_new_pause_resume(|new_pause| {
+                                    if new_pause {
+                                        stream.pause_stream();
+                                    } else {
+                                        stream.resume_stream();
+                                    }
+                                });
                             }
                             if let Some(last_snapshot) = *last_snapshot.lock() {
                                 let state_row =

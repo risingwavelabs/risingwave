@@ -361,7 +361,9 @@ pub enum Mutation {
     Update(UpdateMutation),
     Add(AddMutation),
     SourceChangeSplit(SplitAssignments),
+    #[cfg(test)]
     Pause,
+    #[cfg(test)]
     Resume,
     Throttle(HashMap<ActorId, Option<u32>>),
     ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
@@ -551,8 +553,6 @@ impl Barrier {
             Mutation::Add(AddMutation { adds, .. }) => adds.get(&upstream_actor_id).is_some(),
             Mutation::Update(_)
             | Mutation::Stop(_)
-            | Mutation::Pause
-            | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
             | Mutation::Throttle(_)
             | Mutation::DropSubscriptions { .. }
@@ -561,6 +561,8 @@ impl Barrier {
             | Mutation::RefreshStart { .. }
             | Mutation::ListFinish { .. }
             | Mutation::LoadFinish { .. } => false,
+            #[cfg(test)]
+            Mutation::Pause | Mutation::Resume => false,
         }
     }
 
@@ -588,7 +590,11 @@ impl Barrier {
 
     /// Whether this barrier is for resume.
     pub fn is_resume(&self) -> bool {
-        matches!(self.mutation.as_deref(), Some(Mutation::Resume))
+        match self.mutation.as_deref() {
+            #[cfg(test)]
+            Some(Mutation::Resume) => true,
+            _ => false,
+        }
     }
 
     /// Returns the [`MergeUpdate`] if this barrier is to update the merge executors for the actor
@@ -870,9 +876,10 @@ impl Mutation {
                         .collect(),
                 })
             }
+            #[cfg(test)]
             Mutation::Pause | Mutation::Resume => {
                 unreachable!()
-            },
+            }
             Mutation::Throttle(changes) => PbMutation::Throttle(PbThrottleMutation {
                 actor_throttle: changes
                     .iter()
@@ -1103,6 +1110,23 @@ impl Mutation {
             },
         };
         Ok(mutation)
+    }
+
+    pub fn on_new_pause_resume(&self, f: impl FnOnce(bool)) {
+        #[cfg(test)]
+        match self {
+            Mutation::Pause => {
+                f(true);
+                return;
+            }
+            Mutation::Resume => {
+                f(false);
+                return;
+            }
+            _ => {}
+        }
+
+        drop(f);
     }
 }
 
