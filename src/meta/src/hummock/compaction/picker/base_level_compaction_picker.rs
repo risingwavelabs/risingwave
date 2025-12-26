@@ -416,6 +416,7 @@ pub mod tests {
                 .level0_tier_compact_file_number(2)
                 .compaction_mode(CompactionMode::Range as i32)
                 .level0_sub_level_compact_level_count(1)
+                .enable_optimize_l0_interval_selection(Some(false))
                 .build(),
         );
 
@@ -527,7 +528,7 @@ pub mod tests {
                 ret.input_levels[0]
                     .table_infos
                     .iter()
-                    .map(|t| t.sst_id)
+                    .map(|t| t.sst_id.inner())
                     .collect_vec(),
                 vec![1]
             );
@@ -536,7 +537,7 @@ pub mod tests {
                 ret.input_levels[1]
                     .table_infos
                     .iter()
-                    .map(|t| t.sst_id)
+                    .map(|t| t.sst_id.inner())
                     .collect_vec(),
                 vec![3]
             );

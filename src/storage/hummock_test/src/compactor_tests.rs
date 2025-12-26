@@ -2315,7 +2315,7 @@ pub(crate) mod tests {
             (&mut local_2, true),
             &mut epoch,
             val.clone(),
-            200,
+            120,
             millisec_interval_epoch,
             key_prefix.clone(),
             hummock_meta_client.clone(),
