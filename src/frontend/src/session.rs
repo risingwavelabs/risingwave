@@ -50,7 +50,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{
     AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
-    StreamingConfig, UdfConfig, load_config,
+    RpcClientConfig, StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::id::WorkerId;
 use risingwave_common::memory::MemoryContext;
@@ -80,6 +80,7 @@ use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
+    MonitorClientPool, MonitorClientPoolRef,
 };
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -156,6 +157,7 @@ pub(crate) struct FrontendEnv {
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
     frontend_client_pool: FrontendClientPoolRef,
+    monitor_client_pool: MonitorClientPoolRef,
 
     /// Each session is identified by (`process_id`,
     /// `secret_key`). When Cancel Request received, find corresponding session and cancel all
@@ -224,6 +226,7 @@ impl FrontendEnv {
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let frontend_client_pool = Arc::new(FrontendClientPool::for_test());
+        let monitor_client_pool = Arc::new(MonitorClientPool::for_test());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool,
@@ -266,6 +269,7 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             frontend_client_pool,
+            monitor_client_pool,
             sessions_map,
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
@@ -358,6 +362,7 @@ impl FrontendEnv {
             1,
             config.batch.developer.frontend_client_config.clone(),
         ));
+        let monitor_client_pool = Arc::new(MonitorClientPool::new(1, RpcClientConfig::default()));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool.clone(),
@@ -545,6 +550,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool: compute_client_pool,
                 frontend_client_pool,
+                monitor_client_pool,
                 frontend_metrics,
                 cursor_metrics,
                 spill_metrics,
@@ -645,6 +651,10 @@ impl FrontendEnv {
 
     pub fn frontend_client_pool(&self) -> FrontendClientPoolRef {
         self.frontend_client_pool.clone()
+    }
+
+    pub fn monitor_client_pool(&self) -> MonitorClientPoolRef {
+        self.monitor_client_pool.clone()
     }
 
     pub fn batch_config(&self) -> &BatchConfig {

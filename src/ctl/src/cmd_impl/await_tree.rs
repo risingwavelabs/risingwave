@@ -16,7 +16,7 @@ use risingwave_common::util::StackTraceResponseExt;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::StackTraceRequest;
 use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
-use risingwave_rpc_client::{ComputeClientPool, MonitorClientPool};
+use risingwave_rpc_client::MonitorClientPool;
 use rw_diagnose_tools::await_tree::AnalyzeSummary;
 
 use crate::CtlContext;

@@ -20,7 +20,7 @@ use clap::ValueEnum;
 use futures::future::try_join_all;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::monitor_service::ProfilingResponse;
-use risingwave_rpc_client::{ComputeClientPool, MonitorClientPool};
+use risingwave_rpc_client::MonitorClientPool;
 use thiserror_ext::AsReport;
 use tokio::fs::{File, create_dir_all};
 use tokio::io::AsyncWriteExt;
