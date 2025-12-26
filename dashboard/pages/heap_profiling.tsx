@@ -78,9 +78,12 @@ export default function HeapProfiling() {
             await api.get(`/monitor/list_heap_profile/${workerNodeId}`)
           )
         setProfileList(list)
+        setDisplayInfo(
+          `Successfully loaded profiling file list from ${getWorkerLabel(workerNodeId)}\n\nFound ${list.nameAuto.length} auto and ${list.nameManually.length} manually dumped files.`
+        )
       } catch (e: any) {
         console.error(e)
-        let result = `Getting Profiling File List from ${getWorkerLabel(workerNodeId)}\n\nError: ${e.message}\n${e.cause}`
+        let result = `Failed to load profiling file list from ${getWorkerLabel(workerNodeId)}\n\nError: ${e.message}\nCause: ${e.cause}`
         setDisplayInfo(result)
       }
     }
@@ -173,8 +176,8 @@ export default function HeapProfiling() {
   }
 
   const workerTypeOrder = [
-    WorkerType.WORKER_TYPE_FRONTEND,
     WorkerType.WORKER_TYPE_COMPUTE_NODE,
+    WorkerType.WORKER_TYPE_FRONTEND,
     WorkerType.WORKER_TYPE_COMPACTOR,
   ]
   const workerTypeLabel = (workerType: WorkerType) => {
