@@ -20,6 +20,7 @@ use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use serde::{Deserialize, Serialize};
@@ -824,7 +825,10 @@ pub fn try_shorten_block_smallest_key(
 ) -> Option<FullKey<Vec<u8>>> {
     /// Returns the length of the longest common prefix between two byte slices.
     fn lcp_len(a: &[u8], b: &[u8]) -> usize {
-        a.iter().zip(b.iter()).take_while(|(x, y)| x == y).count()
+        a.iter()
+            .zip_eq_fast(b.iter())
+            .take_while(|(x, y)| x == y)
+            .count()
     }
 
     let prev_table_key = prev_block_last.user_key.table_key.as_ref();
@@ -832,7 +836,8 @@ pub fn try_shorten_block_smallest_key(
 
     let lcp = lcp_len(prev_table_key, next_table_key);
 
-    // Need at least LCP + 2 chars to shorten (LCP + 1 for diff, + 1 to trim)
+    // Shortened key = LCP prefix + first differing byte.
+    // Only shorten if the result is strictly shorter than next_table_key.
     let shortened_len = lcp + 1;
     if shortened_len >= next_table_key.len() {
         return None;
@@ -1109,7 +1114,7 @@ mod tests {
             )
         }
 
-        /// Verifies the invariant: prev < shortened <= next using FullKey::cmp
+        /// Verifies the invariant: prev < shortened <= next using `FullKey::cmp`
         fn assert_invariant(
             prev: &FullKey<&[u8]>,
             shortened: &FullKey<Vec<u8>>,
