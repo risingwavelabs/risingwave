@@ -31,8 +31,6 @@ mod plan_rewriter;
 
 mod plan_visitor;
 
-#[cfg(feature = "datafusion")]
-pub use plan_visitor::LogicalPlanToDataFusionExt;
 pub use plan_visitor::{
     ExecutionModeDecider, LogicalIcebergScanExt, PlanVisitor, RelationCollectorVisitor,
     SysTableVisitor,
@@ -386,6 +384,62 @@ impl BatchOptimizedLogicalPlanRoot {
         }
 
         Ok(self.into_phase(plan))
+    }
+
+    #[cfg(feature = "datafusion")]
+    pub fn gen_datafusion_logical_plan(self) -> Result<Arc<datafusion::logical_expr::LogicalPlan>> {
+        use datafusion::logical_expr::{Expr as DFExpr, LogicalPlan, Projection, Sort};
+        use datafusion_common::Column;
+        use plan_visitor::LogicalPlanToDataFusionExt;
+
+        use crate::datafusion::{InputColumns, convert_column_order};
+
+        tracing::debug!(
+            "Converting RisingWave logical plan to DataFusion plan:\nRisingWave Plan: {:?}",
+            self.plan
+        );
+
+        let ctx = self.plan.ctx();
+        // Inline session timezone mainly for rewriting now()
+        let mut plan = inline_session_timezone_in_exprs(ctx, self.plan.clone())?;
+        plan = const_eval_exprs(plan)?;
+
+        let mut df_plan = plan.to_datafusion_logical_plan()?;
+
+        if !self.required_order.is_any() {
+            let input_columns = InputColumns::new(df_plan.schema().as_ref(), plan.schema());
+            let expr = self
+                .required_order
+                .column_orders
+                .iter()
+                .map(|column_order| convert_column_order(column_order, &input_columns))
+                .collect_vec();
+            df_plan = Arc::new(LogicalPlan::Sort(Sort {
+                expr,
+                input: df_plan,
+                fetch: None,
+            }));
+        }
+
+        if self.out_names.len() < df_plan.schema().fields().len() {
+            let df_schema = df_plan.schema().as_ref();
+            let projection_exprs = self
+                .out_fields
+                .ones()
+                .zip_eq_debug(self.out_names.iter())
+                .map(|(i, name)| {
+                    DFExpr::Column(Column::from(df_schema.qualified_field(i))).alias(name)
+                })
+                .collect_vec();
+            df_plan = Arc::new(LogicalPlan::Projection(Projection::try_new(
+                projection_exprs,
+                df_plan,
+            )?));
+        }
+
+        tracing::debug!("Converted DataFusion plan:\nDataFusion Plan: {:?}", df_plan);
+
+        Ok(df_plan)
     }
 }
 
