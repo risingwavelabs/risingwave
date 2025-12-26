@@ -141,15 +141,12 @@ impl<S: StateStore> NowExecutor<S> {
             for barrier in barriers {
                 let curr_epoch = barrier.get_curr_epoch();
                 let new_timestamp = curr_epoch.as_timestamptz();
-                let pause_mutation =
-                    barrier
-                        .mutation
-                        .as_deref()
-                        .and_then(|mutation| match mutation {
-                            Mutation::Pause => Some(true),
-                            Mutation::Resume => Some(false),
-                            _ => None,
-                        });
+                let mut pause_mutation = None;
+                if let Some(mutation) = barrier.mutation.as_deref() {
+                    mutation.on_new_pause_resume(|new_pause| {
+                        pause_mutation = Some(new_pause);
+                    });
+                }
 
                 if !initialized {
                     let first_epoch = barrier.epoch;

@@ -156,8 +156,6 @@ impl CreatingStreamingJobControl {
             actor_dispatchers: Default::default(),
             added_actors,
             actor_splits,
-            // we assume that when handling snapshot backfill, the cluster must not be paused
-            pause: false,
             subscriptions_to_add: Default::default(),
             backfill_nodes_to_pause,
             actor_cdc_table_snapshot_splits: None,
