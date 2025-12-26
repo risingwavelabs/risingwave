@@ -44,12 +44,12 @@ export async function getClusterInfoCompactor() {
 }
 
 export async function getClusterInfoProfileWorkers() {
-  const [frontends, computes, compactors] = await Promise.all([
-    getClusterInfoFrontend(),
+  const [computes, frontends, compactors] = await Promise.all([
     getClusterInfoComputeNode(),
+    getClusterInfoFrontend(),
     getClusterInfoCompactor(),
   ])
-  return [...frontends, ...computes, ...compactors]
+  return [...computes, ...frontends, ...compactors]
 }
 
 export async function getClusterVersion() {
