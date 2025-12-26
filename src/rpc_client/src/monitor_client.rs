@@ -34,7 +34,8 @@ use crate::{RpcClient, RpcClientPool};
 
 /// Client for monitoring and profiling.
 ///
-/// Currently can be applied to compute nodes and compactor nodes.
+/// Can be applied to any type of worker node, though some methods may not be supported. See
+/// documentation of each method for availability.
 #[derive(Clone)]
 pub struct MonitorClient {
     pub monitor_client: MonitorServiceClient<Channel>,
@@ -53,6 +54,9 @@ impl MonitorClient {
         })
     }
 
+    /// Available on meta node, compute node, and compactor node.
+    ///
+    /// Note: for meta node, it will gather await tree from all nodes in the cluster besides itself.
     pub async fn await_tree(&self, req: StackTraceRequest) -> Result<StackTraceResponse> {
         Ok(self
             .monitor_client
@@ -63,6 +67,7 @@ impl MonitorClient {
             .into_inner())
     }
 
+    /// Available on compute node.
     pub async fn get_streaming_stats(&self) -> Result<GetStreamingStatsResponse> {
         Ok(self
             .monitor_client
@@ -73,6 +78,7 @@ impl MonitorClient {
             .into_inner())
     }
 
+    /// Available on compute node.
     pub async fn get_profile_stats(
         &self,
         request: GetProfileStatsRequest,
@@ -86,6 +92,7 @@ impl MonitorClient {
             .into_inner())
     }
 
+    /// Available on compute node, compactor node, and frontend node.
     pub async fn profile(&self, sleep_s: u64) -> Result<ProfilingResponse> {
         Ok(self
             .monitor_client
@@ -96,6 +103,7 @@ impl MonitorClient {
             .into_inner())
     }
 
+    /// Available on compute node, compactor node, and frontend node.
     pub async fn heap_profile(&self, dir: String) -> Result<HeapProfilingResponse> {
         Ok(self
             .monitor_client
@@ -106,6 +114,7 @@ impl MonitorClient {
             .into_inner())
     }
 
+    /// Available on compute node, compactor node, and frontend node.
     pub async fn list_heap_profile(&self) -> Result<ListHeapProfilingResponse> {
         Ok(self
             .monitor_client
@@ -116,6 +125,7 @@ impl MonitorClient {
             .into_inner())
     }
 
+    /// Available on compute node, compactor node, and frontend node.
     pub async fn analyze_heap(&self, path: String) -> Result<AnalyzeHeapResponse> {
         Ok(self
             .monitor_client
