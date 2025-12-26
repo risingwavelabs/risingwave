@@ -415,6 +415,9 @@ pub async fn start_service_as_election_leader(
 
     #[cfg(not(madsim))]
     let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
+        use risingwave_common::config::RpcClientConfig;
+        use risingwave_rpc_client::MonitorClientPool;
+
         let dashboard_service = crate::dashboard::DashboardService {
             await_tree_reg: env.await_tree_reg().clone(),
             dashboard_addr: *dashboard_addr,
@@ -422,7 +425,7 @@ pub async fn start_service_as_election_leader(
             prometheus_selector,
             metadata_manager: metadata_manager.clone(),
             hummock_manager: hummock_manager.clone(),
-            compute_clients: ComputeClientPool::new(1, env.opts.compute_client_config.clone()), /* typically no need for plural clients */
+            monitor_clients: MonitorClientPool::new(1, RpcClientConfig::default()),
             diagnose_command,
             trace_state,
         };
