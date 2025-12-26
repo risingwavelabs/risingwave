@@ -11478,6 +11478,7 @@ dependencies = [
  "risingwave_batch",
  "risingwave_batch_executors",
  "risingwave_common",
+ "risingwave_common_heap_profiling",
  "risingwave_common_rate_limit",
  "risingwave_common_service",
  "risingwave_connector",
