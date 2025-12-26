@@ -80,7 +80,6 @@ use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
-use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend};
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
