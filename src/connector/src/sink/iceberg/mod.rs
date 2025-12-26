@@ -2763,30 +2763,30 @@ mod test {
         // Test that RisingWave schema can be a superset of Iceberg schema
         // This supports schema evolution where new columns are added to RisingWave table
         // before they are added to Iceberg table via commit_schema_change
-        let risingwave_schema = Schema::new(vec![
+        let rw_schema_superset = Schema::new(vec![
             Field::with_name(DataType::Int32, "id"),
             Field::with_name(DataType::Int32, "v1"),
             Field::with_name(DataType::Int32, "v2"), // Extra column not in Iceberg
         ]);
-        let arrow_schema = ArrowSchema::new(vec![
+        let iceberg_schema_subset = ArrowSchema::new(vec![
             ArrowField::new("id", ArrowDataType::Int32, false),
             ArrowField::new("v1", ArrowDataType::Int32, false),
         ]);
 
         // This should succeed - RisingWave has more columns than Iceberg
-        try_matches_arrow_schema(&risingwave_schema, &arrow_schema).unwrap();
+        try_matches_arrow_schema(&rw_schema_superset, &iceberg_schema_subset).unwrap();
 
         // Test that Iceberg schema cannot be larger than RisingWave schema
-        let risingwave_schema = Schema::new(vec![
+        let rw_schema_smaller = Schema::new(vec![
             Field::with_name(DataType::Int32, "id"),
         ]);
-        let arrow_schema = ArrowSchema::new(vec![
+        let iceberg_schema_larger = ArrowSchema::new(vec![
             ArrowField::new("id", ArrowDataType::Int32, false),
             ArrowField::new("v1", ArrowDataType::Int32, false),
         ]);
 
         // This should fail - Iceberg has more columns than RisingWave
-        assert!(try_matches_arrow_schema(&risingwave_schema, &arrow_schema).is_err());
+        assert!(try_matches_arrow_schema(&rw_schema_smaller, &iceberg_schema_larger).is_err());
     }
 
     #[test]
