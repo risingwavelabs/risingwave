@@ -162,6 +162,14 @@ pub struct StorageConfig {
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
 
+    /// If set, block metadata keys will be shortened when their length exceeds this threshold.
+    /// This reduces SSTable metadata size by storing only the minimal distinguishing prefix.
+    /// - `None`: Disabled (default)
+    /// - `Some(0)`: Always shorten
+    /// - `Some(n)`: Only shorten keys with length >= n bytes
+    #[serde(default = "default::storage::shorten_block_meta_key_threshold")]
+    pub shorten_block_meta_key_threshold: Option<usize>,
+
     /// Deprecated: The window size of table info statistic history.
     #[serde(default = "default::storage::table_info_statistic_history_times")]
     #[deprecated]
@@ -950,6 +958,10 @@ pub mod default {
 
         pub fn compactor_iter_max_io_retry_times() -> usize {
             8
+        }
+
+        pub fn shorten_block_meta_key_threshold() -> Option<usize> {
+            None
         }
 
         pub fn compactor_max_sst_size() -> u64 {
