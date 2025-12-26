@@ -12,16 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::mem;
 use std::sync::Arc;
 use std::time::SystemTime;
 
 use bytes::{Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
+use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, user_key};
 use risingwave_hummock_sdk::key_range::KeyRange;
-use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
+use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeStatistics};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
 use risingwave_pb::hummock::BloomFilterType;
@@ -61,6 +63,8 @@ pub struct SstableBuilderOptions {
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
     pub max_sst_size: u64,
+    /// Max bytes for vnode key-range hints in SST metadata. None or 0 disables collection.
+    pub max_vnode_key_range_bytes: Option<usize>,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
@@ -73,6 +77,7 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
             max_sst_size: options.compactor_max_sst_size,
+            max_vnode_key_range_bytes: None,
         }
     }
 }
@@ -86,6 +91,7 @@ impl Default for SstableBuilderOptions {
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
             max_sst_size: DEFAULT_MAX_SST_SIZE,
+            max_vnode_key_range_bytes: None,
         }
     }
 }
@@ -129,6 +135,7 @@ pub struct SstableBuilder<W: SstableWriter, F: FilterBuilder> {
     memory_limiter: Option<Arc<MemoryLimiter>>,
 
     block_size_vec: Vec<usize>, // for statistics
+    vnode_range_collector: Option<VnodeKeyRangeCollector>,
 }
 
 impl<W: SstableWriter> SstableBuilder<W, Xor16FilterBuilder> {
@@ -197,6 +204,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             epoch_set: BTreeSet::default(),
             memory_limiter,
             block_size_vec: Vec::new(),
+            vnode_range_collector: VnodeKeyRangeCollector::with_limit(
+                options.max_vnode_key_range_bytes,
+            ),
         }
     }
 
@@ -319,9 +329,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         full_key.encode_into(&mut self.raw_key);
         value.encode(&mut self.raw_value);
         let is_new_user_key = self.last_full_key.is_empty()
-            || !user_key(&self.raw_key).eq(user_key(&self.last_full_key));
+            || !user_key(&self.raw_key).eq(user_key(self.last_full_key.as_slice()));
         let table_id = full_key.user_key.table_id;
-        let is_new_table = self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id;
+        let is_new_table = self.last_table_id != Some(table_id);
         let current_block_size = self.current_block_size();
         let is_block_full = current_block_size >= self.options.block_capacity
             || (current_block_size > self.options.block_capacity / 4 * 3
@@ -371,9 +381,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             });
         }
 
-        let table_id = full_key.user_key.table_id;
-        let mut extract_key = user_key(&self.raw_key);
-        extract_key = self.compaction_catalog_agent_ref.extract(extract_key);
+        let extract_key = self
+            .compaction_catalog_agent_ref
+            .extract(user_key(&self.raw_key));
         // add bloom_filter check
         if !extract_key.is_empty() {
             self.filter_builder
@@ -386,6 +396,14 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         }
         self.last_table_stats.total_key_size += full_key.encoded_len() as i64;
         self.last_table_stats.total_value_size += value.encoded_len() as i64;
+
+        if let Some(collector) = self.vnode_range_collector.as_mut() {
+            collector.observe_key(
+                VirtualNode::from_index(full_key.user_key.get_vnode_id()),
+                &self.raw_key,
+                &self.last_full_key,
+            );
+        }
 
         self.last_full_key.clear();
         self.last_full_key.extend_from_slice(&self.raw_key);
@@ -412,6 +430,14 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         };
         let largest_key = self.last_full_key.clone();
         self.finalize_last_table_stats();
+
+        // Vnode key-range hints are only supported for single-table SSTs.
+        // Multi-table SST scenarios should not enable max_vnode_key_range_bytes in config.
+        debug_assert!(
+            self.table_ids.len() <= 1 || self.vnode_range_collector.is_none(),
+            "vnode key-range hints are only supported for single-table SSTs, found {} tables",
+            self.table_ids.len()
+        );
 
         self.build_block().await?;
         let right_exclusive = false;
@@ -526,6 +552,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         };
 
+        let vnode_key_ranges = self
+            .vnode_range_collector
+            .take()
+            .and_then(|collector| collector.finish(&self.last_full_key));
+
         let sst_info: SstableInfo = SstableInfoInner {
             object_id: self.sst_object_id,
             // use the same sst_id as object_id for initial sst
@@ -546,8 +577,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             max_epoch,
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
+            vnode_statistics: vnode_key_ranges,
         }
         .into();
+
         tracing::trace!(
             "meta_size {} bloom_filter_size {}  add_key_counts {} stale_key_count {} min_epoch {} max_epoch {} epoch_count {}",
             meta.encoded_size(),
@@ -676,6 +709,120 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 }
 
+/// Collects vnode key-range hints for single-table SSTs with byte-based capacity limit.
+struct VnodeKeyRangeCollector {
+    max_bytes: usize,
+    ranges: BTreeMap<VirtualNode, (FullKey<Bytes>, FullKey<Bytes>)>,
+    state: CollectorState,
+    current_size: usize,
+}
+
+enum CollectorState {
+    Collecting {
+        current_vnode: Option<VirtualNode>,
+        current_left: Vec<u8>,
+    },
+    Stopped,
+}
+
+impl VnodeKeyRangeCollector {
+    fn with_limit(max_bytes: Option<usize>) -> Option<Self> {
+        let max_bytes = max_bytes.unwrap_or(0);
+        (max_bytes > 0).then_some(Self {
+            max_bytes,
+            ranges: BTreeMap::new(),
+            state: CollectorState::Collecting {
+                current_vnode: None,
+                current_left: Vec::new(),
+            },
+            current_size: 0,
+        })
+    }
+
+    /// Records a key for vnode range tracking. Keys must be observed in sorted order.
+    ///
+    /// # Arguments
+    /// * `vnode` - The vnode of the current key
+    /// * `key` - The current key (used as left boundary when a new vnode starts)
+    /// * `prev_key` - The previous key (used as right boundary when vnode switches)
+    ///
+    /// # Semantics
+    /// Implements "allow over-limit write": inserting a range may cause `current_size` to exceed
+    /// `max_bytes`, but stops before starting the next range if it would exceed the limit.
+    fn observe_key(&mut self, vnode: VirtualNode, key: &[u8], prev_key: &[u8]) {
+        if matches!(self.state, CollectorState::Stopped) {
+            return;
+        }
+
+        let CollectorState::Collecting {
+            current_vnode,
+            current_left,
+        } = &mut self.state
+        else {
+            unreachable!()
+        };
+
+        match current_vnode {
+            None => {
+                *current_vnode = Some(vnode);
+                current_left.clear();
+                current_left.extend_from_slice(key);
+            }
+            Some(prev_vnode) if *prev_vnode != vnode => {
+                // Seal previous vnode's range first
+                let left_bytes = Bytes::from(mem::take(current_left));
+                let right_bytes = Bytes::copy_from_slice(prev_key);
+                let range_size =
+                    mem::size_of::<VirtualNode>() + left_bytes.len() + right_bytes.len();
+                let left_key = FullKey::decode(&left_bytes).copy_into();
+                let right_key = FullKey::decode(&right_bytes).copy_into();
+                self.ranges.insert(*prev_vnode, (left_key, right_key));
+                self.current_size += range_size;
+
+                // Stop if starting next range would exceed limit
+                let estimated_next_size = mem::size_of::<VirtualNode>() + key.len();
+                if self.current_size + estimated_next_size > self.max_bytes {
+                    self.state = CollectorState::Stopped;
+                    return;
+                }
+
+                // Start new range for current vnode
+                *current_vnode = Some(vnode);
+                current_left.clear();
+                current_left.extend_from_slice(key);
+            }
+            Some(_) => {}
+        }
+    }
+
+    /// Finalizes collection and returns vnode ranges if multiple vnodes were collected.
+    ///
+    /// Returns `None` for single-vnode SSTs since they don't benefit from vnode hints.
+    fn finish(mut self, last_key: &[u8]) -> Option<VnodeStatistics> {
+        if let CollectorState::Collecting {
+            current_vnode: Some(vnode),
+            current_left,
+        } = self.state
+        {
+            let left_bytes = Bytes::from(current_left);
+            let right_bytes = Bytes::copy_from_slice(last_key);
+            // Decode once for the last vnode
+            let left_key = FullKey::decode(&left_bytes).copy_into();
+            let right_key = FullKey::decode(&right_bytes).copy_into();
+            self.ranges.insert(vnode, (left_key, right_key));
+        }
+
+        // Only emits hints when an SST contains multiple vnodes (> 1), since single-vnode SSTs
+        // have `vnode_range` == `sst_range`.
+        // Decode at vnode boundaries (low frequency), avoiding batch decode in VnodeStatistics::new()
+        if self.ranges.len() > 1 {
+            Some(VnodeStatistics::from_map(self.ranges))
+        } else {
+            None
+        }
+    }
+}
+
 pub struct SstableBuilderOutputStats {
     bloom_filter_size: usize,
     avg_key_size: usize,
@@ -767,6 +914,199 @@ pub(super) mod tests {
         );
 
         b.finish().await.unwrap();
+    }
+
+    fn encode_full_key(table_key: &[u8]) -> Vec<u8> {
+        FullKey::for_test(TableId::default(), table_key.to_vec(), 0).encode()
+    }
+
+    #[test]
+    fn test_vnode_key_range_basic_collection() {
+        // Test basic multi-vnode collection with boundary semantics verification.
+        // Validates: vnode switching triggers range sealing, boundaries are inclusive (right_exclusive=false).
+        let mut collector = VnodeKeyRangeCollector::with_limit(Some(1024)).unwrap();
+        let vnode_1 = VirtualNode::from_index(1);
+        let vnode_2 = VirtualNode::from_index(2);
+
+        let k1 = encode_full_key(b"k1");
+        let k2 = encode_full_key(b"k2");
+        let k3 = encode_full_key(b"k3");
+        let k4 = encode_full_key(b"k4");
+
+        collector.observe_key(vnode_1, &k1, &[]);
+        collector.observe_key(vnode_1, &k2, &k1);
+        collector.observe_key(vnode_2, &k3, &k2);
+        collector.observe_key(vnode_2, &k4, &k3);
+
+        let info = collector.finish(&k4).unwrap();
+        assert_eq!(info.vnode_key_ranges().len(), 2);
+
+        // Verify vnode_1: left = first key, right = last key before switch
+        let (range1_left, range1_right) = info.get_vnode_key_range(vnode_1).unwrap();
+        assert_eq!(range1_left.user_key.table_key.as_ref(), b"k1");
+        assert_eq!(range1_right.user_key.table_key.as_ref(), b"k2");
+
+        // Verify vnode_2: left = first key, right = SST's last key
+        let (range2_left, range2_right) = info.get_vnode_key_range(vnode_2).unwrap();
+        assert_eq!(range2_left.user_key.table_key.as_ref(), b"k3");
+        assert_eq!(range2_right.user_key.table_key.as_ref(), b"k4");
+    }
+
+    #[test]
+    fn test_vnode_key_range_capacity_limit() {
+        // Test "allow over-limit write" semantics: inserting a range may exceed capacity,
+        // but stops before starting the next range if it would exceed the limit.
+        //
+        // Calculation based on encoded key sizes:
+        // Each range = sizeof(VirtualNode) + left.len() + right.len().
+        // Use a limit that:
+        //   - allows writing vnode_1 (range_size),
+        //   - allows over-limit write of vnode_2 (range_size + estimated_next),
+        //   - stops before vnode_3 (2 * range_size + estimated_next > limit).
+        let vnode_1 = VirtualNode::from_index(1);
+        let vnode_2 = VirtualNode::from_index(2);
+        let vnode_3 = VirtualNode::from_index(3);
+        let vnode_4 = VirtualNode::from_index(4);
+
+        let k1 = encode_full_key(b"k1");
+        let k2 = encode_full_key(b"k2");
+        let k3 = encode_full_key(b"k3");
+        let k4 = encode_full_key(b"k4");
+        let k5 = encode_full_key(b"k5");
+        let k6 = encode_full_key(b"k6");
+        let k7 = encode_full_key(b"k7");
+
+        let range_size = mem::size_of::<VirtualNode>() + k1.len() + k2.len();
+        let estimated_next_size = mem::size_of::<VirtualNode>() + k3.len();
+        let limit = range_size + estimated_next_size; // allow second range, stop before third
+        let mut collector = VnodeKeyRangeCollector::with_limit(Some(limit)).unwrap();
+
+        collector.observe_key(vnode_1, &k1, &[]);
+        collector.observe_key(vnode_1, &k2, &k1);
+        collector.observe_key(vnode_2, &k3, &k2); // Seals vnode_1 (6 bytes)
+        collector.observe_key(vnode_2, &k4, &k3);
+        collector.observe_key(vnode_3, &k5, &k4); // Seals vnode_2 (12 bytes total), stops before vnode_3
+        collector.observe_key(vnode_3, &k6, &k5); // Ignored
+        collector.observe_key(vnode_4, &k7, &k6); // Ignored
+
+        let info = collector.finish(&k7).unwrap();
+        assert_eq!(
+            info.vnode_key_ranges().len(),
+            2,
+            "Should collect exactly 2 vnodes"
+        );
+
+        // Verify collected vnodes have correct boundaries
+        let (range1_left, range1_right) = info.get_vnode_key_range(vnode_1).unwrap();
+        assert_eq!(range1_left.user_key.table_key.as_ref(), b"k1");
+        assert_eq!(range1_right.user_key.table_key.as_ref(), b"k2");
+
+        let (range2_left, range2_right) = info.get_vnode_key_range(vnode_2).unwrap();
+        assert_eq!(range2_left.user_key.table_key.as_ref(), b"k3");
+        assert_eq!(range2_right.user_key.table_key.as_ref(), b"k4");
+
+        // Verify stopped vnodes are not collected
+        assert!(info.get_vnode_key_range(vnode_3).is_none());
+        assert!(info.get_vnode_key_range(vnode_4).is_none());
+    }
+
+    #[test]
+    fn test_vnode_key_range_sparse_distribution() {
+        // Test non-consecutive vnodes (production scenario: hash-based data distribution).
+        // Validates: collector handles sparse vnode indices correctly, gaps are not filled.
+        let mut collector = VnodeKeyRangeCollector::with_limit(Some(1024)).unwrap();
+        let vnode_5 = VirtualNode::from_index(5);
+        let vnode_10 = VirtualNode::from_index(10);
+        let vnode_100 = VirtualNode::from_index(100);
+
+        let keys = vec![
+            (vnode_5, encode_full_key(b"key_005_001")),
+            (vnode_5, encode_full_key(b"key_005_002")),
+            (vnode_5, encode_full_key(b"key_005_999")),
+            (vnode_10, encode_full_key(b"key_010_001")),
+            (vnode_10, encode_full_key(b"key_010_100")),
+            (vnode_100, encode_full_key(b"key_100_001")),
+            (vnode_100, encode_full_key(b"key_100_999")),
+        ];
+
+        let mut prev_key = Vec::new();
+        for (vnode, key) in &keys {
+            collector.observe_key(*vnode, key, &prev_key);
+            prev_key = key.clone();
+        }
+
+        let info = collector.finish(&prev_key).unwrap();
+        assert_eq!(info.vnode_key_ranges().len(), 3);
+
+        // Verify each collected vnode has correct boundaries
+        let (range5_left, range5_right) = info.get_vnode_key_range(vnode_5).unwrap();
+        assert_eq!(range5_left.user_key.table_key.as_ref(), b"key_005_001");
+        assert_eq!(range5_right.user_key.table_key.as_ref(), b"key_005_999");
+
+        let (range10_left, range10_right) = info.get_vnode_key_range(vnode_10).unwrap();
+        assert_eq!(range10_left.user_key.table_key.as_ref(), b"key_010_001");
+        assert_eq!(range10_right.user_key.table_key.as_ref(), b"key_010_100");
+
+        let (range100_left, range100_right) = info.get_vnode_key_range(vnode_100).unwrap();
+        assert_eq!(range100_left.user_key.table_key.as_ref(), b"key_100_001");
+        assert_eq!(range100_right.user_key.table_key.as_ref(), b"key_100_999");
+
+        // Verify gaps are not filled (no data for vnodes 0, 7, 50)
+        assert!(
+            info.get_vnode_key_range(VirtualNode::from_index(0))
+                .is_none()
+        );
+        assert!(
+            info.get_vnode_key_range(VirtualNode::from_index(7))
+                .is_none()
+        );
+        assert!(
+            info.get_vnode_key_range(VirtualNode::from_index(50))
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_vnode_key_range_edge_cases() {
+        // Test 1: Configuration disabled (None or 0) should return None
+        assert!(VnodeKeyRangeCollector::with_limit(None).is_none());
+        assert!(VnodeKeyRangeCollector::with_limit(Some(0)).is_none());
+
+        // Test 2: Empty collector (no keys) should return None
+        let collector = VnodeKeyRangeCollector::with_limit(Some(1024)).unwrap();
+        assert!(collector.finish(&encode_full_key(b"any")).is_none());
+
+        // Test 3: Single vnode (optimization: don't emit hints for single-vnode SSTs)
+        let vnode = VirtualNode::from_index(5);
+        let mut collector = VnodeKeyRangeCollector::with_limit(Some(1024)).unwrap();
+        let a = encode_full_key(b"a");
+        let b = encode_full_key(b"b");
+        let c = encode_full_key(b"c");
+        collector.observe_key(vnode, &a, &[]);
+        collector.observe_key(vnode, &b, &a);
+        collector.observe_key(vnode, &c, &b);
+        assert!(
+            collector.finish(&c).is_none(),
+            "Single-vnode SST should not emit hints"
+        );
+
+        // Test 4: Extreme limit (1 byte) - first vnode exceeds, becomes single-vnode
+        // Range size = sizeof(VirtualNode=2) + 4 + 4 = 10 bytes
+        // With 1-byte limit: vnode_1 range (10 bytes) exceeds but allowed (over-limit write)
+        // vnode_2 check: 10 + 10 > 1, stop. Result: only vnode_1, returns None (single-vnode)
+        let mut collector = VnodeKeyRangeCollector::with_limit(Some(1)).unwrap();
+        let vnode_1 = VirtualNode::from_index(1);
+        let vnode_2 = VirtualNode::from_index(2);
+        let key1 = encode_full_key(b"key1");
+        let key2 = encode_full_key(b"key2");
+        let key3 = encode_full_key(b"key3");
+        collector.observe_key(vnode_1, &key1, &[]);
+        collector.observe_key(vnode_1, &key2, &key1);
+        collector.observe_key(vnode_2, &key3, &key2); // Seals vnode_1, stops before vnode_2
+        assert!(
+            collector.finish(&key3).is_none(),
+            "Only 1 vnode collected, should return None"
+        );
     }
 
     #[tokio::test]

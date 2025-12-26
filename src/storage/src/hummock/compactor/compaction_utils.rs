@@ -139,6 +139,7 @@ pub struct TaskConfig {
     pub table_schemas: HashMap<TableId, PbTableSchema>,
     /// `disable_drop_column_optimization` should only be set in benchmark.
     pub disable_drop_column_optimization: bool,
+    pub max_vnode_key_range_bytes: Option<usize>,
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {

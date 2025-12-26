@@ -12,16 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::mem::size_of;
 use std::ops::Deref;
 use std::sync::Arc;
 
+use bytes::Bytes;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::{PbBloomFilterType, PbKeyRange, PbSstableInfo};
+use risingwave_common::hash::VirtualNode;
+use risingwave_pb::hummock::{
+    PbBloomFilterType, PbKeyRange, PbSstableInfo, PbVnodeKeyRange, PbVnodeStatistics,
+};
 
+use crate::key::FullKey;
 use crate::key_range::KeyRange;
 use crate::version::{ObjectIdReader, SstableIdReader};
 use crate::{HummockSstableId, HummockSstableObjectId};
+
+#[derive(Debug, PartialEq, Clone, Default)]
+pub struct VnodeStatistics {
+    /// Map from vnode to its full key range (`min_full_key`, `max_full_key`) in this SST.
+    /// All ranges use closed intervals [`min_key`, `max_key`].
+    /// Keys are pre-decoded `FullKey` to allow direct access to `user_key` field.
+    vnode_key_ranges: BTreeMap<VirtualNode, (FullKey<Bytes>, FullKey<Bytes>)>,
+}
 
 #[derive(Debug, PartialEq, Clone)]
 #[cfg_attr(any(test, feature = "test"), derive(Default))]
@@ -40,6 +54,7 @@ pub struct SstableInfoInner {
     pub range_tombstone_count: u64,
     pub bloom_filter_kind: PbBloomFilterType,
     pub sst_size: u64,
+    pub vnode_statistics: Option<VnodeStatistics>,
 }
 
 impl SstableInfoInner {
@@ -58,12 +73,64 @@ impl SstableInfoInner {
             + size_of::<u32>() // bloom_filter_kind
             + size_of::<u64>(); // sst_size
         basic += self.key_range.left.len() + self.key_range.right.len() + size_of::<bool>();
+        if let Some(vnode_statistics) = &self.vnode_statistics {
+            for (min_key, max_key) in vnode_statistics.vnode_key_ranges.values() {
+                basic += size_of::<u32>() + min_key.encoded_len() + max_key.encoded_len();
+            }
+        }
 
         basic
     }
 
     pub fn to_protobuf(&self) -> PbSstableInfo {
         self.into()
+    }
+}
+
+impl From<&PbVnodeStatistics> for VnodeStatistics {
+    fn from(info: &PbVnodeStatistics) -> Self {
+        Self {
+            vnode_key_ranges: info
+                .vnode_key_ranges
+                .iter()
+                .map(|range| {
+                    let min_key = FullKey::decode(&range.min_key).copy_into();
+                    let max_key = FullKey::decode(&range.max_key).copy_into();
+                    (
+                        VirtualNode::from_index(range.vnode as usize),
+                        (min_key, max_key),
+                    )
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<PbVnodeStatistics> for VnodeStatistics {
+    fn from(info: PbVnodeStatistics) -> Self {
+        (&info).into()
+    }
+}
+
+impl From<&VnodeStatistics> for PbVnodeStatistics {
+    fn from(info: &VnodeStatistics) -> Self {
+        Self {
+            vnode_key_ranges: info
+                .vnode_key_ranges
+                .iter()
+                .map(|(vnode, (min_key, max_key))| PbVnodeKeyRange {
+                    vnode: vnode.to_index() as u32,
+                    min_key: min_key.encode(),
+                    max_key: max_key.encode(),
+                })
+                .collect(),
+        }
+    }
+}
+
+impl From<VnodeStatistics> for PbVnodeStatistics {
+    fn from(info: VnodeStatistics) -> Self {
+        (&info).into()
     }
 }
 
@@ -101,6 +168,10 @@ impl From<PbSstableInfo> for SstableInfoInner {
             } else {
                 pb_sstable_info.sst_size
             },
+            vnode_statistics: pb_sstable_info
+                .vnode_statistics
+                .as_ref()
+                .map(VnodeStatistics::from),
         }
     }
 }
@@ -138,6 +209,10 @@ impl From<&PbSstableInfo> for SstableInfoInner {
             } else {
                 pb_sstable_info.sst_size
             },
+            vnode_statistics: pb_sstable_info
+                .vnode_statistics
+                .as_ref()
+                .map(VnodeStatistics::from),
         }
     }
 }
@@ -176,6 +251,10 @@ impl From<SstableInfoInner> for PbSstableInfo {
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
             sst_size: sstable_info.sst_size,
+            vnode_statistics: sstable_info
+                .vnode_statistics
+                .as_ref()
+                .map(PbVnodeStatistics::from),
         }
     }
 }
@@ -211,7 +290,31 @@ impl From<&SstableInfoInner> for PbSstableInfo {
             range_tombstone_count: sstable_info.range_tombstone_count,
             bloom_filter_kind: sstable_info.bloom_filter_kind.into(),
             sst_size: sstable_info.sst_size,
+            vnode_statistics: sstable_info
+                .vnode_statistics
+                .as_ref()
+                .map(PbVnodeStatistics::from),
         }
+    }
+}
+
+impl VnodeStatistics {
+    pub fn from_map(
+        vnode_key_ranges: BTreeMap<VirtualNode, (FullKey<Bytes>, FullKey<Bytes>)>,
+    ) -> Self {
+        Self { vnode_key_ranges }
+    }
+
+    pub fn get_vnode_key_range(
+        &self,
+        vnode: VirtualNode,
+    ) -> Option<&(FullKey<Bytes>, FullKey<Bytes>)> {
+        self.vnode_key_ranges.get(&vnode)
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn vnode_key_ranges(&self) -> &BTreeMap<VirtualNode, (FullKey<Bytes>, FullKey<Bytes>)> {
+        &self.vnode_key_ranges
     }
 }
 

@@ -373,6 +373,8 @@ impl<C: CompactionFilter> CompactorRunner<C> {
         let compression_algorithm: CompressionAlgorithm = task.compression_algorithm.into();
         options.compression_algorithm = compression_algorithm;
         options.capacity = task.target_file_size as usize;
+        // Disable vnode key-range hints for fast compaction path by default.
+        options.max_vnode_key_range_bytes = None;
         let get_id_time = Arc::new(AtomicU64::new(0));
 
         let key_range = KeyRange::inf();
@@ -388,6 +390,7 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             use_block_based_filter: true,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
+            max_vnode_key_range_bytes: None,
         };
         let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
 

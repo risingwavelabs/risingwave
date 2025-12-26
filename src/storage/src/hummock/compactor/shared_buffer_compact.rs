@@ -573,6 +573,7 @@ impl SharedBufferCompactRunner {
                 use_block_based_filter,
                 table_schemas: Default::default(),
                 disable_drop_column_optimization: false,
+                max_vnode_key_range_bytes: None,
             },
             object_id_getter,
         );
