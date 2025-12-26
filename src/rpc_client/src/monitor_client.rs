@@ -21,10 +21,10 @@ use risingwave_common::monitor::EndpointExt as _;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
-    AnalyzeHeapRequest, AnalyzeHeapResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
-    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
-    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, StackTraceRequest,
-    StackTraceResponse,
+    AnalyzeHeapRequest, AnalyzeHeapResponse, GetProfileStatsRequest, GetProfileStatsResponse,
+    GetStreamingStatsRequest, GetStreamingStatsResponse, HeapProfilingRequest,
+    HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest,
+    ProfilingResponse, StackTraceRequest, StackTraceResponse,
 };
 use tonic::transport::Endpoint;
 
@@ -68,6 +68,19 @@ impl MonitorClient {
             .monitor_client
             .clone()
             .get_streaming_stats(GetStreamingStatsRequest::default())
+            .await
+            .map_err(RpcError::from_monitor_status)?
+            .into_inner())
+    }
+
+    pub async fn get_profile_stats(
+        &self,
+        request: GetProfileStatsRequest,
+    ) -> Result<GetProfileStatsResponse> {
+        Ok(self
+            .monitor_client
+            .clone()
+            .get_profile_stats(request)
             .await
             .map_err(RpcError::from_monitor_status)?
             .into_inner())
