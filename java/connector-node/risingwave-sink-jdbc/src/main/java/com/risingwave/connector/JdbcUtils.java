@@ -107,7 +107,9 @@ public abstract class JdbcUtils {
         // disable auto commit can improve performance
         conn.setAutoCommit(config.isAutoCommit());
         // explicitly set isolation level to RC
-        conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        if (!jdbcUrl.startsWith("jdbc:postgresql")) {
+            conn.setTransactionIsolation(Connection.TRANSACTION_READ_COMMITTED);
+        }
         return conn;
     }
 }
