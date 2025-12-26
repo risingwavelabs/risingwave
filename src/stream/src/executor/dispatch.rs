@@ -21,7 +21,7 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::{FutureExt, TryStreamExt};
-use futures::future::select;
+use futures::future::{BoxFuture, select};
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -30,8 +30,10 @@ use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::sink::log_store::LogStoreResult;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
+use risingwave_storage::store::StateStoreRead;
 use rw_futures_util::drop_either_future;
 use smallvec::{SmallVec, smallvec};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -45,6 +47,7 @@ use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
+use crate::common::log_store_impl::kv_log_store::state::LogStoreWriteState;
 use crate::executor::prelude::*;
 use crate::executor::{StopMutation, StreamConsumer};
 use crate::task::{DispatcherId, NewOutputRequest};
@@ -603,6 +606,35 @@ impl DispatchExecutorForSyncLogStore {
     }
 }
 
+type ReadingChunkFuture<'a> = BoxFuture<'a, StreamResult<Option<MessageBatch>>>;
+type DispatchingFuture<'a> = BoxFuture<'a, StreamResult<()>>;
+
+enum ConsumerFuture<'a> {
+    ReadingChunk { future: ReadingChunkFuture<'a> },
+    Dispatching { future: DispatchingFuture<'a> },
+    EndOfStream,
+    Empty,
+}
+
+impl<'a> ConsumerFuture<'a> {
+    async fn next_event(
+        &mut self,
+    ) -> StreamExecutorResult<()> {
+        match self {
+            ConsumerFuture::ReadingChunk { future }
+            => {
+                // Read future
+                // Read a chunk and enter Dispatching
+
+                
+            }
+            ConsumerFuture::Dispatching {
+
+            }
+        }
+    }
+}
+
 impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
@@ -661,7 +693,6 @@ async fn dispatch_message_to_downstream(
     buffer: &mut VecDeque<MessageBatch>,
     inner: &mut DispatchExecutorInner,
 ) -> StreamResult<()>{
-    // TODO: restore the message when this future is droped
     let msg = buffer.pop_back().expect("buffer is not empty when reading message");
     match msg {
         chunk @ MessageBatch::Chunk(_) => {
@@ -712,7 +743,7 @@ impl StreamConsumer for DispatchExecutorForSyncLogStore {
             loop {
                 let select_result = {
                     let read_future = async {
-                        let 
+                        match try_batch_barriers(max_barrier_count_per_batch, &mut input).await?
                     };
                     pin_mut!(read_future);
                     let write_future = async {
