@@ -56,7 +56,9 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             .await;
 
         let left_table = node.get_left_table()?;
-        let cleaned_by_watermark = left_table.get_cleaned_by_watermark();
+        let cleaned_by_watermark = node.cleaned_by_watermark
+            || #[expect(deprecated)]
+            left_table.cleaned_by_watermark;
         let state_table_l = StateTableBuilder::new(node.get_left_table()?, store, vnodes)
             .enable_preload_all_rows_by_config(&params.config)
             .build()
