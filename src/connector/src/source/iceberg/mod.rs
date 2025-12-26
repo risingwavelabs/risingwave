@@ -494,9 +494,10 @@ impl IcebergSplitEnumerator {
             .collect_vec();
         let name_to_field_id: HashMap<String, i32> = require_names
             .iter()
-            .filter_map(|name| match table_schema.field_id_by_name(name) {
-                Some(field_id) => Some((name.clone(), field_id)),
-                None => None,
+            .filter_map(|name| {
+                table_schema
+                    .field_id_by_name(name)
+                    .map(|field_id| (name.clone(), field_id))
             })
             .collect();
 

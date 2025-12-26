@@ -442,7 +442,7 @@ impl SourceScanInfo {
                     .iceberg_file_scan_task
                     .as_ref()
                     .clone()
-                    .split(batch_parallelism as usize)?;
+                    .split(batch_parallelism)?;
 
                 let spilt_info = if let Some(snapshot_id) = iceberg_specific_info.snapshot_id {
                     splits
