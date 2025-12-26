@@ -15,7 +15,7 @@
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
-use crate::binder::{Binder, Clause};
+use crate::binder::{Binder, Clause, COLUMN_GROUP_PREFIX};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
@@ -44,10 +44,15 @@ impl Binder {
             return self.bind_sql_udf_parameter(&column_name);
         }
 
-        // For qualified references (with table name), use get_column_binding_index which will error
-        // on ambiguous columns. For unqualified references, use get_column_binding_indices which
-        // allows COALESCE for naturally joined columns.
-        if table_name.is_some() {
+        // For qualified references (with table name), check if it's a column group reference.
+        // Column groups (from natural joins) can have duplicate column names and use COALESCE.
+        // For regular qualified references, error on ambiguous columns.
+        let is_column_group = table_name
+            .as_ref()
+            .map(|t| t.starts_with(COLUMN_GROUP_PREFIX))
+            .unwrap_or(false);
+
+        if table_name.is_some() && !is_column_group {
             match self
                 .context
                 .get_column_binding_index(&table_name, &column_name)
