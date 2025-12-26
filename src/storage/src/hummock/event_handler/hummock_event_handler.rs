@@ -931,6 +931,7 @@ mod tests {
                 )]),
                 ..Default::default()
             }),
+            HashMap::default(),
             unbounded_channel().0,
         );
 
@@ -1094,6 +1095,7 @@ mod tests {
                 ]),
                 ..Default::default()
             }),
+            HashMap::default(),
             unbounded_channel().0,
         );
 
