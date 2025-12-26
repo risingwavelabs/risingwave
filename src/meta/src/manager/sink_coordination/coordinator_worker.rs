@@ -573,7 +573,7 @@ impl CoordinatorWorker {
     ) -> anyhow::Result<()> {
         assert!(matches!(self.curr_state, CoordinatorWorkerState::Running));
         if let Some(two_phase_handler) = two_phase_handler
-            && two_phase_handler.is_empty()
+            && !two_phase_handler.is_empty()
         {
             // Delay handling init requests until all pending epochs are flushed.
             self.curr_state = CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids.clone());

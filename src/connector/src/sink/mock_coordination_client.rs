@@ -157,7 +157,9 @@ impl MockSinkCoordinationRpcClient {
                         msg:
                             Some(coordinate_request::Msg::CommitRequest(
                                 coordinate_request::CommitRequest {
-                                    epoch, metadata, ..
+                                    epoch,
+                                    metadata,
+                                    schema_change,
                                 },
                             )),
                     }) => {
@@ -167,15 +169,19 @@ impl MockSinkCoordinationRpcClient {
                                 SinkCommitCoordinator::SinglePhase(coordinator) => {
                                     coordinator.init().await?;
                                     coordinator
-                                        .commit(epoch, vec![metadata.unwrap()], None)
+                                        .commit(epoch, vec![metadata.unwrap()], schema_change)
                                         .await?;
                                 }
                                 SinkCommitCoordinator::TwoPhase(coordinator) => {
                                     coordinator.init().await?;
                                     let metadata = coordinator
-                                        .pre_commit(epoch, vec![metadata.unwrap()], None)
+                                        .pre_commit(
+                                            epoch,
+                                            vec![metadata.unwrap()],
+                                            schema_change.clone(),
+                                        )
                                         .await?;
-                                    coordinator.commit(epoch, metadata, None).await?;
+                                    coordinator.commit(epoch, metadata, schema_change).await?;
                                 }
                             }
                         };
