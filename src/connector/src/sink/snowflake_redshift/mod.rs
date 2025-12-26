@@ -23,6 +23,7 @@ use risingwave_common::row::Row;
 use risingwave_pb::id::ExecutorId;
 use serde_json::{Map, Value};
 use thiserror_ext::AsReport;
+use uuid::Uuid;
 
 use crate::sink::encoder::{
     JsonEncoder, JsonbHandlingMode, RowEncoder, TimeHandlingMode, TimestampHandlingMode,
@@ -149,13 +150,11 @@ pub struct SnowflakeRedshiftSinkS3Writer {
     s3_operator: Operator,
     augmented_row: AugmentedRow,
     opendal_writer_path: Option<(opendal::Writer, String)>,
-    executor_id: ExecutorId,
     target_table_name: Option<String>,
 }
 
 pub async fn build_opendal_writer_path(
     s3_config: &S3Common,
-    executor_id: ExecutorId,
     operator: &Operator,
     target_table_name: &Option<String>,
 ) -> Result<(opendal::Writer, String)> {
@@ -172,7 +171,7 @@ pub async fn build_opendal_writer_path(
     let object_name = format!(
         "{}{}_{}.{}",
         base_path,
-        executor_id,
+        Uuid::new_v4(),
         create_time.as_secs(),
         "json",
     );
@@ -188,7 +187,6 @@ impl SnowflakeRedshiftSinkS3Writer {
         s3_config: S3Common,
         schema: Schema,
         is_append_only: bool,
-        executor_id: ExecutorId,
         target_table_name: Option<String>,
     ) -> Result<Self> {
         let s3_operator = FileSink::<S3Sink>::new_s3_sink(&s3_config)?;
@@ -196,7 +194,6 @@ impl SnowflakeRedshiftSinkS3Writer {
             s3_config,
             s3_operator,
             opendal_writer_path: None,
-            executor_id,
             augmented_row: AugmentedRow::new(0, is_append_only, schema),
             target_table_name,
         })
@@ -211,7 +208,6 @@ impl SnowflakeRedshiftSinkS3Writer {
         if self.opendal_writer_path.is_none() {
             let opendal_writer_path = build_opendal_writer_path(
                 &self.s3_config,
-                self.executor_id,
                 &self.s3_operator,
                 &self.target_table_name,
             )
