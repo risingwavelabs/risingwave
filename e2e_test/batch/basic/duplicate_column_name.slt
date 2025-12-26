@@ -1,0 +1,98 @@
+# Test for duplicate column names in SELECT statements
+# Issue: https://github.com/risingwavelabs/risingwave/issues/24095
+#
+# Note: PostgreSQL allows duplicate column names in SELECT, but raises an error
+# when trying to reference an ambiguous column.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Test 1: Duplicate column names in CTE - should error when referenced
+statement error
+with cte as (
+  select
+    1 as col,
+    2 as col
+)
+select cte.col from cte;
+
+# Test 2: Duplicate column names in simple SELECT are allowed
+query II
+select 1 as col, 2 as col;
+----
+1	2
+
+# Test 3: Duplicate column names with different types are allowed
+query III
+select 1 as x, 2.5 as x, 'hello' as x;
+----
+1	2.5	hello
+
+# Test 4: Duplicate column names (case insensitive for unquoted identifiers)
+# In PostgreSQL, unquoted identifiers are folded to lowercase
+# This is allowed - duplicate names in schema
+query II
+select 1 as col, 2 as COL;
+----
+1	2
+
+# Test 5: Case sensitive when double quoted - these are different
+query II
+select 1 as "Col", 2 as "col";
+----
+1	2
+
+# Test 6: No error when column names are different
+query II
+select 1 as col1, 2 as col2;
+----
+1	2
+
+# Test 7: Multiple unnamed columns are OK
+query II
+select 1, 2;
+----
+1	2
+
+# Test 8: Mix of named and unnamed columns is OK
+query II
+select 1 as col, 2;
+----
+1	2
+
+# Test 9: Multiple duplicate columns in the middle - allowed in SELECT
+query IIII
+select 1 as a, 2 as b, 3 as a, 4 as b;
+----
+1	2	3	4
+
+# Test 10: Duplicate columns with table reference
+statement ok
+create table test_table(col int);
+
+# This is allowed - duplicate column in SELECT
+statement ok
+insert into test_table values (10);
+
+# This should work - just selecting with duplicates
+query II
+select test_table.col as col, 1 as col from test_table;
+----
+10	1
+
+# Test 11: Qualified reference to ambiguous column should error
+statement error
+with cte as (
+  select test_table.col as col, 1 as col from test_table
+)
+select cte.col from cte;
+
+# Test 12: Selecting the same column twice with duplicate names
+query II
+select test_table.col, test_table.col from test_table;
+----
+10	10
+
+# Clean up
+statement ok
+drop table test_table;
