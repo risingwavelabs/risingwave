@@ -108,6 +108,11 @@ WHERE t_int = 999;
 ----
 NULL NULL []
 
+query ?
+SELECT COUNT(*) FROM t;
+----
+6
+
 statement ok
 DROP TABLE t;
 

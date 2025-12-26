@@ -202,7 +202,7 @@ use datafusion::logical_expr::expr::{
     AggregateFunction as DFAggregateFunction, AggregateFunctionParams as DFAggregateFunctionParams,
 };
 use datafusion::logical_expr::{AggregateUDF, Signature, SortExpr, TypeSignature, Volatility};
-use datafusion::prelude::Expr as DFExpr;
+use datafusion::prelude::{Expr as DFExpr, lit};
 use risingwave_common::bail_not_implemented;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_expr::aggregate::{AggArgs, AggType, BoxedAggregateFunction, PbAggKind};
@@ -225,17 +225,25 @@ pub fn convert_agg_call(
     agg: &PlanAggCall,
     input_columns: &impl ColumnTrait,
 ) -> RwResult<DFAggregateFunction> {
-    let func: Arc<AggregateUDF> = if is_datafusion_native_agg(agg, input_columns) {
+    let native_agg = is_datafusion_native_agg(agg, input_columns);
+    let func: Arc<AggregateUDF> = if native_agg {
         convert_datafusion_native_agg_func(&agg.agg_type)?
     } else {
         convert_agg_func_fallback(agg, input_columns)?
     };
 
-    let df_args = agg
+    let mut df_args: Vec<_> = agg
         .inputs
         .iter()
         .map(|input_ref| DFExpr::Column(input_columns.column(input_ref.index)))
         .collect();
+    if native_agg
+        && df_args.is_empty()
+        && matches!(agg.agg_type, AggType::Builtin(PbAggKind::Count))
+    {
+        // DataFusion will take COUNT(*) as COUNT(1)
+        df_args.push(lit(1));
+    }
     let filter = match agg.filter.as_expr_unless_true() {
         None => None,
         Some(expr) => Some(Box::new(convert_expr(&expr, input_columns)?)),
