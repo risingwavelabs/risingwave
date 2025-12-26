@@ -53,10 +53,6 @@ export default function HeapProfiling() {
   const [profileList, setProfileList] = useState<
     ListHeapProfilingResponse | undefined
   >()
-  const [selectedProfileList, setSelectedProfileList] = useState<
-    FileList | undefined
-  >()
-  const [profileType, setProfileType] = useState<string | undefined>("Auto")
   const [analyzeTargetFileName, setAnalyzeTargetFileName] = useState<
     string | undefined
   >()
@@ -77,13 +73,21 @@ export default function HeapProfiling() {
           ListHeapProfilingResponse.fromJSON(
             await api.get(`/monitor/list_heap_profile/${workerNodeId}`)
           )
+        list.nameAuto.sort().reverse()
+        list.nameManually.sort().reverse()
         setProfileList(list)
         setDisplayInfo(
-          `Successfully loaded profiling file list from ${getWorkerLabel(workerNodeId)}\n\nFound ${list.nameAuto.length} auto and ${list.nameManually.length} manually dumped files.`
+          `Successfully loaded profiling file list from ${getWorkerLabel(
+            workerNodeId
+          )}\n\nFound ${list.nameAuto.length} auto and ${
+            list.nameManually.length
+          } manually dumped files.`
         )
       } catch (e: any) {
         console.error(e)
-        let result = `Failed to load profiling file list from ${getWorkerLabel(workerNodeId)}\n\nError: ${e.message}\nCause: ${e.cause}`
+        let result = `Failed to load profiling file list from ${getWorkerLabel(
+          workerNodeId
+        )}\n\nError: ${e.message}\nCause: ${e.cause}`
         setDisplayInfo(result)
       }
     }
@@ -97,29 +101,14 @@ export default function HeapProfiling() {
     if (!profileList) {
       return
     }
-    if (profileType === "Auto") {
-      setSelectedProfileList({
-        dir: profileList.dir,
-        name: profileList.nameAuto,
-      })
-    } else if (profileType === "Manually") {
-      setSelectedProfileList({
-        dir: profileList.dir,
-        name: profileList.nameManually,
-      })
+    if (profileList.nameAuto.length > 0) {
+      setAnalyzeTargetFileName(profileList.nameAuto[0])
+    } else if (profileList.nameManually.length > 0) {
+      setAnalyzeTargetFileName(profileList.nameManually[0])
     } else {
-      console.error(`Bad profileType ${profileType}`)
+      setAnalyzeTargetFileName(undefined)
     }
-  }, [profileType, profileList])
-
-  useEffect(() => {
-    if (!selectedProfileList) {
-      return
-    }
-    if (selectedProfileList.name.length > 0) {
-      setAnalyzeTargetFileName(selectedProfileList.name[0])
-    }
-  }, [selectedProfileList])
+  }, [profileList])
 
   async function dumpProfile() {
     try {
@@ -127,31 +116,25 @@ export default function HeapProfiling() {
       getProfileList(workerNodes, workerNodeId)
     } catch (e: any) {
       setDisplayInfo(
-        `Dumping heap profile on ${getWorkerLabel(workerNodeId)}.\n\nError: ${e.message}\n${e.cause}`
+        `Dumping heap profile on ${getWorkerLabel(workerNodeId)}.\n\nError: ${
+          e.message
+        }\n${e.cause}`
       )
     }
   }
 
   async function analyzeHeapFile() {
-    if (
-      selectedProfileList === undefined ||
-      analyzeTargetFileName === undefined
-    ) {
+    if (profileList === undefined || analyzeTargetFileName === undefined) {
       console.log(
-        `selectedProfileList: ${selectedProfileList}, analyzeTargetFileName: ${analyzeTargetFileName}`
+        `profileList: ${profileList}, analyzeTargetFileName: ${analyzeTargetFileName}`
       )
       return
     }
 
-    let analyzeFilePath = path.join(
-      selectedProfileList.dir,
-      analyzeTargetFileName
-    )
+    let analyzeFilePath = path.join(profileList.dir, analyzeTargetFileName)
 
     const workerLabel = getWorkerLabel(workerNodeId)
-    setDisplayInfo(
-      `Analyzing ${analyzeTargetFileName} from ${workerLabel}`
-    )
+    setDisplayInfo(`Analyzing ${analyzeTargetFileName} from ${workerLabel}`)
 
     const title = `Collapsed Profiling of ${workerLabel} for ${analyzeTargetFileName}`
 
@@ -192,15 +175,12 @@ export default function HeapProfiling() {
         return "Other"
     }
   }
-  const groupedWorkerNodes = (workerNodes ?? []).reduce(
-    (groups, node) => {
-      const list = groups.get(node.type) ?? []
-      list.push(node)
-      groups.set(node.type, list)
-      return groups
-    },
-    new Map<WorkerType, WorkerNode[]>()
-  )
+  const groupedWorkerNodes = (workerNodes ?? []).reduce((groups, node) => {
+    const list = groups.get(node.type) ?? []
+    list.push(node)
+    groups.set(node.type, list)
+    return groups
+  }, new Map<WorkerType, WorkerNode[]>())
   for (const nodes of groupedWorkerNodes.values()) {
     nodes.sort((a, b) => a.id - b.id)
   }
@@ -262,26 +242,30 @@ export default function HeapProfiling() {
           <FormControl>
             <FormLabel textColor="blue.500">Analyze Heap Profile</FormLabel>
             <VStack>
-              <FormLabel>Dumped By</FormLabel>
-              <Select onChange={(event) => setProfileType(event.target.value)}>
-                {["Auto", "Manually"].map((n) => (
-                  <option value={n} key={n}>
-                    {n}
-                  </option>
-                ))}
-              </Select>
               <FormLabel>Dumped Files</FormLabel>
               <Select
                 onChange={(event) =>
                   setAnalyzeTargetFileName(event.target.value)
                 }
               >
-                {selectedProfileList &&
-                  selectedProfileList.name.map((n) => (
-                    <option value={n} key={n}>
-                      {n}
-                    </option>
-                  ))}
+                {profileList && (
+                  <optgroup label="Auto">
+                    {profileList.nameAuto.map((n) => (
+                      <option value={n} key={`auto-${n}`}>
+                        {n}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
+                {profileList && (
+                  <optgroup label="Manually">
+                    {profileList.nameManually.map((n) => (
+                      <option value={n} key={`manually-${n}`}>
+                        {n}
+                      </option>
+                    ))}
+                  </optgroup>
+                )}
               </Select>
               <Button onClick={(_) => analyzeHeapFile()} width="full">
                 Analyze
