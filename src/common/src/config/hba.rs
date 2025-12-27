@@ -74,10 +74,13 @@ pub struct HbaEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(rename_all = "snake_case")]
 pub enum ConnectionType {
     /// Unix socket connections
+    #[serde(alias = "Local")]
     Local,
     /// TCP/IP connections (both SSL and non-SSL)
+    #[serde(alias = "Host")]
     Host,
     /// TCP/IP connections that use SSL
     #[serde(rename = "hostssl")]
