@@ -24,9 +24,9 @@ use tokio::time::sleep;
 #[tokio::test]
 async fn test_adaptive_strategy_create() -> Result<()> {
     // 3cn * 2core
-    let config = Configuration::for_auto_parallelism(10, true);
+    let config = Configuration::for_scale();
 
-    assert_eq!(config.compute_node_cores * config.compute_nodes, 6);
+    assert_eq!(config.total_streaming_cores(), 6);
 
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
@@ -66,9 +66,9 @@ async fn test_adaptive_strategy_create() -> Result<()> {
 #[tokio::test]
 async fn test_adaptive_strategy_alter() -> Result<()> {
     // 3cn * 2core
-    let config = Configuration::for_auto_parallelism(10, true);
+    let config = Configuration::for_scale();
 
-    assert_eq!(config.compute_node_cores * config.compute_nodes, 6);
+    assert_eq!(config.total_streaming_cores(), 6);
 
     let mut cluster = Cluster::start(config).await?;
     let mut session = cluster.start_session();
@@ -149,6 +149,33 @@ async fn test_adaptive_strategy_alter_resource_group() -> Result<()> {
     sleep(Duration::from_secs(100)).await;
 
     session.run("select distinct parallelism from rw_fragment_parallelism where name = 'm' and distribution_type = 'HASH';").await?.assert_result_eq("2");
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_adaptive_strategy_linear_curve() -> Result<()> {
+    // 3cn * 2core
+    let config = Configuration::for_scale();
+
+    assert_eq!(config.total_streaming_cores(), 6);
+
+    let mut cluster = Cluster::start(config).await?;
+    let mut session = cluster.start_session();
+
+    // Basic linear curve: at 6 available cores, ratio 0.5 -> target parallelism 3.
+    session
+        .run("alter system set adaptive_parallelism_strategy to 'LINEAR_CURVE(2:0.2,6:0.5,12:1.0)'")
+        .await?;
+    session.run("create table t_linear(v int)").await?;
+    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_linear' and distribution_type = 'HASH';").await?.assert_result_eq("3");
+
+    // Very small ratio should still floor to at least 1.
+    session
+        .run("alter system set adaptive_parallelism_strategy to 'linear_curve(2:0.05,6:0.05)'")
+        .await?;
+    session.run("create table t_linear_min(v int)").await?;
+    session.run("select distinct parallelism from rw_fragment_parallelism where name = 't_linear_min' and distribution_type = 'HASH';").await?.assert_result_eq("1");
 
     Ok(())
 }
