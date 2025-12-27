@@ -168,10 +168,6 @@ impl HummockError {
         HummockErrorInner::FoyerError(error).into()
     }
 
-    pub fn foyer_io_error(error: foyer::IoError) -> HummockError {
-        HummockErrorInner::FoyerError(foyer::Error::Storage(error.into())).into()
-    }
-
     pub fn other(error: impl ToString) -> HummockError {
         HummockErrorInner::Other(error.to_string()).into()
     }
