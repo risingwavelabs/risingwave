@@ -2600,16 +2600,22 @@ impl Parser<'_> {
             None
         };
 
+        let webhook_wait_for_persistence = with_options
+            .iter()
+            .find(|&opt| opt.name.real_value() == WEBHOOK_WAIT_FOR_PERSISTENCE)
+            .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
+            .unwrap_or(true);
+        let webhook_is_batched = with_options
+            .iter()
+            .find(|&opt| opt.name.real_value() == WEBHOOK_IS_BATCHED)
+            .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
         let webhook_info = if self.parse_keyword(Keyword::VALIDATE) {
             if !contain_webhook {
                 parser_err!("VALIDATE is only supported for tables created with webhook source");
             }
 
-            let wait_for_persistence = with_options
-                .iter()
-                .find(|&opt| opt.name.real_value() == WEBHOOK_WAIT_FOR_PERSISTENCE)
-                .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
-                .unwrap_or(true);
             let secret_ref = if self.parse_keyword(Keyword::SECRET) {
                 let secret_ref = self.parse_secret_ref()?;
                 if secret_ref.ref_as == SecretRefAsType::File {
@@ -2623,17 +2629,18 @@ impl Parser<'_> {
             self.expect_keyword(Keyword::AS)?;
             let signature_expr = self.parse_function()?;
 
-            let is_batched = with_options
-                .iter()
-                .find(|&opt| opt.name.real_value() == WEBHOOK_IS_BATCHED)
-                .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-
             Some(WebhookSourceInfo {
                 secret_ref,
-                signature_expr,
-                wait_for_persistence,
-                is_batched,
+                signature_expr: Some(signature_expr),
+                wait_for_persistence: webhook_wait_for_persistence,
+                is_batched: webhook_is_batched,
+            })
+        } else if contain_webhook {
+            Some(WebhookSourceInfo {
+                secret_ref: None,
+                signature_expr: None,
+                wait_for_persistence: webhook_wait_for_persistence,
+                is_batched: webhook_is_batched,
             })
         } else {
             None
