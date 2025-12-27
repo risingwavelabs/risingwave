@@ -205,6 +205,16 @@ impl Receiver {
     pub fn permits(&self) -> Arc<Permits> {
         self.permits.clone()
     }
+
+    /// Convert into a stream of [`MessageWithPermits`].
+    #[futures_async_stream::stream(item = MessageWithPermits)]
+    pub async fn into_raw_stream(mut self) {
+        // Note: we don't use `tokio_stream::wrapper` because it needs destructuring `self`,
+        // which is impossible since there's `Drop`.
+        while let Some(message) = self.recv_raw().await {
+            yield message;
+        }
+    }
 }
 
 impl Drop for Receiver {
