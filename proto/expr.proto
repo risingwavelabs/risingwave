@@ -207,6 +207,8 @@ message ExprNode {
     SET_BIT = 336;
     SET_BYTE = 337;
     BIT_COUNT = 338;
+    CRC32 = 339;
+    CRC32C = 340;
 
     // Constraints Check
     CHECK_NOT_NULL = 350;
