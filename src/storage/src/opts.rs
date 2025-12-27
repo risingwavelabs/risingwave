@@ -83,6 +83,9 @@ pub struct StorageOpts {
     pub max_version_pinning_duration_sec: u64,
     pub compactor_iter_max_io_retry_times: usize,
 
+    /// If set, block metadata keys will be shortened when their length exceeds this threshold.
+    pub shorten_block_meta_key_threshold: Option<usize>,
+
     pub data_file_cache_dir: String,
     pub data_file_cache_capacity_mb: usize,
     pub data_file_cache_file_capacity_mb: usize,
@@ -298,6 +301,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .compactor_fast_max_compact_delete_ratio,
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
             compactor_iter_max_io_retry_times: c.storage.compactor_iter_max_io_retry_times,
+            shorten_block_meta_key_threshold: c.storage.shorten_block_meta_key_threshold,
             compactor_concurrent_uploading_sst_count: c
                 .storage
                 .compactor_concurrent_uploading_sst_count,
