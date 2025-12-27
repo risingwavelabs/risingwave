@@ -102,6 +102,7 @@ struct DependentSourceFragmentUpdate {
 }
 
 impl CatalogController {
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
@@ -113,6 +114,7 @@ impl CatalogController {
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
         specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
+        backfill_parallelism: Option<StreamingParallelism>,
     ) -> MetaResult<JobId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
@@ -123,6 +125,7 @@ impl CatalogController {
             timezone: Set(ctx.timezone),
             config_override: Set(Some(ctx.config_override.to_string())),
             parallelism: Set(streaming_parallelism),
+            backfill_parallelism: Set(backfill_parallelism),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
         };
@@ -145,6 +148,7 @@ impl CatalogController {
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
+        backfill_parallelism: &Option<Parallelism>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -155,6 +159,9 @@ impl CatalogController {
             (None, DefaultParallelism::Default(n)) => StreamingParallelism::Fixed(n.get()),
             (Some(n), _) => StreamingParallelism::Fixed(n.parallelism as _),
         };
+        let backfill_parallelism = backfill_parallelism
+            .as_ref()
+            .map(|p| StreamingParallelism::Fixed(p.parallelism as _));
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
         ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
@@ -212,6 +219,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 table.id = job_id.as_mv_table_id();
@@ -241,6 +249,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 sink.id = job_id.as_sink_id();
@@ -259,6 +268,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 table.id = job_id.as_mv_table_id();
@@ -318,6 +328,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -350,6 +361,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 src.id = job_id.as_shared_source_id();
@@ -982,6 +994,7 @@ impl CatalogController {
             ctx,
             parallelism,
             original_max_parallelism as _,
+            None,
             None,
         )
         .await?;

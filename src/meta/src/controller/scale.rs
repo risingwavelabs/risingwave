@@ -29,8 +29,9 @@ use risingwave_meta_model::prelude::{
     Database, Fragment, FragmentRelation, FragmentSplits, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    DatabaseId, DispatcherType, FragmentId, SourceId, StreamingParallelism, WorkerId, database,
-    fragment, fragment_relation, fragment_splits, object, sink, source, streaming_job, table,
+    DatabaseId, DispatcherType, FragmentId, JobStatus, SourceId, StreamingParallelism, WorkerId,
+    database, fragment, fragment_relation, fragment_splits, object, sink, source, streaming_job,
+    table,
 };
 use risingwave_meta_model_migration::Condition;
 use sea_orm::{
@@ -584,9 +585,17 @@ fn render_actors(
 
         let total_parallelism = available_workers.values().map(|w| w.get()).sum::<usize>();
 
+        let effective_job_parallelism = if job.job_status == JobStatus::Creating {
+            job.backfill_parallelism
+                .as_ref()
+                .unwrap_or(&job.parallelism)
+        } else {
+            &job.parallelism
+        };
+
         let actual_parallelism = match entry_fragment_parallelism
             .as_ref()
-            .unwrap_or(&job.parallelism)
+            .unwrap_or(effective_job_parallelism)
         {
             StreamingParallelism::Adaptive | StreamingParallelism::Custom => {
                 adaptive_parallelism_strategy.compute_target_parallelism(total_parallelism)
@@ -1267,6 +1276,7 @@ mod tests {
             timezone: None,
             config_override: None,
             parallelism: StreamingParallelism::Fixed(1),
+            backfill_parallelism: None,
             max_parallelism: 1,
             specific_resource_group: None,
         };
@@ -1360,6 +1370,7 @@ mod tests {
             timezone: None,
             config_override: None,
             parallelism: StreamingParallelism::Fixed(2),
+            backfill_parallelism: None,
             max_parallelism: 2,
             specific_resource_group: None,
         };
@@ -1481,6 +1492,7 @@ mod tests {
             timezone: None,
             config_override: None,
             parallelism: StreamingParallelism::Fixed(2),
+            backfill_parallelism: None,
             max_parallelism: 2,
             specific_resource_group: None,
         };
