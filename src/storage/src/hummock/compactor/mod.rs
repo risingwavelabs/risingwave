@@ -373,10 +373,7 @@ pub fn start_iceberg_compactor(
             IcebergTaskQueue::new(max_task_parallelism, pending_parallelism_budget);
 
         // Shutdown tracking for running tasks (task_key -> shutdown_sender)
-        let shutdown_map = Arc::new(Mutex::new(HashMap::<
-            TaskKey,
-            tokio::sync::oneshot::Sender<()>,
-        >::new()));
+        let shutdown_map = Arc::new(Mutex::new(HashMap::<TaskKey, Sender<()>>::new()));
 
         // Channel for task completion notifications
         let (task_completion_tx, mut task_completion_rx) =
