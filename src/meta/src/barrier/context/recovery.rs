@@ -27,7 +27,6 @@ use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::SinkId;
-use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use thiserror_ext::AsReport;
 use tracing::{info, warn};
@@ -40,11 +39,33 @@ use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragmentContext, RenderedGraph, WorkerInfo, render_actor_assignments,
 };
+use crate::controller::utils::StreamingJobExtraInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::reload_cdc_table_snapshot_splits;
-use crate::stream::{SourceChange, StreamFragmentGraph};
+use crate::stream::{SourceChange, StreamFragmentGraph, UpstreamSinkInfo};
+
+struct UpstreamSinkRecoveryInfo {
+    target_fragment_id: FragmentId,
+    upstream_infos: Vec<UpstreamSinkInfo>,
+}
+
+struct LoadedRecoveryContext {
+    fragment_context: LoadedFragmentContext,
+    job_extra_info: HashMap<JobId, StreamingJobExtraInfo>,
+    upstream_sink_recovery: HashMap<JobId, UpstreamSinkRecoveryInfo>,
+}
+
+impl LoadedRecoveryContext {
+    fn empty(fragment_context: LoadedFragmentContext) -> Self {
+        Self {
+            fragment_context,
+            job_extra_info: HashMap::new(),
+            upstream_sink_recovery: HashMap::new(),
+        }
+    }
+}
 
 impl GlobalBarrierWorkerContextImpl {
     /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
@@ -218,6 +239,94 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(fragments)
     }
 
+    async fn load_recovery_context(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<LoadedRecoveryContext> {
+        let fragment_context =
+            self.load_fragment_context(database_id)
+                .await
+                .inspect_err(|err| {
+                    warn!(error = %err.as_report(), "load fragment context failed");
+                })?;
+
+        if fragment_context.is_empty() {
+            return Ok(LoadedRecoveryContext::empty(fragment_context));
+        }
+
+        let job_ids = fragment_context.job_map.keys().copied().collect_vec();
+        let job_extra_info = self
+            .metadata_manager
+            .catalog_controller
+            .get_streaming_job_extra_info(job_ids.clone())
+            .await?;
+
+        let mut upstream_targets = HashMap::new();
+        for fragment in fragment_context.fragment_map.values() {
+            let mut has_upstream_union = false;
+            visit_stream_node_cont(&fragment.stream_node.to_protobuf(), |node| {
+                if let Some(PbNodeBody::UpstreamSinkUnion(_)) = node.node_body {
+                    has_upstream_union = true;
+                    false
+                } else {
+                    true
+                }
+            });
+
+            if has_upstream_union
+                && let Some(duplicated) =
+                    upstream_targets.insert(fragment.job_id, fragment.fragment_id)
+            {
+                warn!(
+                    job_id = %fragment.job_id,
+                    fragment_id = %fragment.fragment_id,
+                    duplicated_fragment_id = %duplicated,
+                    "multiple upstream sink union fragments found for job"
+                );
+            }
+        }
+
+        let mut upstream_sink_recovery = HashMap::new();
+        if !upstream_targets.is_empty() {
+            let tables = self
+                .metadata_manager
+                .catalog_controller
+                .get_user_created_table_by_ids(upstream_targets.keys().copied())
+                .await?;
+
+            for table in tables {
+                let job_id = table.id.as_job_id();
+                let Some(target_fragment_id) = upstream_targets.get(&job_id) else {
+                    tracing::debug!(
+                        job_id = %job_id,
+                        "upstream sink union target fragment not found for table"
+                    );
+                    continue;
+                };
+
+                let upstream_infos = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_all_upstream_sink_infos(&table, *target_fragment_id as _)
+                    .await?;
+
+                upstream_sink_recovery.insert(
+                    job_id,
+                    UpstreamSinkRecoveryInfo {
+                        target_fragment_id: *target_fragment_id,
+                        upstream_infos,
+                    },
+                );
+            }
+        }
+
+        Ok(LoadedRecoveryContext {
+            fragment_context,
+            job_extra_info,
+            upstream_sink_recovery,
+        })
+    }
+
     #[expect(clippy::type_complexity)]
     fn resolve_hummock_version_epochs(
         background_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, InflightFragmentInfo>)>,
@@ -350,61 +459,38 @@ impl GlobalBarrierWorkerContextImpl {
     /// For normal DDL operations, the `UpstreamSinkUnion` operator is modified dynamically, and does not persist the
     /// newly added or deleted upstreams in meta-store. Therefore, when restoring jobs, we need to restore the
     /// information required by the operator based on the current state of the upstream (sink) and downstream (table) of
-    /// the operator.
-    async fn recovery_table_with_upstream_sinks(
-        &self,
+    /// the operator. All necessary metadata must be preloaded before rendering.
+    fn recovery_table_with_upstream_sinks(
         inflight_jobs: &mut FragmentRenderMap,
+        upstream_sink_recovery: &HashMap<JobId, UpstreamSinkRecoveryInfo>,
     ) -> MetaResult<()> {
-        let mut jobs = inflight_jobs.values_mut().try_fold(
-            HashMap::new(),
-            |mut acc, table_map| -> MetaResult<_> {
-                for (job_id, job) in table_map {
-                    if acc.insert(*job_id, job).is_some() {
-                        return Err(anyhow::anyhow!("Duplicate job id found: {}", job_id).into());
-                    }
+        if upstream_sink_recovery.is_empty() {
+            return Ok(());
+        }
+
+        let mut seen_jobs = HashSet::new();
+
+        for jobs in inflight_jobs.values_mut() {
+            for (job_id, fragments) in jobs {
+                if !seen_jobs.insert(*job_id) {
+                    return Err(anyhow::anyhow!("Duplicate job id found: {}", job_id).into());
                 }
-                Ok(acc)
-            },
-        )?;
-        // Only `Table` will be returned here, ignoring other catalog objects.
-        let tables = self
-            .metadata_manager
-            .catalog_controller
-            .get_user_created_table_by_ids(jobs.keys().copied())
-            .await?;
-        for table in tables {
-            assert_eq!(table.table_type(), PbTableType::Table);
-            let fragment_infos = jobs.get_mut(&table.id.as_job_id()).unwrap();
-            let mut target_fragment_id = None;
-            for fragment in fragment_infos.values() {
-                let mut is_target_fragment = false;
-                visit_stream_node_cont(&fragment.nodes, |node| {
-                    if let Some(PbNodeBody::UpstreamSinkUnion(_)) = node.node_body {
-                        is_target_fragment = true;
-                        false
+
+                if let Some(recovery) = upstream_sink_recovery.get(job_id) {
+                    if let Some(target_fragment) = fragments.get_mut(&recovery.target_fragment_id) {
+                        refill_upstream_sink_union_in_table(
+                            &mut target_fragment.nodes,
+                            &recovery.upstream_infos,
+                        );
                     } else {
-                        true
+                        warn!(
+                            job_id = %job_id,
+                            target_fragment_id = %recovery.target_fragment_id,
+                            "target fragment not found for upstream sink recovery"
+                        );
                     }
-                });
-                if is_target_fragment {
-                    target_fragment_id = Some(fragment.fragment_id);
-                    break;
                 }
             }
-            let Some(target_fragment_id) = target_fragment_id else {
-                tracing::debug!(
-                    "The table {} created by old versions has not yet been migrated, so sinks cannot be created or dropped on this table.",
-                    table.id
-                );
-                continue;
-            };
-            let target_fragment = fragment_infos.get_mut(&target_fragment_id).unwrap();
-            let upstream_infos = self
-                .metadata_manager
-                .catalog_controller
-                .get_all_upstream_sink_infos(&table, target_fragment_id as _)
-                .await?;
-            refill_upstream_sink_union_in_table(&mut target_fragment.nodes, &upstream_infos);
         }
 
         Ok(())
@@ -486,7 +572,7 @@ impl GlobalBarrierWorkerContextImpl {
                     };
 
                     if !unreschedulable_jobs.is_empty() {
-                        tracing::info!(
+                        info!(
                             "unreschedulable background jobs: {:?}",
                             unreschedulable_jobs
                         );
@@ -495,20 +581,9 @@ impl GlobalBarrierWorkerContextImpl {
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
-                    let mut info = if unreschedulable_jobs.is_empty() {
+                    let mut recovery_context = if unreschedulable_jobs.is_empty() {
                         info!("trigger offline scaling");
-                        let loaded = self.load_fragment_context(None).await.inspect_err(|err| {
-                            warn!(error = %err.as_report(), "load fragment context failed");
-                        })?;
-                        self.render_actor_assignments(
-                            None,
-                            &loaded,
-                            &active_streaming_nodes,
-                            adaptive_parallelism_strategy,
-                        )
-                        .inspect_err(|err| {
-                            warn!(error = %err.as_report(), "render actor assignments failed");
-                        })?
+                        self.load_recovery_context(None).await?
                     } else {
                         bail!(
                             "Recovery for unreschedulable background jobs is not yet implemented. \
@@ -517,19 +592,28 @@ impl GlobalBarrierWorkerContextImpl {
                         );
                     };
 
+                    let mut info = self
+                        .render_actor_assignments(
+                            None,
+                            &recovery_context.fragment_context,
+                            &active_streaming_nodes,
+                            adaptive_parallelism_strategy,
+                        )
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "render actor assignments failed");
+                        })?;
+
                     let dropped_table_ids = self.scheduled_barriers.pre_apply_drop_cancel(None);
                     if !dropped_table_ids.is_empty() {
                         self.metadata_manager
                             .catalog_controller
                             .complete_dropped_tables(dropped_table_ids)
                             .await;
-                        let loaded = self.load_fragment_context(None).await.inspect_err(|err| {
-                            warn!(error = %err.as_report(), "load fragment context failed");
-                        })?;
+                        recovery_context = self.load_recovery_context(None).await?;
                         info = self
                             .render_actor_assignments(
                                 None,
-                                &loaded,
+                                &recovery_context.fragment_context,
                                 &active_streaming_nodes,
                                 adaptive_parallelism_strategy,
                             )
@@ -538,7 +622,10 @@ impl GlobalBarrierWorkerContextImpl {
                             })?
                     }
 
-                    self.recovery_table_with_upstream_sinks(&mut info).await?;
+                    Self::recovery_table_with_upstream_sinks(
+                        &mut info,
+                        &recovery_context.upstream_sink_recovery,
+                    )?;
 
                     let info = info;
 
@@ -575,7 +662,8 @@ impl GlobalBarrierWorkerContextImpl {
                         .get_mv_depended_subscriptions(None)
                         .await?;
 
-                    let stream_actors = self.load_stream_actors(&info).await?;
+                    let stream_actors =
+                        Self::build_stream_actors(&info, &recovery_context.job_extra_info)?;
 
                     let fragment_relations = self
                         .metadata_manager
@@ -692,17 +780,12 @@ impl GlobalBarrierWorkerContextImpl {
         let active_streaming_nodes =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
-        let loaded = self
-            .load_fragment_context(Some(database_id))
-            .await
-            .inspect_err(|err| {
-                warn!(error = %err.as_report(), "load fragment context failed");
-            })?;
+        let recovery_context = self.load_recovery_context(Some(database_id)).await?;
 
         let mut all_info = self
             .render_actor_assignments(
                 Some(database_id),
-                &loaded,
+                &recovery_context.fragment_context,
                 &active_streaming_nodes,
                 adaptive_parallelism_strategy,
             )
@@ -716,12 +799,15 @@ impl GlobalBarrierWorkerContextImpl {
                 HashMap::from([(database_id, table_map)])
             });
 
-        self.recovery_table_with_upstream_sinks(&mut database_info)
-            .await?;
+        Self::recovery_table_with_upstream_sinks(
+            &mut database_info,
+            &recovery_context.upstream_sink_recovery,
+        )?;
 
         assert!(database_info.len() <= 1);
 
-        let stream_actors = self.load_stream_actors(&database_info).await?;
+        let stream_actors =
+            Self::build_stream_actors(&database_info, &recovery_context.job_extra_info)?;
 
         let Some(info) = database_info
             .into_iter()
@@ -790,21 +876,10 @@ impl GlobalBarrierWorkerContextImpl {
         }))
     }
 
-    async fn load_stream_actors(
-        &self,
+    fn build_stream_actors(
         all_info: &FragmentRenderMap,
+        job_extra_info: &HashMap<JobId, StreamingJobExtraInfo>,
     ) -> MetaResult<HashMap<ActorId, StreamActor>> {
-        let job_ids = all_info
-            .values()
-            .flat_map(|jobs| jobs.keys().copied())
-            .collect_vec();
-
-        let job_extra_info = self
-            .metadata_manager
-            .catalog_controller
-            .get_streaming_job_extra_info(job_ids)
-            .await?;
-
         let mut stream_actors = HashMap::new();
 
         for (job_id, streaming_info) in all_info.values().flatten() {
@@ -833,5 +908,158 @@ impl GlobalBarrierWorkerContextImpl {
             }
         }
         Ok(stream_actors)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use risingwave_common::catalog::FragmentTypeMask;
+    use risingwave_common::id::WorkerId;
+    use risingwave_meta_model::DispatcherType;
+    use risingwave_meta_model::fragment::DistributionType;
+    use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+    use risingwave_pb::stream_plan::{
+        PbDispatchOutputMapping, PbStreamNode, UpstreamSinkUnionNode as PbUpstreamSinkUnionNode,
+    };
+
+    use super::*;
+    use crate::controller::fragment::InflightActorInfo;
+    use crate::model::DownstreamFragmentRelation;
+    use crate::stream::UpstreamSinkInfo;
+
+    #[test]
+    fn test_recovery_table_with_upstream_sinks_updates_union_node() {
+        let database_id = DatabaseId::new(1);
+        let job_id = JobId::new(10);
+        let fragment_id = FragmentId::new(100);
+        let sink_fragment_id = FragmentId::new(200);
+
+        let mut inflight_jobs: FragmentRenderMap = HashMap::new();
+        let fragment = InflightFragmentInfo {
+            fragment_id,
+            distribution_type: DistributionType::Hash,
+            fragment_type_mask: FragmentTypeMask::empty(),
+            vnode_count: 1,
+            nodes: PbStreamNode {
+                node_body: Some(PbNodeBody::UpstreamSinkUnion(Box::new(
+                    PbUpstreamSinkUnionNode {
+                        init_upstreams: vec![],
+                    },
+                ))),
+                ..Default::default()
+            },
+            actors: HashMap::new(),
+            state_table_ids: HashSet::new(),
+        };
+
+        inflight_jobs
+            .entry(database_id)
+            .or_default()
+            .entry(job_id)
+            .or_default()
+            .insert(fragment_id, fragment);
+
+        let upstream_sink_recovery = HashMap::from([(
+            job_id,
+            UpstreamSinkRecoveryInfo {
+                target_fragment_id: fragment_id,
+                upstream_infos: vec![UpstreamSinkInfo {
+                    sink_id: SinkId::new(1),
+                    sink_fragment_id,
+                    sink_output_fields: vec![],
+                    sink_original_target_columns: vec![],
+                    project_exprs: vec![],
+                    new_sink_downstream: DownstreamFragmentRelation {
+                        downstream_fragment_id: FragmentId::new(300),
+                        dispatcher_type: DispatcherType::Hash,
+                        dist_key_indices: vec![],
+                        output_mapping: PbDispatchOutputMapping::default(),
+                    },
+                }],
+            },
+        )]);
+
+        GlobalBarrierWorkerContextImpl::recovery_table_with_upstream_sinks(
+            &mut inflight_jobs,
+            &upstream_sink_recovery,
+        )
+        .unwrap();
+
+        let updated = inflight_jobs
+            .get(&database_id)
+            .unwrap()
+            .get(&job_id)
+            .unwrap()
+            .get(&fragment_id)
+            .unwrap();
+
+        let PbNodeBody::UpstreamSinkUnion(updated_union) =
+            updated.nodes.node_body.as_ref().unwrap()
+        else {
+            panic!("expected upstream sink union node");
+        };
+
+        assert_eq!(updated_union.init_upstreams.len(), 1);
+        assert_eq!(
+            updated_union.init_upstreams[0].upstream_fragment_id,
+            sink_fragment_id.as_raw_id()
+        );
+    }
+
+    #[test]
+    fn test_build_stream_actors_uses_preloaded_extra_info() {
+        let database_id = DatabaseId::new(2);
+        let job_id = JobId::new(20);
+        let fragment_id = FragmentId::new(120);
+        let actor_id = ActorId::new(500);
+
+        let mut inflight_jobs: FragmentRenderMap = HashMap::new();
+        inflight_jobs
+            .entry(database_id)
+            .or_default()
+            .entry(job_id)
+            .or_default()
+            .insert(
+                fragment_id,
+                InflightFragmentInfo {
+                    fragment_id,
+                    distribution_type: DistributionType::Hash,
+                    fragment_type_mask: FragmentTypeMask::empty(),
+                    vnode_count: 1,
+                    nodes: PbStreamNode::default(),
+                    actors: HashMap::from([(
+                        actor_id,
+                        InflightActorInfo {
+                            worker_id: WorkerId::new(1),
+                            vnode_bitmap: None,
+                            splits: vec![],
+                        },
+                    )]),
+                    state_table_ids: HashSet::new(),
+                },
+            );
+
+        let job_extra_info = HashMap::from([(
+            job_id,
+            StreamingJobExtraInfo {
+                timezone: Some("UTC".to_string()),
+                config_override: "cfg".into(),
+                job_definition: "definition".to_string(),
+            },
+        )]);
+
+        let stream_actors =
+            GlobalBarrierWorkerContextImpl::build_stream_actors(&inflight_jobs, &job_extra_info)
+                .unwrap();
+
+        let actor = stream_actors.get(&actor_id).unwrap();
+        assert_eq!(actor.actor_id, actor_id);
+        assert_eq!(actor.fragment_id, fragment_id);
+        assert_eq!(actor.mview_definition, "definition");
+        assert_eq!(&*actor.config_override, "cfg");
+        let expr_ctx = actor.expr_context.as_ref().unwrap();
+        assert_eq!(expr_ctx.time_zone, "UTC");
     }
 }
