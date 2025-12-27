@@ -11,6 +11,9 @@ system ok
 python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_test" 20 user
 
 statement ok
+DROP SOURCE IF EXISTS src_user CASCADE;
+
+statement ok
 CREATE SOURCE src_user
 INCLUDE timestamp -- include explicitly here to test a bug found in https://github.com/risingwavelabs/risingwave/pull/17293
 WITH (
@@ -24,6 +27,12 @@ FORMAT PLAIN ENCODE PROTOBUF(
 );
 
 # Create source with generated column to test ALTER SOURCE REFRESH SCHEMA with generated columns
+statement ok
+DROP SOURCE IF EXISTS src_user_gen CASCADE;
+
+statement ok
+DROP TABLE IF EXISTS t_user CASCADE;
+
 statement ok
 CREATE SOURCE src_user_gen (*, t int as id+1)
 INCLUDE timestamp
@@ -168,5 +177,81 @@ DROP SOURCE src_user;
 statement ok
 DROP SOURCE src_user_gen;
 
+# Test nested struct schema evolution (compatible changes)
+system ok
+rpk topic delete pb_nested_alter_test || true; \
+(rpk sr subject delete 'pb_nested_alter_test-value' && rpk sr subject delete 'pb_nested_alter_test-value' --permanent) || true;
+
+system ok
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_nested_alter_test" 10 user_with_nested_struct
+
 statement ok
-SET streaming_use_shared_source TO true;
+DROP SOURCE IF EXISTS src_user_nested CASCADE;
+
+statement ok
+CREATE SOURCE src_user_nested
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'pb_nested_alter_test',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+    message = 'test.User'
+);
+
+# Verify original nested struct schema
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user_nested';
+----
+CREATE SOURCE src_user_nested (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, age INT, address_detail STRUCT<street CHARACTER VARYING, city CHARACTER VARYING, location_detail STRUCT<latitude DOUBLE, longitude DOUBLE>>)
+
+statement ok
+CREATE MATERIALIZED VIEW mv_user_nested AS SELECT * FROM src_user_nested;
+
+# Verify we can query the nested fields
+query I retry 3 backoff 5s
+SELECT COUNT(*) FROM mv_user_nested WHERE (address_detail).city IS NOT NULL;
+----
+10
+
+# Push events with extended nested fields (compatible: adds country to Address, altitude to Location, and industry at top level)
+system ok
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_nested_alter_test" 5 user_with_nested_struct_extended
+
+# Change the source schema - this should succeed because adding fields to nested structs is compatible
+statement ok
+ALTER SOURCE src_user_nested REFRESH SCHEMA;
+
+# Verify the schema now includes the new nested fields
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user_nested';
+----
+CREATE SOURCE src_user_nested (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, age INT, address_detail STRUCT<street CHARACTER VARYING, city CHARACTER VARYING, location_detail STRUCT<latitude DOUBLE, longitude DOUBLE, altitude DOUBLE>, country CHARACTER VARYING>)
+
+statement ok
+CREATE MATERIALIZED VIEW mv_user_nested_extended AS SELECT * FROM src_user_nested;
+
+# Verify the new nested fields are accessible
+query I retry 3 backoff 5s
+SELECT (address_detail).country FROM mv_user_nested_extended WHERE (address_detail).country IS NOT NULL;
+----
+Country_0
+Country_1
+Country_2
+Country_3
+Country_4
+
+query I
+SELECT COUNT(*) FROM mv_user_nested_extended WHERE ((address_detail).location_detail).altitude IS NOT NULL;
+----
+5
+
+statement ok
+DROP MATERIALIZED VIEW mv_user_nested_extended;
+
+statement ok
+DROP MATERIALIZED VIEW mv_user_nested;
+
+statement ok
+DROP SOURCE src_user_nested;
