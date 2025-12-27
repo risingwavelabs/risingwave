@@ -20,7 +20,6 @@ use std::ops::Range;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use serde::{Deserialize, Serialize};
@@ -825,10 +824,13 @@ pub fn try_shorten_block_smallest_key(
 ) -> Option<FullKey<Vec<u8>>> {
     /// Returns the length of the longest common prefix between two byte slices.
     fn lcp_len(a: &[u8], b: &[u8]) -> usize {
-        a.iter()
-            .zip_eq_fast(b.iter())
-            .take_while(|(x, y)| x == y)
-            .count()
+        let min_len = a.len().min(b.len());
+        for i in 0..min_len {
+            if a[i] != b[i] {
+                return i;
+            }
+        }
+        min_len
     }
 
     let prev_table_key = prev_block_last.user_key.table_key.as_ref();
