@@ -27,7 +27,7 @@ pub use super::arrow_56::{
 use crate::array::{
     Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray,
 };
-use crate::types::StructType;
+use crate::types::{ScalarRef, StructType};
 
 pub struct IcebergArrowConvert;
 
@@ -145,7 +145,7 @@ impl ToArrow for IcebergArrowConvert {
         let values: Vec<Option<i128>> = array
             .iter()
             .map(|e| {
-                e.and_then(|e| match e {
+                e.and_then(|e| match e.to_owned_scalar() {
                     crate::array::Decimal::Normalized(e) => {
                         let value = e.mantissa();
                         let scale = e.scale() as i8;

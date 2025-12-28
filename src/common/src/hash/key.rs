@@ -528,24 +528,24 @@ impl HashKeyDe for F64 {
     }
 }
 
-impl HashKeySer<'_> for Decimal {
-    fn serialize_into(self, mut buf: impl BufMut) {
-        let b = Decimal::unordered_serialize(&self.normalize());
-        buf.put_slice(b.as_ref());
-    }
-
-    fn exact_size() -> Option<usize> {
-        Some(16)
-    }
-}
-
-impl HashKeyDe for Decimal {
-    fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
-        let mut value = [0; 16];
-        buf.copy_to_slice(&mut value);
-        Self::unordered_deserialize(value)
-    }
-}
+// impl HashKeySer<'_> for Decimal {
+//     fn serialize_into(self, mut buf: impl BufMut) {
+//         let b = Decimal::unordered_serialize(&self.normalize());
+//         buf.put_slice(b.as_ref());
+//     }
+// 
+//     fn exact_size() -> Option<usize> {
+//         Some(16)
+//     }
+// }
+// 
+// impl HashKeyDe for Decimal {
+//     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
+//         let mut value = [0; 16];
+//         buf.copy_to_slice(&mut value);
+//         Self::unordered_deserialize(value)
+//     }
+// }
 
 impl HashKeySer<'_> for Date {
     fn serialize_into(self, mut buf: impl BufMut) {
@@ -629,6 +629,7 @@ impl_memcmp_encoding_hash_key_serde!(StructValue);
 impl_memcmp_encoding_hash_key_serde!(ListValue);
 impl_memcmp_encoding_hash_key_serde!(VectorVal);
 impl_memcmp_encoding_hash_key_serde!(MapValue);
+impl_memcmp_encoding_hash_key_serde!(Decimal);
 
 #[cfg(test)]
 mod tests {

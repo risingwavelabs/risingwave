@@ -22,7 +22,7 @@ use risingwave_pb::data::{ArrayType, PbArray};
 
 use super::{Array, ArrayBuilder, ArrayImpl};
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::types::{DataType, Decimal};
+use crate::types::{DataType, DeciRef, Decimal, Scalar, ScalarRef};
 
 macro_rules! impl_array_methods {
     ($scalar_type:ty, $array_type_pb:ident, $array_impl_variant:ident) => {
@@ -75,7 +75,7 @@ impl FromIterator<Option<Decimal>> for DecimalArray {
         let iter = iter.into_iter();
         let mut builder = <Self as Array>::Builder::new(iter.size_hint().0);
         for i in iter {
-            builder.append(i);
+            builder.append(i.as_ref().map(|v| v.as_scalar_ref()));
         }
         builder.finish()
     }
@@ -121,14 +121,14 @@ impl DecimalArray {
 impl Array for DecimalArray {
     type Builder = DecimalArrayBuilder;
     type OwnedItem = Decimal;
-    type RefItem<'a> = Decimal;
+    type RefItem<'a> = DeciRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        unsafe { *self.data.get_unchecked(idx) }
+        unsafe { self.data.get_unchecked(idx) }.as_scalar_ref()
     }
 
     fn raw_iter(&self) -> impl ExactSizeIterator<Item = Self::RefItem<'_>> {
-        self.data.iter().cloned()
+        self.data.iter().map(|d| d.as_scalar_ref())
     }
 
     fn len(&self) -> usize {
@@ -139,7 +139,7 @@ impl Array for DecimalArray {
         let mut output_buffer = Vec::<u8>::with_capacity(self.len() * size_of::<Decimal>());
 
         for v in self.iter() {
-            v.map(|node| node.to_protobuf(&mut output_buffer));
+            v.map(|node| node.to_owned_scalar().to_protobuf(&mut output_buffer));
         }
 
         let buffer = Buffer {
@@ -195,11 +195,11 @@ impl ArrayBuilder for DecimalArrayBuilder {
         Self::new(capacity)
     }
 
-    fn append_n(&mut self, n: usize, value: Option<Decimal>) {
+    fn append_n(&mut self, n: usize, value: Option<DeciRef<'_>>) {
         match value {
             Some(x) => {
                 self.bitmap.append_n(n, true);
-                self.data.extend(std::iter::repeat_n(x, n));
+                self.data.extend(std::iter::repeat_n(x.to_owned_scalar(), n));
             }
             None => {
                 self.bitmap.append_n(n, false);

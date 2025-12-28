@@ -150,23 +150,23 @@ impl ScalarRef<'_> for bool {
 
 /// Implement `Scalar` for `Decimal`.
 impl Scalar for Decimal {
-    type ScalarRefType<'a> = Decimal;
+    type ScalarRefType<'a> = DeciRef<'a>;
 
-    fn as_scalar_ref(&self) -> Decimal {
-        *self
+    fn as_scalar_ref(&self) -> DeciRef<'_> {
+        DeciRef(self)
     }
 }
 
 /// Implement `ScalarRef` for `Decimal`.
-impl ScalarRef<'_> for Decimal {
+impl<'a> ScalarRef<'a> for DeciRef<'a> {
     type ScalarType = Decimal;
 
     fn to_owned_scalar(&self) -> Decimal {
-        *self
+        self.0.clone()
     }
 
     fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.normalize().hash(state)
+        self.0.normalize().hash(state)
     }
 }
 

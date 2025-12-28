@@ -29,7 +29,7 @@ use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, Rounding
 use super::DataType;
 use super::to_text::ToText;
 use crate::array::ArrayResult;
-use crate::types::Decimal::Normalized;
+use Decimal::Normalized;
 use crate::types::ordered_float::OrderedFloat;
 
 #[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]

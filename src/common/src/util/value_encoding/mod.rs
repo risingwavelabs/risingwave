@@ -215,7 +215,7 @@ fn serialize_scalar(value: ScalarRefImpl<'_>, buf: &mut impl BufMut) {
         ScalarRefImpl::Utf8(v) => serialize_str(v.as_bytes(), buf),
         ScalarRefImpl::Bytea(v) => serialize_str(v, buf),
         ScalarRefImpl::Bool(v) => buf.put_u8(v as u8),
-        ScalarRefImpl::Decimal(v) => serialize_decimal(&v, buf),
+        ScalarRefImpl::Decimal(v) => serialize_decimal(&v.to_owned_scalar(), buf),
         ScalarRefImpl::Interval(v) => serialize_interval(&v, buf),
         ScalarRefImpl::Date(v) => serialize_date(v.0.num_days_from_ce(), buf),
         ScalarRefImpl::Timestamp(v) => serialize_timestamp(

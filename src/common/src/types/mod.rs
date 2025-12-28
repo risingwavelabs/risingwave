@@ -82,7 +82,7 @@ pub use risingwave_fields_derive::Fields;
 
 pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
-pub use self::decimal1::{Decimal, PowError as DecimalPowError};
+pub use self::decimal2::{Decimal, DeciRef, PowError as DecimalPowError};
 pub use self::interval::{DateTimeField, Interval, IntervalDisplay, test_utils};
 pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::list_type::ListType;
@@ -1187,7 +1187,7 @@ impl ScalarRefImpl<'_> {
             Self::Utf8(v) => v.serialize(ser)?,
             Self::Bytea(v) => ser.serialize_bytes(v)?,
             Self::Bool(v) => v.serialize(ser)?,
-            Self::Decimal(v) => ser.serialize_decimal((*v).into())?,
+            Self::Decimal(v) => ser.serialize_decimal((*v).to_owned_scalar().into())?,
             Self::Interval(v) => v.serialize(ser)?,
             Self::Date(v) => v.0.num_days_from_ce().serialize(ser)?,
             Self::Timestamp(v) => {

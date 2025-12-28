@@ -46,9 +46,12 @@ pub enum Decimal {
     NaN,
 }
 
+#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
+pub struct DeciRef<'a>(pub &'a Decimal);
+
 impl ZeroHeapSize for Decimal {}
 
-impl ToText for Decimal {
+impl ToText for DeciRef<'_> {
     fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
         write!(f, "{self}")
     }

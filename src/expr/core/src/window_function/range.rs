@@ -22,7 +22,7 @@ use futures_util::FutureExt;
 use risingwave_common::bail;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Datum, IsNegative, ScalarImpl, ScalarRefImpl, Sentinelled, ToOwnedDatum, ToText,
+    DataType, Datum, IsNegative, ScalarImpl, ScalarRef, ScalarRefImpl, Sentinelled, ToOwnedDatum, ToText
 };
 use risingwave_common::util::sort_util::{Direction, OrderType};
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
@@ -114,7 +114,7 @@ impl FrameBoundsImpl for RangeFrameBounds {
                 ScalarRefImpl::Int64(val) => validate_non_negative(val)?,
                 ScalarRefImpl::Float32(val) => validate_non_negative(val)?,
                 ScalarRefImpl::Float64(val) => validate_non_negative(val)?,
-                ScalarRefImpl::Decimal(val) => validate_non_negative(val)?,
+                ScalarRefImpl::Decimal(val) => validate_non_negative(val.to_owned_scalar())?,
                 ScalarRefImpl::Interval(val) => {
                     if !val.is_never_negative() {
                         bail!(

@@ -14,7 +14,7 @@
 
 use num_integer::Integer;
 
-use crate::types::{Datum, DatumRef, Decimal, ScalarImpl, ScalarRefImpl};
+use crate::types::{Datum, DatumRef, Decimal, ScalarImpl, ScalarRef, ScalarRefImpl};
 
 /// Strategy for filling gaps in time series data.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -69,7 +69,7 @@ pub fn calculate_interpolation_step(d1: DatumRef<'_>, d2: DatumRef<'_>, steps: u
             Some(ScalarImpl::Float64((v2 - v1) / steps as f64))
         }
         (ScalarRefImpl::Decimal(v1), ScalarRefImpl::Decimal(v2)) => {
-            Some(ScalarImpl::Decimal((v2 - v1) / Decimal::from(steps)))
+            Some(ScalarImpl::Decimal((v2.to_owned_scalar() - v1.to_owned_scalar()) / Decimal::from(steps)))
         }
         _ => None,
     }

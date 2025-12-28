@@ -22,6 +22,7 @@ use super::{
 };
 use crate::array::{ListRef, StructRef};
 use crate::error::NotImplemented;
+use crate::types::ScalarRef;
 
 /// Error type for [`ToBinary`] trait.
 #[derive(thiserror::Error, Debug)]
@@ -157,7 +158,7 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Float64(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Utf8(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bool(v) => v.to_binary_with_type(ty),
-            ScalarRefImpl::Decimal(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Decimal(v) => v.to_owned_scalar().to_binary_with_type(ty),
             ScalarRefImpl::Interval(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Date(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Timestamp(v) => v.to_binary_with_type(ty),

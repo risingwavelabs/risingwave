@@ -28,7 +28,7 @@ mod tests {
     // use super::*;
     use super::super::decimal2_array::{DecimalArray, DecimalArrayBuilder};
     use crate::array::{Array, ArrayBuilder, ArrayImpl, NULL_VAL_FOR_HASH};
-    use crate::types::Decimal;
+    use crate::types::{Decimal, Scalar as _, ScalarRef};
     use crate::util::iter_util::ZipEqFast;
 
     #[test]
@@ -36,10 +36,10 @@ mod tests {
         let v = (0..1000).map(Decimal::from).collect_vec();
         let mut builder = DecimalArrayBuilder::new(0);
         for i in &v {
-            builder.append(Some(*i));
+            builder.append(Some(i.as_scalar_ref()));
         }
         let a = builder.finish();
-        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| Some(*a) == b);
+        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| Some(*a) == b.map(|x| x.to_owned_scalar()));
         assert!(res);
     }
 
@@ -112,7 +112,7 @@ mod tests {
             .map(|v| {
                 let mut builder = DecimalArrayBuilder::new(0);
                 for i in v {
-                    builder.append(*i);
+                    builder.append(i.as_ref().map(|x| x.as_scalar_ref()));
                 }
                 builder.finish()
             })

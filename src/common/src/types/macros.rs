@@ -48,7 +48,7 @@ macro_rules! for_all_variants {
             { Float64,      Float64,      float64,      $crate::types::F64,         $crate::types::F64,                 $crate::array::F64Array,            $crate::array::F64ArrayBuilder          },
             { Varchar,      Utf8,         utf8,         Box<str>,                   &'scalar str,                       $crate::array::Utf8Array,           $crate::array::Utf8ArrayBuilder         },
             { Boolean,      Bool,         bool,         bool,                       bool,                               $crate::array::BoolArray,           $crate::array::BoolArrayBuilder         },
-            { Decimal,      Decimal,      decimal,      $crate::types::Decimal,     $crate::types::Decimal,             $crate::array::DecimalArray,        $crate::array::DecimalArrayBuilder      },
+            { Decimal,      Decimal,      decimal,      $crate::types::Decimal,     $crate::types::DeciRef<'scalar>,    $crate::array::DecimalArray,        $crate::array::DecimalArrayBuilder      },
             { Interval,     Interval,     interval,     $crate::types::Interval,    $crate::types::Interval,            $crate::array::IntervalArray,       $crate::array::IntervalArrayBuilder     },
             { Date,         Date,         date,         $crate::types::Date,        $crate::types::Date,                $crate::array::DateArray,           $crate::array::DateArrayBuilder         },
             { Time,         Time,         time,         $crate::types::Time,        $crate::types::Time,                $crate::array::TimeArray,           $crate::array::TimeArrayBuilder         },

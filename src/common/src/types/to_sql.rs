@@ -18,7 +18,7 @@ use bytes::BytesMut;
 use postgres_types::{IsNull, ToSql, Type, to_sql_checked};
 use risingwave_common::types::ScalarRefImpl;
 
-use crate::types::ScalarImpl;
+use crate::types::{ScalarImpl, ScalarRef};
 
 impl ToSql for ScalarImpl {
     to_sql_checked!();
@@ -79,7 +79,7 @@ impl ToSql for ScalarRefImpl<'_> {
             ScalarRefImpl::Float64(v) => v.to_sql(ty, out),
             ScalarRefImpl::Utf8(v) => v.to_sql(ty, out),
             ScalarRefImpl::Bool(v) => v.to_sql(ty, out),
-            ScalarRefImpl::Decimal(v) => v.to_sql(ty, out),
+            ScalarRefImpl::Decimal(v) => v.to_owned_scalar().to_sql(ty, out),
             ScalarRefImpl::Interval(v) => v.to_sql(ty, out),
             ScalarRefImpl::Date(v) => v.to_sql(ty, out),
             ScalarRefImpl::Timestamp(v) => v.to_sql(ty, out),

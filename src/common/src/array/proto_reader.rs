@@ -95,7 +95,7 @@ fn read_decimal_array(array: &PbArray, cardinality: usize) -> ArrayResult<ArrayI
     for not_null in bitmap.iter() {
         if not_null {
             let v = Decimal::from_protobuf(&mut cursor)?;
-            builder.append(Some(v));
+            builder.append(Some(v.as_scalar_ref()));
         } else {
             builder.append(None);
         }
@@ -293,7 +293,7 @@ mod tests {
         let mut builder = DecimalArrayBuilder::new(cardinality);
         for i in 0..cardinality {
             if i % 2 == 0 {
-                builder.append(Some(Decimal::from(i)));
+                builder.append(Some(Decimal::from(i).as_scalar_ref()));
             } else {
                 builder.append(None);
             }
@@ -304,7 +304,7 @@ mod tests {
         let arr: &DecimalArray = new_col.as_decimal();
         arr.iter().enumerate().for_each(|(i, x)| {
             if i % 2 == 0 {
-                assert_eq!(Decimal::from(i), x.unwrap());
+                assert_eq!(Decimal::from(i), x.unwrap().to_owned_scalar());
             } else {
                 assert!(x.is_none());
             }
