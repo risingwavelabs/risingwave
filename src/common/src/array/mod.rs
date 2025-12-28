@@ -51,7 +51,7 @@ pub use chrono_array::{
 };
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
-pub use decimal1_array::{DecimalArray, DecimalArrayBuilder};
+pub use decimal2_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
@@ -348,6 +348,12 @@ for_all_variants! { array_impl_enum }
 impl<T: PrimitiveArrayItemType> From<PrimitiveArray<T>> for ArrayImpl {
     fn from(arr: PrimitiveArray<T>) -> Self {
         T::erase_array_type(arr)
+    }
+}
+
+impl From<DecimalArray> for ArrayImpl {
+    fn from(arr: DecimalArray) -> Self {
+        Decimal::erase_array_type(arr)
     }
 }
 

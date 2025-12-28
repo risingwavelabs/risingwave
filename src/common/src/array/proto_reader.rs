@@ -32,7 +32,7 @@ impl ArrayImpl {
             PbArrayType::Float64 => read_primitive_array::<F64>(array, cardinality)?,
             PbArrayType::Bool => read_bool_array(array, cardinality)?,
             PbArrayType::Utf8 => read_string_array::<Utf8ValueReader>(array, cardinality)?,
-            PbArrayType::Decimal => read_primitive_array::<Decimal>(array, cardinality)?,
+            PbArrayType::Decimal => read_decimal_array(array, cardinality)?,
             PbArrayType::Date => read_primitive_array::<Date>(array, cardinality)?,
             PbArrayType::Time => read_primitive_array::<Time>(array, cardinality)?,
             PbArrayType::Timestamp => read_primitive_array::<Timestamp>(array, cardinality)?,
@@ -70,6 +70,31 @@ fn read_primitive_array<T: PrimitiveArrayItemType>(
     for not_null in bitmap.iter() {
         if not_null {
             let v = T::from_protobuf(&mut cursor)?;
+            builder.append(Some(v));
+        } else {
+            builder.append(None);
+        }
+    }
+    let arr = builder.finish();
+    ensure_eq!(arr.len(), cardinality);
+
+    Ok(arr.into())
+}
+
+fn read_decimal_array(array: &PbArray, cardinality: usize) -> ArrayResult<ArrayImpl> {
+    ensure!(
+        array.get_values().len() == 1,
+        "Must have only 1 buffer in a numeric array"
+    );
+
+    let buf = array.get_values()[0].get_body().as_slice();
+
+    let mut builder = DecimalArrayBuilder::new(cardinality);
+    let bitmap: Bitmap = array.get_null_bitmap()?.into();
+    let mut cursor = Cursor::new(buf);
+    for not_null in bitmap.iter() {
+        if not_null {
+            let v = Decimal::from_protobuf(&mut cursor)?;
             builder.append(Some(v));
         } else {
             builder.append(None);

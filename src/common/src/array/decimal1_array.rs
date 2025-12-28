@@ -25,8 +25,10 @@ mod tests {
 
     use itertools::Itertools;
 
-    use super::*;
+    // use super::*;
+    use super::super::decimal2_array::{DecimalArray, DecimalArrayBuilder};
     use crate::array::{Array, ArrayBuilder, ArrayImpl, NULL_VAL_FOR_HASH};
+    use crate::types::Decimal;
     use crate::util::iter_util::ZipEqFast;
 
     #[test]

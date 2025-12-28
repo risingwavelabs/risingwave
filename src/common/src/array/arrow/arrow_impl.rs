@@ -1743,13 +1743,13 @@ mod tests {
 
     #[test]
     fn uint64() {
-        let array: PrimitiveArray<Decimal> = DecimalArray::from_iter([
+        let array = DecimalArray::from_iter([
             None,
             Some(Decimal::Normalized("7".parse().unwrap())),
             Some(Decimal::Normalized("18446744073709551615".parse().unwrap())),
         ]);
         let arr = arrow_array::UInt64Array::from(vec![None, Some(7), Some(18446744073709551615)]);
-        let converted: PrimitiveArray<Decimal> = (&arr).try_into().unwrap();
+        let converted: DecimalArray = (&arr).try_into().unwrap();
         assert_eq!(converted, array);
     }
 
