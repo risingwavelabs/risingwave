@@ -52,6 +52,7 @@ use crate::{
 mod cow;
 mod datetime;
 mod decimal1;
+mod decimal2;
 mod fields;
 mod from_sql;
 mod interval;
