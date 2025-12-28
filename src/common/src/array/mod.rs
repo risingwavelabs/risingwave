@@ -21,6 +21,7 @@ mod chrono_array;
 mod data_chunk;
 pub mod data_chunk_iter;
 mod decimal1_array;
+mod decimal2_array;
 pub mod error;
 pub mod interval_array;
 mod iterator;
