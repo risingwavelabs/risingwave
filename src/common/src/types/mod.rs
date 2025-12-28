@@ -51,7 +51,7 @@ use crate::{
 
 mod cow;
 mod datetime;
-mod decimal;
+mod decimal1;
 mod fields;
 mod from_sql;
 mod interval;
@@ -81,7 +81,7 @@ pub use risingwave_fields_derive::Fields;
 
 pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
-pub use self::decimal::{Decimal, PowError as DecimalPowError};
+pub use self::decimal1::{Decimal, PowError as DecimalPowError};
 pub use self::interval::{DateTimeField, Interval, IntervalDisplay, test_utils};
 pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::list_type::ListType;

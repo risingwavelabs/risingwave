@@ -20,7 +20,7 @@ pub mod bytes_array;
 mod chrono_array;
 mod data_chunk;
 pub mod data_chunk_iter;
-mod decimal_array;
+mod decimal1_array;
 pub mod error;
 pub mod interval_array;
 mod iterator;
@@ -50,7 +50,7 @@ pub use chrono_array::{
 };
 pub use data_chunk::{DataChunk, DataChunkTestExt};
 pub use data_chunk_iter::RowRef;
-pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
+pub use decimal1_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
