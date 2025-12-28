@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{PrimitiveArray, PrimitiveArrayBuilder};
-use crate::types::Decimal;
+// use super::{PrimitiveArray, PrimitiveArrayBuilder};
+// use crate::types::Decimal;
 
-pub type DecimalArray = PrimitiveArray<Decimal>;
-pub type DecimalArrayBuilder = PrimitiveArrayBuilder<Decimal>;
+// pub type DecimalArray = PrimitiveArray<Decimal>;
+// pub type DecimalArrayBuilder = PrimitiveArrayBuilder<Decimal>;
 
 #[cfg(test)]
 mod tests {
