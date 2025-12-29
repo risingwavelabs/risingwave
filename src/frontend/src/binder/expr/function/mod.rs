@@ -35,8 +35,8 @@ use crate::binder::bind_context::Clause;
 use crate::catalog::function_catalog::FunctionCatalog;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    Expr, ExprImpl, ExprType, FunctionCallWithLambda, InputRef, TableFunction, TableFunctionType,
-    UserDefinedFunction,
+    Expr, ExprImpl, ExprType, FunctionCallWithLambda, InputRef, SecretRefExpr, TableFunction,
+    TableFunctionType, UserDefinedFunction,
 };
 use crate::handler::privilege::ObjectCheckItem;
 
@@ -188,6 +188,11 @@ impl Binder {
                     .into());
                 }
 
+                reject_syntax!(
+                    !func.secret_refs.is_empty(),
+                    "`SECRET` is not allowed in AGGREGATE:function call"
+                );
+
                 if func.language == "sql" {
                     self.bind_sql_udf(func.clone(), array_args)?
                 } else {
@@ -229,6 +234,11 @@ impl Binder {
                 ObjectCheckItem::new(func.owner, AclMode::Execute, func.name.clone(), func.id),
                 self.database_id,
             )?;
+
+            // extend args with the implicit secret arguments
+            for secret_ref in func.secret_refs.values() {
+                args.push(SecretRefExpr::from_expr_proto(secret_ref).into());
+            }
             Some(func.clone())
         } else {
             None
@@ -747,7 +757,16 @@ impl Binder {
             );
         };
 
-        self.bind_sql_udf_inner(body, &func.arg_names, args)
+        // Add the implicit secret arguments to arg_names before binding
+        // args are extended in bind_function already
+        let mut arg_names = func.arg_names.clone();
+        for secret_name in func.secret_refs.keys() {
+            arg_names.push(secret_name.clone());
+        }
+
+        debug_assert_eq!(arg_names.len(), args.len());
+
+        self.bind_sql_udf_inner(body, &arg_names, args)
     }
 
     pub(in crate::binder) fn bind_function_expr_arg(

@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -20,6 +21,7 @@ use risingwave_common::types::DataType;
 
 use super::{Expr, ExprDisplay, ExprImpl};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
+use crate::error::{ErrorCode, RwError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UserDefinedFunction {
@@ -36,14 +38,56 @@ impl UserDefinedFunction {
         udf: &risingwave_pb::expr::UserDefinedFunction,
         return_type: DataType,
     ) -> crate::error::Result<Self> {
-        let args: Vec<_> = udf
+        let mut args: Vec<_> = udf
             .get_children()
             .iter()
             .map(ExprImpl::from_expr_proto)
             .try_collect()?;
+        let mut arg_names = udf.arg_names.clone();
+        let mut arg_types = udf.get_arg_types().iter().map_into().collect_vec();
+        let mut secret_refs = BTreeMap::new();
+
+        while let Some(secret) = args.pop_if(|arg| matches!(arg, ExprImpl::SecretRefExpr(_))) {
+            let secret_expr = secret.into_secret_ref_expr().unwrap();
+            let secret_name = arg_names.pop().ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "mismatched secret arg names and args for udf {}",
+                    udf.name
+                )))
+            })?;
+            let data_type = arg_types.pop().ok_or_else(|| {
+                RwError::from(ErrorCode::InternalError(format!(
+                    "mismatched secret arg types and args for udf {}",
+                    udf.name
+                )))
+            })?;
+            if data_type != secret_expr.return_type() {
+                return Err(RwError::from(ErrorCode::InternalError(format!(
+                    "mismatched secret arg type for udf {}: expected {:?}, got {:?}",
+                    udf.name,
+                    data_type,
+                    secret_expr.return_type()
+                ))));
+            }
+            if secret_refs
+                .insert(secret_name.clone(), secret_expr.to_pb_secret_ref())
+                .is_some()
+            {
+                return Err(RwError::from(ErrorCode::InternalError(format!(
+                    "duplicate secret arg name '{}' for udf {}",
+                    secret_name, udf.name
+                ))));
+            }
+        }
+
+        debug_assert!(
+            args.iter()
+                .all(|arg| !matches!(arg, ExprImpl::SecretRefExpr(_)))
+        );
+        debug_assert_eq!(arg_names.len(), args.len());
+        debug_assert_eq!(arg_types.len(), args.len());
 
         // function catalog
-        let arg_types = udf.get_arg_types().iter().map_into().collect_vec();
         let catalog = FunctionCatalog {
             // FIXME(yuhao): function id is not in udf proto.
             id: FunctionId::placeholder(),
@@ -65,6 +109,7 @@ impl UserDefinedFunction {
             is_async: udf.is_async,
             created_at_epoch: None,
             created_at_cluster_version: None,
+            secret_refs,
         };
 
         Ok(Self {
@@ -83,11 +128,27 @@ impl Expr for UserDefinedFunction {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
 
-        let children = self
+        let children: Vec<_> = self
             .args
             .iter()
             .map(|arg| arg.try_to_expr_proto())
             .try_collect()?;
+
+        // Prepare arg_names and arg_types including secret refs
+        let mut arg_names = self.catalog.arg_names.clone();
+        let mut arg_types = self
+            .catalog
+            .arg_types
+            .iter()
+            .map(|t| t.to_protobuf())
+            .collect_vec();
+        for secret_name in self.catalog.secret_refs.keys() {
+            arg_names.push(secret_name.clone());
+            arg_types.push(DataType::Varchar.to_protobuf());
+        }
+
+        debug_assert_eq!(arg_names.len(), children.len());
+        debug_assert_eq!(arg_types.len(), children.len());
 
         Ok(ExprNode {
             function_type: Type::Unspecified.into(),
@@ -95,13 +156,8 @@ impl Expr for UserDefinedFunction {
             rex_node: Some(RexNode::Udf(Box::new(UserDefinedFunction {
                 children,
                 name: self.catalog.name.clone(),
-                arg_names: self.catalog.arg_names.clone(),
-                arg_types: self
-                    .catalog
-                    .arg_types
-                    .iter()
-                    .map(|t| t.to_protobuf())
-                    .collect(),
+                arg_names,
+                arg_types,
                 language: self.catalog.language.clone(),
                 runtime: self.catalog.runtime.clone(),
                 identifier: self.catalog.name_in_runtime.clone(),

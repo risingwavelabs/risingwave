@@ -850,6 +850,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".catalog.Sink",
         ".catalog.View",
         ".catalog.SinkFormatDesc",
+        ".catalog.Function",
         ".connector_service.ValidateSourceRequest",
         ".connector_service.GetEventStreamRequest",
         ".connector_service.SinkParam",

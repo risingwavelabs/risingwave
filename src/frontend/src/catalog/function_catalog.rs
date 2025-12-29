@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeMap;
+
 use enum_as_inner::EnumAsInner;
 use parse_display::Display;
 use risingwave_common::catalog::FunctionId;
@@ -20,6 +22,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::PbKind;
 use risingwave_pb::expr::{PbUdfExprVersion, PbUserDefinedFunctionMetadata};
+use risingwave_pb::secret::PbSecretRef;
 
 use crate::catalog::OwnedByUserCatalog;
 
@@ -43,6 +46,8 @@ pub struct FunctionCatalog {
     pub is_batched: Option<bool>,
     pub created_at_epoch: Option<Epoch>,
     pub created_at_cluster_version: Option<String>,
+    /// Secrets that will be implicitly passed to the function.
+    pub secret_refs: BTreeMap<String, PbSecretRef>,
 }
 
 #[derive(Clone, Display, PartialEq, Eq, Hash, Debug, EnumAsInner)]
@@ -85,15 +90,27 @@ impl From<&PbFunction> for FunctionCatalog {
             is_batched: prost.is_batched,
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
+            secret_refs: prost.secret_refs.clone(),
         }
     }
 }
 
 impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
     fn from(c: &FunctionCatalog) -> Self {
+        // Append secret args to arg names and types
+        let mut arg_names = c.arg_names.clone();
+        let mut arg_types = c
+            .arg_types
+            .iter()
+            .map(|t| t.to_protobuf())
+            .collect::<Vec<_>>();
+        for secret_name in c.secret_refs.keys() {
+            arg_names.push(secret_name.clone());
+            arg_types.push(DataType::Varchar.to_protobuf());
+        }
         PbUserDefinedFunctionMetadata {
-            arg_names: c.arg_names.clone(),
-            arg_types: c.arg_types.iter().map(|t| t.to_protobuf()).collect(),
+            arg_names,
+            arg_types,
             return_type: Some(c.return_type.to_protobuf()),
             language: c.language.clone(),
             runtime: c.runtime.clone(),

@@ -367,6 +367,10 @@ message Function {
   // Cluster version (tracked by git commit) when created
   optional string created_at_cluster_version = 23;
 
+  // Secrets that will be implicitly passed to the function as named arguments.
+  // Key is the exposed argument name, value stores the referenced secret id and access mode.
+  map<string, secret.SecretRef> secret_refs = 24;
+
   oneof kind {
     ScalarFunction scalar = 11;
     TableFunction table = 12;

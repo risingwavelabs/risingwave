@@ -127,6 +127,7 @@ impl MonotonicityAnalyzer {
             ExprImpl::Literal(_) => Inherent(Constant),
             ExprImpl::Now(_) => Inherent(NonDecreasing),
             ExprImpl::UserDefinedFunction(_) => Inherent(Unknown),
+            ExprImpl::SecretRefExpr(_) => Inherent(Unknown),
 
             // recursively visit children
             ExprImpl::FunctionCall(inner) => self.visit_function_call(inner),

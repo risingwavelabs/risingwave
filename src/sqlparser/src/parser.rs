@@ -2257,6 +2257,8 @@ impl Parser<'_> {
 
         let append_only = self.parse_keywords(&[Keyword::APPEND, Keyword::ONLY]);
         let params = self.parse_create_function_body()?;
+        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
+        let with_options = with_options.try_into()?;
 
         Ok(Statement::CreateAggregate {
             or_replace,
@@ -2266,6 +2268,7 @@ impl Parser<'_> {
             returns,
             append_only,
             params,
+            with_options
         })
     }
 

@@ -20,7 +20,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{DataType, DataTypeArray, FunctionId, Property};
+use crate::{DataType, DataTypeArray, FunctionId, Property, SecretRef};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
@@ -53,6 +53,7 @@ pub struct Model {
     // To keep compatible with legacy code, this is not included in `options`.
     pub always_retry_on_network_error: bool,
     pub options: Option<Property>,
+    pub secret_ref: Option<SecretRef>,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
@@ -119,6 +120,7 @@ impl From<PbFunction> for ActiveModel {
             kind: Set(function.kind.unwrap().into()),
             always_retry_on_network_error: Set(function.always_retry_on_network_error),
             options: Set(Some(options.into())),
+            secret_ref: Set(Some(SecretRef::from(function.secret_refs))),
         }
     }
 }

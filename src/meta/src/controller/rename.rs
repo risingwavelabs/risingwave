@@ -488,6 +488,7 @@ impl IndexItemRewriter {
             RexNode::Udf(udf) => self.rewrite_udf(udf),
             RexNode::FuncCall(function_call) => self.rewrite_function_call(function_call),
             RexNode::Now(_) => {}
+            RexNode::Secret(_) => {}
         }
     }
 
