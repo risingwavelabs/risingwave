@@ -1044,9 +1044,9 @@ mod tests {
         let job_extra_info = HashMap::from([(
             job_id,
             StreamingJobExtraInfo {
-                timezone: Some("UTC".to_string()),
+                timezone: Some("UTC".to_owned()),
                 config_override: "cfg".into(),
-                job_definition: "definition".to_string(),
+                job_definition: "definition".to_owned(),
             },
         )]);
 
