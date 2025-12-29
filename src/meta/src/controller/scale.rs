@@ -42,7 +42,7 @@ use sea_orm::{
 use crate::MetaResult;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamActor};
+use crate::model::{ActorId, StreamActor, StreamingJobModelContextExt};
 use crate::stream::{AssignerBuilder, SplitDiffOptions};
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
@@ -568,6 +568,11 @@ fn render_actors(
             .get(&job_id)
             .ok_or_else(|| anyhow!("streaming job {job_id} not found"))?;
 
+        let job_strategy = job
+            .stream_context()
+            .adaptive_parallelism_strategy
+            .unwrap_or(adaptive_parallelism_strategy);
+
         let resource_group = match &job.specific_resource_group {
             None => {
                 let database = streaming_job_databases
@@ -610,7 +615,7 @@ fn render_actors(
             .unwrap_or(effective_job_parallelism)
         {
             StreamingParallelism::Adaptive | StreamingParallelism::Custom => {
-                adaptive_parallelism_strategy.compute_target_parallelism(total_parallelism)
+                job_strategy.compute_target_parallelism(total_parallelism)
             }
             StreamingParallelism::Fixed(n) => *n,
         }
@@ -1287,6 +1292,7 @@ mod tests {
             create_type: CreateType::Foreground,
             timezone: None,
             config_override: None,
+            adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(1),
             backfill_parallelism: None,
             max_parallelism: 1,
@@ -1383,6 +1389,7 @@ mod tests {
             create_type: CreateType::Background,
             timezone: None,
             config_override: None,
+            adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(2),
             backfill_parallelism: None,
             max_parallelism: 2,
@@ -1507,6 +1514,7 @@ mod tests {
             create_type: CreateType::Background,
             timezone: None,
             config_override: None,
+            adaptive_parallelism_strategy: None,
             parallelism: StreamingParallelism::Fixed(2),
             backfill_parallelism: None,
             max_parallelism: 2,
@@ -1604,5 +1612,491 @@ mod tests {
             BTreeSet::from([split_a.id().to_string(), split_b.id().to_string()])
         );
         assert_eq!(actor_id_counter.load(Ordering::Relaxed), 4);
+    }
+
+    /// Test that job-level strategy overrides global strategy for Adaptive parallelism.
+    #[test]
+    fn render_actors_job_strategy_overrides_global() {
+        let actor_id_counter = AtomicU32::new(0);
+        let fragment_id: FragmentId = 1.into();
+        let job_id: JobId = 100.into();
+        let database_id: DatabaseId = DatabaseId::new(10);
+
+        // Fragment with Adaptive parallelism, vnode_count = 8
+        let fragment_model = build_fragment(
+            fragment_id,
+            job_id,
+            0,
+            DistributionType::Hash,
+            8,
+            StreamingParallelism::Adaptive,
+        );
+
+        // Job has custom strategy: BOUNDED(2)
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Foreground,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
+            parallelism: StreamingParallelism::Adaptive,
+            max_parallelism: 8,
+            specific_resource_group: None,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "test_db".into(),
+            resource_group: "default".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([fragment_id]),
+            components: HashSet::from([fragment_id]),
+        }];
+
+        let fragment_map = HashMap::from([(fragment_id, fragment_model)]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        // 4 workers with 1 parallelism each = total 4 parallelism
+        let worker_map = BTreeMap::from([
+            (
+                1.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                2.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                3.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                4.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+        ]);
+
+        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
+        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+        };
+
+        // Global strategy is FULL (would give 4 actors), but job strategy is BOUNDED(2)
+        let result = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &job_map,
+            &worker_map,
+            AdaptiveParallelismStrategy::Full,
+            context,
+        )
+        .expect("actor rendering succeeds");
+
+        let state = collect_actor_state(&result[&database_id][&job_id][&fragment_id]);
+        // Job strategy BOUNDED(2) should limit to 2 actors, not 4 (global FULL)
+        assert_eq!(
+            state.len(),
+            2,
+            "Job strategy BOUNDED(2) should override global FULL"
+        );
+    }
+
+    /// Test that global strategy is used when job has no custom strategy.
+    #[test]
+    fn render_actors_uses_global_strategy_when_job_has_none() {
+        let actor_id_counter = AtomicU32::new(0);
+        let fragment_id: FragmentId = 1.into();
+        let job_id: JobId = 101.into();
+        let database_id: DatabaseId = DatabaseId::new(11);
+
+        let fragment_model = build_fragment(
+            fragment_id,
+            job_id,
+            0,
+            DistributionType::Hash,
+            8,
+            StreamingParallelism::Adaptive,
+        );
+
+        // Job has NO custom strategy (None)
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Foreground,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: None, // No custom strategy
+            parallelism: StreamingParallelism::Adaptive,
+            max_parallelism: 8,
+            specific_resource_group: None,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "test_db".into(),
+            resource_group: "default".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([fragment_id]),
+            components: HashSet::from([fragment_id]),
+        }];
+
+        let fragment_map = HashMap::from([(fragment_id, fragment_model)]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        // 4 workers = total 4 parallelism
+        let worker_map = BTreeMap::from([
+            (
+                1.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                2.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                3.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                4.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+        ]);
+
+        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
+        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+        };
+
+        // Global strategy is BOUNDED(3)
+        let result = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &job_map,
+            &worker_map,
+            AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(3).unwrap()),
+            context,
+        )
+        .expect("actor rendering succeeds");
+
+        let state = collect_actor_state(&result[&database_id][&job_id][&fragment_id]);
+        // Should use global strategy BOUNDED(3)
+        assert_eq!(
+            state.len(),
+            3,
+            "Should use global strategy BOUNDED(3) when job has no custom strategy"
+        );
+    }
+
+    /// Test that Fixed parallelism ignores strategy entirely.
+    #[test]
+    fn render_actors_fixed_parallelism_ignores_strategy() {
+        let actor_id_counter = AtomicU32::new(0);
+        let fragment_id: FragmentId = 1.into();
+        let job_id: JobId = 102.into();
+        let database_id: DatabaseId = DatabaseId::new(12);
+
+        // Fragment with FIXED parallelism
+        let fragment_model = build_fragment(
+            fragment_id,
+            job_id,
+            0,
+            DistributionType::Hash,
+            8,
+            StreamingParallelism::Fixed(5),
+        );
+
+        // Job has custom strategy, but it should be ignored for Fixed parallelism
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Foreground,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
+            parallelism: StreamingParallelism::Fixed(5),
+            max_parallelism: 8,
+            specific_resource_group: None,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "test_db".into(),
+            resource_group: "default".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([fragment_id]),
+            components: HashSet::from([fragment_id]),
+        }];
+
+        let fragment_map = HashMap::from([(fragment_id, fragment_model)]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        // 6 workers = total 6 parallelism
+        let worker_map = BTreeMap::from([
+            (
+                1.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                2.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                3.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                4.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                5.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                6.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+        ]);
+
+        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
+        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+        };
+
+        let result = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &job_map,
+            &worker_map,
+            AdaptiveParallelismStrategy::Full,
+            context,
+        )
+        .expect("actor rendering succeeds");
+
+        let state = collect_actor_state(&result[&database_id][&job_id][&fragment_id]);
+        // Fixed(5) should be used, ignoring both job strategy BOUNDED(2) and global FULL
+        assert_eq!(
+            state.len(),
+            5,
+            "Fixed parallelism should ignore all strategies"
+        );
+    }
+
+    /// Test RATIO strategy calculation.
+    #[test]
+    fn render_actors_ratio_strategy() {
+        let actor_id_counter = AtomicU32::new(0);
+        let fragment_id: FragmentId = 1.into();
+        let job_id: JobId = 103.into();
+        let database_id: DatabaseId = DatabaseId::new(13);
+
+        let fragment_model = build_fragment(
+            fragment_id,
+            job_id,
+            0,
+            DistributionType::Hash,
+            16,
+            StreamingParallelism::Adaptive,
+        );
+
+        // Job has RATIO(0.5) strategy
+        let job_model = streaming_job::Model {
+            job_id,
+            job_status: JobStatus::Created,
+            create_type: CreateType::Foreground,
+            timezone: None,
+            config_override: None,
+            adaptive_parallelism_strategy: Some("RATIO(0.5)".to_owned()),
+            parallelism: StreamingParallelism::Adaptive,
+            max_parallelism: 16,
+            specific_resource_group: None,
+        };
+
+        let database_model = database::Model {
+            database_id,
+            name: "test_db".into(),
+            resource_group: "default".into(),
+            barrier_interval_ms: None,
+            checkpoint_frequency: None,
+        };
+
+        let ensembles = vec![NoShuffleEnsemble {
+            entries: HashSet::from([fragment_id]),
+            components: HashSet::from([fragment_id]),
+        }];
+
+        let fragment_map = HashMap::from([(fragment_id, fragment_model)]);
+        let job_map = HashMap::from([(job_id, job_model)]);
+
+        // 8 workers = total 8 parallelism
+        let worker_map = BTreeMap::from([
+            (
+                1.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                2.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                3.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                4.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                5.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                6.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                7.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+            (
+                8.into(),
+                WorkerInfo {
+                    parallelism: NonZeroUsize::new(1).unwrap(),
+                    resource_group: Some("default".into()),
+                },
+            ),
+        ]);
+
+        let fragment_source_ids: HashMap<FragmentId, SourceId> = HashMap::new();
+        let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
+        let streaming_job_databases = HashMap::from([(job_id, database_id)]);
+        let database_map = HashMap::from([(database_id, database_model)]);
+
+        let context = RenderActorsContext {
+            fragment_source_ids: &fragment_source_ids,
+            fragment_splits: &fragment_splits,
+            streaming_job_databases: &streaming_job_databases,
+            database_map: &database_map,
+        };
+
+        let result = render_actors(
+            &actor_id_counter,
+            &ensembles,
+            &fragment_map,
+            &job_map,
+            &worker_map,
+            AdaptiveParallelismStrategy::Full,
+            context,
+        )
+        .expect("actor rendering succeeds");
+
+        let state = collect_actor_state(&result[&database_id][&job_id][&fragment_id]);
+        // RATIO(0.5) of 8 = 4
+        assert_eq!(
+            state.len(),
+            4,
+            "RATIO(0.5) of 8 workers should give 4 actors"
+        );
     }
 }

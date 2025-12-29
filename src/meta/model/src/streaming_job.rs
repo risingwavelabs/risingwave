@@ -31,6 +31,7 @@ pub struct Model {
     pub timezone: Option<String>,
     // Here `NULL` is equivalent to an empty config override string.
     pub config_override: Option<String>,
+    pub adaptive_parallelism_strategy: Option<String>,
     pub parallelism: StreamingParallelism,
     pub backfill_parallelism: Option<StreamingParallelism>,
     pub max_parallelism: i32,
