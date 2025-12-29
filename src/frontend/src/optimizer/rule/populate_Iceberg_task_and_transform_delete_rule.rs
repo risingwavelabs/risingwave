@@ -37,7 +37,7 @@ use crate::error::Result;
 use crate::expr::{Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
-use crate::optimizer::plan_node::{LogicalFilter, LogicalIcebergScan, LogicalJoin, LogicalSource};
+use crate::optimizer::plan_node::{LogicalFilter, LogicalIcebergScan, LogicalImmIcebergScan, LogicalJoin, LogicalSource};
 use crate::optimizer::rule::{ApplyResult, FallibleRule};
 use crate::utils::{Condition, FRONTEND_RUNTIME};
 
@@ -45,12 +45,29 @@ pub struct PopulateIcebergTaskAndTransformDeleteRule {}
 
 impl FallibleRule<Logical> for PopulateIcebergTaskAndTransformDeleteRule {
     fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
-        let scan: &LogicalIcebergScan = plan.as_logical_iceberg_scan()?;
+        let scan: &LogicalImmIcebergScan = plan.as_logical_imm_iceberg_scan()?;
         // 1. Get predicate from LogicalFilter
         let predicate = scan.predicate();
-        let schema = scan.schema();
+        let schema = scan.schema().clone();
         let (iceberg_predicate, rw_predicate) =
             rw_predicate_to_iceberg_predicate(predicate, scan.schema().fields());
+
+        let mut required_cols = scan.required_cols.clone();
+        if rw_predicate.always_true() {
+            // no need to add required cols
+        } else {
+            let col_num = schema.len();
+            for expr in &rw_predicate.conjunctions {
+                let bitset = expr.collect_input_refs(col_num);
+                for idx in bitset.ones() {
+                    if !required_cols.contains(&idx) {
+                        required_cols.push(idx);
+                    }
+                }
+            }
+        }
+
+        
         // 2. Create IcebergTask from LogicalIcebergScan and predicate
         let timezone = plan.ctx().get_session_timezone();
         let as_of = scan.logical_source.core.as_of.clone();
@@ -75,10 +92,17 @@ impl FallibleRule<Logical> for PopulateIcebergTaskAndTransformDeleteRule {
                 .into(),
             );
         };
+        let fields_name = schema.fields.iter().enumerate().filter_map(|(idx,f)| {
+            if required_cols.contains(&idx) {
+                Some(f.name.clone())
+            } else {
+                None
+            }
+        }).collect();
 
         let delete_parameters: IcebergTaskParameters = tokio::task::block_in_place(|| {
             FRONTEND_RUNTIME.block_on(s.get_iceberg_task_parameters(
-                schema.clone(),
+                fields_name,
                 iceberg_predicate,
                 time_travel_info,
             ))

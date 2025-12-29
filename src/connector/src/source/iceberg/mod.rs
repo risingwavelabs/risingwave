@@ -146,141 +146,143 @@ impl IcebergFileScanTaskJsonStr {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub enum IcebergFileScanTask {
-    Data(Vec<FileScanTask>),
-    EqualityDelete(Vec<FileScanTask>),
-    PositionDelete(Vec<FileScanTask>),
-    CountStar(u64),
-}
+// #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+// pub enum IcebergFileScanTask {
+//     Data(Vec<FileScanTask>),
+//     EqualityDelete(Vec<FileScanTask>),
+//     PositionDelete(Vec<FileScanTask>),
+//     CountStar(u64),
+// }
 
-impl Hash for IcebergFileScanTask {
-    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
-        match self {
-            IcebergFileScanTask::Data(file_scan_tasks) => {
-                file_scan_tasks.iter().for_each(|task| {
-                    task.data_file_path.hash(state);
-                });
-            }
-            IcebergFileScanTask::EqualityDelete(file_scan_tasks) => {
-                file_scan_tasks.iter().for_each(|task| {
-                    task.data_file_path.hash(state);
-                });
-            }
-            IcebergFileScanTask::PositionDelete(file_scan_tasks) => {
-                file_scan_tasks.iter().for_each(|task| {
-                    task.data_file_path.hash(state);
-                });
-            }
-            IcebergFileScanTask::CountStar(count) => {
-                count.hash(state);
-            }
-        }
-    }
-}
+// impl Hash for IcebergFileScanTask {
+//     fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+//         match self {
+//              Data(file_scan_tasks) => {
+//                 file_scan_tasks.iter().for_each(|task| {
+//                     task.data_file_path.hash(state);
+//                 });
+//             }
+//              EqualityDelete(file_scan_tasks) => {
+//                 file_scan_tasks.iter().for_each(|task| {
+//                     task.data_file_path.hash(state);
+//                 });
+//             }
+//              PositionDelete(file_scan_tasks) => {
+//                 file_scan_tasks.iter().for_each(|task| {
+//                     task.data_file_path.hash(state);
+//                 });
+//             }
+//              CountStar(count) => {
+//                 count.hash(state);
+//             }
+//         }
+//     }
+// }
 
-impl IcebergFileScanTask {
-    pub fn new_count_star(count_sum: u64) -> Self {
-        IcebergFileScanTask::CountStar(count_sum)
-    }
+// impl IcebergFileScanTask {
+//     pub fn new_count_star(count_sum: u64) -> Self {
+//          CountStar(count_sum)
+//     }
 
-    pub fn get_iceberg_scan_type(&self) -> IcebergScanType {
-        match self {
-            IcebergFileScanTask::Data(_) => IcebergScanType::DataScan,
-            IcebergFileScanTask::EqualityDelete(_) => IcebergScanType::EqualityDeleteScan,
-            IcebergFileScanTask::PositionDelete(_) => IcebergScanType::PositionDeleteScan,
-            IcebergFileScanTask::CountStar(_) => IcebergScanType::CountStar,
-        }
-    }
+//     pub fn get_iceberg_scan_type(&self) -> IcebergScanType {
+//         match self {
+//              Data(_) => IcebergScanType::DataScan,
+//              EqualityDelete(_) => IcebergScanType::EqualityDeleteScan,
+//              PositionDelete(_) => IcebergScanType::PositionDeleteScan,
+//              CountStar(_) => IcebergScanType::CountStar,
+//         }
+//     }
 
-    pub fn is_empty(&self) -> bool {
-        match self {
-            IcebergFileScanTask::Data(data_files) => data_files.is_empty(),
-            IcebergFileScanTask::EqualityDelete(equality_delete_files) => {
-                equality_delete_files.is_empty()
-            }
-            IcebergFileScanTask::PositionDelete(position_delete_files) => {
-                position_delete_files.is_empty()
-            }
-            IcebergFileScanTask::CountStar(_) => false,
-        }
-    }
+//     pub fn is_empty(&self) -> bool {
+//         match self {
+//              Data(data_files) => data_files.is_empty(),
+//              EqualityDelete(equality_delete_files) => {
+//                 equality_delete_files.is_empty()
+//             }
+//              PositionDelete(position_delete_files) => {
+//                 position_delete_files.is_empty()
+//             }
+//              CountStar(_) => false,
+//         }
+//     }
 
-    pub fn files(&self) -> Vec<String> {
-        match self {
-            IcebergFileScanTask::Data(file_scan_tasks)
-            | IcebergFileScanTask::EqualityDelete(file_scan_tasks)
-            | IcebergFileScanTask::PositionDelete(file_scan_tasks) => file_scan_tasks
-                .iter()
-                .map(|task| task.data_file_path.clone())
-                .collect(),
-            IcebergFileScanTask::CountStar(_) => vec![],
-        }
-    }
+//     pub fn files(&self) -> Vec<String> {
+//         match self {
+//              Data(file_scan_tasks)
+//             |  EqualityDelete(file_scan_tasks)
+//             |  PositionDelete(file_scan_tasks) => file_scan_tasks
+//                 .iter()
+//                 .map(|task| task.data_file_path.clone())
+//                 .collect(),
+//              CountStar(_) => vec![],
+//         }
+//     }
 
-    pub fn add_project_field_ids(&mut self, project_field_ids: Vec<i32>) {
-        match self {
-            IcebergFileScanTask::Data(file_scan_tasks)
-            | IcebergFileScanTask::EqualityDelete(file_scan_tasks)
-            | IcebergFileScanTask::PositionDelete(file_scan_tasks) => {
-                for task in file_scan_tasks.iter_mut() {
-                    task.project_field_ids = project_field_ids.clone();
-                }
-            }
-            IcebergFileScanTask::CountStar(_) => {}
-        }
-    }
+//     pub fn add_project_field_ids(&mut self, project_field_ids: Vec<i32>) {
+//         match self {
+//              Data(file_scan_tasks)
+//             |  EqualityDelete(file_scan_tasks)
+//             |  PositionDelete(file_scan_tasks) => {
+//                 for task in file_scan_tasks.iter_mut() {
+//                     task.project_field_ids = project_field_ids.clone();
+//                 }
+//             }
+//              CountStar(_) => {}
+//         }
+//     }
 
-    /// Splits the current `IcebergFileScanTask` into multiple smaller tasks.
-    ///
-    /// # Parameters
-    /// - `split_num`: The number of splits to create. The scan tasks will be divided as evenly as possible among the splits.
-    ///
-    /// # Returns
-    /// Returns a `ConnectorResult` containing a vector of split `IcebergFileScanTask`s.
-    /// For `CountStar` variant, returns a single-element vector containing itself.
-    pub fn split(self, split_num: usize) -> ConnectorResult<Vec<IcebergFileScanTask>> {
-        match self {
-            IcebergFileScanTask::Data(file_scan_tasks) => {
-                let split_tasks = Self::split_n_vecs(file_scan_tasks, split_num);
-                Ok(split_tasks
-                    .into_iter()
-                    .map(IcebergFileScanTask::Data)
-                    .collect())
-            }
-            IcebergFileScanTask::EqualityDelete(file_scan_tasks) => {
-                let split_tasks = Self::split_n_vecs(file_scan_tasks, split_num);
-                Ok(split_tasks
-                    .into_iter()
-                    .map(IcebergFileScanTask::EqualityDelete)
-                    .collect())
-            }
-            IcebergFileScanTask::PositionDelete(file_scan_tasks) => {
-                let split_tasks = Self::split_n_vecs(file_scan_tasks, split_num);
-                Ok(split_tasks
-                    .into_iter()
-                    .map(IcebergFileScanTask::PositionDelete)
-                    .collect())
-            }
-            IcebergFileScanTask::CountStar(count) => {
-                Ok(vec![IcebergFileScanTask::CountStar(count)])
-            }
-        }
-    }
+//     /// Splits the current `IcebergFileScanTask` into multiple smaller tasks.
+//     ///
+//     /// # Parameters
+//     /// - `split_num`: The number of splits to create. The scan tasks will be divided as evenly as possible among the splits.
+//     ///
+//     /// # Returns
+//     /// Returns a `ConnectorResult` containing a vector of split `IcebergFileScanTask`s.
+//     /// For `CountStar` variant, returns a single-element vector containing itself.
+//     pub fn split(self, split_num: usize) -> ConnectorResult<Vec<IcebergFileScanTask>> {
+//         match self {
+//              Data(file_scan_tasks) => {
+//                 let split_tasks = Self::split_n_vecs(file_scan_tasks, split_num);
+//                 Ok(split_tasks
+//                     .into_iter()
+//                     .map( Data)
+//                     .collect())
+//             }
+//              EqualityDelete(file_scan_tasks) => {
+//                 let split_tasks = Self::split_n_vecs(file_scan_tasks, split_num);
+//                 Ok(split_tasks
+//                     .into_iter()
+//                     .map( EqualityDelete)
+//                     .collect())
+//             }
+//              PositionDelete(file_scan_tasks) => {
+//                 let split_tasks = Self::split_n_vecs(file_scan_tasks, split_num);
+//                 Ok(split_tasks
+//                     .into_iter()
+//                     .map( PositionDelete)
+//                     .collect())
+//             }
+//              CountStar(count) => {
+//                 Ok(vec![ CountStar(count)])
+//             }
+//         }
+//     }
 
-    /// Uniformly distribute scan tasks to compute nodes.
-    /// It's deterministic so that it can best utilize the data locality.
-    ///
-    /// # Arguments
-    /// * `file_scan_tasks`: The file scan tasks to be split.
-    /// * `split_num`: The number of splits to be created.
-    ///
-    /// This algorithm is based on a min-heap. It will push all groups into the heap, and then pop the smallest group and add the file scan task to it.
-    /// Ensure that the total length of each group is as balanced as possible.
-    /// The time complexity is O(n log k), where n is the number of file scan tasks and k is the number of splits.
-    /// The space complexity is O(k), where k is the number of splits.
-    /// The algorithm is stable, so the order of the file scan tasks will be preserved.
-    fn split_n_vecs(
+// }
+
+/// Uniformly distribute scan tasks to compute nodes.
+/// It's deterministic so that it can best utilize the data locality.
+///
+/// # Arguments
+/// * `file_scan_tasks`: The file scan tasks to be split.
+/// * `split_num`: The number of splits to be created.
+///
+/// This algorithm is based on a min-heap. It will push all groups into the heap, and then pop the smallest group and add the file scan task to it.
+/// Ensure that the total length of each group is as balanced as possible.
+/// The time complexity is O(n log k), where n is the number of file scan tasks and k is the number of splits.
+/// The space complexity is O(k), where k is the number of splits.
+/// The algorithm is stable, so the order of the file scan tasks will be preserved.
+pub fn split_n_vecs(
         file_scan_tasks: Vec<FileScanTask>,
         split_num: usize,
     ) -> Vec<Vec<FileScanTask>> {
@@ -340,13 +342,13 @@ impl IcebergFileScanTask {
             .map(|reverse_group| reverse_group.0.tasks)
             .collect()
     }
-}
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct IcebergSplit {
     pub split_id: i64,
     pub snapshot_id: i64,
-    pub task: IcebergFileScanTask,
+    pub tasks: Vec<FileScanTask>,
+    pub iceberg_scan_type: IcebergScanType,
 }
 
 impl SplitMetaData for IcebergSplit {
@@ -374,13 +376,11 @@ pub struct IcebergSplitEnumerator {
 
 #[derive(Debug, Clone)]
 pub struct IcebergTaskParameters {
-    pub data_tasks: IcebergFileScanTask,
-    pub equality_delete_tasks: IcebergFileScanTask,
+    pub data_tasks: Vec<FileScanTask>,
+    pub equality_delete_tasks: Vec<FileScanTask>,
     pub equality_delete_columns: Vec<String>,
-    pub position_delete_tasks: IcebergFileScanTask,
-    pub count: u64,
+    pub position_delete_tasks: Vec<FileScanTask>,
     pub snapshot_id: Option<i64>,
-    pub name_to_field_id: HashMap<String, i32>,
 }
 
 #[async_trait]
@@ -459,7 +459,7 @@ impl IcebergSplitEnumerator {
 
     pub async fn get_iceberg_task_parameters(
         &self,
-        schema: Schema,
+        require_names: Vec<String>,
         predicate: IcebergPredicate,
         time_travel_info: Option<IcebergTimeTravelInfo>,
     ) -> ConnectorResult<IcebergTaskParameters> {
@@ -469,20 +469,17 @@ impl IcebergSplitEnumerator {
             Some(id) => id,
             None => {
                 return Ok(IcebergTaskParameters {
-                    data_tasks: IcebergFileScanTask::Data(vec![]),
-                    equality_delete_tasks: IcebergFileScanTask::EqualityDelete(vec![]),
+                    data_tasks: vec![],
+                    equality_delete_tasks: vec![],
                     equality_delete_columns: vec![],
-                    position_delete_tasks: IcebergFileScanTask::PositionDelete(vec![]),
-                    count: 0,
+                    position_delete_tasks: vec![],
                     snapshot_id: None,
-                    name_to_field_id: HashMap::default(),
                 });
             }
         };
         let table_schema = table.metadata().current_schema();
         tracing::debug!("iceberg_table_schema: {:?}", table_schema);
-        let schema_names = schema.names();
-        let require_names = schema_names
+        let require_names = require_names
             .iter()
             .filter(|name| {
                 name.ne(&ICEBERG_SEQUENCE_NUM_COLUMN_NAME)
@@ -492,14 +489,6 @@ impl IcebergSplitEnumerator {
             })
             .cloned()
             .collect_vec();
-        let name_to_field_id: HashMap<String, i32> = require_names
-            .iter()
-            .filter_map(|name| {
-                table_schema
-                    .field_id_by_name(name)
-                    .map(|field_id| (name.clone(), field_id))
-            })
-            .collect();
 
         let scan = table
             .scan()
@@ -520,14 +509,10 @@ impl IcebergSplitEnumerator {
         let mut position_delete_set = HashSet::new();
         let mut position_delete_file_scan_tasks = vec![];
         let mut equality_ids: Option<Vec<i32>> = None;
-        let mut count_sum = 0u64;
 
         #[for_await]
         for task in file_scan_stream {
             let task: FileScanTask = task.map_err(|e| anyhow!(e))?;
-            count_sum += task
-                .record_count
-                .ok_or_else(|| anyhow!("record count must be present for count star"))?;
             for delete in &task.deletes {
                 match delete.data_file_content {
                     DataContentType::EqualityDeletes => {
@@ -571,17 +556,13 @@ impl IcebergSplitEnumerator {
             })
             .collect::<ConnectorResult<Vec<_>>>()?;
         Ok(IcebergTaskParameters {
-            data_tasks: IcebergFileScanTask::Data(data_file_scan_tasks),
-            equality_delete_tasks: IcebergFileScanTask::EqualityDelete(
+            data_tasks: data_file_scan_tasks,
+            equality_delete_tasks: 
                 equality_delete_file_scan_tasks,
-            ),
             equality_delete_columns: delete_columns,
-            position_delete_tasks: IcebergFileScanTask::PositionDelete(
+            position_delete_tasks: 
                 position_delete_file_scan_tasks,
-            ),
-            count: count_sum,
             snapshot_id: Some(snapshot_id),
-            name_to_field_id,
         })
     }
 }
@@ -732,7 +713,7 @@ mod tests {
             .map(|i| create_file_scan_task(i + 100, i))
             .collect::<Vec<_>>(); // Ensure the correct function is called
 
-        let groups = IcebergFileScanTask::split_n_vecs(file_scan_tasks, 3);
+        let groups = split_n_vecs(file_scan_tasks, 3);
 
         assert_eq!(groups.len(), 3);
 
@@ -752,7 +733,7 @@ mod tests {
     #[test]
     fn test_split_n_vecs_empty() {
         let file_scan_tasks = Vec::new();
-        let groups = IcebergFileScanTask::split_n_vecs(file_scan_tasks, 3);
+        let groups = split_n_vecs(file_scan_tasks, 3);
         assert_eq!(groups.len(), 3);
         assert!(groups.iter().all(|group| group.is_empty()));
     }
@@ -760,7 +741,7 @@ mod tests {
     #[test]
     fn test_split_n_vecs_single_task() {
         let file_scan_tasks = vec![create_file_scan_task(100, 1)];
-        let groups = IcebergFileScanTask::split_n_vecs(file_scan_tasks, 3);
+        let groups = split_n_vecs(file_scan_tasks, 3);
         assert_eq!(groups.len(), 3);
         assert_eq!(groups.iter().filter(|group| !group.is_empty()).count(), 1);
     }
@@ -775,7 +756,7 @@ mod tests {
             create_file_scan_task(100, 5),
         ];
 
-        let groups = IcebergFileScanTask::split_n_vecs(file_scan_tasks, 2);
+        let groups =  split_n_vecs(file_scan_tasks, 2);
         assert_eq!(groups.len(), 2);
 
         let group_with_large_task = groups
@@ -798,7 +779,7 @@ mod tests {
             create_file_scan_task(100, 8),
         ];
 
-        let groups = IcebergFileScanTask::split_n_vecs(file_scan_tasks.clone(), 4)
+        let groups = split_n_vecs(file_scan_tasks.clone(), 4)
             .iter()
             .map(|g| {
                 g.iter()
@@ -808,7 +789,7 @@ mod tests {
             .collect::<Vec<_>>();
 
         for _ in 0..10000 {
-            let groups_2 = IcebergFileScanTask::split_n_vecs(file_scan_tasks.clone(), 4)
+            let groups_2 =  split_n_vecs(file_scan_tasks.clone(), 4)
                 .iter()
                 .map(|g| {
                     g.iter()

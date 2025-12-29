@@ -881,10 +881,10 @@ impl LogicalOptimizer {
 
         plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
 
+        // plan = plan.optimize_by_rules(&LOGICAL_ICEBGER_COUNT_STAR)?;
+
         // Iceberg-specific predicate pushdown (for zone-map optimization)
         plan = plan.optimize_by_rules(&LOGICAL_ICEBERG_PREDICATE_PUSHDOWN)?;
-
-        plan = plan.optimize_by_rules(&LOGICAL_ICEBGER_COUNT_STAR)?;
 
         plan = plan.optimize_by_rules(&POPULATE_ICEBERG_TASK_AND_TRANSFORM_DELETE)?;
 

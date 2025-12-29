@@ -49,10 +49,11 @@ impl FallibleRule<Logical> for SourceToIcebergScanRule {
             );
             #[cfg(not(madsim))]
             {
-                use std::collections::HashMap;
+
+                use crate::optimizer::plan_node::LogicalImmIcebergScan;
 
                 let data_iceberg_scan: PlanRef =
-                    LogicalIcebergScan::new(source, None, HashMap::default()).into();
+                    LogicalImmIcebergScan::new(source).into();
                 ApplyResult::Ok(data_iceberg_scan)
             }
         } else {

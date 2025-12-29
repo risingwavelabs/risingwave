@@ -18,7 +18,7 @@
 // (found in the LICENSE.Apache file in the root directory).
 
 use super::prelude::*;
-use crate::optimizer::plan_node::{LogicalFilter, LogicalIcebergScan, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalFilter, LogicalIcebergScan, LogicalImmIcebergScan, PlanTreeNodeUnary};
 
 /// NOTE(kwannoel): We do predicate pushdown to the iceberg-sdk here.
 /// zone-map is used to evaluate predicates on iceberg tables.
@@ -30,7 +30,7 @@ impl Rule<Logical> for LogicalIcebergPredicatePushDownRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
         let input = filter.input();
-        let scan: &LogicalIcebergScan = input.as_logical_iceberg_scan()?;
+        let scan: &LogicalImmIcebergScan = input.as_logical_imm_iceberg_scan()?;
         // NOTE(kwannoel): We only fill iceberg predicate here.
         assert!(scan.predicate().always_true());
 
