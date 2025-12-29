@@ -22,7 +22,7 @@ use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
 use crate::common::table::state_table::{StateTableBuilder, StateTableOpConsistencyLevel};
-use crate::executor::WatermarkFilterExecutor;
+use crate::executor::{UpsertWatermarkFilterExecutor, WatermarkFilterExecutor};
 
 pub struct WatermarkFilterBuilder;
 
@@ -67,16 +67,29 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
             .build()
             .await;
 
-        let exec = WatermarkFilterExecutor::new(
-            params.actor_context,
-            input,
-            watermark_expr,
-            event_time_col_idx,
-            upsert,
-            table,
-            global_watermark_table,
-            params.eval_error_report,
-        );
+        let exec: Box<dyn Execute> = if upsert {
+            UpsertWatermarkFilterExecutor::new(
+                params.actor_context,
+                input,
+                watermark_expr,
+                event_time_col_idx,
+                table,
+                global_watermark_table,
+                params.eval_error_report,
+            )
+            .boxed()
+        } else {
+            WatermarkFilterExecutor::new(
+                params.actor_context,
+                input,
+                watermark_expr,
+                event_time_col_idx,
+                table,
+                global_watermark_table,
+                params.eval_error_report,
+            )
+            .boxed()
+        };
         Ok((params.info, exec).into())
     }
 }
