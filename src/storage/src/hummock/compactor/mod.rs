@@ -597,6 +597,13 @@ pub fn start_iceberg_compactor(
                                                 required_parallelism = required_parallelism,
                                                 "Iceberg plan runner rejected - invalid parallelism"
                                             );
+                                        },
+                                        PushResult::RejectedDuplicate => {
+                                            tracing::error!(
+                                                task_id = task_id,
+                                                plan_index = meta.plan_index,
+                                                "Iceberg plan runner rejected - duplicate (task_id, plan_index)"
+                                            );
                                         }
                                     }
                                 }

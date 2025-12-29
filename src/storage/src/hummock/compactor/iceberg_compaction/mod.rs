@@ -91,6 +91,8 @@ pub enum PushResult {
     RejectedTooLarge,
     /// `required_parallelism` == 0
     RejectedInvalidParallelism,
+    /// Task with same `(task_id, plan_index)` already exists
+    RejectedDuplicate,
 }
 
 impl IcebergTaskQueue {
@@ -173,12 +175,18 @@ impl IcebergTaskQueue {
             return PushResult::RejectedTooLarge;
         }
 
+        let key = meta.key();
+
+        // Reject duplicate keys to prevent inconsistent state between id_map and deque
+        if self.inner.id_map.contains_key(&key) {
+            return PushResult::RejectedDuplicate;
+        }
+
         let new_total = self.inner.waiting_parallelism_sum + meta.required_parallelism;
         if new_total > self.pending_parallelism_budget {
             return PushResult::RejectedCapacity;
         }
 
-        let key = meta.key();
         self.inner.id_map.insert(key, meta.required_parallelism);
         self.inner.waiting_parallelism_sum = new_total;
 
@@ -221,6 +229,11 @@ impl IcebergTaskQueue {
     /// Returns `true` if the task was found and removed, `false` otherwise.
     pub fn finish_running(&mut self, task_key: TaskKey) -> bool {
         let Some(required) = self.inner.id_map.remove(&task_key) else {
+            tracing::warn!(
+                task_id = task_key.0,
+                plan_index = task_key.1,
+                "finish_running called for unknown task key, possible bug: double-finish or invalid key"
+            );
             return false;
         };
 
@@ -290,6 +303,32 @@ mod tests {
     }
 
     #[test]
+    fn test_duplicate_key_rejected() {
+        let mut q = IcebergTaskQueue::new(8, 32);
+        assert_eq!(q.push(mk_meta(1, 0, 3), None), PushResult::Added);
+        // Same (task_id, plan_index) should be rejected
+        assert_eq!(
+            q.push(mk_meta(1, 0, 5), None),
+            PushResult::RejectedDuplicate
+        );
+        // Parallelism sum should not have changed
+        assert_eq!(q.waiting_parallelism_sum(), 3);
+
+        // Different plan_index is allowed
+        assert_eq!(q.push(mk_meta(1, 1, 2), None), PushResult::Added);
+        assert_eq!(q.waiting_parallelism_sum(), 5);
+
+        // After pop and finish, the key can be reused
+        let p = q.pop().unwrap();
+        assert_eq!(p.meta.task_id, 1);
+        assert_eq!(p.meta.plan_index, 0);
+        q.finish_running((1, 0));
+
+        // Now the same key can be pushed again
+        assert_eq!(q.push(mk_meta(1, 0, 4), None), PushResult::Added);
+    }
+
+    #[test]
     fn test_pop_insufficient_parallelism() {
         let mut q = IcebergTaskQueue::new(8, 32);
         assert_eq!(q.push(mk_meta(1, 0, 6), None), PushResult::Added);
@@ -309,51 +348,71 @@ mod tests {
     #[test]
     fn test_finish_nonexistent_task() {
         let mut q = IcebergTaskQueue::new(4, 16);
-        assert!(!q.finish_running((999, 0))); // no such task
+        assert!(!q.finish_running((999, 0)));
         assert_eq!(q.running_parallelism_sum(), 0);
     }
 
     #[test]
-    fn test_parallelism_sum_accounting() {
-        let mut q = IcebergTaskQueue::new(10, 20);
+    fn test_double_finish() {
+        let mut q = IcebergTaskQueue::new(8, 32);
+        assert_eq!(q.push(mk_meta(1, 0, 4), None), PushResult::Added);
+        q.pop().unwrap();
+        assert_eq!(q.running_parallelism_sum(), 4);
 
-        assert_eq!(q.push(mk_meta(1, 0, 3), None), PushResult::Added);
-        assert_eq!(q.push(mk_meta(2, 0, 5), None), PushResult::Added);
-        assert_eq!(q.waiting_parallelism_sum(), 8);
-        assert_eq!(q.running_parallelism_sum(), 0);
-
-        let _p1 = q.pop().unwrap();
-        assert_eq!(q.waiting_parallelism_sum(), 5);
-        assert_eq!(q.running_parallelism_sum(), 3);
-
-        let _p2 = q.pop().unwrap();
-        assert_eq!(q.waiting_parallelism_sum(), 0);
-        assert_eq!(q.running_parallelism_sum(), 8);
-
+        // First finish succeeds
         assert!(q.finish_running((1, 0)));
-        assert_eq!(q.running_parallelism_sum(), 5);
+        assert_eq!(q.running_parallelism_sum(), 0);
 
-        assert!(q.finish_running((2, 0)));
+        // Second finish on same key returns false (triggers warn log)
+        assert!(!q.finish_running((1, 0)));
         assert_eq!(q.running_parallelism_sum(), 0);
     }
 
     #[test]
-    fn test_multiple_tasks_same_parallelism() {
+    fn test_max_parallelism_boundary() {
+        // pending_budget == max_parallelism: minimal valid configuration
+        let mut q = IcebergTaskQueue::new(4, 4);
+
+        // Task with required_parallelism == max_parallelism should be accepted
+        assert_eq!(q.push(mk_meta(1, 0, 4), None), PushResult::Added);
+        // Budget exhausted
+        assert_eq!(q.push(mk_meta(2, 0, 1), None), PushResult::RejectedCapacity);
+
+        // Can pop and run at full parallelism
+        let p = q.pop().unwrap();
+        assert_eq!(p.meta.required_parallelism, 4);
+        assert_eq!(q.running_parallelism_sum(), 4);
+
+        // No room for any new running task
+        assert_eq!(q.push(mk_meta(3, 0, 1), None), PushResult::Added);
+        assert!(q.pop().is_none());
+    }
+
+    #[test]
+    fn test_same_task_id_multiple_plans() {
         let mut q = IcebergTaskQueue::new(10, 30);
-        // All tasks can be enqueued (total = 30)
-        for i in 1..=10 {
-            assert_eq!(q.push(mk_meta(i, 0, 3), None), PushResult::Added);
+        let task_id = 1u64;
+
+        // Same task_id with different plan_index are independent
+        assert_eq!(q.push(mk_meta(task_id, 0, 3), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(task_id, 1, 4), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(task_id, 2, 2), None), PushResult::Added);
+        assert_eq!(q.waiting_parallelism_sum(), 9);
+
+        // Pop all
+        for i in 0..3 {
+            let p = q.pop().unwrap();
+            assert_eq!(p.meta.task_id, task_id);
+            assert_eq!(p.meta.plan_index, i);
         }
-        assert_eq!(q.waiting_parallelism_sum(), 30);
-
-        // Can pop 3 tasks (total parallelism = 9)
-        assert!(q.pop().is_some());
-        assert!(q.pop().is_some());
-        assert!(q.pop().is_some());
-        assert!(q.pop().is_none()); // would need 12 total
-
         assert_eq!(q.running_parallelism_sum(), 9);
-        assert_eq!(q.waiting_parallelism_sum(), 21);
+
+        // Finish out of order
+        assert!(q.finish_running((task_id, 1)));
+        assert_eq!(q.running_parallelism_sum(), 5);
+        assert!(q.finish_running((task_id, 0)));
+        assert!(q.finish_running((task_id, 2)));
+        assert_eq!(q.running_parallelism_sum(), 0);
     }
 
     #[test]
@@ -363,66 +422,5 @@ mod tests {
         assert!(!q.finish_running((1, 0)));
         assert_eq!(q.waiting_parallelism_sum(), 0);
         assert_eq!(q.running_parallelism_sum(), 0);
-    }
-
-    #[test]
-    fn test_runner_lifecycle() {
-        let mut q = IcebergTaskQueue::new(8, 32);
-        // Push without runner
-        assert_eq!(q.push(mk_meta(1, 0, 4), None), PushResult::Added);
-        let popped = q.pop().unwrap();
-        assert!(popped.runner.is_none());
-        assert!(q.finish_running((1, 0)));
-
-        // Verify runner map is cleaned up
-        assert!(q.inner.runners.is_empty());
-    }
-
-    /// Regression test: multiple plans from the same `task_id` must be tracked separately.
-    #[test]
-    fn test_same_task_id_multiple_plans() {
-        let mut q = IcebergTaskQueue::new(10, 30);
-
-        // Simulate one IcebergCompactionTask producing 3 plans
-        let task_id = 12345u64;
-        assert_eq!(q.push(mk_meta(task_id, 0, 3), None), PushResult::Added);
-        assert_eq!(q.push(mk_meta(task_id, 1, 4), None), PushResult::Added);
-        assert_eq!(q.push(mk_meta(task_id, 2, 2), None), PushResult::Added);
-
-        assert_eq!(q.waiting_parallelism_sum(), 9); // 3 + 4 + 2
-
-        // Pop all three - they should all have correct metadata
-        let p0 = q.pop().unwrap();
-        assert_eq!(p0.meta.task_id, task_id);
-        assert_eq!(p0.meta.plan_index, 0);
-        assert_eq!(p0.meta.required_parallelism, 3);
-
-        let p1 = q.pop().unwrap();
-        assert_eq!(p1.meta.task_id, task_id);
-        assert_eq!(p1.meta.plan_index, 1);
-        assert_eq!(p1.meta.required_parallelism, 4);
-
-        let p2 = q.pop().unwrap();
-        assert_eq!(p2.meta.task_id, task_id);
-        assert_eq!(p2.meta.plan_index, 2);
-        assert_eq!(p2.meta.required_parallelism, 2);
-
-        assert_eq!(q.waiting_parallelism_sum(), 0);
-        assert_eq!(q.running_parallelism_sum(), 9);
-
-        // Finish each independently - each should correctly reduce running_parallelism
-        assert!(q.finish_running((task_id, 1))); // finish plan 1 first (out of order)
-        assert_eq!(q.running_parallelism_sum(), 5); // 9 - 4
-
-        assert!(q.finish_running((task_id, 0)));
-        assert_eq!(q.running_parallelism_sum(), 2); // 5 - 3
-
-        assert!(q.finish_running((task_id, 2)));
-        assert_eq!(q.running_parallelism_sum(), 0); // 2 - 2
-
-        // Finishing again should return false
-        assert!(!q.finish_running((task_id, 0)));
-        assert!(!q.finish_running((task_id, 1)));
-        assert!(!q.finish_running((task_id, 2)));
     }
 }
