@@ -548,6 +548,7 @@ impl HummockEventHandler {
                                 &version_delta.removed_table_ids,
                                 &version_delta.state_table_info_delta,
                                 &changed_table_info,
+                                false,
                             );
                         }
 
@@ -567,8 +568,8 @@ impl HummockEventHandler {
 
                 pinned_version.new_with_local_version(version_to_apply)
             }
-            HummockVersionUpdate::PinnedVersion(version) => {
-                pinned_version.new_pin_version(*version)
+            HummockVersionUpdate::PinnedVersion(version, table_change_logs) => {
+                pinned_version.new_pin_version(*version, *table_change_logs)
             }
         }
     }
@@ -930,6 +931,7 @@ mod tests {
                 )]),
                 ..Default::default()
             }),
+            HashMap::default(),
             unbounded_channel().0,
         );
 
@@ -1093,6 +1095,7 @@ mod tests {
                 ]),
                 ..Default::default()
             }),
+            HashMap::default(),
             unbounded_channel().0,
         );
 

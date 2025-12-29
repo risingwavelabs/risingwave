@@ -17,6 +17,7 @@ use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
+use risingwave_hummock_sdk::change_log::{TableChangeLog, TableChangeLogs};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     BranchedSstInfo, get_compaction_group_ids, get_table_compaction_group_id_mapping,
@@ -44,6 +45,7 @@ use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
+use crate::hummock::model::ext::to_table_change_log;
 use crate::model::VarTransaction;
 
 #[derive(Default)]
@@ -58,12 +60,15 @@ pub struct Versioning {
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
+    /// Used by object GC and metric update.
+    pub checkpoint_table_change_log_object_size: HashMap<HummockObjectId, u64>,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
     /// Stats for latest hummock version.
     pub version_stats: HummockVersionStats,
     pub checkpoint: HummockVersionCheckpoint,
+    pub table_change_log: HashMap<TableId, TableChangeLog>,
 }
 
 impl ContextInfo {
@@ -94,7 +99,12 @@ impl Versioning {
         let mut tracked_object_ids = self
             .checkpoint
             .version
-            .get_object_ids(false)
+            .get_object_ids()
+            .chain(
+                self.table_change_log
+                    .values()
+                    .flat_map(|c| c.get_object_ids()),
+            )
             .collect::<HashSet<_>>();
         // add object ids added between checkpoint version and current version
         for (_, delta) in self.hummock_version_deltas.range((
@@ -154,6 +164,14 @@ impl HummockManager {
 
     pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
         f(&self.versioning.read().await.current_version)
+    }
+
+    pub async fn on_current_version_and_table_change_log<T>(
+        &self,
+        mut f: impl FnMut(&HummockVersion, &TableChangeLogs) -> T,
+    ) -> T {
+        let guard = self.versioning.read().await;
+        f(&guard.current_version, &guard.table_change_log)
     }
 
     pub async fn get_version_id(&self) -> HummockVersionId {
@@ -262,6 +280,7 @@ impl HummockManager {
             let mut version = HummockVersionTransaction::new(
                 &mut versioning.current_version,
                 &mut versioning.hummock_version_deltas,
+                &mut versioning.table_change_log,
                 self.env.notification_manager(),
                 None,
                 &self.metrics,
@@ -273,6 +292,38 @@ impl HummockManager {
             new_version_delta.pre_apply();
             commit_multi_var!(self.meta_store_ref(), version)?;
         }
+        Ok(())
+    }
+
+    #[expect(deprecated)]
+    pub async fn load_table_change_log(&self) -> Result<()> {
+        use sea_orm::EntityTrait;
+
+        use crate::model::MetadataModelError;
+        let mut versioning = self.versioning.write().await;
+        // 1. Initialize from HummockVersion::table_change_log for backward-compatibility.
+        versioning.table_change_log = versioning.current_version.table_change_log.clone();
+        // 2. Merge table change log from meta store.
+        versioning.table_change_log.extend(
+            risingwave_meta_model::hummock_table_change_log::Entity::find()
+                .all(&self.env.meta_store_ref().conn)
+                .await
+                .map_err(MetadataModelError::from)?
+                .into_iter()
+                .map(|m| (m.table_id, to_table_change_log(m)))
+                .into_group_map()
+                .into_iter()
+                .map(|(table_id, unordered_change_logs)| {
+                    (
+                        table_id,
+                        TableChangeLog::new(
+                            unordered_change_logs
+                                .into_iter()
+                                .sorted_by_key(|l| l.checkpoint_epoch),
+                        ),
+                    )
+                }),
+        );
         Ok(())
     }
 }

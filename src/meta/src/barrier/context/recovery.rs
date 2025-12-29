@@ -25,6 +25,7 @@ use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::SinkId;
 use risingwave_pb::catalog::table::PbTableType;
@@ -222,6 +223,7 @@ impl GlobalBarrierWorkerContextImpl {
     fn resolve_hummock_version_epochs(
         background_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, InflightFragmentInfo>)>,
         version: &HummockVersion,
+        table_change_log: &TableChangeLogs,
     ) -> MetaResult<(
         HashMap<TableId, u64>,
         HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -307,8 +309,7 @@ impl GlobalBarrierWorkerContextImpl {
                     continue;
                 }
                 Ordering::Greater => {
-                    if let Some(table_change_log) = version.table_change_log.get(&upstream_table_id)
-                    {
+                    if let Some(table_change_log) = table_change_log.get(&upstream_table_id) {
                         let epochs = table_change_log
                             .filter_epoch((downstream_committed_epoch, upstream_committed_epoch))
                             .map(|epoch_log| {
@@ -556,7 +557,7 @@ impl GlobalBarrierWorkerContextImpl {
 
                     let (state_table_committed_epochs, state_table_log_epochs) = self
                         .hummock_manager
-                        .on_current_version(|version| {
+                        .on_current_version_and_table_change_log(|version, table_change_log| {
                             Self::resolve_hummock_version_epochs(
                                 info.values().flat_map(|jobs| {
                                     jobs.iter().filter_map(|(job_id, job)| {
@@ -566,6 +567,7 @@ impl GlobalBarrierWorkerContextImpl {
                                     })
                                 }),
                                 version,
+                                table_change_log,
                             )
                         })
                         .await?;
@@ -736,12 +738,13 @@ impl GlobalBarrierWorkerContextImpl {
 
         let (state_table_committed_epochs, state_table_log_epochs) = self
             .hummock_manager
-            .on_current_version(|version| {
+            .on_current_version_and_table_change_log(|version, table_change_log| {
                 Self::resolve_hummock_version_epochs(
                     background_jobs
                         .keys()
                         .map(|job_id| (*job_id, &info[job_id])),
                     version,
+                    table_change_log,
                 )
             })
             .await?;

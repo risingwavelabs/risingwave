@@ -22,7 +22,7 @@ use auto_enums::auto_enum;
 use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::log::LogSuppressor;
-use risingwave_hummock_sdk::change_log::TableChangeLogCommon;
+use risingwave_hummock_sdk::change_log::{TableChangeLogCommon, TableChangeLogs};
 use risingwave_hummock_sdk::level::{Level, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
@@ -102,21 +102,26 @@ impl Deref for PinnedVersion {
 impl PinnedVersion {
     pub fn new(
         version: HummockVersion,
+        table_change_logs: TableChangeLogs,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
-        let (local_version, table_id_to_change_logs) = version.split_change_log();
+        let local_version = LocalHummockVersion::from(version);
         PinnedVersion {
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
             )),
-            table_change_log: Arc::new(RwLock::new(table_id_to_change_logs)),
+            table_change_log: Arc::new(RwLock::new(table_change_logs)),
             version: Arc::new(local_version),
         }
     }
 
-    pub fn new_pin_version(&self, version: HummockVersion) -> Option<Self> {
+    pub fn new_pin_version(
+        &self,
+        version: HummockVersion,
+        table_change_logs: TableChangeLogs,
+    ) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
@@ -127,13 +132,13 @@ impl PinnedVersion {
             return None;
         }
         let version_id = version.id;
-        let (local_version, table_id_to_change_logs) = version.split_change_log();
+        let local_version = LocalHummockVersion::from(version);
         Some(PinnedVersion {
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-            table_change_log: Arc::new(RwLock::new(table_id_to_change_logs)),
+            table_change_log: Arc::new(RwLock::new(table_change_logs)),
             version: Arc::new(local_version),
         })
     }

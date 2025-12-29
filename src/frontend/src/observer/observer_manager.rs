@@ -26,6 +26,7 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::FrontendHummockVersion;
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::{HummockVersionDeltas, HummockVersionStats};
 use risingwave_pb::meta::object::{ObjectInfo, PbObjectInfo};
@@ -151,6 +152,7 @@ impl ObserverState for FrontendObserverNode {
             version,
             secrets,
             cluster_resource,
+            table_change_logs,
         } = snapshot;
 
         for db in databases {
@@ -195,10 +197,14 @@ impl ObserverState for FrontendObserverNode {
             convert_worker_slot_mapping(&streaming_worker_slot_mappings),
             convert_worker_slot_mapping(&serving_worker_slot_mappings),
         );
-        self.hummock_snapshot_manager
-            .init(FrontendHummockVersion::from_protobuf(
-                hummock_version.unwrap(),
-            ));
+        let table_change_logs = table_change_logs
+            .into_iter()
+            .map(|(id, change_log)| (id.into(), TableChangeLog::from_protobuf(&change_log)))
+            .collect();
+        self.hummock_snapshot_manager.init(
+            FrontendHummockVersion::from_protobuf(hummock_version.unwrap()),
+            table_change_logs,
+        );
 
         let snapshot_version = version.unwrap();
         self.version = snapshot_version.catalog_version;
