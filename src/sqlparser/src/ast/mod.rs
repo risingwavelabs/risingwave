@@ -2967,6 +2967,8 @@ pub enum FunctionArgExpr {
     QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
     /// An unqualified `*` or `* except (columns)`
     Wildcard(Option<Vec<Expr>>),
+    /// A secret reference, e.g. `secret my_secret` or `secret my_secret AS FILE`
+    SecretRef(SecretRefValue),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -3011,6 +3013,7 @@ impl fmt::Display for FunctionArgExpr {
                 ),
                 None => f.write_str("*"),
             },
+            FunctionArgExpr::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
         }
     }
 }

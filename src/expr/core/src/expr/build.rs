@@ -131,6 +131,19 @@ where
                 _ => FuncCallBuilder::build_boxed(prost, build_child),
             },
 
+            RexNode::Secret(secret_ref) => {
+                // Fill the secret value during expression building
+                let value = risingwave_common::secret::LocalSecretManager::global()
+                    .fill_secret(secret_ref.clone())
+                    .map_err(|e| anyhow::anyhow!("Failed to fill secret: {e}"))?;
+
+                // Create a LiteralExpression that returns the filled value
+                Ok(
+                    LiteralExpression::new(DataType::Varchar, Some(ScalarImpl::Utf8(value.into())))
+                        .boxed(),
+                )
+            }
+
             RexNode::Now(_) => unreachable!("now should not be built at backend"),
         }
     }

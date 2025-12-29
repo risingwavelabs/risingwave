@@ -35,6 +35,7 @@ mod literal;
 mod now;
 mod parameter;
 mod pure;
+mod secret_ref;
 mod subquery;
 mod table_function;
 mod user_defined_function;
@@ -64,6 +65,7 @@ pub use now::{InlineNowProcTime, Now, NowProcTimeFinder};
 pub use parameter::Parameter;
 pub use pure::*;
 pub use risingwave_pb::expr::expr_node::Type as ExprType;
+pub use secret_ref::SecretRefExpr;
 pub use session_timezone::{SessionTimezone, TimestamptzExprFinder};
 pub use subquery::{Subquery, SubqueryKind};
 pub use table_function::{TableFunction, TableFunctionType};
@@ -143,6 +145,7 @@ impl_expr_impl!(
     UserDefinedFunction,
     Parameter,
     Now,
+    SecretRefExpr,
 );
 
 impl ExprImpl {
@@ -591,7 +594,8 @@ impl ExprImpl {
                         | ExprImpl::WindowFunction(_)
                         | ExprImpl::UserDefinedFunction(_)
                         | ExprImpl::Parameter(_)
-                        | ExprImpl::Now(_) => self.has_others = true,
+                        | ExprImpl::Now(_)
+                        | ExprImpl::SecretRefExpr(_) => self.has_others = true,
                         ExprImpl::Literal(_inner) => {}
                         ExprImpl::FunctionCall(inner) => {
                             if !self.is_short_circuit(inner) {
@@ -971,6 +975,9 @@ impl ExprImpl {
                 )?))
             }
             RexNode::Now(_) => Self::Now(Box::new(Now {})),
+            RexNode::Secret(secret_ref) => Self::SecretRefExpr(Box::new(
+                SecretRefExpr::from_expr_proto(secret_ref)?,
+            )),
         })
     }
 }
@@ -1006,6 +1013,8 @@ impl std::fmt::Debug for ExprImpl {
                 }
                 Self::Parameter(arg0) => f.debug_tuple("Parameter").field(arg0).finish(),
                 Self::Now(_) => f.debug_tuple("Now").finish(),
+                Self::SecretRefExpr(_) =>
+                    f.debug_tuple("SecretRefExpr").finish()
             };
         }
         match self {
@@ -1021,6 +1030,7 @@ impl std::fmt::Debug for ExprImpl {
             Self::UserDefinedFunction(x) => write!(f, "{:?}", x),
             Self::Parameter(x) => write!(f, "{:?}", x),
             Self::Now(x) => write!(f, "{:?}", x),
+            Self::SecretRefExpr(x) => write!(f, "{:?}", x),
         }
     }
 }
@@ -1082,6 +1092,7 @@ impl std::fmt::Debug for ExprDisplay<'_> {
             }
             ExprImpl::Parameter(x) => write!(f, "{:?}", x),
             ExprImpl::Now(x) => write!(f, "{:?}", x),
+            ExprImpl::SecretRefExpr(x) => write!(f, "{:?}", x),
         }
     }
 }

@@ -279,6 +279,8 @@ impl QueryRewriter<'_> {
                         self.visit_expr(expr);
                     }
                 }
+                // No need to visit secret
+                FunctionArgExpr::SecretRef(_) => {},
             },
         }
     }
@@ -488,6 +490,7 @@ impl IndexItemRewriter {
             RexNode::Udf(udf) => self.rewrite_udf(udf),
             RexNode::FuncCall(function_call) => self.rewrite_function_call(function_call),
             RexNode::Now(_) => {}
+            RexNode::Secret(_) => {},
         }
     }
 

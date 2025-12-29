@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
-    Now, Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction,
+    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef,
+    Literal, Now, Parameter, SecretRefExpr, Subquery, TableFunction, UserDefinedFunction,
+    WindowFunction,
 };
 
 /// with the same visit logic of `ExprVisitor`, but mutable.
@@ -33,6 +34,7 @@ pub trait ExprMutator {
             ExprImpl::UserDefinedFunction(inner) => self.visit_user_defined_function(inner),
             ExprImpl::Parameter(inner) => self.visit_parameter(inner),
             ExprImpl::Now(inner) => self.visit_now(inner),
+                    ExprImpl::SecretRefExpr(inner) => self.visit_secret_ref(inner),
         }
     }
     fn visit_function_call(&mut self, func_call: &mut FunctionCall) {
@@ -78,4 +80,5 @@ pub trait ExprMutator {
             .for_each(|expr| self.visit_expr(expr));
     }
     fn visit_now(&mut self, _: &mut Now) {}
+    fn visit_secret_ref(&mut self, _: &mut SecretRefExpr) {}
 }
