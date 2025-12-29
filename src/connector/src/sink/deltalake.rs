@@ -527,20 +527,12 @@ impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
         Ok(())
     }
 
-    async fn commit(
+    async fn commit_data(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<()> {
-        tracing::info!("Starting DeltaLake commit in epoch {epoch}.");
-        if let Some(schema_change) = schema_change {
-            return Err(anyhow!(
-                "Delta lake sink does not support schema changes, but got: {:?}",
-                schema_change
-            )
-            .into());
-        }
+        tracing::debug!("Starting DeltaLake commit in epoch {epoch}.");
 
         let deltalake_write_result = metadata
             .iter()
@@ -576,10 +568,22 @@ impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
             .await?
             .version();
         self.table.update().await?;
-        tracing::info!(
+        tracing::debug!(
             "Succeeded to commit to DeltaLake table in epoch {epoch}, version {version}."
         );
         Ok(())
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        _epoch: u64,
+        schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        Err(anyhow!(
+            "Delta lake sink does not support schema changes, but got: {:?}",
+            schema_change
+        )
+        .into())
     }
 }
 
@@ -693,7 +697,7 @@ mod tests {
             table: deltalake_table,
         };
         let metadata = deltalake_writer.barrier(true).await.unwrap().unwrap();
-        committer.commit(1, vec![metadata], None).await.unwrap();
+        committer.commit_data(1, vec![metadata]).await.unwrap();
 
         // The following code is to test reading the deltalake data table written with test data.
         // To enable the following code, add `deltalake = { workspace = true, features = ["datafusion"] }`

@@ -823,12 +823,15 @@ pub trait SinglePhaseCommitCoordinator {
     /// Initialize the sink committer coordinator.
     async fn init(&mut self) -> Result<()>;
 
-    /// Commit directly using single-phase strategy.
-    async fn commit(
+    /// Commit data directly using single-phase strategy.
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+
+    /// Idempotent implementation is required, because `commit_schema_change` in the same epoch could be called multiple
+    /// times.
+    async fn commit_schema_change(
         &mut self,
         epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        schema_change: Option<PbSinkSchemaChange>,
+        schema_change: PbSinkSchemaChange,
     ) -> Result<()>;
 }
 
@@ -845,12 +848,15 @@ pub trait TwoPhaseCommitCoordinator {
         schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<Vec<u8>>;
 
-    /// Idempotent implementation is required, because `commit` in the same epoch could be called multiple times.
-    async fn commit(
+    /// Idempotent implementation is required, because `commit_data` in the same epoch could be called multiple times.
+    async fn commit_data(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()>;
+
+    /// Idempotent implementation is required, because `commit_schema_change` in the same epoch could be called multiple
+    /// times.
+    async fn commit_schema_change(
         &mut self,
         epoch: u64,
-        commit_metadata: Vec<u8>,
-        schema_change: Option<PbSinkSchemaChange>,
+        schema_change: PbSinkSchemaChange,
     ) -> Result<()>;
 
     /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.

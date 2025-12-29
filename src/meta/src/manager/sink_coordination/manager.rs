@@ -457,13 +457,20 @@ mod tests {
             Ok(())
         }
 
-        async fn commit(
+        async fn commit_data(
             &mut self,
             epoch: u64,
             metadata: Vec<SinkMetadata>,
-            _schema_change: Option<PbSinkSchemaChange>,
         ) -> risingwave_connector::sink::Result<()> {
             (self.f)(epoch, metadata, &mut self.context)
+        }
+
+        async fn commit_schema_change(
+            &mut self,
+            _epoch: u64,
+            _schema_change: PbSinkSchemaChange,
+        ) -> risingwave_connector::sink::Result<()> {
+            unimplemented!()
         }
     }
 
@@ -1403,23 +1410,31 @@ mod tests {
 
     struct MockTwoPhaseCoordinator<
         P: FnMut(u64, Vec<SinkMetadata>, Option<PbSinkSchemaChange>) -> Result<Vec<u8>, SinkError>,
-        C: FnMut(u64, Vec<u8>, Option<PbSinkSchemaChange>) -> Result<(), SinkError>,
+        CD: FnMut(u64, Vec<u8>) -> Result<(), SinkError>,
+        CS: FnMut(u64, PbSinkSchemaChange) -> Result<(), SinkError>,
     > {
         pre_commit: P,
-        commit: C,
+        commit_data: CD,
+        commit_schema_change: CS,
     }
 
     impl<
         P: FnMut(u64, Vec<SinkMetadata>, Option<PbSinkSchemaChange>) -> Result<Vec<u8>, SinkError>
             + Send
             + 'static,
-        C: FnMut(u64, Vec<u8>, Option<PbSinkSchemaChange>) -> Result<(), SinkError> + Send + 'static,
-    > MockTwoPhaseCoordinator<P, C>
+        CD: FnMut(u64, Vec<u8>) -> Result<(), SinkError> + Send + 'static,
+        CS: FnMut(u64, PbSinkSchemaChange) -> Result<(), SinkError> + Send + 'static,
+    > MockTwoPhaseCoordinator<P, CD, CS>
     {
-        fn new_coordinator(pre_commit: P, commit: C) -> SinkCommitCoordinator {
+        fn new_coordinator(
+            pre_commit: P,
+            commit_data: CD,
+            commit_schema_change: CS,
+        ) -> SinkCommitCoordinator {
             SinkCommitCoordinator::TwoPhase(Box::new(MockTwoPhaseCoordinator {
                 pre_commit,
-                commit,
+                commit_data,
+                commit_schema_change,
             }))
         }
     }
@@ -1429,8 +1444,9 @@ mod tests {
         P: FnMut(u64, Vec<SinkMetadata>, Option<PbSinkSchemaChange>) -> Result<Vec<u8>, SinkError>
             + Send
             + 'static,
-        C: FnMut(u64, Vec<u8>, Option<PbSinkSchemaChange>) -> Result<(), SinkError> + Send + 'static,
-    > TwoPhaseCommitCoordinator for MockTwoPhaseCoordinator<P, C>
+        CD: FnMut(u64, Vec<u8>) -> Result<(), SinkError> + Send + 'static,
+        CS: FnMut(u64, PbSinkSchemaChange) -> Result<(), SinkError> + Send + 'static,
+    > TwoPhaseCommitCoordinator for MockTwoPhaseCoordinator<P, CD, CS>
     {
         async fn init(&mut self) -> risingwave_connector::sink::Result<()> {
             Ok(())
@@ -1445,13 +1461,20 @@ mod tests {
             (self.pre_commit)(epoch, metadata, schema_change)
         }
 
-        async fn commit(
+        async fn commit_data(
             &mut self,
             epoch: u64,
             commit_metadata: Vec<u8>,
-            schema_change: Option<PbSinkSchemaChange>,
         ) -> risingwave_connector::sink::Result<()> {
-            (self.commit)(epoch, commit_metadata, schema_change)
+            (self.commit_data)(epoch, commit_metadata)
+        }
+
+        async fn commit_schema_change(
+            &mut self,
+            epoch: u64,
+            schema_change: PbSinkSchemaChange,
+        ) -> risingwave_connector::sink::Result<()> {
+            (self.commit_schema_change)(epoch, schema_change)
         }
 
         async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) {
@@ -1584,7 +1607,8 @@ mod tests {
                                     move |_epoch, _metadata_list, _schema_change| {
                                         Err(SinkError::Coordinator(anyhow!("failed to pre commit")))
                                     },
-                                    move |_epoch, _commit_metadata, _schema_change| unreachable!(),
+                                    move |_epoch, _commit_metadata| unreachable!(),
+                                    move |_epoch, _schema_change| unreachable!(),
                                 ),
                                 subscriber.clone(),
                             )
@@ -1706,10 +1730,11 @@ mod tests {
                                             _ => unreachable!(),
                                         })
                                     },
-                                    move |_epoch, commit_metadata, _schema_change| {
+                                    move |_epoch, commit_metadata| {
                                         assert_eq!(commit_metadata, metadata);
                                         Ok(())
                                     },
+                                    move |_epoch, _schema_change| unreachable!(),
                                 ),
                                 subscriber.clone(),
                             )
@@ -1857,7 +1882,7 @@ mod tests {
                                             _ => unreachable!(),
                                         })
                                     },
-                                    move |_epoch, commit_metadata, _schema_change| {
+                                    move |_epoch, commit_metadata| {
                                         assert_eq!(commit_metadata, metadata);
                                         if commit_attempt
                                             .fetch_add(1, std::sync::atomic::Ordering::SeqCst)
@@ -1868,6 +1893,7 @@ mod tests {
                                             Ok(())
                                         }
                                     },
+                                    move |_epoch, _schema_change| unreachable!(),
                                 ),
                                 subscriber.clone(),
                             )
@@ -2004,10 +2030,11 @@ mod tests {
                                             _ => unreachable!(),
                                         })
                                     },
-                                    move |_epoch, commit_metadata, _schema_change| {
+                                    move |_epoch, commit_metadata| {
                                         assert_eq!(commit_metadata, metadata);
                                         Ok(())
                                     },
+                                    move |_epoch, _schema_change| unreachable!(),
                                 ),
                                 subscriber.clone(),
                             )
@@ -2175,12 +2202,12 @@ mod tests {
                                             _ => unreachable!(),
                                         })
                                     },
-                                    move |_epoch, commit_metadata, schema_change| {
-                                        assert_eq!(
-                                            schema_change,
-                                            Some(schema_change_for_commit.clone())
-                                        );
+                                    move |_epoch, commit_metadata| {
                                         assert_eq!(commit_metadata, metadata);
+                                        Ok(())
+                                    },
+                                    move |_epoch, schema_change| {
+                                        assert_eq!(schema_change, schema_change_for_commit.clone());
                                         Ok(())
                                     },
                                 ),

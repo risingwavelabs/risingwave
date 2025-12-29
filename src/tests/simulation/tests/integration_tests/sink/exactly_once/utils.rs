@@ -393,11 +393,10 @@ impl TwoPhaseCommitCoordinator for SimulationTestIcebergCommitter {
         Ok(pre_commit_metadata_bytes)
     }
 
-    async fn commit(
+    async fn commit_data(
         &mut self,
         epoch: u64,
         commit_metadata: Vec<u8>,
-        _schema_change: Option<PbSinkSchemaChange>,
     ) -> risingwave_connector::sink::Result<()> {
         if commit_metadata.is_empty() {
             tracing::debug!(?epoch, "no data to commit");
@@ -442,6 +441,14 @@ impl TwoPhaseCommitCoordinator for SimulationTestIcebergCommitter {
         self.commit_inner(epoch, write_results, snapshot_id).await?;
 
         Ok(())
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> risingwave_connector::sink::Result<()> {
+        unreachable!()
     }
 
     async fn abort(&mut self, epoch: u64, _commit_metadata: Vec<u8>) {

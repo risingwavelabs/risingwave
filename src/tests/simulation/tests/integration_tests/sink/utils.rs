@@ -322,11 +322,10 @@ impl SinglePhaseCommitCoordinator for TestCoordinator {
     /// the set of metadata. The metadata is serialized into bytes, because the metadata is expected
     /// to be passed between different gRPC node, so in this general trait, the metadata is
     /// serialized bytes.
-    async fn commit(
+    async fn commit_data(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        _schema_change: Option<PbSinkSchemaChange>,
     ) -> risingwave_connector::sink::Result<()> {
         if SimulationTestSink::random_err(&self.err_rate) {
             println!("commit with err");
@@ -344,6 +343,14 @@ impl SinglePhaseCommitCoordinator for TestCoordinator {
                 .flatten(),
         );
         Ok(())
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> risingwave_connector::sink::Result<()> {
+        unreachable!()
     }
 }
 
@@ -378,11 +385,10 @@ impl TwoPhaseCommitCoordinator for TestCoordinator {
         Ok(pre_commit_metadata_bytes)
     }
 
-    async fn commit(
+    async fn commit_data(
         &mut self,
         epoch: u64,
         commit_metadata: Vec<u8>,
-        _schema_change: Option<PbSinkSchemaChange>,
     ) -> risingwave_connector::sink::Result<()> {
         if commit_metadata.is_empty() {
             return Ok(());
@@ -409,6 +415,14 @@ impl TwoPhaseCommitCoordinator for TestCoordinator {
                 .flatten(),
         );
         Ok(())
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> risingwave_connector::sink::Result<()> {
+        unreachable!()
     }
 
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>) {
