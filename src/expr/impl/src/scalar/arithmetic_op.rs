@@ -447,9 +447,7 @@ pub fn gamma_f64(input: F64) -> Result<F64> {
         }
     } else {
         result = input.gamma();
-        if result.is_nan() {
-            return Err(ExprError::NumericOverflow);
-        } else if result.is_infinite() {
+        if result.is_nan() || result.is_infinite() {
             return Err(ExprError::NumericOverflow);
         } else if result.is_zero() {
             return Err(ExprError::NumericUnderflow);
