@@ -274,17 +274,20 @@ where
     ) -> Option<StreamChunk> {
         let mut builder = StreamChunkBuilder::unlimited(data_types, Some(self.buffer.len()));
         for record in self.into_records() {
-            let records = if let Record::Update { old_row, new_row } = &record
+            macro_rules! append_record {
+                ($record:expr) => {
+                    let none = builder.append_record($record);
+                    debug_assert!(none.is_none());
+                };
+            }
+
+            if let Record::Update { old_row, new_row } = &record
                 && !Row::eq(&old_row.project(key_indices), &new_row.project(key_indices))
             {
-                &[Record::Delete { old_row }, Record::Insert { new_row }][..]
+                append_record!(Record::Delete { old_row });
+                append_record!(Record::Insert { new_row });
             } else {
-                &[record.as_ref()][..]
-            };
-
-            for record in records {
-                let none = builder.append_record(record.as_ref());
-                debug_assert!(none.is_none());
+                append_record!(record);
             }
         }
         builder.take()
