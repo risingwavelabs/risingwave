@@ -33,14 +33,19 @@ use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{AddMutation, StopMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
+use risingwave_pb::stream_service::streaming_control_stream_response::ResetPartialGraphResponse;
 use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
 
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
+use crate::barrier::checkpoint::recovery::{
+    DatabaseRecoveringState, INITIAL_RESET_REQUEST_ID, ResetPartialGraphCollector,
+};
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
+use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::{BackfillOrderState, BarrierKind, CreateStreamingJobCommandInfo, TracedEpoch};
@@ -538,6 +543,7 @@ impl CreatingStreamingJobControl {
                     self.barrier_control.inflight_barrier_count()
                 )
             }
+            CreatingStreamingJobStatus::Resetting(_, _) => "Resetting".to_owned(),
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -709,6 +715,9 @@ impl CreatingStreamingJobControl {
                     .map(Excluded)
                     .unwrap_or(Unbounded),
             ),
+            CreatingStreamingJobStatus::Resetting(_, _) => {
+                return None;
+            }
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -742,7 +751,8 @@ impl CreatingStreamingJobControl {
         match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { .. } => true,
-            CreatingStreamingJobStatus::Finishing(..) => false,
+            CreatingStreamingJobStatus::Finishing(..)
+            | CreatingStreamingJobStatus::Resetting(_, _) => false,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -767,10 +777,82 @@ impl CreatingStreamingJobControl {
         match self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::Resetting(_, _)
             | CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!("expect finish")
             }
             CreatingStreamingJobStatus::Finishing(_, tracking_job) => tracking_job,
+        }
+    }
+
+    pub(super) fn on_reset_partial_graph_resp(
+        &mut self,
+        worker_id: WorkerId,
+        resp: ResetPartialGraphResponse,
+    ) -> bool {
+        match &mut self.status {
+            CreatingStreamingJobStatus::Resetting(collector, notifiers) => {
+                collector.collect(worker_id, resp);
+                if collector.remaining_workers.is_empty() {
+                    for notifier in notifiers.drain(..) {
+                        notifier.notify_collected();
+                    }
+                    true
+                } else {
+                    false
+                }
+            }
+            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::Finishing(_, _) => {
+                panic!(
+                    "should be resetting when receiving reset partial graph resp, but at {:?}",
+                    self.status
+                )
+            }
+            CreatingStreamingJobStatus::PlaceHolder => {
+                unreachable!()
+            }
+        }
+    }
+
+    pub(super) fn drop(
+        &mut self,
+        mut notifiers: Vec<Notifier>,
+        control_stream_manager: &mut ControlStreamManager,
+    ) {
+        for notifier in &mut notifiers {
+            notifier.notify_started();
+        }
+        match &mut self.status {
+            CreatingStreamingJobStatus::Resetting(_, existing_notifiers) => {
+                existing_notifiers.extend(notifiers);
+            }
+            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::Finishing(_, _) => {
+                let collector = DatabaseRecoveringState::reset_partial_graph(
+                    self.database_id,
+                    Some(self.job_id),
+                    control_stream_manager,
+                    INITIAL_RESET_REQUEST_ID,
+                );
+                self.status = CreatingStreamingJobStatus::Resetting(collector, notifiers);
+            }
+            CreatingStreamingJobStatus::PlaceHolder => {
+                unreachable!()
+            }
+        }
+    }
+
+    pub(super) fn reset(self) -> Option<ResetPartialGraphCollector> {
+        if let CreatingStreamingJobStatus::Resetting(collector, notifiers) = self.status {
+            for notifier in notifiers {
+                notifier.notify_collected();
+            }
+            Some(collector)
+        } else {
+            None
         }
     }
 }
