@@ -12448,7 +12448,6 @@ dependencies = [
  "rand 0.9.0",
  "risingwave_backup",
  "risingwave_common",
- "risingwave_common_heap_profiling",
  "risingwave_connector",
  "risingwave_hummock_sdk",
  "risingwave_license",
