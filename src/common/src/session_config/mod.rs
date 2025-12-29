@@ -35,7 +35,7 @@ use crate::config::mutate::TomlTableMutateExt;
 use crate::config::streaming::{JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
-use crate::session_config::parallelism::ConfigParallelism;
+use crate::session_config::parallelism::{ConfigAdaptiveParallelismStrategy, ConfigParallelism};
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -170,21 +170,45 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism: ConfigParallelism,
 
+    /// The adaptive parallelism strategy for streaming jobs. Defaults to `default`, which follows the system setting.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy: ConfigAdaptiveParallelismStrategy,
+
+    /// Specific adaptive parallelism strategy for table. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_table: ConfigAdaptiveParallelismStrategy,
+
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_table: ConfigParallelism,
+
+    /// Specific adaptive parallelism strategy for sink. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_sink: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_sink: ConfigParallelism,
 
+    /// Specific adaptive parallelism strategy for index. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_index: ConfigAdaptiveParallelismStrategy,
+
     /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_index: ConfigParallelism,
 
+    /// Specific adaptive parallelism strategy for source. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_source: ConfigAdaptiveParallelismStrategy,
+
     /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_source: ConfigParallelism,
+
+    /// Specific adaptive parallelism strategy for materialized view. Falls back to `STREAMING_PARALLELISM_STRATEGY`.
+    #[parameter(default = ConfigAdaptiveParallelismStrategy::default())]
+    streaming_parallelism_strategy_for_materialized_view: ConfigAdaptiveParallelismStrategy,
 
     /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
