@@ -385,12 +385,10 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             gc_delete_keys: task.gc_delete_keys,
             retain_multiple_version: false,
             stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
-            task_type: task.task_type,
             table_vnode_partition: task.table_vnode_partition.clone(),
             use_block_based_filter: true,
             table_schemas: Default::default(),
             disable_drop_column_optimization: false,
-            max_vnode_key_range_bytes: None,
         };
         let factory = UnifiedSstableWriterFactory::new(context.sstable_store.clone());
 

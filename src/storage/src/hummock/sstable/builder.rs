@@ -63,7 +63,7 @@ pub struct SstableBuilderOptions {
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
     pub max_sst_size: u64,
-    /// Max bytes for vnode key-range hints in SST metadata. None or 0 disables collection.
+    /// Max bytes for vnode key-range hints in SST metadata. None disables collection.
     pub max_vnode_key_range_bytes: Option<usize>,
 }
 
@@ -183,6 +183,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     ) -> Self {
         let sst_object_id = sst_object_id.into();
         Self {
+            vnode_range_collector: VnodeKeyRangeCollector::with_limit(
+                options.max_vnode_key_range_bytes,
+            ),
             options: options.clone(),
             writer,
             block_builder: BlockBuilder::new(BlockBuilderOptions {
@@ -204,9 +207,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             epoch_set: BTreeSet::default(),
             memory_limiter,
             block_size_vec: Vec::new(),
-            vnode_range_collector: VnodeKeyRangeCollector::with_limit(
-                options.max_vnode_key_range_bytes,
-            ),
         }
     }
 

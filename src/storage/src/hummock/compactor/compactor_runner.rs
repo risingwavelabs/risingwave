@@ -107,7 +107,6 @@ impl CompactorRunner {
                 gc_delete_keys: task.gc_delete_keys,
                 retain_multiple_version: false,
                 stats_target_table_ids: Some(HashSet::from_iter(task.existing_table_ids.clone())),
-                task_type: task.task_type,
                 use_block_based_filter,
                 table_vnode_partition: task.table_vnode_partition.clone(),
                 table_schemas: task
@@ -116,7 +115,6 @@ impl CompactorRunner {
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
                 disable_drop_column_optimization: false,
-                max_vnode_key_range_bytes: task.effective_vnode_key_range_limit(),
             },
             object_id_getter,
         );

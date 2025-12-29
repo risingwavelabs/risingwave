@@ -32,7 +32,6 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
 use risingwave_pb::hummock::PbTableSchema;
-use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
@@ -301,14 +300,14 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
         compaction_catalog_agent_ref,
     );
 
-    let task_config = task_config.unwrap_or_else(|| TaskConfig {
-        key_range: KeyRange::inf(),
-        cache_policy: CachePolicy::Disable,
-        gc_delete_keys: false,
-        stats_target_table_ids: None,
-        task_type: PbTaskType::Dynamic,
-        use_block_based_filter: true,
-        ..Default::default()
+    let task_config = task_config.unwrap_or_else(|| {
+        TaskConfig::for_test(
+            KeyRange::inf(),
+            CachePolicy::Disable,
+            false,
+            true,
+            HashMap::new(),
+        )
     });
     compact_and_build_sst(
         &mut builder,
@@ -452,43 +451,54 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
     });
     let level2 = vec![info1, info2];
 
-    let task_config_no_schema = TaskConfig {
-        key_range: KeyRange::inf(),
-        cache_policy: CachePolicy::Disable,
-        gc_delete_keys: false,
-        stats_target_table_ids: None,
-        task_type: PbTaskType::Dynamic,
-        use_block_based_filter: true,
-        table_schemas: vec![].into_iter().collect(),
-        ..Default::default()
-    };
-
-    let mut task_config_schema = task_config_no_schema.clone();
-    task_config_schema.table_schemas.insert(
-        10.into(),
-        PbTableSchema {
-            column_ids: (0..column_num as i32).collect(),
-        },
-    );
-    task_config_schema.table_schemas.insert(
-        11.into(),
-        PbTableSchema {
-            column_ids: (0..column_num as i32).collect(),
-        },
+    let task_config_no_schema = TaskConfig::for_test(
+        KeyRange::inf(),
+        CachePolicy::Disable,
+        false,
+        true,
+        HashMap::new(),
     );
 
-    let mut task_config_schema_cause_drop = task_config_no_schema.clone();
-    task_config_schema_cause_drop.table_schemas.insert(
-        10.into(),
-        PbTableSchema {
-            column_ids: (0..column_num as i32 / 2).collect(),
-        },
+    let task_config_schema = TaskConfig::for_test(
+        KeyRange::inf(),
+        CachePolicy::Disable,
+        false,
+        true,
+        HashMap::from([
+            (
+                10.into(),
+                PbTableSchema {
+                    column_ids: (0..column_num as i32).collect(),
+                },
+            ),
+            (
+                11.into(),
+                PbTableSchema {
+                    column_ids: (0..column_num as i32).collect(),
+                },
+            ),
+        ]),
     );
-    task_config_schema_cause_drop.table_schemas.insert(
-        11.into(),
-        PbTableSchema {
-            column_ids: (0..column_num as i32 / 2).collect(),
-        },
+
+    let task_config_schema_cause_drop = TaskConfig::for_test(
+        KeyRange::inf(),
+        CachePolicy::Disable,
+        false,
+        true,
+        HashMap::from([
+            (
+                10.into(),
+                PbTableSchema {
+                    column_ids: (0..column_num as i32 / 2).collect(),
+                },
+            ),
+            (
+                11.into(),
+                PbTableSchema {
+                    column_ids: (0..column_num as i32 / 2).collect(),
+                },
+            ),
+        ]),
     );
 
     let get_iter = || {
@@ -543,8 +553,9 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
             b.to_async(&runtime).iter(|| {
                 let iter = get_iter();
                 let sstable_store1 = sstable_store.clone();
-                let mut task_config_clone = task_config_schema.clone();
-                task_config_clone.disable_drop_column_optimization = true;
+                let task_config_clone = task_config_schema
+                    .clone()
+                    .with_disable_drop_column_optimization(true);
                 async move { compact(iter, sstable_store1, Some(task_config_clone)).await }
             });
         },
