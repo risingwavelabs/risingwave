@@ -12,34 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::write;
 use std::future::{Future, pending};
 use std::iter::repeat_with;
+use std::mem::replace;
 use std::ops::{Deref, DerefMut};
+use std::pin::Pin;
 use std::time::Duration;
 
-use anyhow::anyhow;
-use futures::{FutureExt, TryStreamExt};
+use futures::{FutureExt, TryStreamExt, StreamExt};
 use futures::future::{BoxFuture, select};
+use futures::stream::StreamFuture;
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
+use risingwave_common::must_match;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::sink::log_store::LogStoreResult;
+use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
-use risingwave_storage::store::StateStoreRead;
+use risingwave_storage::store::{LocalStateStore, StateStoreRead};
 use rw_futures_util::drop_either_future;
 use smallvec::{SmallVec, smallvec};
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::time::Instant;
-use tokio_stream::StreamExt;
-use tokio_stream::adapters::Peekable;
+use tokio::time::{Instant, Sleep, sleep_until};
+use futures::stream::Peekable;
 use tracing::{Instrument, event};
 
 use super::exchange::output::Output;
@@ -47,9 +50,13 @@ use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
-use crate::common::log_store_impl::kv_log_store::state::LogStoreWriteState;
+use crate::common::log_store_impl::kv_log_store::serde::LogStoreItemMergeStream;
+use crate::common::log_store_impl::kv_log_store::{FlushInfo, SeqId};
+use crate::common::log_store_impl::kv_log_store::state::{LogStoreStateWriteChunkFuture, LogStoreWriteState};
+use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::executor::prelude::*;
 use crate::executor::{StopMutation, StreamConsumer};
+use crate::executor::sync_kv_log_store::{ReadFlushedChunkFuture, ReadFuture};
 use crate::task::{DispatcherId, NewOutputRequest};
 
 mod output_mapping;
@@ -606,30 +613,195 @@ impl DispatchExecutorForSyncLogStore {
     }
 }
 
-type ReadingChunkFuture<'a> = BoxFuture<'a, StreamResult<Option<MessageBatch>>>;
-type DispatchingFuture<'a> = BoxFuture<'a, StreamResult<()>>;
+struct FlushedChunkInfo {
+    epoch: u64,
+    start_seq_id: SeqId,
+    end_seq_id: SeqId,
+    flush_info: FlushInfo,
+    vnode_bitmap: Bitmap,
+}
 
-enum ConsumerFuture<'a> {
-    ReadingChunk { future: ReadingChunkFuture<'a> },
-    Dispatching { future: DispatchingFuture<'a> },
+enum WriteFuture<S: LocalStateStore> {
+    Paused {
+        start_instant: Instant,
+        sleep_future: Option<Pin<Box<Sleep>>>,
+        barrier: Barrier,
+        stream: BoxedMessageStream,
+        write_state: LogStoreWriteState<S>,
+    },
+    ReceiveFromUpstream {
+        future: StreamFuture<BoxedMessageStream>,
+        write_state: LogStoreWriteState<S>,
+    },
+    FlushingChunk {
+        epoch: u64,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
+        future: Pin<Box<LogStoreStateWriteChunkFuture<S>>>,
+        stream: BoxedMessageStream,
+    },
     EndOfStream,
     Empty,
 }
 
-impl<'a> ConsumerFuture<'a> {
+enum WriteFutureEvent {
+    UpstreamMessageReceived(Message),
+    ChunkFlushed(FlushedChunkInfo),
+    EndofStream,
+}
+
+impl<S: LocalStateStore> WriteFuture<S> {
+    fn flush_chunk(
+        stream: BoxedMessageStream,
+        write_state: LogStoreWriteState<S>,
+        chunk: StreamChunk,
+        epoch: u64,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
+    ) -> Self {
+        tracing::trace!(
+            start_seq_id,
+            end_seq_id,
+            epoch,
+            cardinality = chunk.cardinality(),
+            "write_future: flushing chunk"
+        );
+        Self::FlushingChunk { 
+            epoch, 
+            start_seq_id, 
+            end_seq_id, 
+            future: Box::pin(write_state.into_write_chunk_future(
+                chunk, 
+                epoch, 
+                start_seq_id, 
+                end_seq_id,
+            )), 
+            stream,
+        }
+    }
+
+    fn receive_from_upstream(
+        stream: BoxedMessageStream,
+        write_state: LogStoreWriteState<S>,
+    ) -> Self {
+        Self::ReceiveFromUpstream { 
+            future: stream.into_future(), 
+            write_state 
+        }
+    }
+
+    fn paused(
+        duration: Duration,
+        barrier: Barrier,
+        stream: BoxedMessageStream,
+        write_state: LogStoreWriteState<S>,
+    ) -> Self {
+        let now = Instant::now();
+        tracing::trace!(?now, ?duration, "write_future_pause");
+        Self::Paused { 
+            start_instant: now, 
+            sleep_future: Some(Box::pin(sleep_until(now + duration))), 
+            barrier, 
+            stream, 
+            write_state }
+    }
+
+    // TODO: add metrics
     async fn next_event(
         &mut self,
-    ) -> StreamExecutorResult<()> {
+    ) -> StreamExecutorResult<(BoxedMessageStream, LogStoreWriteState<S>, WriteFutureEvent)> {
         match self {
-            ConsumerFuture::ReadingChunk { future }
-            => {
-                // Read future
-                // Read a chunk and enter Dispatching
-
-                
+            WriteFuture::Paused { 
+                start_instant,
+                sleep_future, 
+                ..
+            } => {
+                if let Some(sleep_future) = sleep_future {
+                    sleep_future.await;
+                    tracing::trace!("resuming write future");
+                }
+                must_match!(replace(self, WriteFuture::Empty), WriteFuture::Paused { stream, write_state, barrier, .. } => {
+                    Ok((stream, write_state, WriteFutureEvent::UpstreamMessageReceived(Message::Barrier(barrier))))
+                })
             }
-            ConsumerFuture::Dispatching {
 
+            WriteFuture::ReceiveFromUpstream { future, .. } => {
+                let (opt, stream) = future.await;
+                
+                match opt {
+                    Some(result) => {
+                        must_match!(replace(self, WriteFuture::Empty), WriteFuture::ReceiveFromUpstream { write_state, .. } => {
+                            result.map(|item| {
+                                (stream, write_state, WriteFutureEvent::UpstreamMessageReceived(item))
+                            })
+                        })
+                    }
+                    None => {
+                        must_match!(replace(self, WriteFuture::Empty), WriteFuture::ReceiveFromUpstream { write_state, .. } => {
+                            Ok((stream, write_state, WriteFutureEvent::EndofStream))
+                        })
+                    }
+                }
+            }
+            WriteFuture::FlushingChunk { future, .. } => {
+                let (write_state, result) = future.await;
+                let result = must_match!(replace(self, WriteFuture::Empty), WriteFuture::FlushingChunk { epoch, start_seq_id, end_seq_id, stream, ..  } => {
+                    result.map(|(flush_info, vnode_bitmap)| {
+                        (stream, write_state, WriteFutureEvent::ChunkFlushed(FlushedChunkInfo {
+                            epoch,
+                            start_seq_id,
+                            end_seq_id,
+                            flush_info,
+                            vnode_bitmap,
+                        }))
+                    })
+                });
+                result.map_err(Into::into)
+            }
+            WriteFuture::EndOfStream => {
+                pending().await
+            }
+            WriteFuture::Empty => {
+                unreachable!("should not be polled after ready")
+            }
+        }
+    }
+}
+
+type ReadingChunkFuture = BoxFuture<'static, StreamExecutorResult<StreamChunk>>;
+type DispatchingFuture = BoxFuture<'static, StreamExecutorResult<()>>;
+
+enum ConsumerFuture {
+    ReadingChunk { future: ReadingChunkFuture },
+    Dispatching { future: DispatchingFuture },
+    Empty,
+}
+
+enum ConsumerFutureEvent {
+    ReadOutChunk(StreamChunk),
+    DispatchFinished,
+}
+
+// TODO: add metrics here
+impl ConsumerFuture {
+    async fn next_event(
+        &mut self
+    ) -> StreamExecutorResult<ConsumerFutureEvent> {
+        match self {
+            ConsumerFuture::ReadingChunk{future} => {
+                let result = future.await?;
+                must_match!(replace(self, ConsumerFuture::Empty), ConsumerFuture::ReadingChunk{future} => {
+                    Ok(ConsumerFutureEvent::ReadOutChunk(result))
+                })
+            }
+            ConsumerFuture::Dispatching {future} => {
+                let result = future.await?;
+                must_match!(replace(self, ConsumerFuture::Empty), ConsumerFuture::Dispatching { future } => {
+                    Ok(ConsumerFutureEvent::DispatchFinished)
+                })
+            }
+            ConsumerFuture::Empty => {
+                unreachable!("ConsumerFuture::Empty should be handled!")
             }
         }
     }
@@ -735,30 +907,35 @@ impl StreamConsumer for DispatchExecutorForSyncLogStore {
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
         let max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
-        #[try_stream]
-        async move {
-            let mut input = self.input.execute().peekable();
-            let mut end_of_stream = false;
-            let mut buffer: VecDeque<MessageBatch> = VecDeque::new();
-            loop {
-                let select_result = {
-                    let read_future = async {
-                        match try_batch_barriers(max_barrier_count_per_batch, &mut input).await?
-                    };
-                    pin_mut!(read_future);
-                    let write_future = async {
-                        if buffer.is_empty() {
-                            pending().await
-                        } else {
-                            dispatch_message_to_downstream(&mut buffer, &mut self.inner).await
-                        }
-                    };
-                    pin_mut!(write_future);
-                    let output = select(write_future, read_future).await;
-                    drop_either_future(output)
-                };
-            }
-        }
+        
+        let mut input = self.input.execute().peekable();
+        
+        // init first epoch + local state store
+        let first_barrier = expect_first_barrier(&mut input).await?;
+        // #[try_stream]
+        // async move {
+        //     let mut input = self.input.execute().peekable();
+        //     let mut end_of_stream = false;
+        //     let mut buffer: VecDeque<MessageBatch> = VecDeque::new();
+        //     loop {
+        //         let select_result = {
+        //             let read_future = async {
+        //                 match try_batch_barriers(max_barrier_count_per_batch, &mut input).await?
+        //             };
+        //             pin_mut!(read_future);
+        //             let write_future = async {
+        //                 if buffer.is_empty() {
+        //                     pending().await
+        //                 } else {
+        //                     dispatch_message_to_downstream(&mut buffer, &mut self.inner).await
+        //                 }
+        //             };
+        //             pin_mut!(write_future);
+        //             let output = select(write_future, read_future).await;
+        //             drop_either_future(output)
+        //         };
+        //     }
+        // }
     }
 
 }

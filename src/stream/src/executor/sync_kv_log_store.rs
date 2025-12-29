@@ -327,7 +327,7 @@ pub mod metrics {
     }
 }
 
-type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
+pub type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
 
 pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
