@@ -1108,6 +1108,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     }
 
     #[cfg(any(test, feature = "test"))]
+    #[allow(clippy::too_many_arguments)]
     pub async fn for_test_with_stream_key(
         input: Executor,
         store: S,
@@ -1132,6 +1133,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
     }
 
     #[cfg(any(test, feature = "test"))]
+    #[allow(clippy::too_many_arguments)]
     async fn for_test_inner(
         input: Executor,
         store: S,

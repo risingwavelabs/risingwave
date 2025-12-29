@@ -52,6 +52,7 @@ pub struct WatermarkFilterExecutor<S: StateStore> {
 }
 
 impl<S: StateStore> WatermarkFilterExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Executor,
