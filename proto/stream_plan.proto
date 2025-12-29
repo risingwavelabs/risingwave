@@ -1285,6 +1285,8 @@ message StreamFragmentGraph {
 
 // Schema change operation for sink
 message SinkSchemaChange {
+  // Original schema before this change.
+  // Used for validation and conflict detection.
   repeated plan_common.Field original_schema = 1;
 
   // Schema change operation (mutually exclusive)
