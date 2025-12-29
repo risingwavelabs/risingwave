@@ -45,6 +45,7 @@
 use std::sync::Arc;
 
 use datafusion::arrow::datatypes::DataType as DFDataType;
+use datafusion::functions::{math, unicode};
 use datafusion::logical_expr::binary::BinaryTypeCoercer;
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
@@ -84,6 +85,7 @@ pub fn convert_function_call(
         convert_binary_func,
         convert_case_func,
         convert_cast_func,
+        convert_trivial_datafusion_func,
         fallback_rw_expr_builder
     );
 
@@ -272,7 +274,8 @@ impl RwDataType {
             | RwDataType::Timestamptz
             | RwDataType::Varchar
             | RwDataType::Bytea
-            | RwDataType::Serial => true,
+            | RwDataType::Serial
+            | RwDataType::Decimal => true,
             RwDataType::Struct(v) => v.types().all(RwDataTypeDataFusionExt::is_datafusion_native),
             RwDataType::List(list) => list.elem().is_datafusion_native(),
             RwDataType::Map(map) => {
@@ -289,6 +292,63 @@ impl RwDataType {
         let arrow_field = IcebergArrowConvert.to_arrow_field("", self).ok()?;
         Some(arrow_field.data_type().clone())
     }
+}
+
+fn convert_trivial_datafusion_func(
+    func_call: &FunctionCall,
+    input_columns: &impl ColumnTrait,
+) -> Option<DFExpr> {
+    if !func_call
+        .inputs()
+        .iter()
+        .all(|input| input.return_type().is_datafusion_native())
+    {
+        return None;
+    }
+    if !func_call.return_type().is_datafusion_native() {
+        return None;
+    }
+
+    let udf_impl: Arc<ScalarUDF> = match func_call.func_type() {
+        ExprType::Round => math::round(),
+        ExprType::Abs => math::abs(),
+        ExprType::Ceil => math::ceil(),
+        ExprType::Floor => math::floor(),
+        ExprType::Trunc => math::trunc(),
+        ExprType::Pow => math::power(),
+        ExprType::Exp => math::exp(),
+        ExprType::Sin => math::sin(),
+        ExprType::Cos => math::cos(),
+        ExprType::Tan => math::tan(),
+        ExprType::Cot => math::cot(),
+        ExprType::Asin => math::asin(),
+        ExprType::Acos => math::acos(),
+        ExprType::Atan => math::atan(),
+        ExprType::Atan2 => math::atan2(),
+        ExprType::Sqrt => math::sqrt(),
+        ExprType::Degrees => math::degrees(),
+        ExprType::Radians => math::radians(),
+        ExprType::Sinh => math::sinh(),
+        ExprType::Cosh => math::cosh(),
+        ExprType::Tanh => math::tanh(),
+        ExprType::Asinh => math::asinh(),
+        ExprType::Acosh => math::acosh(),
+        ExprType::Atanh => math::atanh(),
+        ExprType::Ln => math::ln(),
+        ExprType::Log10 => math::log10(),
+        ExprType::Substr => unicode::substr(),
+        _ => return None,
+    };
+    let args = func_call
+        .inputs()
+        .iter()
+        .map(|input| convert_expr(input, input_columns).ok())
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(DFExpr::ScalarFunction(ScalarFunction {
+        func: udf_impl,
+        args,
+    }))
 }
 
 fn fallback_rw_expr_builder(
