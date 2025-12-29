@@ -470,12 +470,14 @@ mod tests {
             _epoch: u64,
             _schema_change: PbSinkSchemaChange,
         ) -> risingwave_connector::sink::Result<()> {
-            unimplemented!()
+            unreachable!()
         }
     }
 
     #[tokio::test]
     async fn test_basic() {
+        let db = prepare_db_backend().await;
+
         let param = SinkParam {
             sink_id: SinkId::from(1),
             sink_name: "test".into(),
@@ -528,16 +530,18 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
+                let db = db.clone();
                 move |param, new_writer_rx| {
                     let metadata = metadata.clone();
                     let expected_param = expected_param.clone();
+                    let db = db.clone();
                     tokio::spawn({
                         let subscriber = mock_subscriber.clone();
                         async move {
                             // validate the start request
                             assert_eq!(param, expected_param);
                             CoordinatorWorker::execute_coordinator(
-                                DatabaseConnection::Disconnected,
+                                db,
                                 param.clone(),
                                 new_writer_rx,
                                 MockSinglePhaseCoordinator::new_coordinator(
@@ -686,6 +690,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_single_writer() {
+        let db = prepare_db_backend().await;
         let param = SinkParam {
             sink_id: SinkId::from(1),
             sink_name: "test".into(),
@@ -730,16 +735,18 @@ mod tests {
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
+                let db = db.clone();
                 move |param, new_writer_rx| {
                     let metadata = metadata.clone();
                     let expected_param = expected_param.clone();
+                    let db = db.clone();
                     tokio::spawn({
                         let subscriber = mock_subscriber.clone();
                         async move {
                             // validate the start request
                             assert_eq!(param, expected_param);
                             CoordinatorWorker::execute_coordinator(
-                                DatabaseConnection::Disconnected,
+                                db,
                                 param.clone(),
                                 new_writer_rx,
                                 MockSinglePhaseCoordinator::new_coordinator(
@@ -833,6 +840,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_partial_commit() {
+        let db = prepare_db_backend().await;
         let param = SinkParam {
             sink_id: SinkId::from(1),
             sink_name: "test".into(),
@@ -877,15 +885,17 @@ mod tests {
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
+                let db = db.clone();
                 move |param, new_writer_rx| {
                     let expected_param = expected_param.clone();
+                    let db = db.clone();
                     tokio::spawn({
                         let subscriber = mock_subscriber.clone();
                         async move {
                             // validate the start request
                             assert_eq!(param, expected_param);
                             CoordinatorWorker::execute_coordinator(
-                                DatabaseConnection::Disconnected,
+                                db,
                                 param,
                                 new_writer_rx,
                                 MockSinglePhaseCoordinator::new_coordinator(
@@ -938,6 +948,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_fail_commit() {
+        let db = prepare_db_backend().await;
         let param = SinkParam {
             sink_id: SinkId::from(1),
             sink_name: "test".into(),
@@ -981,8 +992,10 @@ mod tests {
         let (manager, (_join_handle, _stop_tx)) =
             SinkCoordinatorManager::start_worker_with_spawn_worker({
                 let expected_param = param.clone();
+                let db = db.clone();
                 move |param, new_writer_rx| {
                     let expected_param = expected_param.clone();
+                    let db = db.clone();
                     tokio::spawn({
                         let subscriber = mock_subscriber.clone();
                         {
@@ -990,7 +1003,7 @@ mod tests {
                                 // validate the start request
                                 assert_eq!(param, expected_param);
                                 CoordinatorWorker::execute_coordinator(
-                                    DatabaseConnection::Disconnected,
+                                    db,
                                     param,
                                     new_writer_rx,
                                     MockSinglePhaseCoordinator::new_coordinator((), |_, _, _| {
@@ -1056,6 +1069,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_update_vnode_bitmap() {
+        let db = prepare_db_backend().await;
         let param = SinkParam {
             sink_id: SinkId::from(1),
             sink_name: "test".into(),
@@ -1113,18 +1127,20 @@ mod tests {
                 let metadata = metadata.clone();
                 let metadata_scale_out = metadata_scale_out.clone();
                 let metadata_scale_in = metadata_scale_in.clone();
+                let db = db.clone();
                 move |param, new_writer_rx| {
                     let metadata = metadata.clone();
                     let metadata_scale_out = metadata_scale_out.clone();
                     let metadata_scale_in = metadata_scale_in.clone();
                     let expected_param = expected_param.clone();
+                    let db = db.clone();
                     tokio::spawn({
                         let subscriber = mock_subscriber.clone();
                         async move {
                             // validate the start request
                             assert_eq!(param, expected_param);
                             CoordinatorWorker::execute_coordinator(
-                                DatabaseConnection::Disconnected,
+                                db,
                                 param.clone(),
                                 new_writer_rx,
                                 MockSinglePhaseCoordinator::new_coordinator(
