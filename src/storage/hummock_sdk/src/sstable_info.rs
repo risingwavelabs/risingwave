@@ -93,13 +93,10 @@ impl From<&PbVnodeStatistics> for VnodeStatistics {
             vnode_key_ranges: info
                 .vnode_key_ranges
                 .iter()
-                .map(|range| {
+                .map(|(&vnode, range)| {
                     let min_key = FullKey::decode(&range.min_key).copy_into();
                     let max_key = FullKey::decode(&range.max_key).copy_into();
-                    (
-                        VirtualNode::from_index(range.vnode as usize),
-                        (min_key, max_key),
-                    )
+                    (VirtualNode::from_index(vnode as usize), (min_key, max_key))
                 })
                 .collect(),
         }
@@ -118,10 +115,14 @@ impl From<&VnodeStatistics> for PbVnodeStatistics {
             vnode_key_ranges: info
                 .vnode_key_ranges
                 .iter()
-                .map(|(vnode, (min_key, max_key))| PbVnodeKeyRange {
-                    vnode: vnode.to_index() as u32,
-                    min_key: min_key.encode(),
-                    max_key: max_key.encode(),
+                .map(|(vnode, (min_key, max_key))| {
+                    (
+                        vnode.to_index() as u32,
+                        PbVnodeKeyRange {
+                            min_key: min_key.encode(),
+                            max_key: max_key.encode(),
+                        },
+                    )
                 })
                 .collect(),
         }

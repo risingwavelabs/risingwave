@@ -15,18 +15,17 @@ enum BloomFilterType {
   BLOCKED = 2;
 }
 
-// Pruning hints for a single vnode within an SST.
+// Key range for a single vnode within an SST.
 // Keys are always represented as closed intervals: [min_key, max_key].
 message VnodeKeyRange {
-  uint32 vnode = 1;
-  bytes min_key = 2;
-  bytes max_key = 3;
+  bytes min_key = 1;
+  bytes max_key = 2;
 }
 
 // Optional per-vnode statistics for SSTs with few vnodes.
 // Enables more precise query pruning by providing vnode-level key ranges.
 message VnodeStatistics {
-  repeated VnodeKeyRange vnode_key_ranges = 1;
+  map<uint32, VnodeKeyRange> vnode_key_ranges = 1;
 }
 
 message SstableInfo {

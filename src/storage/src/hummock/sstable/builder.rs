@@ -709,112 +709,77 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
     }
 }
 
-/// Collects vnode key-range hints for single-table SSTs with byte-based capacity limit.
+/// Collects vnode key-range hints during SST building.
 struct VnodeKeyRangeCollector {
     max_bytes: usize,
-    ranges: BTreeMap<VirtualNode, (FullKey<Bytes>, FullKey<Bytes>)>,
-    state: CollectorState,
     current_size: usize,
-}
-
-enum CollectorState {
-    Collecting {
-        current_vnode: Option<VirtualNode>,
-        current_left: Vec<u8>,
-    },
-    Stopped,
+    ranges: BTreeMap<VirtualNode, (FullKey<Bytes>, FullKey<Bytes>)>,
+    current_vnode: VirtualNode,
+    range_start_key: Vec<u8>,
 }
 
 impl VnodeKeyRangeCollector {
-    fn with_limit(max_bytes: Option<usize>) -> Option<Self> {
-        let max_bytes = max_bytes.unwrap_or(0);
-        (max_bytes > 0).then_some(Self {
+    fn new(max_bytes: usize) -> Self {
+        Self {
             max_bytes,
-            ranges: BTreeMap::new(),
-            state: CollectorState::Collecting {
-                current_vnode: None,
-                current_left: Vec::new(),
-            },
             current_size: 0,
-        })
+            ranges: BTreeMap::new(),
+            current_vnode: VirtualNode::ZERO,
+            range_start_key: Vec::new(),
+        }
     }
 
-    /// Records a key for vnode range tracking. Keys must be observed in sorted order.
-    ///
-    /// # Arguments
-    /// * `vnode` - The vnode of the current key
-    /// * `key` - The current key (used as left boundary when a new vnode starts)
-    /// * `prev_key` - The previous key (used as right boundary when vnode switches)
-    ///
-    /// # Semantics
-    /// Implements "allow over-limit write": inserting a range may cause `current_size` to exceed
-    /// `max_bytes`, but stops before starting the next range if it would exceed the limit.
+    fn with_limit(max_bytes: Option<usize>) -> Option<Self> {
+        max_bytes.filter(|&n| n > 0).map(Self::new)
+    }
+
     fn observe_key(&mut self, vnode: VirtualNode, key: &[u8], prev_key: &[u8]) {
-        if matches!(self.state, CollectorState::Stopped) {
+        if self.current_size >= self.max_bytes {
             return;
         }
 
-        let CollectorState::Collecting {
-            current_vnode,
-            current_left,
-        } = &mut self.state
-        else {
-            unreachable!()
-        };
-
-        match current_vnode {
-            None => {
-                *current_vnode = Some(vnode);
-                current_left.clear();
-                current_left.extend_from_slice(key);
-            }
-            Some(prev_vnode) if *prev_vnode != vnode => {
-                // Seal previous vnode's range first
-                let left_bytes = Bytes::from(mem::take(current_left));
-                let right_bytes = Bytes::copy_from_slice(prev_key);
-                let range_size =
-                    mem::size_of::<VirtualNode>() + left_bytes.len() + right_bytes.len();
-                let left_key = FullKey::decode(&left_bytes).copy_into();
-                let right_key = FullKey::decode(&right_bytes).copy_into();
-                self.ranges.insert(*prev_vnode, (left_key, right_key));
-                self.current_size += range_size;
-
-                // Stop if starting next range would exceed limit
-                let estimated_next_size = mem::size_of::<VirtualNode>() + key.len();
-                if self.current_size + estimated_next_size > self.max_bytes {
-                    self.state = CollectorState::Stopped;
-                    return;
-                }
-
-                // Start new range for current vnode
-                *current_vnode = Some(vnode);
-                current_left.clear();
-                current_left.extend_from_slice(key);
-            }
-            Some(_) => {}
+        // First key
+        if self.range_start_key.is_empty() {
+            self.current_vnode = vnode;
+            self.range_start_key = key.to_vec();
+            return;
         }
+
+        // Same vnode, nothing to do
+        if vnode == self.current_vnode {
+            return;
+        }
+
+        // Vnode changed: seal previous range
+        self.seal_range(prev_key);
+
+        // Check if budget exhausted after sealing
+        if self.current_size >= self.max_bytes {
+            return;
+        }
+
+        // Start new vnode
+        self.current_vnode = vnode;
+        self.range_start_key = key.to_vec();
     }
 
-    /// Finalizes collection and returns vnode ranges if multiple vnodes were collected.
-    ///
-    /// Returns `None` for single-vnode SSTs since they don't benefit from vnode hints.
-    fn finish(mut self, last_key: &[u8]) -> Option<VnodeStatistics> {
-        if let CollectorState::Collecting {
-            current_vnode: Some(vnode),
-            current_left,
-        } = self.state
-        {
-            let left_bytes = Bytes::from(current_left);
-            let right_bytes = Bytes::copy_from_slice(last_key);
-            // Decode once for the last vnode
-            let left_key = FullKey::decode(&left_bytes).copy_into();
-            let right_key = FullKey::decode(&right_bytes).copy_into();
-            self.ranges.insert(vnode, (left_key, right_key));
-        }
+    fn seal_range(&mut self, right_key: &[u8]) {
+        let left = Bytes::from(mem::take(&mut self.range_start_key));
+        let right = Bytes::copy_from_slice(right_key);
+        self.current_size += mem::size_of::<VirtualNode>() + left.len() + right.len();
+        self.ranges.insert(
+            self.current_vnode,
+            (
+                FullKey::decode(&left).copy_into(),
+                FullKey::decode(&right).copy_into(),
+            ),
+        );
+    }
 
-        // Only emits hints when an SST contains multiple vnodes (> 1), since single-vnode SSTs
-        // have `vnode_range` == `sst_range`.
-        // Decode at vnode boundaries (low frequency), avoiding batch decode in VnodeStatistics::new()
+    fn finish(mut self, last_key: &[u8]) -> Option<VnodeStatistics> {
+        if !self.range_start_key.is_empty() {
+            self.seal_range(last_key);
+        }
         if self.ranges.len() > 1 {
             Some(VnodeStatistics::from_map(self.ranges))
         } else {
