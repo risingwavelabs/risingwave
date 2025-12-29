@@ -42,7 +42,7 @@ use crate::barrier::worker::{
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub(super) struct ResetPartialGraphCollector {
     pub(super) reset_request_id: u32,
     pub(super) remaining_workers: HashSet<WorkerId>,
