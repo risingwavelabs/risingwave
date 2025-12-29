@@ -282,7 +282,7 @@ where
             }
 
             if let Record::Update { old_row, new_row } = &record
-                && !Row::eq(&old_row.project(key_indices), &new_row.project(key_indices))
+                && !Row::eq(&old_row.project(key_indices), new_row.project(key_indices))
             {
                 append_record!(Record::Delete { old_row });
                 append_record!(Record::Insert { new_row });
