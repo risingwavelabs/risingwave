@@ -34,6 +34,7 @@ use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
 };
+use crate::barrier::notifier::Notifier;
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::utils::NodeToCollect;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
@@ -135,6 +136,7 @@ impl DatabaseCheckpointControl {
     pub(super) fn apply_command(
         &mut self,
         mut command: Option<Command>,
+        notifiers: &mut Vec<Notifier>,
         barrier_info: &BarrierInfo,
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: &HummockVersionStats,
@@ -525,7 +527,19 @@ impl DatabaseCheckpointControl {
 
         for (job_id, creating_job) in &mut self.creating_streaming_job_controls {
             if !finished_snapshot_backfill_jobs.contains(job_id) {
-                creating_job.on_new_upstream_barrier(control_stream_manager, barrier_info)?;
+                let throttle = if let Some(Command::Throttle { jobs, config }) = &command
+                    && jobs.len() == 1
+                    && jobs.iter().next() == Some(job_id)
+                {
+                    Some((config, take(notifiers)))
+                } else {
+                    None
+                };
+                creating_job.on_new_upstream_barrier(
+                    control_stream_manager,
+                    barrier_info,
+                    throttle,
+                )?;
             }
         }
 
