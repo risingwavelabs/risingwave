@@ -27,6 +27,12 @@
     select v1 as a1 from t order by a1;
   expected_outputs:
   - batch_plan
+- name: order by identifier matches aliased output
+  sql: |
+    create table t (a int, b int);
+    select a as x from t order by a;
+  expected_outputs:
+  - batch_plan
 - name: order by ambiguous
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -105,6 +111,13 @@
     select distinct x from t order by y;
   expected_outputs:
   - planner_error
+- name: select distinct order by expression reuse
+  sql: |
+    create table t (x int);
+    select distinct x + 1 as y from t order by x + 1;
+  expected_outputs:
+  - stream_plan
+  - batch_plan
 - name: No BatchSort needed, when input is already sorted
   sql: |
     create table t(v int);

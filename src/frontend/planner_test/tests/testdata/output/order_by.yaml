@@ -41,6 +41,14 @@
     BatchExchange { order: [t.v1 ASC], dist: Single }
     └─BatchSort { order: [t.v1 ASC] }
       └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+- name: order by identifier matches aliased output
+  sql: |
+    create table t (a int, b int);
+    select a as x from t order by a;
+  batch_plan: |-
+    BatchExchange { order: [t.a ASC], dist: Single }
+    └─BatchSort { order: [t.a ASC] }
+      └─BatchScan { table: t, columns: [t.a], distribution: SomeShard }
 - name: order by ambiguous
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -168,6 +176,24 @@
     create table t (x int, y int);
     select distinct x from t order by y;
   planner_error: 'Invalid input syntax: for SELECT DISTINCT, ORDER BY expressions must appear in select list'
+- name: select distinct order by expression reuse
+  sql: |
+    create table t (x int);
+    select distinct x + 1 as y from t order by x + 1;
+  batch_plan: |-
+    BatchExchange { order: [$expr1 ASC], dist: Single }
+    └─BatchSort { order: [$expr1 ASC] }
+      └─BatchHashAgg { group_key: [$expr1], aggs: [] }
+        └─BatchExchange { order: [], dist: HashShard($expr1) }
+          └─BatchProject { exprs: [(t.x + 1:Int32) as $expr1] }
+            └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
+  stream_plan: |-
+    StreamMaterialize { columns: [y], stream_key: [y], pk_columns: [y], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [$expr1], noop_update_hint: true }
+      └─StreamHashAgg { group_key: [$expr1], aggs: [count] }
+        └─StreamExchange { dist: HashShard($expr1) }
+          └─StreamProject { exprs: [(t.x + 1:Int32) as $expr1, t._row_id] }
+            └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: No BatchSort needed, when input is already sorted
   sql: |
     create table t(v int);
