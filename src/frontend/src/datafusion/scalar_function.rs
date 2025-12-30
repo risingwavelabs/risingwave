@@ -46,7 +46,6 @@ use std::sync::Arc;
 
 use datafusion::arrow::datatypes::DataType as DFDataType;
 use datafusion::functions::{math, unicode};
-use datafusion::logical_expr::binary::BinaryTypeCoercer;
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
     BinaryExpr, Case, Cast, ColumnarValue, Operator, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl,
@@ -181,16 +180,6 @@ fn convert_binary_func(
     }
 
     let op = convert_binary_op(func_call.func_type())?;
-    let lhs_type = func_call.inputs()[0].return_type().to_datafusion_native()?;
-    let rhs_type = func_call.inputs()[1].return_type().to_datafusion_native()?;
-    if BinaryTypeCoercer::new(&lhs_type, &op, &rhs_type)
-        .get_result_type()
-        .is_err()
-    {
-        // Check if DataFusion can handle the binary operation with the given types
-        return None;
-    }
-
     let left = convert_expr(&func_call.inputs()[0], input_columns).ok()?;
     let right = convert_expr(&func_call.inputs()[1], input_columns).ok()?;
     Some(DFExpr::BinaryExpr(BinaryExpr {
@@ -355,6 +344,11 @@ fn fallback_rw_expr_builder(
     func_call: &FunctionCall,
     input_columns: &impl ColumnTrait,
 ) -> Option<DFExpr> {
+    tracing::warn!(
+        "Falling back to RwScalarFunction for function call, it may have performance impact: {:?}",
+        func_call
+    );
+
     let cast = CastExecutor::from_iter(
         (0..input_columns.len()).map(|i| input_columns.df_data_type(i)),
         (0..input_columns.len()).map(|i| input_columns.rw_data_type(i)),

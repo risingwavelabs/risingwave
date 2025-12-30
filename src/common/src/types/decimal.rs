@@ -441,6 +441,7 @@ impl Sub for Decimal {
 }
 
 impl Decimal {
+    const MAX_I128_REPR: i128 = 0x0000_0000_FFFF_FFFF_FFFF_FFFF_FFFF_FFFF;
     pub const MAX_PRECISION: u8 = 28;
 
     pub fn scale(&self) -> Option<i32> {
@@ -547,6 +548,27 @@ impl Decimal {
 
     pub fn from_i128_with_scale(num: i128, scale: u32) -> Self {
         Decimal::Normalized(RustDecimal::from_i128_with_scale(num, scale))
+    }
+
+    /// Truncate the given `num` and `scale` to fit into `Decimal`, return `None` if it cannot be
+    /// represented even after truncation.
+    pub fn truncated_i128_and_scale(mut num: i128, mut scale: u32) -> Option<Self> {
+        if num.abs() > Self::MAX_I128_REPR {
+            let diff_scale = scale - ((num.abs().ilog10() + 1) - Self::MAX_PRECISION as u32);
+            if scale < diff_scale {
+                return None;
+            }
+            num /= 10i128.pow(diff_scale);
+            scale -= diff_scale;
+        }
+        if scale > Self::MAX_PRECISION as u32 {
+            let diff_scale = scale - Self::MAX_PRECISION as u32;
+            num /= 10i128.pow(diff_scale);
+            scale = Self::MAX_PRECISION as u32;
+        }
+        Some(Decimal::Normalized(
+            RustDecimal::try_from_i128_with_scale(num, scale).ok()?,
+        ))
     }
 
     #[must_use]
