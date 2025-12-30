@@ -500,8 +500,8 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
                                             Mutation::Throttle(fragment_to_apply) => {
-                                                if let Some(new_rate_limit) =
-                                                    fragment_to_apply.get(&self.actor_ctx.fragment_id)
+                                                if let Some(new_rate_limit) = fragment_to_apply
+                                                    .get(&self.actor_ctx.fragment_id)
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     tracing::debug!(

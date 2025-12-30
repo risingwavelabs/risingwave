@@ -626,8 +626,7 @@ impl MetadataManager {
         fragment_id: FragmentId,
         rate_limit: Option<u32>,
     ) -> MetaResult<()> {
-        self
-            .catalog_controller
+        self.catalog_controller
             .update_fragment_rate_limit_by_fragment_id(fragment_id as _, rate_limit)
             .await
     }

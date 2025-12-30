@@ -31,7 +31,8 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, StopMutation};
+use risingwave_pb::stream_plan::throttle_mutation::PbRateLimit;
+use risingwave_pb::stream_plan::{AddMutation, StopMutation, ThrottleMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetPartialGraphResponse;
 use status::CreatingStreamingJobStatus;
@@ -184,6 +185,7 @@ impl CreatingStreamingJobControl {
             initial_barrier_info,
             Some(actors_to_create),
             Some(initial_mutation),
+            vec![], /* notifiers of creating snapshot backfill is on the database checkpoint control */
         )?;
 
         assert!(pending_non_checkpoint_barriers.is_empty());
@@ -482,6 +484,7 @@ impl CreatingStreamingJobControl {
             first_barrier_info,
             Some(new_actors),
             Some(initial_mutation),
+            vec![], // no notifiers in recovery
         )?;
         Ok(Self {
             database_id,
@@ -573,6 +576,7 @@ impl CreatingStreamingJobControl {
         barrier_info: BarrierInfo,
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
+        mut notifiers: Vec<Notifier>,
     ) -> MetaResult<()> {
         let node_to_collect = control_stream_manager.inject_barrier(
             database_id,
@@ -583,10 +587,12 @@ impl CreatingStreamingJobControl {
             state_table_ids.into_iter().flatten().copied(),
             new_actors,
         )?;
+        notifiers.iter_mut().for_each(|n| n.notify_started());
         barrier_control.enqueue_epoch(
             barrier_info.prev_epoch(),
             node_to_collect,
             barrier_info.kind.clone(),
+            notifiers,
         );
         Ok(())
     }
@@ -620,14 +626,17 @@ impl CreatingStreamingJobControl {
                     .collect(),
                 dropped_sink_fragments: vec![], // not related to sink-into-table
             })),
+            vec![], // no notifiers when start consuming upstream
         )?;
         Ok(info)
     }
 
+    #[expect(clippy::type_complexity)]
     pub(super) fn on_new_upstream_barrier(
         &mut self,
         control_stream_manager: &mut ControlStreamManager,
         barrier_info: &BarrierInfo,
+        mut throttle: Option<(&HashMap<FragmentId, Option<u32>>, Vec<Notifier>)>,
     ) -> MetaResult<()> {
         let progress_epoch =
             if let Some(max_committed_epoch) = self.barrier_control.max_committed_epoch() {
@@ -644,6 +653,22 @@ impl CreatingStreamingJobControl {
         );
         {
             for (barrier_to_inject, mutation) in self.status.on_new_upstream_epoch(barrier_info) {
+                let mut notifiers = vec![];
+                let mutation = mutation.or_else(|| {
+                    if let Some((throttle, new_notifiers)) = throttle.take() {
+                        notifiers.extend(new_notifiers);
+                        Some(Mutation::Throttle(ThrottleMutation {
+                            fragment_throttle: throttle
+                                .iter()
+                                .map(|(fragment_id, limit)| {
+                                    (*fragment_id, PbRateLimit { rate_limit: *limit })
+                                })
+                                .collect(),
+                        }))
+                    } else {
+                        None
+                    }
+                });
                 Self::inject_barrier(
                     self.database_id,
                     self.job_id,
@@ -654,6 +679,7 @@ impl CreatingStreamingJobControl {
                     barrier_to_inject,
                     None,
                     mutation,
+                    notifiers,
                 )?;
             }
         }
