@@ -159,9 +159,9 @@ impl DmlExecutor {
                             match mutation {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
-                                Mutation::Throttle(actor_to_apply) => {
+                                Mutation::Throttle(fragment_to_apply) => {
                                     if let Some(new_rate_limit) =
-                                        actor_to_apply.get(&self.actor_ctx.id)
+                                        fragment_to_apply.get(&self.actor_ctx.fragment_id)
                                     {
                                         let new_rate_limit = (*new_rate_limit).into();
                                         let old_rate_limit =
