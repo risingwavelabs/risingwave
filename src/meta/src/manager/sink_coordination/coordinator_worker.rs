@@ -15,13 +15,11 @@
 use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::future::{Future, poll_fn};
-use std::pin::pin;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
-use futures::future::{Either, pending, select};
-use futures::pin_mut;
+use futures::future::pending;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
@@ -34,6 +32,7 @@ use risingwave_connector::sink::{
 use risingwave_meta_model::pending_sink_state::SinkState;
 use risingwave_pb::connector_service::{SinkMetadata, coordinate_request};
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
+use rw_futures_util::run_future_with_sleep_fn;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
@@ -52,17 +51,9 @@ use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
 async fn run_future_with_periodic_fn<F: Future>(
     future: F,
     interval: Duration,
-    mut f: impl FnMut(),
+    f: impl FnMut(),
 ) -> F::Output {
-    pin_mut!(future);
-    loop {
-        match select(&mut future, pin!(sleep(interval))).await {
-            Either::Left((output, _)) => {
-                break output;
-            }
-            Either::Right(_) => f(),
-        }
-    }
+    run_future_with_sleep_fn(future, || sleep(interval), f).await
 }
 
 type HandleId = usize;
