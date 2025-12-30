@@ -258,7 +258,7 @@ impl GlobalBarrierWorkerContextImpl {
         let job_extra_info = self
             .metadata_manager
             .catalog_controller
-            .get_streaming_job_extra_info(job_ids.clone())
+            .get_streaming_job_extra_info(job_ids)
             .await?;
 
         let mut upstream_targets = HashMap::new();
@@ -273,16 +273,20 @@ impl GlobalBarrierWorkerContextImpl {
                 }
             });
 
-            if has_upstream_union
-                && let Some(duplicated) =
-                    upstream_targets.insert(fragment.job_id, fragment.fragment_id)
-            {
-                warn!(
-                    job_id = %fragment.job_id,
-                    fragment_id = %fragment.fragment_id,
-                    duplicated_fragment_id = %duplicated,
-                    "multiple upstream sink union fragments found for job"
-                );
+            if has_upstream_union {
+                match upstream_targets.entry(fragment.job_id) {
+                    Entry::Vacant(entry) => {
+                        entry.insert(fragment.fragment_id);
+                    }
+                    Entry::Occupied(entry) => {
+                        warn!(
+                            job_id = %fragment.job_id,
+                            fragment_id = %fragment.fragment_id,
+                            kept_fragment_id = %entry.get(),
+                            "multiple upstream sink union fragments found for job, keeping first"
+                        );
+                    }
+                }
             }
         }
 
@@ -297,6 +301,7 @@ impl GlobalBarrierWorkerContextImpl {
             for table in tables {
                 let job_id = table.id.as_job_id();
                 let Some(target_fragment_id) = upstream_targets.get(&job_id) else {
+                    // This should not happen unless catalog changes or legacy metadata are involved.
                     tracing::debug!(
                         job_id = %job_id,
                         "upstream sink union target fragment not found for table"
@@ -483,11 +488,12 @@ impl GlobalBarrierWorkerContextImpl {
                             &recovery.upstream_infos,
                         );
                     } else {
-                        warn!(
-                            job_id = %job_id,
-                            target_fragment_id = %recovery.target_fragment_id,
-                            "target fragment not found for upstream sink recovery"
-                        );
+                        return Err(anyhow::anyhow!(
+                            "target fragment {} not found for upstream sink recovery of job {}",
+                            recovery.target_fragment_id,
+                            job_id
+                        )
+                        .into());
                     }
                 }
             }
@@ -515,7 +521,7 @@ impl GlobalBarrierWorkerContextImpl {
 
                     // Background job progress needs to be recovered.
                     tracing::info!("recovering background job progress");
-                    let background_jobs = self
+                    let initial_background_jobs = self
                         .list_background_job_progress(None)
                         .await
                         .context("recover background job progress should not fail")?;
@@ -543,7 +549,8 @@ impl GlobalBarrierWorkerContextImpl {
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
                             .await?;
 
-                    let background_streaming_jobs = background_jobs.keys().cloned().collect_vec();
+                    let background_streaming_jobs =
+                        initial_background_jobs.keys().cloned().collect_vec();
 
                     tracing::info!(
                         "background streaming jobs: {:?} total {}",
@@ -647,7 +654,7 @@ impl GlobalBarrierWorkerContextImpl {
                             Self::resolve_hummock_version_epochs(
                                 info.values().flat_map(|jobs| {
                                     jobs.iter().filter_map(|(job_id, job)| {
-                                        background_jobs
+                                        initial_background_jobs
                                             .contains_key(job_id)
                                             .then_some((*job_id, job))
                                     })
@@ -677,15 +684,16 @@ impl GlobalBarrierWorkerContextImpl {
                         )
                         .await?;
 
+                    // Refresh background job progress for the final snapshot to reflect any catalog changes.
                     let background_jobs = {
-                        let mut background_jobs = self
+                        let mut refreshed_background_jobs = self
                             .list_background_job_progress(None)
                             .await
                             .context("recover background job progress should not fail")?;
                         info.values()
                             .flatten()
                             .filter_map(|(job_id, _)| {
-                                background_jobs
+                                refreshed_background_jobs
                                     .remove(job_id)
                                     .map(|definition| (*job_id, definition))
                             })
@@ -820,13 +828,26 @@ impl GlobalBarrierWorkerContextImpl {
             return Ok(None);
         };
 
+        let missing_background_jobs = background_jobs
+            .keys()
+            .filter(|job_id| !info.contains_key(job_id))
+            .copied()
+            .collect_vec();
+        if !missing_background_jobs.is_empty() {
+            warn!(
+                database_id = %database_id,
+                missing_job_ids = ?missing_background_jobs,
+                "background jobs missing in rendered info"
+            );
+        }
+
         let (state_table_committed_epochs, state_table_log_epochs) = self
             .hummock_manager
             .on_current_version(|version| {
                 Self::resolve_hummock_version_epochs(
                     background_jobs
                         .keys()
-                        .map(|job_id| (*job_id, &info[job_id])),
+                        .filter_map(|job_id| info.get(job_id).map(|job| (*job_id, job))),
                     version,
                 )
             })
@@ -896,7 +917,7 @@ impl GlobalBarrierWorkerContextImpl {
                     stream_actors.insert(
                         *actor_id,
                         StreamActor {
-                            actor_id: *actor_id as _,
+                            actor_id: *actor_id,
                             fragment_id: *fragment_id,
                             vnode_bitmap: vnode_bitmap.clone(),
                             mview_definition: job_definition.clone(),
