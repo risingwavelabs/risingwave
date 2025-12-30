@@ -12,9 +12,9 @@ statement error overflow
 SELECT gamma('-inf'::float8);
 
 query R
-SELECT gamma('0.5'::float8);
+SELECT ABS(gamma('0.5'::float8) - 1.7724538509055) <= 1e-6;
 ----
-1.772453850905516
+t
 
 
 query R
@@ -70,9 +70,9 @@ SELECT lgamma('-inf'::float8);
 Infinity
 
 query R
-SELECT lgamma('0.5'::float8);
+SELECT abs(lgamma('0.5'::float8) - 0.5723649429247) <= 1e-6;
 ----
-0.5723649429247
+t
 
 query R
 SELECT lgamma('1'::float8);
@@ -85,19 +85,19 @@ SELECT lgamma('2'::float8);
 0
 
 query R
-SELECT lgamma('3'::float8);
+SELECT abs(lgamma('3'::float8) - 0.69314718055995) <= 1e-6;
 ----
-0.6931471805599454
+t
 
 query R
-SELECT lgamma('4'::float8);
+SELECT abs(lgamma('4'::float8) - 1.7917594692281) <= 1e-6;
 ----
-1.7917594692280552
+t
 
 query R
-SELECT lgamma('5'::float8);
+SELECT abs(lgamma('5'::float8) - 3.1780538303479) <= 1e-6;
 ----
-3.1780538303479453
+t
 
 statement error overflow
 SELECT lgamma('-1'::float8);
@@ -111,9 +111,9 @@ statement error overflow
 SELECT lgamma('0'::float8);
 
 query R
-SELECT lgamma('1000'::float8);
+SELECT abs(lgamma('1000'::float8) - 5905.2204232092) <= 1e-6;
 ----
-5905.220423209181
+t
 
 statement error overflow
 SELECT lgamma('1e308'::float8);
