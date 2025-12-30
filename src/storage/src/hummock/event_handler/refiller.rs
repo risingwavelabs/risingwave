@@ -393,11 +393,12 @@ impl CacheRefillTask {
             .filter(|info| {
                 // Skip if the table ids don't overlap.
                 context.config.meta_refill_table_ids.is_empty()
-                    || context
-                        .config
-                        .meta_refill_table_ids
-                        .iter()
-                        .any(|id| info.table_ids.contains(id))
+                    || info.table_ids.iter().any(|id| {
+                        context
+                            .config
+                            .meta_refill_table_ids
+                            .contains(&id.as_raw_id())
+                    })
             })
             .map(|info| async {
                 let mut stats = StoreLocalStatistic::default();
@@ -656,7 +657,7 @@ impl CacheRefillTask {
                 && !context
                     .config
                     .data_refill_table_ids
-                    .contains(&block_meta.table_id().table_id())
+                    .contains(&block_meta.table_id().as_raw_id())
             {
                 continue;
             }
