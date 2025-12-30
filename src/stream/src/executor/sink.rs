@@ -38,6 +38,7 @@ use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam,
     SinkWriterParam,
 };
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_plan::stream_node::StreamKind;
 use thiserror_ext::AsReport;
 use tokio::select;
@@ -379,6 +380,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         processed_input,
                         log_writer.monitored(log_writer_metrics),
                         actor_id,
+                        fragment_id,
                         sink_id,
                         rate_limit_tx,
                         rebuild_sink_tx,
@@ -417,6 +419,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: impl MessageStream,
         mut log_writer: W,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         sink_id: SinkId,
         rate_limit_tx: UnboundedSender<RateLimit>,
         rebuild_sink_tx: UnboundedSender<RebuildSinkMessage>,
@@ -486,8 +489,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 log_writer.resume()?;
                                 is_paused = false;
                             }
-                            Mutation::Throttle(actor_to_apply) => {
-                                if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
+                            Mutation::Throttle(fragment_to_apply) => {
+                                if let Some(new_rate_limit) = fragment_to_apply.get(&fragment_id) {
                                     tracing::info!(
                                         rate_limit = new_rate_limit,
                                         "received sink rate limit on actor {actor_id}"

@@ -465,8 +465,8 @@ where
                                 backfill_paused = false;
                             }
                         }
-                        Mutation::Throttle(actor_to_apply) => {
-                            let new_rate_limit_entry = actor_to_apply.get(&self.actor_id);
+                        Mutation::Throttle(fragment_to_apply) => {
+                            let new_rate_limit_entry = fragment_to_apply.get(&self.fragment_id);
                             if let Some(new_rate_limit) = new_rate_limit_entry {
                                 let new_rate_limit = (*new_rate_limit).into();
                                 let old_rate_limit = self.rate_limiter.update(new_rate_limit);

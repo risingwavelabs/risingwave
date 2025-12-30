@@ -426,7 +426,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                 // 1. Handle rate limit 0. Currently, to resume the process, the actor must be rebuilt.
                                                 // 2. Apply new rate limit immediately.
                                                 if let Some(new_rate_limit) =
-                                                    some.get(&self.actor_ctx.id)
+                                                    some.get(&self.actor_ctx.fragment_id)
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     // The new rate limit will take effect since next split.
