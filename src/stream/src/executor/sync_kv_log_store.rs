@@ -379,12 +379,12 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     }
 }
 
-struct FlushedChunkInfo {
-    epoch: u64,
-    start_seq_id: SeqId,
-    end_seq_id: SeqId,
-    flush_info: FlushInfo,
-    vnode_bitmap: Bitmap,
+pub(crate) struct FlushedChunkInfo {
+    pub epoch: u64,
+    pub start_seq_id: SeqId,
+    pub end_seq_id: SeqId,
+    pub flush_info: FlushInfo,
+    pub vnode_bitmap: Bitmap,
 }
 
 enum WriteFuture<S: LocalStateStore> {

@@ -172,6 +172,7 @@ pub use row_merge::RowMergeExecutor;
 pub use sink::SinkExecutor;
 pub use sync_kv_log_store::SyncedKvLogStoreExecutor;
 pub use sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
+pub(crate) use sync_kv_log_store::FlushedChunkInfo;
 pub use temporal_join::TemporalJoinExecutor;
 pub use top_n::{
     AppendOnlyGroupTopNExecutor, AppendOnlyTopNExecutor, GroupTopNExecutor, TopNExecutor,
