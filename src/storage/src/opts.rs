@@ -108,6 +108,7 @@ pub struct StorageOpts {
     pub cache_refill_threshold: f64,
     pub cache_refill_skip_recent_filter: bool,
     pub cache_refill_data_refill_table_ids: Vec<u32>,
+    pub cache_refill_meta_refill_table_ids: Vec<u32>,
 
     pub meta_file_cache_dir: String,
     pub meta_file_cache_capacity_mb: usize,
@@ -283,6 +284,11 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .storage
                 .cache_refill
                 .data_refill_table_ids
+                .clone(),
+            cache_refill_meta_refill_table_ids: c
+                .storage
+                .cache_refill
+                .meta_refill_table_ids
                 .clone(),
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,

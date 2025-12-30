@@ -203,6 +203,8 @@ pub struct CacheRefillConfig {
     pub skip_recent_filter: bool,
 
     pub data_refill_table_ids: HashSet<u32>,
+
+    pub meta_refill_table_ids: HashSet<u32>,
 }
 
 impl CacheRefillConfig {
@@ -231,6 +233,13 @@ impl CacheRefillConfig {
             }
         };
 
+        // The meta refill doesn't require ElasticDiskCache feature.
+        let meta_refill_table_ids = options
+            .cache_refill_meta_refill_table_ids
+            .iter()
+            .copied()
+            .collect();
+
         Self {
             timeout: Duration::from_millis(options.cache_refill_timeout_ms),
             data_refill_levels,
@@ -239,6 +248,7 @@ impl CacheRefillConfig {
             threshold: options.cache_refill_threshold,
             skip_recent_filter: options.cache_refill_skip_recent_filter,
             data_refill_table_ids,
+            meta_refill_table_ids,
         }
     }
 }
@@ -380,6 +390,14 @@ impl CacheRefillTask {
         let tasks = delta
             .insert_sst_infos
             .iter()
+            .filter(|info| {
+                // Skip if the table ids don't overlap.
+                context.config.meta_refill_table_ids.is_empty()
+                    || info
+                        .table_ids
+                        .iter()
+                        .any(|id| context.config.meta_refill_table_ids.contains(id))
+            })
             .map(|info| async {
                 let mut stats = StoreLocalStatistic::default();
                 GLOBAL_CACHE_REFILL_METRICS.meta_refill_attempts_total.inc();
