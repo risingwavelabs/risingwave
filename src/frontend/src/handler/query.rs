@@ -330,7 +330,7 @@ fn gen_batch_query_plan(
     {
         use crate::optimizer::LogicalIcebergScanExt;
 
-        if session.config().enable_datafusion_engine() && logical.plan.contains_iceberg_scan() {
+        if session.config().enable_datafusion_engine() && logical.plan.all_iceberg_scan() {
             let optimized_logical = logical.gen_optimized_logical_plan_for_datafusion_batch()?;
 
             let plan = optimized_logical.gen_datafusion_logical_plan()?;

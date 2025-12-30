@@ -16,7 +16,7 @@ use crate::optimizer::plan_node::LogicalIcebergScan;
 use crate::optimizer::plan_visitor::{LogicalPlanVisitor, Merge};
 use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 
-/// Visitor to check if Logical Plan contains any `LogicalIcebergScan` node.
+/// Visitor to check if all scans in the plan are Iceberg scans.
 #[derive(Debug, Clone, Copy)]
 struct IcebergScanDetector;
 
@@ -42,8 +42,8 @@ impl LogicalPlanVisitor for IcebergScanDetector {
 
 #[easy_ext::ext(LogicalIcebergScanExt)]
 pub impl LogicalPlanRef {
-    /// Returns `true` if the plan contains any `LogicalIcebergScan` node.
-    fn contains_iceberg_scan(&self) -> bool {
+    /// Returns `true` if all scans in the plan are Iceberg scans.
+    fn all_iceberg_scan(&self) -> bool {
         IcebergScanDetector.visit(self.clone())
     }
 }
