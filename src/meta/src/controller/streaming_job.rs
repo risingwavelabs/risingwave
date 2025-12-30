@@ -56,7 +56,9 @@ use risingwave_pb::plan_common::source_refresh_mode::{
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode};
+use risingwave_pb::stream_plan::{
+    PbSinkLogStoreType, PbStreamNode, StreamFragmentGraph as StreamFragmentGraphProto,
+};
 use risingwave_pb::user::PbUserInfo;
 use risingwave_sqlparser::ast::{Engine, SqlOption, Statement};
 use risingwave_sqlparser::parser::{Parser, ParserError};
@@ -142,6 +144,7 @@ impl CatalogController {
         streaming_job: &mut StreamingJob,
         ctx: &StreamContext,
         parallelism: &Option<Parallelism>,
+        fragment_graph: &StreamFragmentGraphProto,
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
@@ -361,7 +364,7 @@ impl CatalogController {
         // collect dependent secrets.
         dependencies.extend(
             streaming_job
-                .dependent_secret_ids()?
+                .dependent_secret_ids(fragment_graph)?
                 .into_iter()
                 .map(|id| id.as_object_id()),
         );

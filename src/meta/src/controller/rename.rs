@@ -280,7 +280,7 @@ impl QueryRewriter<'_> {
                     }
                 }
                 // No need to visit secret
-                FunctionArgExpr::SecretRef(_) => {},
+                FunctionArgExpr::SecretRef(_) => {}
             },
         }
     }
@@ -490,7 +490,7 @@ impl IndexItemRewriter {
             RexNode::Udf(udf) => self.rewrite_udf(udf),
             RexNode::FuncCall(function_call) => self.rewrite_function_call(function_call),
             RexNode::Now(_) => {}
-            RexNode::Secret(_) => {},
+            RexNode::Secret(_) => {}
         }
     }
 

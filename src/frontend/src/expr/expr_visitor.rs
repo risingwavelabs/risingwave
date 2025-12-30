@@ -17,8 +17,7 @@ use risingwave_common::util::recursive::{Recurse, tracker};
 use super::{
     AggCall, CorrelatedInputRef, EXPR_DEPTH_THRESHOLD, EXPR_TOO_DEEP_NOTICE, ExprImpl,
     FunctionCall, FunctionCallWithLambda, InputRef, Literal, Now, Parameter, SecretRefExpr,
-    Subquery,
-    TableFunction, UserDefinedFunction, WindowFunction,
+    Subquery, TableFunction, UserDefinedFunction, WindowFunction,
 };
 use crate::session::current::notice_to_user;
 
@@ -52,7 +51,7 @@ pub fn default_visit_expr<V: ExprVisitor + ?Sized>(visitor: &mut V, expr: &ExprI
             ExprImpl::UserDefinedFunction(inner) => visitor.visit_user_defined_function(inner),
             ExprImpl::Parameter(inner) => visitor.visit_parameter(inner),
             ExprImpl::Now(inner) => visitor.visit_now(inner),
-                    ExprImpl::SecretRefExpr(inner) => visitor.visit_secret_ref(inner),
+            ExprImpl::SecretRefExpr(inner) => visitor.visit_secret_ref(inner),
         }
     })
 }

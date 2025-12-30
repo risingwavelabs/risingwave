@@ -975,9 +975,9 @@ impl ExprImpl {
                 )?))
             }
             RexNode::Now(_) => Self::Now(Box::new(Now {})),
-            RexNode::Secret(secret_ref) => Self::SecretRefExpr(Box::new(
-                SecretRefExpr::from_expr_proto(secret_ref)?,
-            )),
+            RexNode::Secret(secret_ref) => {
+                Self::SecretRefExpr(Box::new(SecretRefExpr::from_expr_proto(secret_ref)?))
+            }
         })
     }
 }
@@ -1013,8 +1013,7 @@ impl std::fmt::Debug for ExprImpl {
                 }
                 Self::Parameter(arg0) => f.debug_tuple("Parameter").field(arg0).finish(),
                 Self::Now(_) => f.debug_tuple("Now").finish(),
-                Self::SecretRefExpr(_) =>
-                    f.debug_tuple("SecretRefExpr").finish()
+                Self::SecretRefExpr(_) => f.debug_tuple("SecretRefExpr").finish(),
             };
         }
         match self {

@@ -311,9 +311,7 @@ impl Expr for FunctionCall {
         Ok(ExprNode {
             function_type: self.func_type().into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children,
-            })),
+            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
         })
     }
 }

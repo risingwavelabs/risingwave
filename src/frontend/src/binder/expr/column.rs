@@ -15,7 +15,7 @@
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
-use crate::binder::{Binder, Clause, COLUMN_GROUP_PREFIX};
+use crate::binder::{Binder, COLUMN_GROUP_PREFIX, Clause};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
