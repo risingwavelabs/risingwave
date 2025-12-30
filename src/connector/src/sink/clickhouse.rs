@@ -24,7 +24,7 @@ use phf::{Set, phf_set};
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, Decimal, ScalarRefImpl, Serial};
+use risingwave_common::types::{DataType, Decimal, ScalarRef, ScalarRefImpl, Serial};
 use serde::ser::{SerializeSeq, SerializeStruct};
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
@@ -947,7 +947,8 @@ impl ClickHouseFieldWithNull {
             ScalarRefImpl::Utf8(v) => ClickHouseField::String(v.to_owned()),
             ScalarRefImpl::Bool(v) => ClickHouseField::Bool(v),
             ScalarRefImpl::Decimal(d) => {
-                let d = if let Decimal::Normalized(d) = d {
+                let owned = d.to_owned_scalar();
+                let d = if let Decimal::Normalized(d) = owned {
                     let scale =
                         clickhouse_schema_feature.accuracy_decimal.1 as i32 - d.scale() as i32;
                     if scale < 0 {

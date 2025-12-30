@@ -24,7 +24,7 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, JsonbVal, ScalarRefImpl, ToText};
+use risingwave_common::types::{DataType, DatumRef, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{Map, Value, json};
 use thiserror_ext::AsReport;
@@ -233,11 +233,12 @@ fn datum_to_json_object(
             json!(v)
         }
         // Doris/Starrocks will convert out-of-bounds decimal and -INF, INF, NAN to NULL
-        (DataType::Decimal, ScalarRefImpl::Decimal(mut v)) => match &config.custom_json_type {
+        (DataType::Decimal, ScalarRefImpl::Decimal(v)) => match &config.custom_json_type {
             CustomJsonType::Doris(map) => {
                 let s = map.get(&field.name).unwrap();
-                v.rescale(*s as u32);
-                json!(v.to_text())
+                let mut owned = v.to_owned_scalar();
+                owned.rescale(*s as u32);
+                json!(owned.as_scalar_ref().to_text())
             }
             CustomJsonType::Es | CustomJsonType::None | CustomJsonType::StarRocks => {
                 json!(v.to_text())

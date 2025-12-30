@@ -14,7 +14,7 @@
 
 use chrono_tz::Tz;
 use num_traits::One;
-use risingwave_common::types::{CheckedAdd, Decimal, Interval, IsNegative, Timestamptz};
+use risingwave_common::types::{CheckedAdd, DeciRef, Decimal, Interval, IsNegative, ScalarRef, Timestamptz};
 use risingwave_expr::expr_context::TIME_ZONE;
 use risingwave_expr::{ExprError, Result, capture_context, function};
 
@@ -28,9 +28,11 @@ where
 }
 
 #[function("generate_series(decimal, decimal) -> setof decimal")]
-fn generate_series_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterator<Item = Decimal>>
+fn generate_series_decimal(start: DeciRef<'_>, stop: DeciRef<'_>) -> Result<impl Iterator<Item = Decimal>>
 where
 {
+    let start = start.to_owned_scalar();
+    let stop = stop.to_owned_scalar();
     validate_range_parameters(start, stop, Decimal::one())?;
     range_generic::<Decimal, Decimal, _, true>(start, stop, Decimal::one(), ())
 }
@@ -48,10 +50,13 @@ where
 
 #[function("generate_series(decimal, decimal, decimal) -> setof decimal")]
 fn generate_series_step_decimal(
-    start: Decimal,
-    stop: Decimal,
-    step: Decimal,
+    start: DeciRef<'_>,
+    stop: DeciRef<'_>,
+    step: DeciRef<'_>,
 ) -> Result<impl Iterator<Item = Decimal>> {
+    let start = start.to_owned_scalar();
+    let stop = stop.to_owned_scalar();
+    let step = step.to_owned_scalar();
     validate_range_parameters(start, stop, step)?;
     range_generic::<_, _, _, true>(start, stop, step, ())
 }
@@ -97,9 +102,11 @@ where
 }
 
 #[function("range(decimal, decimal) -> setof decimal")]
-fn range_decimal(start: Decimal, stop: Decimal) -> Result<impl Iterator<Item = Decimal>>
+fn range_decimal(start: DeciRef<'_>, stop: DeciRef<'_>) -> Result<impl Iterator<Item = Decimal>>
 where
 {
+    let start = start.to_owned_scalar();
+    let stop = stop.to_owned_scalar();
     validate_range_parameters(start, stop, Decimal::one())?;
     range_generic::<Decimal, Decimal, _, false>(start, stop, Decimal::one(), ())
 }
@@ -117,10 +124,13 @@ where
 
 #[function("range(decimal, decimal, decimal) -> setof decimal")]
 fn range_step_decimal(
-    start: Decimal,
-    stop: Decimal,
-    step: Decimal,
+    start: DeciRef<'_>,
+    stop: DeciRef<'_>,
+    step: DeciRef<'_>,
 ) -> Result<impl Iterator<Item = Decimal>> {
+    let start = start.to_owned_scalar();
+    let stop = stop.to_owned_scalar();
+    let step = step.to_owned_scalar();
     validate_range_parameters(start, stop, step)?;
     range_generic::<_, _, _, false>(start, stop, step, ())
 }

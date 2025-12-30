@@ -17,7 +17,7 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use bytes::BytesMut;
 use pg_bigdecimal::PgNumeric;
-use risingwave_common::types::{DataType, Decimal, Int256, ListValue, ScalarImpl, ScalarRefImpl};
+use risingwave_common::types::{DataType, Decimal, Int256, ListValue, ScalarImpl, ScalarRef, ScalarRefImpl};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{FromSql, IsNull, Kind, ToSql, Type, to_sql_checked};
 
@@ -185,7 +185,9 @@ impl ScalarAdapter {
                 for datum in list.iter() {
                     vec.push(match datum {
                         Some(ScalarRefImpl::Int256(s)) => Some(string_to_pg_numeric(&s.to_string())),
-                        Some(ScalarRefImpl::Decimal(s)) => Some(rw_numeric_to_pg_numeric(s)),
+                        Some(ScalarRefImpl::Decimal(s)) => {
+                            Some(rw_numeric_to_pg_numeric(s.to_owned_scalar()))
+                        }
                         Some(ScalarRefImpl::Utf8(s)) => Some(string_to_pg_numeric(s)),
                         None => None,
                         _ => {

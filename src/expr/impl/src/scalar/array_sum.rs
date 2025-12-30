@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::{ArrayError, ListRef};
-use risingwave_common::types::{CheckedAdd, Decimal, ScalarRefImpl};
+use risingwave_common::types::{CheckedAdd, Decimal, ScalarRef, ScalarRefImpl};
 use risingwave_expr::{ExprError, Result, function};
 
 #[function("array_sum(int2[]) -> int8")]
@@ -33,7 +33,6 @@ fn array_sum_int8(list: ListRef<'_>) -> Result<Option<Decimal>> {
 
 #[function("array_sum(float4[]) -> float4")]
 #[function("array_sum(float8[]) -> float8")]
-#[function("array_sum(decimal[]) -> decimal")]
 #[function("array_sum(interval[]) -> interval")]
 fn array_sum<T>(list: ListRef<'_>) -> Result<Option<T>>
 where
@@ -41,6 +40,24 @@ where
     T: Default + From<T> + CheckedAdd<Output = T>,
 {
     array_sum_general::<T, T>(list)
+}
+
+#[function("array_sum(decimal[]) -> decimal")]
+fn array_sum_decimal(list: ListRef<'_>) -> Result<Option<Decimal>> {
+    if list.iter().flatten().next().is_none() {
+        return Ok(None);
+    }
+    let mut sum = Decimal::default();
+    for e in list.iter().flatten() {
+        let ScalarRefImpl::Decimal(v) = e else {
+            unreachable!("array_sum_decimal only receives decimal array");
+        };
+        let owned = v.to_owned_scalar();
+        sum = sum
+            .checked_add(owned)
+            .ok_or_else(|| ExprError::NumericOutOfRange)?;
+    }
+    Ok(Some(sum))
 }
 
 fn array_sum_general<S, T>(list: ListRef<'_>) -> Result<Option<T>>

@@ -20,7 +20,7 @@ use apache_avro::types::{Record, Value};
 use risingwave_common::array::VECTOR_AS_LIST_TYPE;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ListType, ScalarRefImpl, StructType};
+use risingwave_common::types::{DataType, DatumRef, ListType, ScalarRef, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_connector_codec::decoder::utils::rust_decimal_to_scaled_bigint;
 use thiserror_ext::AsReport;
@@ -569,7 +569,8 @@ fn on_field<D: MaybeData>(
         DataType::Decimal => match inner {
             AvroSchema::Decimal(decimal_schema) => {
                 maybe.on_base(|s| {
-                    match s.into_decimal() {
+                    let owned = s.into_decimal().to_owned_scalar();
+                    match owned {
                         risingwave_common::types::Decimal::Normalized(decimal) => {
                             // convert to bigint with scale
                             // rescale the rust_decimal to the scale of the avro decimal

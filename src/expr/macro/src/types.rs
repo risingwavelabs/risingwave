@@ -23,7 +23,7 @@ const TYPE_MATRIX: &str = "
     int256      Int256      Int256Array         Int256          Int256Ref<'_>       _
     float4      Float32     F32Array            F32             F32                 y
     float8      Float64     F64Array            F64             F64                 y
-    decimal     Decimal     DecimalArray        Decimal         Decimal             y
+    decimal     Decimal     DecimalArray        Decimal         DeciRef<'_>         y
     serial      Serial      SerialArray         Serial          Serial              y
     date        Date        DateArray           Date            Date                y
     time        Time        TimeArray           Time            Time                y

@@ -17,13 +17,12 @@ use std::fmt::Debug;
 use chrono::{Duration, NaiveDateTime};
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use risingwave_common::types::{
-    CheckedAdd, Date, Decimal, F64, FloatExt, Interval, IsNegative, Time, Timestamp,
+    CheckedAdd, Date, DeciRef, Decimal, F64, FloatExt, Interval, IsNegative, ScalarRef, Time, Timestamp,
 };
 use risingwave_expr::{ExprError, Result, function};
 use rust_decimal::MathematicalOps;
 
 #[function("add(*int, *int) -> auto")]
-#[function("add(decimal, decimal) -> auto")]
 #[function("add(*float, *float) -> auto")]
 #[function("add(interval, interval) -> interval")]
 #[function("add(int256, int256) -> int256")]
@@ -38,8 +37,14 @@ where
     })
 }
 
+#[function("add(decimal, decimal) -> auto")]
+pub fn decimal_add(l: DeciRef<'_>, r: DeciRef<'_>) -> Result<Decimal> {
+    let l = l.to_owned_scalar();
+    let r = r.to_owned_scalar();
+    l.checked_add(r).ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("subtract(*int, *int) -> auto")]
-#[function("subtract(decimal, decimal) -> auto")]
 #[function("subtract(*float, *float) -> auto")]
 #[function("subtract(interval, interval) -> interval")]
 #[function("subtract(int256, int256) -> int256")]
@@ -54,8 +59,14 @@ where
     })
 }
 
+#[function("subtract(decimal, decimal) -> auto")]
+pub fn decimal_sub(l: DeciRef<'_>, r: DeciRef<'_>) -> Result<Decimal> {
+    let l = l.to_owned_scalar();
+    let r = r.to_owned_scalar();
+    l.checked_sub(&r).ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("multiply(*int, *int) -> auto")]
-#[function("multiply(decimal, decimal) -> auto")]
 #[function("multiply(*float, *float) -> auto")]
 #[function("multiply(int256, int256) -> int256")]
 pub fn general_mul<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
@@ -69,8 +80,14 @@ where
     })
 }
 
+#[function("multiply(decimal, decimal) -> auto")]
+pub fn decimal_mul(l: DeciRef<'_>, r: DeciRef<'_>) -> Result<Decimal> {
+    let l = l.to_owned_scalar();
+    let r = r.to_owned_scalar();
+    l.checked_mul(&r).ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("divide(*int, *int) -> auto")]
-#[function("divide(decimal, decimal) -> auto")]
 #[function("divide(*float, *float) -> auto")]
 #[function("divide(int256, int256) -> int256")]
 #[function("divide(int256, float8) -> float8")]
@@ -92,8 +109,20 @@ where
     })
 }
 
+#[function("divide(decimal, decimal) -> auto")]
+pub fn decimal_div(l: DeciRef<'_>, r: DeciRef<'_>) -> Result<Decimal> {
+    let l = l.to_owned_scalar();
+    let r = r.to_owned_scalar();
+    l.checked_div(&r).ok_or_else(|| {
+        if r.is_zero() {
+            ExprError::DivisionByZero
+        } else {
+            ExprError::NumericOutOfRange
+        }
+    })
+}
+
 #[function("modulus(*int, *int) -> auto")]
-#[function("modulus(decimal, decimal) -> auto")]
 #[function("modulus(int256, int256) -> int256")]
 pub fn general_mod<T1, T2, T3>(l: T1, r: T2) -> Result<T3>
 where
@@ -106,10 +135,22 @@ where
     })
 }
 
+#[function("modulus(decimal, decimal) -> auto")]
+pub fn decimal_mod(l: DeciRef<'_>, r: DeciRef<'_>) -> Result<Decimal> {
+    let l = l.to_owned_scalar();
+    let r = r.to_owned_scalar();
+    l.checked_rem(&r).ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("neg(*int) -> auto")]
 #[function("neg(*float) -> auto")]
-#[function("neg(decimal) -> decimal")]
 pub fn general_neg<T1: CheckedNeg>(expr: T1) -> Result<T1> {
+    expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("neg(decimal) -> decimal")]
+pub fn decimal_neg(expr: DeciRef<'_>) -> Result<Decimal> {
+    let expr = expr.to_owned_scalar();
     expr.checked_neg().ok_or(ExprError::NumericOutOfRange)
 }
 
@@ -153,7 +194,8 @@ where
 }
 
 #[function("abs(decimal) -> decimal")]
-pub fn decimal_abs(decimal: Decimal) -> Decimal {
+pub fn decimal_abs(decimal: DeciRef<'_>) -> Decimal {
+    let decimal = decimal.to_owned_scalar();
     Decimal::abs(&decimal)
 }
 
@@ -190,9 +232,11 @@ pub fn pow_f64(l: F64, r: F64) -> Result<F64> {
 }
 
 #[function("pow(decimal, decimal) -> decimal")]
-pub fn pow_decimal(l: Decimal, r: Decimal) -> Result<Decimal> {
+pub fn pow_decimal(l: DeciRef<'_>, r: DeciRef<'_>) -> Result<Decimal> {
     use risingwave_common::types::DecimalPowError as PowError;
 
+    let l = l.to_owned_scalar();
+    let r = r.to_owned_scalar();
     l.checked_powd(&r).map_err(|e| match e {
         PowError::ZeroNegative => err_pow_zero_negative(),
         PowError::NegativeFract => err_pow_negative_fract(),
@@ -339,7 +383,6 @@ pub fn time_interval_add(l: Time, r: Interval) -> Result<Time> {
 }
 
 #[function("divide(interval, *int) -> interval")]
-#[function("divide(interval, decimal) -> interval")]
 #[function("divide(interval, *float) -> interval")]
 pub fn interval_float_div<T2>(l: Interval, r: T2) -> Result<Interval>
 where
@@ -348,9 +391,14 @@ where
     l.div_float(r).ok_or(ExprError::NumericOutOfRange)
 }
 
+#[function("divide(interval, decimal) -> interval")]
+pub fn interval_decimal_div(l: Interval, r: DeciRef<'_>) -> Result<Interval> {
+    let r_owned = r.to_owned_scalar();
+    l.div_float(r_owned).ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("multiply(interval, float4) -> interval")]
 #[function("multiply(interval, float8) -> interval")]
-#[function("multiply(interval, decimal) -> interval")]
 pub fn interval_float_mul<T2>(l: Interval, r: T2) -> Result<Interval>
 where
     T2: TryInto<F64> + Debug,
@@ -358,14 +406,25 @@ where
     l.mul_float(r).ok_or(ExprError::NumericOutOfRange)
 }
 
+#[function("multiply(interval, decimal) -> interval")]
+pub fn interval_decimal_mul(l: Interval, r: DeciRef<'_>) -> Result<Interval> {
+    let r_owned = r.to_owned_scalar();
+    l.mul_float(r_owned).ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("multiply(float4, interval) -> interval")]
 #[function("multiply(float8, interval) -> interval")]
-#[function("multiply(decimal, interval) -> interval")]
 pub fn float_interval_mul<T1>(l: T1, r: Interval) -> Result<Interval>
 where
     T1: TryInto<F64> + Debug,
 {
     r.mul_float(l).ok_or(ExprError::NumericOutOfRange)
+}
+
+#[function("multiply(decimal, interval) -> interval")]
+pub fn decimal_interval_mul(l: DeciRef<'_>, r: Interval) -> Result<Interval> {
+    let l_owned = l.to_owned_scalar();
+    r.mul_float(l_owned).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("sqrt(float8) -> float8")]
@@ -384,7 +443,8 @@ pub fn sqrt_f64(expr: F64) -> Result<F64> {
 }
 
 #[function("sqrt(decimal) -> decimal")]
-pub fn sqrt_decimal(expr: Decimal) -> Result<Decimal> {
+pub fn sqrt_decimal(expr: DeciRef<'_>) -> Result<Decimal> {
+    let expr = expr.to_owned_scalar();
     match expr {
         Decimal::NaN | Decimal::PositiveInf => Ok(expr),
         Decimal::Normalized(value) => match value.sqrt() {
@@ -417,23 +477,23 @@ pub fn sign_f64(input: F64) -> F64 {
 }
 
 #[function("sign(decimal) -> decimal")]
-pub fn sign_dec(input: Decimal) -> Decimal {
-    input.sign()
+pub fn sign_dec(input: DeciRef<'_>) -> Decimal {
+    input.to_owned_scalar().sign()
 }
 
 #[function("scale(decimal) -> int4")]
-pub fn decimal_scale(d: Decimal) -> Option<i32> {
-    d.scale()
+pub fn decimal_scale(d: DeciRef<'_>) -> Option<i32> {
+    d.to_owned_scalar().scale()
 }
 
 #[function("min_scale(decimal) -> int4")]
-pub fn decimal_min_scale(d: Decimal) -> Option<i32> {
-    d.normalize().scale()
+pub fn decimal_min_scale(d: DeciRef<'_>) -> Option<i32> {
+    d.to_owned_scalar().normalize().scale()
 }
 
 #[function("trim_scale(decimal) -> decimal")]
-pub fn decimal_trim_scale(d: Decimal) -> Decimal {
-    d.normalize()
+pub fn decimal_trim_scale(d: DeciRef<'_>) -> Decimal {
+    d.to_owned_scalar().normalize()
 }
 
 #[cfg(test)]
@@ -547,20 +607,20 @@ mod tests {
             F64::from(f64::INFINITY)
         );
         assert!(sqrt_f64(F64::from(f64::NEG_INFINITY)).is_err());
-        assert_eq!(sqrt_decimal(dec("25.0")).unwrap(), dec("5.0"));
+        assert_eq!(sqrt_decimal(dec("25.0").as_scalar_ref()).unwrap(), dec("5.0"));
         assert_eq!(
-            sqrt_decimal(dec("107")).unwrap(),
+            sqrt_decimal(dec("107").as_scalar_ref()).unwrap(),
             dec("10.344080432788600469738599442")
         );
         assert_eq!(
-            sqrt_decimal(dec("12.234567")).unwrap(),
+            sqrt_decimal(dec("12.234567").as_scalar_ref()).unwrap(),
             dec("3.4977945908815171589625746860")
         );
-        assert!(sqrt_decimal(dec("-25.0")).is_err());
-        assert_eq!(sqrt_decimal(dec("nan")).unwrap(), dec("nan"));
-        assert_eq!(sqrt_decimal(dec("inf")).unwrap(), dec("inf"));
-        assert_eq!(sqrt_decimal(dec("-0")).unwrap(), dec("-0"));
-        assert!(sqrt_decimal(dec("-inf")).is_err());
+        assert!(sqrt_decimal(dec("-25.0").as_scalar_ref()).is_err());
+        assert_eq!(sqrt_decimal(dec("nan").as_scalar_ref()).unwrap(), dec("nan"));
+        assert_eq!(sqrt_decimal(dec("inf").as_scalar_ref()).unwrap(), dec("inf"));
+        assert_eq!(sqrt_decimal(dec("-0").as_scalar_ref()).unwrap(), dec("-0"));
+        assert!(sqrt_decimal(dec("-inf").as_scalar_ref()).is_err());
     }
 
     #[test]

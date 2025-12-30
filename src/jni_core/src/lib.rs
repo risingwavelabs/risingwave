@@ -50,7 +50,7 @@ use risingwave_common::array::{ArrayError, StreamChunk};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
-use risingwave_common::types::{Decimal, ScalarRefImpl};
+use risingwave_common::types::{Decimal, ScalarRef, ScalarRefImpl};
 use risingwave_common::util::panic::rw_catch_unwind;
 use risingwave_pb::connector_service::{
     GetEventStreamResponse, SinkCoordinatorStreamRequest, SinkCoordinatorStreamResponse,
@@ -796,14 +796,15 @@ extern "system" fn Java_com_risingwave_java_binding_Binding_iteratorGetDecimalVa
             .unwrap()
             .into_decimal();
 
-        match decimal_value {
+        let decimal_owned = decimal_value.to_owned_scalar();
+        match decimal_owned {
             Decimal::NaN | Decimal::NegativeInf | Decimal::PositiveInf => {
                 return Ok(JObject::null());
             }
             Decimal::Normalized(_) => {}
         };
 
-        let value = decimal_value.to_string();
+        let value = decimal_owned.to_string();
         let string_value = env.new_string(value)?;
         let (decimal_class_ref, constructor) = pointer
             .as_ref()

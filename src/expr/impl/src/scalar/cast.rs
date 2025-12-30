@@ -21,7 +21,7 @@ use risingwave_common::array::{DataChunk, ListRef, ListValue, StructRef, StructV
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, Serial, Timestamptz, ToText,
+    DataType, DeciRef, F32, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef, Serial, Timestamptz, ToText,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::row_id_to_unix_millis;
@@ -97,11 +97,6 @@ pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
 #[function("cast(float4) -> int8")]
 #[function("cast(float8) -> int8")]
 #[function("cast(float8) -> float4")]
-#[function("cast(decimal) -> int2")]
-#[function("cast(decimal) -> int4")]
-#[function("cast(decimal) -> int8")]
-#[function("cast(decimal) -> float4")]
-#[function("cast(decimal) -> float8")]
 #[function("cast(float4) -> decimal")]
 #[function("cast(float8) -> decimal")]
 pub fn try_cast<T1, T2>(elem: T1) -> Result<T2>
@@ -110,6 +105,41 @@ where
 {
     elem.try_into()
         .map_err(|_| ExprError::CastOutOfRange(std::any::type_name::<T2>()))
+}
+
+#[function("cast(decimal) -> int2")]
+pub fn try_cast_decimal_i16(elem: DeciRef<'_>) -> Result<i16> {
+    let d = elem.to_owned_scalar();
+    d.try_into()
+        .map_err(|_| ExprError::CastOutOfRange("int2"))
+}
+
+#[function("cast(decimal) -> int4")]
+pub fn try_cast_decimal_i32(elem: DeciRef<'_>) -> Result<i32> {
+    let d = elem.to_owned_scalar();
+    d.try_into()
+        .map_err(|_| ExprError::CastOutOfRange("int4"))
+}
+
+#[function("cast(decimal) -> int8")]
+pub fn try_cast_decimal_i64(elem: DeciRef<'_>) -> Result<i64> {
+    let d = elem.to_owned_scalar();
+    d.try_into()
+        .map_err(|_| ExprError::CastOutOfRange("int8"))
+}
+
+#[function("cast(decimal) -> float4")]
+pub fn try_cast_decimal_f32(elem: DeciRef<'_>) -> Result<F32> {
+    let d = elem.to_owned_scalar();
+    d.try_into()
+        .map_err(|_| ExprError::CastOutOfRange("float4"))
+}
+
+#[function("cast(decimal) -> float8")]
+pub fn try_cast_decimal_f64(elem: DeciRef<'_>) -> Result<F64> {
+    let d = elem.to_owned_scalar();
+    d.try_into()
+        .map_err(|_| ExprError::CastOutOfRange("float8"))
 }
 
 #[function("cast(boolean) -> int4")]

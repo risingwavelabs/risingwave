@@ -16,8 +16,8 @@ use std::fmt::Debug;
 
 use jsonbb::Builder;
 use risingwave_common::types::{
-    DataType, Date, Decimal, F32, F64, Int256Ref, Interval, JsonbRef, ListRef, MapRef,
-    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, VectorRef,
+    DataType, Date, DeciRef, Decimal, F32, F64, Int256Ref, Interval, JsonbRef, ListRef, MapRef,
+    ScalarRef, ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, VectorRef,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
@@ -146,6 +146,13 @@ impl ToJsonb for Decimal {
             .map_err(|_| ExprError::CastOutOfRange("IEEE 754 double"))?;
         res.add_to(t, builder)?;
         Ok(())
+    }
+}
+
+impl ToJsonb for DeciRef<'_> {
+    fn add_to(self, t: &DataType, builder: &mut Builder) -> Result<()> {
+        let owned = self.to_owned_scalar();
+        owned.add_to(t, builder)
     }
 }
 

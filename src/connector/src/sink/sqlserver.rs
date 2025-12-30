@@ -20,7 +20,7 @@ use phf::{Set, phf_set};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Decimal};
+use risingwave_common::types::{DataType, Decimal, ScalarRef};
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
@@ -583,7 +583,7 @@ fn bind_params(
                 ScalarRefImpl::Float64(v) => query.bind(v.into_inner()),
                 ScalarRefImpl::Utf8(v) => query.bind(v.to_owned()),
                 ScalarRefImpl::Bool(v) => query.bind(v),
-                ScalarRefImpl::Decimal(v) => match v {
+                ScalarRefImpl::Decimal(v) => match v.to_owned_scalar() {
                     Decimal::Normalized(d) => {
                         query.bind(decimal_to_sql(&d));
                     }

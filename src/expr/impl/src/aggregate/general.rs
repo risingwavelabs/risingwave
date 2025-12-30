@@ -20,7 +20,6 @@ use risingwave_expr::{ExprError, Result, aggregate};
 #[aggregate("sum(int8) -> decimal")]
 #[aggregate("sum(float4) -> float4")]
 #[aggregate("sum(float8) -> float8")]
-#[aggregate("sum(decimal) -> decimal")]
 #[aggregate("sum(interval) -> interval")]
 #[aggregate("sum(int256) -> int256")]
 #[aggregate("sum(int8) -> int8", internal)] // used internally for 2-phase sum(int2) and sum(int4)
@@ -36,6 +35,25 @@ where
     } else {
         state
             .checked_add(&S::from(input))
+            .ok_or_else(|| ExprError::NumericOutOfRange)
+    }
+}
+
+#[aggregate("sum(decimal) -> decimal")]
+fn sum_decimal(
+    state: ::risingwave_common::types::Decimal,
+    input: ::risingwave_common::types::DeciRef<'_>,
+    retract: bool,
+) -> Result<::risingwave_common::types::Decimal> {
+    use ::risingwave_common::types::ScalarRef;
+    let val = input.to_owned_scalar();
+    if retract {
+        state
+            .checked_sub(&val)
+            .ok_or_else(|| ExprError::NumericOutOfRange)
+    } else {
+        state
+            .checked_add(&val)
             .ok_or_else(|| ExprError::NumericOutOfRange)
     }
 }

@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::Finite32;
-use risingwave_common::types::{DataType, F32, F64, ListRef, ScalarRefImpl, VectorRef, VectorVal};
+use risingwave_common::types::{DataType, F32, F64, ListRef, ScalarRef, ScalarRefImpl, VectorRef, VectorVal};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::vector::MeasureDistanceBuilder;
 use risingwave_common::vector::distance::{L1Distance, L2SqrDistance, inner_product_faiss};
@@ -437,7 +437,10 @@ fn array_to_vector(array: ListRef<'_>, ctx: &Context) -> Result<VectorVal> {
             let val = match scalar {
                 ScalarRefImpl::Int32(val) => val.into(),
                 ScalarRefImpl::Decimal(val) => {
-                    val.try_into().map_err(|_| ExprError::NumericOverflow)?
+                    let owned = val.to_owned_scalar();
+                    owned
+                        .try_into()
+                        .map_err(|_| ExprError::NumericOverflow)?
                 }
                 ScalarRefImpl::Float32(val) => val,
                 ScalarRefImpl::Float64(val) => {
