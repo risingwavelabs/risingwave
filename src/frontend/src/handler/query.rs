@@ -328,9 +328,9 @@ fn gen_batch_query_plan(
 
     #[cfg(feature = "datafusion")]
     {
-        use crate::optimizer::LogicalIcebergScanExt;
+        use crate::optimizer::DatafusionExecuteCheckerExt;
 
-        if session.config().enable_datafusion_engine() && logical.plan.all_iceberg_scan() {
+        if session.config().enable_datafusion_engine() && logical.plan.able_to_run_by_datafusion() {
             let optimized_logical = logical.gen_optimized_logical_plan_for_datafusion_batch()?;
 
             let plan = optimized_logical.gen_datafusion_logical_plan()?;
