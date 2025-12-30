@@ -96,6 +96,9 @@ pub struct MaterializeExecutor<S: StateStore, SD: ValueRowSerde> {
 
     conflict_behavior: ConflictBehavior,
 
+    /// Whether the table can clean itself by TTL watermark, i.e., is defined with `WATERMARK ... WITH TTL`.
+    cleaned_by_ttl_watermark: bool,
+
     version_column_indices: Vec<u32>,
 
     may_have_downstream: bool,
@@ -185,12 +188,12 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
 }
 
 fn get_op_consistency_level(
-    cleaned_by_watermark: bool,
+    cleaned_by_ttl_watermark: bool,
     conflict_behavior: ConflictBehavior,
     may_have_downstream: bool,
     subscriber_ids: &HashSet<SubscriberId>,
 ) -> StateTableOpConsistencyLevel {
-    if cleaned_by_watermark {
+    if cleaned_by_ttl_watermark {
         // For tables with watermark TTL. Due to async state cleaning, it's uncertain whether an expired
         // key has been cleaned up by the storage or not, thus we are not sure if to write `Update` or `Insert`
         // if the key appears again.
@@ -224,6 +227,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         version_column_indices: Vec<u32>,
         metrics: Arc<StreamingMetrics>,
         refresh_args: Option<RefreshableMaterializeArgs<S, SD>>,
+        cleaned_by_ttl_watermark: bool,
         local_barrier_manager: LocalBarrierManager,
     ) -> Self {
         let table_columns: Vec<ColumnDesc> = table_catalog
@@ -279,7 +283,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let may_have_downstream = actor_context.initial_dispatch_num != 0;
         let subscriber_ids = actor_context.initial_subscriber_ids.clone();
         let op_consistency_level = get_op_consistency_level(
-            table_catalog.cleaned_by_watermark,
+            cleaned_by_ttl_watermark,
             conflict_behavior,
             may_have_downstream,
             &subscriber_ids,
@@ -332,6 +336,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 cache_metrics,
             ),
             conflict_behavior,
+            cleaned_by_ttl_watermark,
             version_column_indices,
             is_dummy_table,
             may_have_downstream,
@@ -436,7 +441,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
 
                         match msg {
                             Message::Watermark(w) => {
-                                if self.state_table.clean_watermark_index == Some(w.col_idx) {
+                                if self.cleaned_by_ttl_watermark
+                                    && self.state_table.clean_watermark_index == Some(w.col_idx)
+                                {
                                     self.state_table.update_watermark(w.val.clone());
                                 }
                                 yield Message::Watermark(w);
@@ -456,12 +463,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 // This optimization is applied only when there is no specified version column and the is_consistent_op flag of the state table is false,
                                 // and the conflict behavior is overwrite. We can rely on the state table to overwrite the conflicting rows in the storage,
                                 // while outputting inconsistent changes to downstream which no one will subscribe to.
-                                // For tables with watermark TTL (indicated by `cleaned_by_watermark`), conflict check must be enabled.
+                                // For tables with watermark TTL (indicated by `cleaned_by_ttl_watermark`), conflict check must be enabled.
                                 // TODO(ttl): differentiate between table consistency and downstream consistency.
                                 let optimized_conflict_behavior = if let ConflictBehavior::Overwrite =
                                     self.conflict_behavior
                                     && !self.state_table.is_consistent_op()
-                                    && !self.state_table.cleaned_by_watermark()
+                                    && !self.cleaned_by_ttl_watermark
                                     && self.version_column_indices.is_empty()
                                 {
                                     ConflictBehavior::NoCheck
@@ -706,7 +713,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         let msg = msg?;
                         match msg {
                             Message::Watermark(w) => {
-                                if self.state_table.clean_watermark_index == Some(w.col_idx) {
+                                if self.cleaned_by_ttl_watermark
+                                    && self.state_table.clean_watermark_index == Some(w.col_idx)
+                                {
                                     self.state_table.update_watermark(w.val.clone());
                                 }
                                 yield Message::Watermark(w)
@@ -835,7 +844,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         mv_table_id,
                     );
                     let op_consistency_level = get_op_consistency_level(
-                        self.state_table.cleaned_by_watermark(),
+                        self.cleaned_by_ttl_watermark,
                         self.conflict_behavior,
                         self.may_have_downstream,
                         &self.subscriber_ids,
@@ -1198,6 +1207,7 @@ impl<S: StateStore> MaterializeExecutor<S, BasicSerde> {
                 cache_metrics,
             ),
             conflict_behavior,
+            cleaned_by_ttl_watermark: false,
             version_column_indices: vec![],
             is_dummy_table: false,
             may_have_downstream: true,

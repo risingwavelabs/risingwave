@@ -433,6 +433,9 @@ message MaterializeNode {
   // Usage: Persists across refresh operations for resumability
   // Note: Stage info is now tracked in MaterializeExecutor memory for simplicity
   optional catalog.Table refresh_progress_table = 6;
+
+  // Whether the table can clean itself by TTL watermark, i.e., is defined with `WATERMARK ... WITH TTL`.
+  bool cleaned_by_ttl_watermark = 7;
 }
 
 message AggCallState {
