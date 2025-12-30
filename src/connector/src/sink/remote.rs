@@ -46,7 +46,6 @@ use risingwave_pb::connector_service::{
     ValidateSinkResponse, sink_coordinator_stream_request, sink_coordinator_stream_response,
     sink_writer_stream_response,
 };
-use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
     BidiStreamReceiver, BidiStreamSender, DEFAULT_BUFFER_SIZE, SinkCoordinatorStreamHandle,
@@ -696,18 +695,6 @@ impl SinglePhaseCommitCoordinator for RemoteCoordinator {
 
     async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         Ok(self.stream_handle.commit(epoch, metadata).await?)
-    }
-
-    async fn commit_schema_change(
-        &mut self,
-        _epoch: u64,
-        schema_change: PbSinkSchemaChange,
-    ) -> Result<()> {
-        Err(anyhow!(
-            "remote coordinator not support schema change, but got: {:?}",
-            schema_change
-        )
-        .into())
     }
 }
 

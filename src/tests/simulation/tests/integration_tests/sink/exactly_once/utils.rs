@@ -443,14 +443,6 @@ impl TwoPhaseCommitCoordinator for SimulationTestIcebergCommitter {
         Ok(())
     }
 
-    async fn commit_schema_change(
-        &mut self,
-        _epoch: u64,
-        _schema_change: PbSinkSchemaChange,
-    ) -> risingwave_connector::sink::Result<()> {
-        unreachable!()
-    }
-
     async fn abort(&mut self, epoch: u64, _commit_metadata: Vec<u8>) {
         println!("Abort called for epoch {}", epoch);
     }

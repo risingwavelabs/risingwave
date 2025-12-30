@@ -39,7 +39,6 @@ use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
 use tokio::sync::mpsc::UnboundedSender;
@@ -572,18 +571,6 @@ impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
             "Succeeded to commit to DeltaLake table in epoch {epoch}, version {version}."
         );
         Ok(())
-    }
-
-    async fn commit_schema_change(
-        &mut self,
-        _epoch: u64,
-        schema_change: PbSinkSchemaChange,
-    ) -> Result<()> {
-        Err(anyhow!(
-            "Delta lake sink does not support schema changes, but got: {:?}",
-            schema_change
-        )
-        .into())
     }
 }
 

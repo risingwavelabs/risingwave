@@ -344,14 +344,6 @@ impl SinglePhaseCommitCoordinator for TestCoordinator {
         );
         Ok(())
     }
-
-    async fn commit_schema_change(
-        &mut self,
-        _epoch: u64,
-        _schema_change: PbSinkSchemaChange,
-    ) -> risingwave_connector::sink::Result<()> {
-        unreachable!()
-    }
 }
 
 #[async_trait]
@@ -415,14 +407,6 @@ impl TwoPhaseCommitCoordinator for TestCoordinator {
                 .flatten(),
         );
         Ok(())
-    }
-
-    async fn commit_schema_change(
-        &mut self,
-        _epoch: u64,
-        _schema_change: PbSinkSchemaChange,
-    ) -> risingwave_connector::sink::Result<()> {
-        unreachable!()
     }
 
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>) {

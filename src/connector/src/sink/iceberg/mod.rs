@@ -2006,18 +2006,6 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         Ok(())
     }
 
-    async fn commit_schema_change(
-        &mut self,
-        _epoch: u64,
-        schema_change: PbSinkSchemaChange,
-    ) -> Result<()> {
-        Err(SinkError::Iceberg(anyhow!(
-            "TwoPhaseCommitCoordinator for Iceberg sink does not support schema change yet, \
-             but got schema_change: {:?}",
-            schema_change
-        )))
-    }
-
     async fn abort(&mut self, _epoch: u64, _commit_metadata: Vec<u8>) {
         // TODO: Files that have been written but not committed should be deleted.
         tracing::debug!("Abort not implemented yet");

@@ -830,9 +830,13 @@ pub trait SinglePhaseCommitCoordinator {
     /// times.
     async fn commit_schema_change(
         &mut self,
-        epoch: u64,
-        schema_change: PbSinkSchemaChange,
-    ) -> Result<()>;
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        Err(SinkError::Coordinator(anyhow!(
+            "Schema change is not implemented for single-phase commit coordinator"
+        )))
+    }
 }
 
 #[async_trait]
@@ -855,9 +859,13 @@ pub trait TwoPhaseCommitCoordinator {
     /// times.
     async fn commit_schema_change(
         &mut self,
-        epoch: u64,
-        schema_change: PbSinkSchemaChange,
-    ) -> Result<()>;
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        Err(SinkError::Coordinator(anyhow!(
+            "Schema change is not implemented for two-phase commit coordinator"
+        )))
+    }
 
     /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>);
