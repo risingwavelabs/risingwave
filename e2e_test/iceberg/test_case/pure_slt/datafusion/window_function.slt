@@ -1,0 +1,134 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+CREATE TABLE sales (
+    id INT,
+    region VARCHAR,
+    product VARCHAR,
+    amount FLOAT,
+    year INT,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO sales VALUES
+    (1, 'North', 'Laptop', 1200.0, 2023),
+    (2, 'North', 'Mouse', 25.0, 2023),
+    (3, 'North', 'Keyboard', 75.0, 2023),
+    (4, 'South', 'Laptop', 1150.0, 2023),
+    (5, 'South', 'Monitor', 350.0, 2023),
+    (6, 'South', 'Mouse', 30.0, 2023),
+    (7, 'East', 'Keyboard', 80.0, 2023),
+    (8, 'East', 'Laptop', 1100.0, 2023),
+    (9, 'West', 'Monitor', 400.0, 2023),
+    (10, 'West', 'Laptop', 1250.0, 2023),
+    (11, 'North', 'Laptop', 1300.0, 2024),
+    (12, 'North', 'Mouse', 28.0, 2024),
+    (13, 'South', 'Monitor', 380.0, 2024),
+    (14, 'East', 'Laptop', 1180.0, 2024),
+    (15, 'West', 'Keyboard', 85.0, 2024);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Test: Top 2 products per region by amount
+query ????
+SELECT region, product, amount, year
+FROM (
+    SELECT region, product, amount, year,
+           ROW_NUMBER() OVER (PARTITION BY region ORDER BY amount DESC) as rn
+    FROM sales WHERE year = 2023
+) t
+WHERE rn <= 2
+ORDER BY region, rn;
+----
+East Laptop 1100 2023
+East Keyboard 80 2023
+North Laptop 1200 2023
+North Keyboard 75 2023
+South Laptop 1150 2023
+South Monitor 350 2023
+West Laptop 1250 2023
+West Monitor 400 2023
+
+# Test: Sum of sales per region, top 2 regions by total sales
+query ???
+SELECT region, SUM(amount) as total, COUNT(*) as cnt
+FROM sales
+WHERE year = 2023
+GROUP BY region
+ORDER BY total DESC
+LIMIT 2;
+----
+West 1650 2
+South 1530 3
+
+# Test: Regional sales ranking with DENSE_RANK
+query ????
+SELECT region, product, amount,
+       DENSE_RANK() OVER (PARTITION BY region ORDER BY amount DESC) as rank
+FROM sales
+WHERE year = 2023
+ORDER BY region, rank;
+----
+East Laptop 1100 1
+East Keyboard 80 2
+North Laptop 1200 1
+North Keyboard 75 2
+North Mouse 25 3
+South Laptop 1150 1
+South Monitor 350 2
+South Mouse 30 3
+West Laptop 1250 1
+West Monitor 400 2
+
+# Test: Cumulative sum per region ordered by amount
+query ?????
+SELECT region, product, amount,
+       SUM(amount) OVER (PARTITION BY region ORDER BY amount DESC) as cumsum,
+       ROW_NUMBER() OVER (PARTITION BY region ORDER BY amount DESC) as rn
+FROM sales
+WHERE year = 2023
+ORDER BY region, rn;
+----
+East Laptop 1100 1100 1
+East Keyboard 80 1180 2
+North Laptop 1200 1200 1
+North Keyboard 75 1275 2
+North Mouse 25 1300 3
+South Laptop 1150 1150 1
+South Monitor 350 1500 2
+South Mouse 30 1530 3
+West Laptop 1250 1250 1
+West Monitor 400 1650 2
+
+statement ok
+DROP TABLE sales;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

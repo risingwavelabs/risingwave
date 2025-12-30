@@ -325,15 +325,14 @@ fn gen_batch_query_plan(
 
     let logical = planner.plan(bound)?;
     let schema = logical.schema();
-    let optimized_logical = logical.gen_optimized_logical_plan_for_batch()?;
 
     #[cfg(feature = "datafusion")]
     {
         use crate::optimizer::LogicalIcebergScanExt;
 
-        if session.config().enable_datafusion_engine()
-            && optimized_logical.plan.contains_iceberg_scan()
-        {
+        if session.config().enable_datafusion_engine() && logical.plan.contains_iceberg_scan() {
+            let optimized_logical = logical.gen_optimized_logical_plan_for_datafusion_batch()?;
+
             let plan = optimized_logical.gen_datafusion_logical_plan()?;
             return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
                 plan,
@@ -343,7 +342,7 @@ fn gen_batch_query_plan(
         }
     }
 
-    let batch_plan = optimized_logical.gen_batch_plan()?;
+    let batch_plan = logical.gen_batch_plan()?;
 
     let dependent_relations =
         RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan.clone());

@@ -419,6 +419,21 @@ static CONVERT_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+// Datafusion cannot apply OverWindowToTopNRule
+static CONVERT_OVER_WINDOW_FOR_DATAFUSION: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Convert Over Window",
+        vec![
+            ProjectMergeRule::create(),
+            ProjectEliminateRule::create(),
+            TrivialProjectToValuesRule::create(),
+            UnionInputValuesMergeRule::create(),
+            OverWindowToAggAndJoinRule::create(),
+        ],
+        ApplyOrder::TopDown,
+    )
+});
+
 static MERGE_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Merge Over Window",
@@ -845,6 +860,120 @@ impl LogicalOptimizer {
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
         plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW)?;
+        plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW)?;
+
+        // Convert distinct aggregates.
+        plan = plan.optimize_by_rules(&CONVERT_DISTINCT_AGG_FOR_BATCH)?;
+
+        plan = plan.optimize_by_rules(&SIMPLIFY_AGG)?;
+
+        plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
+
+        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
+
+        // Do a final column pruning and predicate pushing down to clean up the plan.
+        plan = Self::column_pruning(plan, explain_trace, &ctx);
+        if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
+            (#[allow(unused_assignments)]
+            last_total_rule_applied_before_predicate_pushdown) = ctx.total_rule_applied();
+            plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        }
+
+        plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
+        plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
+
+        plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
+
+        plan = plan.optimize_by_rules(&PULL_UP_HOP)?;
+
+        plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX)?;
+
+        plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN)?;
+
+        plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
+
+        #[cfg(debug_assertions)]
+        InputRefValidator.validate(plan.clone());
+
+        ctx.may_store_explain_logical(&plan);
+
+        Ok(plan)
+    }
+
+    pub fn gen_optimized_logical_plan_for_datafusion_batch(
+        mut plan: LogicalPlanRef,
+    ) -> Result<LogicalPlanRef> {
+        let ctx = plan.ctx();
+        let explain_trace = ctx.is_explain_trace();
+
+        if explain_trace {
+            ctx.trace("Begin:");
+            ctx.trace(plan.explain_to_string());
+        }
+
+        // Inline `NOW()` and `PROCTIME()`, only for batch queries.
+        plan = Self::inline_now_proc_time(plan, &ctx);
+
+        // Convert the dag back to the tree, because we don't support DAG plan for batch.
+        plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
+
+        plan = plan.optimize_by_rules(&REWRITE_SOURCE_FOR_BATCH)?;
+        plan = plan.optimize_by_rules(&GROUPING_SETS)?;
+        plan = plan.optimize_by_rules(&REWRITE_LIKE_EXPR)?;
+        plan = plan.optimize_by_rules(&SET_OPERATION_MERGE)?;
+        plan = plan.optimize_by_rules(&SET_OPERATION_TO_JOIN)?;
+        plan = plan.optimize_by_rules(&ALWAYS_FALSE_FILTER)?;
+        // Table function should be converted into `file_scan` before `project_set`.
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_FILE_SCAN)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS)?;
+        // In order to unnest a table function, we need to convert it into a `project_set` first.
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
+
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH)?;
+
+        plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
+
+        // Filter simplification must be applied before predicate push-down
+        // otherwise the filter for some nodes (e.g., `LogicalScan`)
+        // may not be properly applied.
+        plan = plan.optimize_by_rules(&LOGICAL_FILTER_EXPRESSION_SIMPLIFY)?;
+
+        // Predicate Push-down
+        let mut last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
+        plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+
+        if plan.ctx().session_ctx().config().enable_join_ordering() {
+            // Merge inner joins and intermediate filters into multijoin
+            // This rule assumes that filters have already been pushed down near to
+            // their relevant joins.
+            plan = plan.optimize_by_rules(&TO_MULTI_JOIN)?;
+
+            // Reorder multijoin into left-deep join tree.
+            plan = plan.optimize_by_rules(&LEFT_DEEP_JOIN_ORDERING)?;
+        }
+
+        // Predicate Push-down: apply filter pushdown rules again since we pullup all join
+        // conditions into a filter above the multijoin.
+        if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
+            last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
+            plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        }
+
+        // Push down the calculation of inputs of join's condition.
+        plan = plan.optimize_by_rules(&PUSH_CALC_OF_JOIN)?;
+
+        plan = plan.optimize_by_rules(&SPLIT_OVER_WINDOW)?;
+        // Must push down predicates again after split over window so that OverWindow can be
+        // optimized to TopN.
+        if last_total_rule_applied_before_predicate_pushdown != ctx.total_rule_applied() {
+            last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
+            plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
+        }
+        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW_FOR_DATAFUSION)?;
         plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW)?;
 
         // Convert distinct aggregates.

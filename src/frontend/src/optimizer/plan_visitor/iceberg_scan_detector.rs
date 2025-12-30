@@ -25,11 +25,18 @@ impl LogicalPlanVisitor for IcebergScanDetector {
     type Result = bool;
 
     fn default_behavior() -> Self::DefaultBehavior {
-        Merge(|a, b| a | b)
+        Merge(|a, b| a & b)
     }
 
-    fn visit_logical_iceberg_scan(&mut self, _scan: &LogicalIcebergScan) -> Self::Result {
+    fn visit_logical_iceberg_scan(&mut self, _: &LogicalIcebergScan) -> Self::Result {
         true
+    }
+
+    fn visit_logical_source(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalSource,
+    ) -> Self::Result {
+        plan.core.is_iceberg_connector()
     }
 }
 

@@ -313,6 +313,15 @@ impl LogicalPlanRoot {
         Ok(self.into_phase(plan))
     }
 
+    /// Apply logical optimization to the plan for datafusion batch.
+    pub fn gen_optimized_logical_plan_for_datafusion_batch(
+        self,
+    ) -> Result<BatchOptimizedLogicalPlanRoot> {
+        let plan =
+            LogicalOptimizer::gen_optimized_logical_plan_for_datafusion_batch(self.plan.clone())?;
+        Ok(self.into_phase(plan))
+    }
+
     pub fn gen_batch_plan(self) -> Result<BatchPlanRoot> {
         self.gen_optimized_logical_plan_for_batch()?
             .gen_batch_plan()
