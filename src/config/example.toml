@@ -353,6 +353,7 @@ recent_filter_shards = 16
 recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 data_refill_table_ids = []
+meta_refill_table_ids = []
 skip_recent_filter = false
 
 [storage.object_store]
