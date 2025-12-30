@@ -26,10 +26,10 @@ import {
 } from "@chakra-ui/react"
 import Editor from "@monaco-editor/react"
 import base64url from "base64url"
+import { saveAs } from "file-saver"
 import Head from "next/head"
 import path from "path"
 import { Fragment, useEffect, useState } from "react"
-import { v4 as uuidv4 } from "uuid"
 import SpinnerOverlay from "../components/SpinnerOverlay"
 import Title from "../components/Title"
 import api from "../lib/api/api"
@@ -152,17 +152,15 @@ export default function HeapProfiling() {
     let result
     try {
       let analyzeFilePathBase64 = base64url(analyzeFilePath)
-      let resObj = await fetch(
+      const url = api.urlFor(
         `/monitor/analyze/${computeNodeId}/${analyzeFilePathBase64}`
-      ).then(async (res) => ({
-        filename: res.headers.get("content-disposition"),
-        blob: await res.blob(),
-      }))
-      let objUrl = window.URL.createObjectURL(resObj.blob)
-      let link = document.createElement("a")
-      link.href = objUrl
-      link.download = resObj.filename || uuidv4()
-      link.click()
+      )
+      const res = await fetch(url)
+      if (!res.ok) {
+        throw Error(`${res.status} ${res.statusText}`)
+      }
+      const blob = await res.blob()
+      saveAs(blob, `${analyzeTargetFileName}.collapsed`)
       result = `${title}\n\nDownloaded!`
     } catch (e: any) {
       result = `${title}\n\nError: ${e.message}`
