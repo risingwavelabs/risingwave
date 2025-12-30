@@ -33,6 +33,7 @@ use risingwave_pb::stream_plan::{self, PbDispatcher};
 use smallvec::{SmallVec, smallvec};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::task::consume_budget;
 use tokio::time::Instant;
 use tokio_stream::StreamExt;
 use tokio_stream::adapters::Peekable;
@@ -553,6 +554,7 @@ impl StreamConsumer for DispatchExecutor {
                             .await?;
                     }
                 }
+                consume_budget().await;
             }
         }
     }
