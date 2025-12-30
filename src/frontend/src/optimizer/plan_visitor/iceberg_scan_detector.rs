@@ -38,6 +38,13 @@ impl LogicalPlanVisitor for IcebergScanDetector {
     ) -> Self::Result {
         plan.core.is_iceberg_connector()
     }
+
+    fn visit_logical_values(
+        &mut self,
+        _: &crate::optimizer::plan_node::LogicalValues,
+    ) -> Self::Result {
+        true
+    }
 }
 
 #[easy_ext::ext(LogicalIcebergScanExt)]
