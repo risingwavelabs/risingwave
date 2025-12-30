@@ -701,18 +701,25 @@ impl CoordinatorWorker {
                     }
                 },
                 CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change) => {
-                    let SinkCommitCoordinator::TwoPhase(coordinator) = &mut coordinator else {
-                        unreachable!("should be two-phase commit coordinator");
-                    };
                     let start_time = Instant::now();
                     let commit_fut = async {
-                        if !metadata.is_empty() {
-                            coordinator.commit_data(epoch, metadata).await?;
-                        }
-                        if let Some(schema_change) = schema_change {
-                            coordinator
-                                .commit_schema_change(epoch, schema_change)
-                                .await?;
+                        match &mut coordinator {
+                            SinkCommitCoordinator::SinglePhase(coordinator) => {
+                                assert!(metadata.is_empty());
+                                if let Some(schema_change) = schema_change {
+                                    coordinator
+                                        .commit_schema_change(epoch, schema_change)
+                                        .await?;
+                                }
+                            }
+                            SinkCommitCoordinator::TwoPhase(coordinator) => {
+                                coordinator.commit_data(epoch, metadata).await?;
+                                if let Some(schema_change) = schema_change {
+                                    coordinator
+                                        .commit_schema_change(epoch, schema_change)
+                                        .await?;
+                                }
+                            }
                         }
                         Ok(())
                     };
