@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::anyhow;
 use core::time::Duration;
 use std::fmt::Debug;
 use std::sync::Arc;
@@ -37,14 +38,16 @@ use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
 
+use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
+use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
-    Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor,
+    Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatchMode, Execute, Executor, ExecutorInfo, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor
 };
+use crate::executor::SyncLogStoreDispatchConfig;
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
     ActorEvalErrorReport, ActorId, AtomicU64Ref, FragmentId, LocalBarrierManager, NewOutputRequest,
@@ -438,6 +441,50 @@ impl StreamActorManager {
         );
         let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
         let expr_context = actor.expr_context.clone().unwrap();
+        let (node, mode) = match node.get_node_body()? {
+            NodeBody::SyncLogStore(sync) => {
+                let sync = sync.clone();
+                let [input] = node.input.as_slice() else {
+                    bail!("SyncLogStore should be at fragment exit and have exactly 1 input");
+                };
+                let input = input.clone();
+
+                let table = sync.log_store_table.as_ref().ok_or_else(|| anyhow!("missing log_store_table in SyncLogStoreNode"))?
+                .clone();
+
+                #[allow(deprecated)]
+                let pause_duration_ms = sync.pause_duration_ms.map_or(
+                    actor_context.config.developer.sync_log_store_pause_duration_ms,
+                    |v| v as usize,
+                );
+
+                #[allow(deprecated)]
+                let max_buffer_size = sync.buffer_size.map_or(
+                    actor_context.config.developer.sync_log_store_buffer_size,
+                    |v| v as usize,
+                );
+
+                let serde = LogStoreRowSerde::new(
+                    &table,
+                    vnode_bitmap.clone().map(|b:Bitmap| b.into()),
+                    &KV_LOG_STORE_V2_INFO,
+                );
+
+                (
+                    Arc::new(input),
+                    DispatchMode::SyncLogStore(
+                        SyncLogStoreDispatchConfig {
+                            table_id: table.id,
+                            serde,
+                            max_buffer_size,
+                            pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
+                            aligned: sync.aligned,
+                        }
+                    ),
+                )
+            },
+            _ => (node.clone(), DispatchMode::Direct)
+        };
 
         let (executor, subtasks) = self
             .create_nodes(
@@ -449,12 +496,13 @@ impl StreamActorManager {
                 &local_barrier_manager,
             )
             .await?;
-
+        
         let dispatcher = DispatchExecutor::new(
             executor,
             new_output_request_rx,
             actor.dispatchers,
             &actor_context,
+            mode,
         )
         .await?;
 
