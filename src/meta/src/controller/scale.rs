@@ -29,9 +29,9 @@ use risingwave_meta_model::prelude::{
     Database, Fragment, FragmentRelation, FragmentSplits, Sink, Source, StreamingJob, Table,
 };
 use risingwave_meta_model::{
-    CreateType, DatabaseId, DispatcherType, FragmentId, JobStatus, SourceId,
-    StreamingParallelism, WorkerId, database, fragment, fragment_relation, fragment_splits, object,
-    sink, source, streaming_job, table,
+    CreateType, DatabaseId, DispatcherType, FragmentId, JobStatus, SourceId, StreamingParallelism,
+    WorkerId, database, fragment, fragment_relation, fragment_splits, object, sink, source,
+    streaming_job, table,
 };
 use risingwave_meta_model_migration::Condition;
 use sea_orm::{
@@ -453,9 +453,6 @@ async fn build_loaded_context<C>(
     fragment_map: HashMap<FragmentId, fragment::Model>,
     job_map: HashMap<JobId, streaming_job::Model>,
 ) -> MetaResult<LoadedFragmentContext>
-=======
-) -> MetaResult<FragmentRenderMap>
->>>>>>> 4853811090 (fix: simplify backfill parallelism logic and restore post-backfill parallelism)
 where
     C: ConnectionTrait,
 {
@@ -1324,12 +1321,14 @@ mod tests {
         let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
@@ -1430,12 +1429,14 @@ mod tests {
         let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
@@ -1567,12 +1568,14 @@ mod tests {
             HashMap::from([(entry_fragment_id, vec![split_a.clone(), split_b.clone()])]);
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
