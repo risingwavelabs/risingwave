@@ -186,7 +186,9 @@ impl MockSinkCoordinationRpcClient {
                                             schema_change.clone(),
                                         )
                                         .await?;
-                                    coordinator.commit_data(epoch, metadata).await?;
+                                    if let Some(metadata) = metadata {
+                                        coordinator.commit_data(epoch, metadata).await?;
+                                    }
                                     if let Some(schema_change) = schema_change {
                                         coordinator
                                             .commit_schema_change(epoch, schema_change)

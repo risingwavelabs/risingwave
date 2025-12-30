@@ -50,7 +50,7 @@ impl MigrationTrait for Migration {
                     .col(
                         ColumnDef::new(PendingSinkState::Metadata)
                             .rw_binary(manager)
-                            .not_null(),
+                            .null(),
                     )
                     .primary_key(
                         Index::create()

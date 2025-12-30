@@ -137,7 +137,7 @@ impl TwoPhaseCommitCoordinator for BoxTwoPhaseCoordinator {
         epoch: u64,
         metadata: Vec<SinkMetadata>,
         schema_change: Option<PbSinkSchemaChange>,
-    ) -> crate::sink::Result<Vec<u8>> {
+    ) -> crate::sink::Result<Option<Vec<u8>>> {
         self.deref_mut()
             .pre_commit(epoch, metadata, schema_change)
             .await

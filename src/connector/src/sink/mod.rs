@@ -834,7 +834,8 @@ pub trait SinglePhaseCommitCoordinator {
         _schema_change: PbSinkSchemaChange,
     ) -> Result<()> {
         Err(SinkError::Coordinator(anyhow!(
-            "Schema change is not implemented for single-phase commit coordinator"
+            "Schema change is not implemented for single-phase commit coordinator {}",
+            std::any::type_name::<Self>()
         )))
     }
 }
@@ -850,7 +851,7 @@ pub trait TwoPhaseCommitCoordinator {
         epoch: u64,
         metadata: Vec<SinkMetadata>,
         schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<Vec<u8>>;
+    ) -> Result<Option<Vec<u8>>>;
 
     /// Idempotent implementation is required, because `commit_data` in the same epoch could be called multiple times.
     async fn commit_data(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()>;
@@ -863,7 +864,8 @@ pub trait TwoPhaseCommitCoordinator {
         _schema_change: PbSinkSchemaChange,
     ) -> Result<()> {
         Err(SinkError::Coordinator(anyhow!(
-            "Schema change is not implemented for two-phase commit coordinator"
+            "Schema change is not implemented for two-phase commit coordinator {}",
+            std::any::type_name::<Self>()
         )))
     }
 

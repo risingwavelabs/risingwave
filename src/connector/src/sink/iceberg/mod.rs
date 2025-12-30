@@ -1933,7 +1933,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         epoch: u64,
         metadata: Vec<SinkMetadata>,
         schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>> {
         tracing::info!("Starting iceberg pre commit in epoch {epoch}");
 
         // TwoPhaseCommitCoordinator does not support schema change yet
@@ -1948,8 +1948,8 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         let (write_results, snapshot_id) = match self.pre_commit_inner(epoch, metadata)? {
             Some((write_results, snapshot_id)) => (write_results, snapshot_id),
             None => {
-                tracing::debug!(?epoch, "no data to commit");
-                return Ok(vec![]);
+                tracing::debug!(?epoch, "no data to pre commit");
+                return Ok(None);
             }
         };
 
@@ -1964,7 +1964,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         write_results_bytes.push(snapshot_id_bytes);
 
         let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(write_results_bytes);
-        Ok(pre_commit_metadata_bytes)
+        Ok(Some(pre_commit_metadata_bytes))
     }
 
     async fn commit_data(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()> {

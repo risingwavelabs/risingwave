@@ -357,24 +357,27 @@ impl TwoPhaseCommitCoordinator for TestCoordinator {
         epoch: u64,
         metadata: Vec<SinkMetadata>,
         _schema_change: Option<PbSinkSchemaChange>,
-    ) -> risingwave_connector::sink::Result<Vec<u8>> {
+    ) -> risingwave_connector::sink::Result<Option<Vec<u8>>> {
         if SimulationTestSink::random_err(&self.err_rate) {
             println!("pre-commit with err");
             self.store.inc_err();
             return Err(SinkError::Internal(anyhow::anyhow!("fail to pre-commit")));
         }
 
+        if metadata.is_empty() {
+            return Ok(None);
+        }
+
         let mut pre_commit_metadata_bytes = Vec::new();
         for metadata in metadata {
             let Metadata::Serialized(serialized) = metadata.metadata.unwrap();
-
             pre_commit_metadata_bytes.push(serialized.metadata);
         }
 
         let pre_commit_metadata_bytes: Vec<u8> =
             serde_json::to_vec(&pre_commit_metadata_bytes).unwrap();
 
-        Ok(pre_commit_metadata_bytes)
+        Ok(Some(pre_commit_metadata_bytes))
     }
 
     async fn commit_data(

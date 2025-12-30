@@ -1425,7 +1425,11 @@ mod tests {
     }
 
     struct MockTwoPhaseCoordinator<
-        P: FnMut(u64, Vec<SinkMetadata>, Option<PbSinkSchemaChange>) -> Result<Vec<u8>, SinkError>,
+        P: FnMut(
+            u64,
+            Vec<SinkMetadata>,
+            Option<PbSinkSchemaChange>,
+        ) -> Result<Option<Vec<u8>>, SinkError>,
         CD: FnMut(u64, Vec<u8>) -> Result<(), SinkError>,
         CS: FnMut(u64, PbSinkSchemaChange) -> Result<(), SinkError>,
     > {
@@ -1435,7 +1439,11 @@ mod tests {
     }
 
     impl<
-        P: FnMut(u64, Vec<SinkMetadata>, Option<PbSinkSchemaChange>) -> Result<Vec<u8>, SinkError>
+        P: FnMut(
+                u64,
+                Vec<SinkMetadata>,
+                Option<PbSinkSchemaChange>,
+            ) -> Result<Option<Vec<u8>>, SinkError>
             + Send
             + 'static,
         CD: FnMut(u64, Vec<u8>) -> Result<(), SinkError> + Send + 'static,
@@ -1457,7 +1465,11 @@ mod tests {
 
     #[async_trait]
     impl<
-        P: FnMut(u64, Vec<SinkMetadata>, Option<PbSinkSchemaChange>) -> Result<Vec<u8>, SinkError>
+        P: FnMut(
+                u64,
+                Vec<SinkMetadata>,
+                Option<PbSinkSchemaChange>,
+            ) -> Result<Option<Vec<u8>>, SinkError>
             + Send
             + 'static,
         CD: FnMut(u64, Vec<u8>) -> Result<(), SinkError> + Send + 'static,
@@ -1473,7 +1485,7 @@ mod tests {
             epoch: u64,
             metadata: Vec<SinkMetadata>,
             schema_change: Option<PbSinkSchemaChange>,
-        ) -> risingwave_connector::sink::Result<Vec<u8>> {
+        ) -> risingwave_connector::sink::Result<Option<Vec<u8>>> {
             (self.pre_commit)(epoch, metadata, schema_change)
         }
 
@@ -1742,7 +1754,7 @@ mod tests {
                                         Ok(match metadata.metadata {
                                             Some(Metadata::Serialized(SerializedMetadata {
                                                 metadata,
-                                            })) => metadata,
+                                            })) => Some(metadata),
                                             _ => unreachable!(),
                                         })
                                     },
@@ -1894,7 +1906,7 @@ mod tests {
                                         Ok(match metadata.metadata {
                                             Some(Metadata::Serialized(SerializedMetadata {
                                                 metadata,
-                                            })) => metadata,
+                                            })) => Some(metadata),
                                             _ => unreachable!(),
                                         })
                                     },
@@ -2042,7 +2054,7 @@ mod tests {
                                         Ok(match metadata.metadata {
                                             Some(Metadata::Serialized(SerializedMetadata {
                                                 metadata,
-                                            })) => metadata,
+                                            })) => Some(metadata),
                                             _ => unreachable!(),
                                         })
                                     },
@@ -2214,7 +2226,7 @@ mod tests {
                                         Ok(match metadata.metadata {
                                             Some(Metadata::Serialized(SerializedMetadata {
                                                 metadata,
-                                            })) => metadata,
+                                            })) => Some(metadata),
                                             _ => unreachable!(),
                                         })
                                     },

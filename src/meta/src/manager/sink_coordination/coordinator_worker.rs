@@ -120,8 +120,8 @@ struct TwoPhaseCommitHandler {
     curr_hummock_committed_epoch: u64,
     job_committed_epoch_rx: UnboundedReceiver<u64>,
     last_committed_epoch: Option<u64>,
-    pending_epochs: VecDeque<(u64, Vec<u8>, Option<PbSinkSchemaChange>)>,
-    prepared_epochs: VecDeque<(u64, Vec<u8>, Option<PbSinkSchemaChange>)>,
+    pending_epochs: VecDeque<(u64, Option<Vec<u8>>, Option<PbSinkSchemaChange>)>,
+    prepared_epochs: VecDeque<(u64, Option<Vec<u8>>, Option<PbSinkSchemaChange>)>,
     backoff_state: Option<(RetryBackoffFuture, RetryBackoffStrategy)>,
 }
 
@@ -155,7 +155,7 @@ impl TwoPhaseCommitHandler {
 
     async fn next_to_commit(
         &mut self,
-    ) -> anyhow::Result<(u64, Vec<u8>, Option<PbSinkSchemaChange>)> {
+    ) -> anyhow::Result<(u64, Option<Vec<u8>>, Option<PbSinkSchemaChange>)> {
         loop {
             let wait_backoff = async {
                 if self.prepared_epochs.is_empty() {
@@ -192,7 +192,7 @@ impl TwoPhaseCommitHandler {
     fn push_new_item(
         &mut self,
         epoch: u64,
-        metadata: Vec<u8>,
+        metadata: Option<Vec<u8>>,
         schema_change: Option<PbSinkSchemaChange>,
     ) {
         if epoch > self.curr_hummock_committed_epoch {
@@ -495,7 +495,7 @@ pub struct CoordinatorWorker {
 
 enum CoordinatorWorkerEvent {
     HandleManagerEvent(HandleId, CoordinationHandleManagerEvent),
-    ReadyToCommit(u64, Vec<u8>, Option<PbSinkSchemaChange>),
+    ReadyToCommit(u64, Option<Vec<u8>>, Option<PbSinkSchemaChange>),
 }
 
 impl CoordinatorWorker {
@@ -705,7 +705,7 @@ impl CoordinatorWorker {
                     let commit_fut = async {
                         match &mut coordinator {
                             SinkCommitCoordinator::SinglePhase(coordinator) => {
-                                assert!(metadata.is_empty());
+                                assert!(metadata.is_none());
                                 if let Some(schema_change) = schema_change {
                                     coordinator
                                         .commit_schema_change(epoch, schema_change)
@@ -713,7 +713,9 @@ impl CoordinatorWorker {
                                 }
                             }
                             SinkCommitCoordinator::TwoPhase(coordinator) => {
-                                coordinator.commit_data(epoch, metadata).await?;
+                                if let Some(metadata) = metadata {
+                                    coordinator.commit_data(epoch, metadata).await?;
+                                }
                                 if let Some(schema_change) = schema_change {
                                     coordinator
                                         .commit_schema_change(epoch, schema_change)
@@ -798,16 +800,16 @@ impl CoordinatorWorker {
                             .await
                             .map_err(|e| anyhow!(e))?;
                         }
-                        if let Some(schema_change) = first_schema_change {
+                        if first_schema_change.is_some() {
                             persist_pre_commit_metadata(
                                 &db,
                                 sink_id as _,
                                 epoch,
-                                vec![],
-                                Some(&schema_change),
+                                None,
+                                first_schema_change.as_ref(),
                             )
                             .await?;
-                            two_phase_handler.push_new_item(epoch, vec![], Some(schema_change));
+                            two_phase_handler.push_new_item(epoch, None, first_schema_change);
                         } else {
                             self.prev_committed_epoch = Some(epoch);
                         }
@@ -816,19 +818,24 @@ impl CoordinatorWorker {
                         let commit_metadata = coordinator
                             .pre_commit(epoch, metadatas, first_schema_change.clone())
                             .await?;
-                        persist_pre_commit_metadata(
-                            &db,
-                            sink_id as _,
-                            epoch,
-                            commit_metadata.clone(),
-                            first_schema_change.as_ref(),
-                        )
-                        .await?;
-                        two_phase_handler.push_new_item(
-                            epoch,
-                            commit_metadata,
-                            first_schema_change,
-                        );
+                        if commit_metadata.is_some() || first_schema_change.is_some() {
+                            persist_pre_commit_metadata(
+                                &db,
+                                sink_id as _,
+                                epoch,
+                                commit_metadata.clone(),
+                                first_schema_change.as_ref(),
+                            )
+                            .await?;
+                            two_phase_handler.push_new_item(
+                                epoch,
+                                commit_metadata,
+                                first_schema_change,
+                            );
+                        } else {
+                            // No data to commit and no schema change.
+                            self.prev_committed_epoch = Some(epoch);
+                        }
                     }
                 }
 
@@ -865,7 +872,9 @@ impl CoordinatorWorker {
             for (epoch, state, metadata, _) in metadata_iter {
                 match state {
                     SinkState::Aborted => {
-                        coordinator.abort(epoch, metadata).await;
+                        if let Some(metadata) = metadata {
+                            coordinator.abort(epoch, metadata).await;
+                        }
                         aborted_epochs.push(epoch);
                     }
                     other => {
