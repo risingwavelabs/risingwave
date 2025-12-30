@@ -1034,7 +1034,7 @@ impl GlobalStreamManager {
                                     tracing::info!(worker = %worker.id, "worker parallelism changed");
                                     should_trigger = true;
                                 }
-                                Some(prev_worker) if  prev_worker.resource_group() != worker.resource_group()  => {
+                                Some(prev_worker) if prev_worker.resource_group() != worker.resource_group()  => {
                                     tracing::info!(worker = %worker.id, "worker label changed");
                                     should_trigger = true;
                                 }
@@ -1063,11 +1063,75 @@ impl GlobalStreamManager {
                             }
                         }
 
+                        LocalNotification::StreamingJobBackfillFinished(job_id) => {
+                            tracing::debug!(job_id = %job_id, "received backfill finished notification");
+                            if let Err(e) = self.apply_post_backfill_parallelism(job_id).await {
+                                tracing::warn!(job_id = %job_id, error = %e.as_report(), "failed to restore parallelism after backfill");
+                            }
+                        }
+
                         _ => {}
                     }
                 }
             }
         }
+    }
+
+    /// Restores a streaming job's parallelism to its target value after backfill completes.
+    async fn apply_post_backfill_parallelism(&self, job_id: JobId) -> MetaResult<()> {
+        // Fetch both the target parallelism (final desired state) and the backfill parallelism
+        // (temporary parallelism used during backfill phase) from the catalog.
+        let (target, backfill_parallelism) = self
+            .metadata_manager
+            .catalog_controller
+            .get_job_parallelisms(job_id)
+            .await?;
+
+        // Determine if we need to reschedule based on the backfill configuration.
+        match backfill_parallelism {
+            Some(backfill_parallelism) if backfill_parallelism == target => {
+                // Backfill parallelism matches target - no reschedule needed since the job
+                // is already running at the desired parallelism.
+                tracing::debug!(
+                    job_id = %job_id,
+                    ?backfill_parallelism,
+                    ?target,
+                    "backfill parallelism equals job parallelism, skip reschedule"
+                );
+                return Ok(());
+            }
+            Some(_) => {
+                // Backfill parallelism differs from target - proceed to restore target parallelism.
+            }
+            None => {
+                // No backfill parallelism was configured, meaning the job was created without
+                // a special backfill override. No reschedule is necessary.
+                tracing::debug!(
+                    job_id = %job_id,
+                    ?target,
+                    "no backfill parallelism configured, skip post-backfill reschedule"
+                );
+                return Ok(());
+            }
+        }
+
+        // Reschedule the job to restore its target parallelism.
+        tracing::info!(
+            job_id = %job_id,
+            ?target,
+            ?backfill_parallelism,
+            "restoring parallelism after backfill via reschedule"
+        );
+        let policy = ReschedulePolicy::Parallelism(ParallelismPolicy {
+            parallelism: target,
+        });
+        if let Err(e) = self.reschedule_streaming_job(job_id, policy, false).await {
+            tracing::warn!(job_id = %job_id, error = %e.as_report(), "reschedule after backfill failed");
+            return Err(e);
+        }
+
+        tracing::info!(job_id = %job_id, "parallelism reschedule after backfill submitted");
+        Ok(())
     }
 
     pub fn start_auto_parallelism_monitor(

@@ -170,6 +170,10 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism: ConfigParallelism,
 
+    /// Specific parallelism for backfill. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_backfill: ConfigParallelism,
+
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_table: ConfigParallelism,

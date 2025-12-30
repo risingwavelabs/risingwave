@@ -15,6 +15,7 @@
 mod adaptive_strategy;
 mod alter_fragment;
 mod auto_parallelism;
+mod backfill_parallelism;
 mod background_ddl;
 mod cascade_materialized_view;
 mod dynamic_filter;
