@@ -607,8 +607,8 @@ impl StreamSink {
 
         if has_ignore_delete && has_force_append_only {
             return Err(ErrorCode::InvalidInputSyntax(format!(
-                "Only one of `{}` and `{}` can be specified",
-                SINK_USER_IGNORE_DELETE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION
+                "`{}` is an alias of `{}`, only one of them can be specified.",
+                SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_USER_IGNORE_DELETE_OPTION
             ))
             .into());
         }
@@ -622,12 +622,12 @@ impl StreamSink {
         };
 
         if properties.value_eq_ignore_case(key, "true") {
-            return Ok(true);
+            Ok(true)
+        } else if properties.value_eq_ignore_case(key, "false") {
+            Ok(false)
+        } else {
+            Err(ErrorCode::InvalidInputSyntax(format!("`{key}` must be true or false")).into())
         }
-        if properties.value_eq_ignore_case(key, "false") {
-            return Ok(false);
-        }
-        Err(ErrorCode::InvalidInputSyntax(format!("`{key}` must be true or false")).into())
     }
 
     /// Derive the sink type based on...
@@ -679,7 +679,7 @@ impl StreamSink {
                 SinkType::Retract => {
                     if user_ignore_delete {
                         bail_invalid_input_syntax!(
-                            "Retract sink does not support `ignore_delete`. \
+                            "Retract sink type does not support `ignore_delete`. \
                              Please use `type = 'append-only'` or `type = 'upsert'` instead.",
                         );
                     }
