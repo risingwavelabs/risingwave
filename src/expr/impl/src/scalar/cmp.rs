@@ -601,7 +601,7 @@ mod tests {
         .await;
     }
 
-    trait TestFrom: Copy {
+    trait TestFrom {
         const NAME: &'static str;
         fn test_from(i: usize) -> Self;
     }
@@ -655,7 +655,7 @@ mod tests {
     }
 
     #[expect(clippy::type_complexity)]
-    fn gen_test_data<L: TestFrom, R: TestFrom, O>(
+    fn gen_test_data<L: TestFrom + Clone, R: TestFrom + Clone, O>(
         count: usize,
         f: impl Fn(Option<L>, Option<R>) -> Option<O>,
     ) -> (Vec<Option<L>>, Vec<Option<R>>, Vec<Option<O>>) {
@@ -676,8 +676,8 @@ mod tests {
             };
             let l = l.map(TestFrom::test_from);
             let r = r.map(TestFrom::test_from);
-            lhs.push(l);
-            rhs.push(r);
+            lhs.push(l.clone());
+            rhs.push(r.clone());
             target.push(f(l, r));
         }
         (lhs, rhs, target)
@@ -703,14 +703,14 @@ mod tests {
     where
         L: Array,
         L: for<'a> FromIterator<&'a Option<<L as Array>::OwnedItem>>,
-        <L as Array>::OwnedItem: TestFrom,
+        <L as Array>::OwnedItem: TestFrom + Clone,
         R: Array,
         R: for<'a> FromIterator<&'a Option<<R as Array>::OwnedItem>>,
-        <R as Array>::OwnedItem: TestFrom,
+        <R as Array>::OwnedItem: TestFrom + Clone,
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        <A as Array>::OwnedItem: TestFrom,
+        <A as Array>::OwnedItem: TestFrom + Clone,
         F: Fn(
             Option<<L as Array>::OwnedItem>,
             Option<<R as Array>::OwnedItem>,
@@ -737,8 +737,8 @@ mod tests {
 
         for i in 0..lhs.len() {
             let row = OwnedRow::new(vec![
-                lhs[i].map(|int| int.to_scalar_value()),
-                rhs[i].map(|int| int.to_scalar_value()),
+                lhs[i].clone().map(|int| int.to_scalar_value()),
+                rhs[i].clone().map(|int| int.to_scalar_value()),
             ]);
             let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
@@ -751,7 +751,7 @@ mod tests {
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        <A as Array>::OwnedItem: TestFrom,
+        <A as Array>::OwnedItem: TestFrom + Clone,
         F: Fn(i32, i32) -> <A as Array>::OwnedItem,
     {
         test_binary_inner::<I32Array, I32Array, _, _>(arithmetic(f), kind).await
@@ -762,7 +762,7 @@ mod tests {
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        <A as Array>::OwnedItem: TestFrom,
+        <A as Array>::OwnedItem: TestFrom + Clone,
         F: Fn(Date, Interval) -> <A as Array>::OwnedItem,
     {
         test_binary_inner::<DateArray, IntervalArray, _, _>(arithmetic(f), kind).await
@@ -773,7 +773,7 @@ mod tests {
         A: Array,
         for<'a> &'a A: std::convert::From<&'a ArrayImpl>,
         for<'a> <A as Array>::RefItem<'a>: PartialEq,
-        <A as Array>::OwnedItem: TestFrom,
+        <A as Array>::OwnedItem: TestFrom + Clone,
         F: Fn(Decimal, Decimal) -> <A as Array>::OwnedItem,
     {
         test_binary_inner::<DecimalArray, DecimalArray, _, _>(arithmetic(f), kind).await
