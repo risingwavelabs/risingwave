@@ -71,12 +71,18 @@ impl ObjectStoreMetaSnapshotStorage {
         Ok(instance)
     }
 
-    async fn update_manifest(&self, new_manifest: &MetaSnapshotManifest) -> BackupResult<()> {
+    async fn update_manifest(
+        &self,
+        update: impl FnOnce(MetaSnapshotManifest) -> MetaSnapshotManifest,
+    ) -> BackupResult<()> {
+        let mut guard = self.manifest.write().await;
+        let new_manifest = update((**guard).clone());
         let bytes =
-            serde_json::to_vec(new_manifest).map_err(|e| BackupError::Encoding(e.into()))?;
+            serde_json::to_vec(&new_manifest).map_err(|e| BackupError::Encoding(e.into()))?;
         self.store
             .upload(&self.get_manifest_path(), bytes.into())
             .await?;
+        *guard = Arc::new(new_manifest);
         Ok(())
     }
 
@@ -124,21 +130,17 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
     ) -> BackupResult<()> {
         let path = self.get_snapshot_path(snapshot.id);
         self.store.upload(&path, snapshot.encode()?.into()).await?;
-
-        // update manifest last
-        let mut gurad = self.manifest.write().await;
-        let mut new_manifest = (**gurad).clone();
-        new_manifest.manifest_id += 1;
-        new_manifest
-            .snapshot_metadata
-            .push(MetaSnapshotMetadata::new(
+        self.update_manifest(|mut manifest: MetaSnapshotManifest| {
+            manifest.manifest_id += 1;
+            manifest.snapshot_metadata.push(MetaSnapshotMetadata::new(
                 snapshot.id,
                 snapshot.metadata.hummock_version_ref(),
                 snapshot.format_version,
                 remarks,
             ));
-        self.update_manifest(&new_manifest).await?;
-        *gurad = Arc::new(new_manifest);
+            manifest
+        })
+        .await?;
         Ok(())
     }
 
@@ -163,18 +165,15 @@ impl MetaSnapshotStorage for ObjectStoreMetaSnapshotStorage {
     }
 
     async fn delete(&self, ids: &[MetaSnapshotId]) -> BackupResult<()> {
-        // update manifest first
         let to_delete: HashSet<MetaSnapshotId> = HashSet::from_iter(ids.iter().cloned());
-        {
-            let mut gurad = self.manifest.write().await;
-            let mut new_manifest = (**gurad).clone();
-            new_manifest.manifest_id += 1;
-            new_manifest
+        self.update_manifest(|mut manifest: MetaSnapshotManifest| {
+            manifest.manifest_id += 1;
+            manifest
                 .snapshot_metadata
                 .retain(|m| !to_delete.contains(&m.id));
-            self.update_manifest(&new_manifest).await?;
-            *gurad = Arc::new(new_manifest);
-        }
+            manifest
+        })
+        .await?;
         let paths = ids
             .iter()
             .map(|id| self.get_snapshot_path(*id))
