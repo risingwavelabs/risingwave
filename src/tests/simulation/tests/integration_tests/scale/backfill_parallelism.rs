@@ -20,7 +20,7 @@ use risingwave_simulation::utils::AssertResult;
 use tokio::time::sleep;
 
 use crate::scale::auto_parallelism::MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE;
-use crate::utils::kill_cn_and_meta_and_wait_recover;
+use crate::utils::kill_cn_meta_and_wait_full_recovery;
 
 async fn wait_parallelism(
     session: &mut risingwave_simulation::cluster::Session,
@@ -165,7 +165,7 @@ async fn test_backfill_parallelism_persists_after_recovery() -> Result<()> {
     wait_parallelism(&mut session, "m", "2").await?;
 
     // Trigger recovery while backfill is in progress.
-    kill_cn_and_meta_and_wait_recover(&cluster).await;
+    kill_cn_meta_and_wait_full_recovery(&mut cluster).await;
 
     // After recovery, the job should continue using backfill parallelism.
     wait_parallelism(&mut session, "m", "2").await?;
