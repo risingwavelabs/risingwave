@@ -67,7 +67,7 @@ impl From<&PbKind> for FunctionKind {
 impl From<&PbFunction> for FunctionCatalog {
     fn from(prost: &PbFunction) -> Self {
         FunctionCatalog {
-            id: prost.id.into(),
+            id: prost.id,
             name: prost.name.clone(),
             owner: prost.owner,
             kind: prost.kind.as_ref().unwrap().into(),
@@ -102,6 +102,8 @@ impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
             body: c.body.clone(),
             compressed_binary: c.compressed_binary.clone(),
             version: PbUdfExprVersion::LATEST as _,
+            is_async: c.is_async,
+            is_batched: c.is_batched,
         }
     }
 }

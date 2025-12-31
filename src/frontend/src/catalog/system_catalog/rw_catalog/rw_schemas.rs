@@ -14,7 +14,6 @@
 
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::OwnedByUserCatalog;
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
@@ -39,10 +38,10 @@ fn read_rw_schema_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSchema>> {
 
     Ok(schemas
         .map(|schema| RwSchema {
-            id: schema.id() as i32,
+            id: schema.id().as_i32_id(),
             name: schema.name(),
             owner: schema.owner() as i32,
-            acl: get_acl_items(&Object::SchemaId(schema.id()), false, &users, username_map),
+            acl: get_acl_items(schema.id(), false, &users, username_map),
         })
         .collect())
 }

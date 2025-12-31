@@ -566,8 +566,8 @@ where
                                     tracing::info!(
                                         old_rate_limit = ?old_rate_limit,
                                         new_rate_limit = ?new_rate_limit,
-                                        upstream_table_id = upstream_table_id,
-                                        actor_id = self.actor_id,
+                                        %upstream_table_id,
+                                        actor_id = %self.actor_id,
                                         "backfill rate limit changed",
                                     );
                                     builders = upstream_table

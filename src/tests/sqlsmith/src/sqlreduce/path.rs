@@ -20,6 +20,7 @@
 use std::fmt;
 
 use risingwave_sqlparser::ast::*;
+use strum::EnumDiscriminants;
 
 /// Represents all possible AST field names that can be navigated.
 /// This provides compile-time safety for field access.
@@ -250,7 +251,9 @@ pub fn display_ast_path(path: &AstPath) -> String {
 /// Represents a node in the AST that can be navigated and modified.
 /// This is a simplified representation focusing on the most commonly
 /// reduced SQL constructs.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, EnumDiscriminants)]
+#[strum_discriminants(derive(strum::Display))]
+#[strum_discriminants(name(AstNodeType))]
 pub enum AstNode {
     Statement(Statement),
     Query(Box<Query>),
@@ -524,7 +527,17 @@ impl AstNode {
         new_child: Option<AstNode>,
     ) -> Option<AstNode> {
         match (self, component) {
-            // Statement field modifications
+            // Handle Statement::Query (root query statements)
+            (AstNode::Statement(Statement::Query(_)), PathComponent::Field(field))
+                if *field == AstField::Query =>
+            {
+                if let Some(AstNode::Query(new_query)) = new_child {
+                    Some(AstNode::Statement(Statement::Query(new_query)))
+                } else {
+                    None
+                }
+            }
+
             (
                 AstNode::Statement(Statement::CreateView {
                     name,
@@ -615,16 +628,25 @@ impl AstNode {
                     AstField::Projection => {
                         if let Some(AstNode::SelectItemList(items)) = new_child {
                             new_select.projection = items;
+                        } else {
+                            // Remove projection by setting to empty vec (SELECT without columns is invalid, but we try it)
+                            new_select.projection = vec![];
                         }
                     }
                     AstField::From => {
                         if let Some(AstNode::TableList(tables)) = new_child {
                             new_select.from = tables;
+                        } else {
+                            // Remove FROM clause by setting to empty vec
+                            new_select.from = vec![];
                         }
                     }
                     AstField::GroupBy => {
                         if let Some(AstNode::ExprList(exprs)) = new_child {
                             new_select.group_by = exprs;
+                        } else {
+                            // Remove GROUP BY by setting to empty vec
+                            new_select.group_by = vec![];
                         }
                     }
                     _ => return None,
@@ -850,7 +872,10 @@ impl AstNode {
                         new_with.cte_tables = new_ctes;
                         Some(AstNode::With(new_with))
                     } else {
-                        None
+                        // Remove all CTEs by setting to empty vec
+                        let mut new_with = with_clause.clone();
+                        new_with.cte_tables = vec![];
+                        Some(AstNode::With(new_with))
                     }
                 }
                 _ => None,
@@ -888,7 +913,8 @@ impl AstNode {
             _ => {
                 // Add debug logging for unmatched cases
                 tracing::debug!(
-                    "set_child: No match for {:?} with component {:?}",
+                    "set_child: No match for {} ({:?}) with component {:?}",
+                    AstNodeType::from(self),
                     std::mem::discriminant(self),
                     component
                 );
@@ -961,8 +987,16 @@ fn explore_child_field(
     let relative_path = vec![field_component];
 
     if let Some(child_node) = get_node_at_path(node, &relative_path) {
-        paths.extend(enumerate_reduction_paths(&child_node, child_path));
+        // Collect child paths but don't add them yet (for outer-first ordering)
+        let child_paths = enumerate_reduction_paths(&child_node, child_path);
+        paths.extend(child_paths);
     }
+}
+
+/// Calculate the depth of a path (number of components).
+/// Used for outer-first ordering: shallower paths (outer queries) come first.
+fn path_depth(path: &AstPath) -> usize {
+    path.len()
 }
 
 /// Enumerate all interesting paths in the AST for reduction.
@@ -1134,6 +1168,11 @@ pub fn enumerate_reduction_paths(node: &AstNode, current_path: AstPath) -> Vec<A
         _ => {}
     }
 
+    // Sort paths by depth (outer-first): shallower paths come first
+    // This ensures outer queries are reduced before inner subqueries
+    // For example: SELECT (SELECT ...) will reduce the outer SELECT first
+    paths.sort_by_key(path_depth);
+
     paths
 }
 
@@ -1152,27 +1191,8 @@ pub fn ast_node_to_statement(node: &AstNode) -> Option<Statement> {
 }
 
 /// Get a human-readable name for an AST node type.
-pub fn get_node_type_name(node: &AstNode) -> &'static str {
-    match node {
-        AstNode::Statement(_) => "Statement",
-        AstNode::Query(_) => "Query",
-        AstNode::Select(_) => "Select",
-        AstNode::Expr(_) => "Expr",
-        AstNode::SelectItem(_) => "SelectItem",
-        AstNode::TableWithJoins(_) => "TableWithJoins",
-        AstNode::Join(_) => "Join",
-        AstNode::TableFactor(_) => "TableFactor",
-        AstNode::OrderByExpr(_) => "OrderByExpr",
-        AstNode::With(_) => "With",
-        AstNode::Cte(_) => "Cte",
-        AstNode::ExprList(_) => "ExprList",
-        AstNode::SelectItemList(_) => "SelectItemList",
-        AstNode::TableList(_) => "TableList",
-        AstNode::JoinList(_) => "JoinList",
-        AstNode::OrderByList(_) => "OrderByList",
-        AstNode::CteList(_) => "CteList",
-        AstNode::Option(_) => "Option",
-    }
+pub fn get_node_type_name(node: &AstNode) -> String {
+    AstNodeType::from(node).to_string()
 }
 
 #[cfg(test)]

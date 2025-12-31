@@ -307,7 +307,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
     let mut curr_epoch = test_epoch(11);
     let mut splits = HashMap::new();
     splits.insert(
-        actor_id,
+        actor_id.into(),
         vec![SplitImpl::MysqlCdc(DebeziumCdcSplit::new(0, None, None))],
     );
     let init_barrier =
@@ -495,7 +495,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         table_pk_order_types,
         table_pk_indices.clone(),
     );
-    let actor_id = 0x1a;
+    let actor_id = 0x1a.into();
 
     // create state table
     let state_schema = Schema::new(vec![
@@ -633,19 +633,20 @@ async fn test_parallelized_cdc_backfill() {
     );
     let splits = [(
         actor_id,
-        vec![CdcTableSnapshotSplitRaw {
-            split_id: 1,
-            left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(1))]).value_serialize(),
-            right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(10))])
-                .value_serialize(),
-        }],
+        (
+            vec![CdcTableSnapshotSplitRaw {
+                split_id: 1,
+                left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(1))])
+                    .value_serialize(),
+                right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(10))])
+                    .value_serialize(),
+            }],
+            10,
+        ),
     )]
     .into_iter()
     .collect();
-    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration {
-        splits,
-        generation: 10,
-    };
+    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration { splits };
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
             splits: source_splits,
@@ -809,19 +810,20 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     );
     let splits = [(
         actor_id,
-        vec![CdcTableSnapshotSplitRaw {
-            split_id: 2,
-            left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(1))]).value_serialize(),
-            right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(6))])
-                .value_serialize(),
-        }],
+        (
+            vec![CdcTableSnapshotSplitRaw {
+                split_id: 2,
+                left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(1))])
+                    .value_serialize(),
+                right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(6))])
+                    .value_serialize(),
+            }],
+            10,
+        ),
     )]
     .into_iter()
     .collect();
-    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration {
-        splits,
-        generation: 10,
-    };
+    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration { splits };
     let init_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
             splits: source_splits.clone(),
@@ -879,29 +881,29 @@ async fn test_parallelized_cdc_backfill_reschedule() {
     // Send reschedule barrier.
     let splits = [(
         actor_id,
-        vec![
-            CdcTableSnapshotSplitRaw {
-                split_id: 3,
-                left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(6))])
-                    .value_serialize(),
-                right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(100))])
-                    .value_serialize(),
-            },
-            CdcTableSnapshotSplitRaw {
-                split_id: 4,
-                left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(100))])
-                    .value_serialize(),
-                right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(500))])
-                    .value_serialize(),
-            },
-        ],
+        (
+            vec![
+                CdcTableSnapshotSplitRaw {
+                    split_id: 3,
+                    left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(6))])
+                        .value_serialize(),
+                    right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(100))])
+                        .value_serialize(),
+                },
+                CdcTableSnapshotSplitRaw {
+                    split_id: 4,
+                    left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(100))])
+                        .value_serialize(),
+                    right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(500))])
+                        .value_serialize(),
+                },
+            ],
+            10,
+        ),
     )]
     .into_iter()
     .collect();
-    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration {
-        splits,
-        generation: 10,
-    };
+    let actor_cdc_table_snapshot_splits = CdcTableSnapshotSplitAssignmentWithGeneration { splits };
     curr_epoch.inc_epoch();
     let reschedule_barrier =
         Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Update(UpdateMutation {

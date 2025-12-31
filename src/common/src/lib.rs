@@ -43,6 +43,7 @@
 #![feature(iter_array_chunks)]
 #![feature(exact_size_is_empty)]
 #![feature(debug_closure_helpers)]
+#![feature(iter_from_coroutine)]
 #![register_tool(rw)]
 
 #[cfg_attr(not(test), allow(unused_extern_crates))]
@@ -52,6 +53,8 @@ extern crate self as risingwave_common;
 // since they were previously defined and exported from `risingwave_common`.
 #[macro_use]
 extern crate risingwave_error;
+use std::sync::OnceLock;
+
 pub use risingwave_error::common::{
     bail_no_function, bail_not_implemented, no_function, not_implemented,
 };
@@ -82,9 +85,12 @@ pub mod catalog;
 pub mod config;
 pub mod constants;
 pub mod field_generator;
+pub mod gap_fill;
 pub mod global_jvm;
 pub mod hash;
-pub mod log;
+pub mod id {
+    pub use risingwave_pb::id::*;
+}
 pub mod memory;
 pub mod metrics_reader;
 pub mod telemetry;
@@ -105,8 +111,8 @@ pub use risingwave_common_metrics::{
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
 pub use {
-    risingwave_common_metrics as metrics, risingwave_common_secret as secret,
-    risingwave_license as license,
+    risingwave_common_log as log, risingwave_common_metrics as metrics,
+    risingwave_common_secret as secret, risingwave_license as license,
 };
 
 pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -123,6 +129,9 @@ pub const SERVER_VERSION_NUM: i32 = 130014;
 pub const SERVER_ENCODING: &str = "UTF8";
 /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-STANDARD-CONFORMING-STRINGS>
 pub const STANDARD_CONFORMING_STRINGS: &str = "on";
+
+pub static STATE_STORE_URL: OnceLock<String> = OnceLock::new();
+pub static DATA_DIRECTORY: OnceLock<String> = OnceLock::new();
 
 #[macro_export]
 macro_rules! git_sha {

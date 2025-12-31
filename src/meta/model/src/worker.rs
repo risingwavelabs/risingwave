@@ -92,7 +92,7 @@ impl From<&PbWorkerNode> for ActiveModel {
     fn from(worker: &PbWorkerNode) -> Self {
         let host = worker.host.clone().unwrap();
         Self {
-            worker_id: Set(worker.id as _),
+            worker_id: Set(worker.id),
             worker_type: Set(worker.r#type().into()),
             host: Set(host.host),
             port: Set(host.port),

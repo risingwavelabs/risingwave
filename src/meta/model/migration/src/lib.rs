@@ -55,6 +55,14 @@ mod m20250905_144810_deprecate_table_incoming_sinks;
 mod m20250916_120000_add_refresh_fields;
 mod m20251005_000000_fragment_splits;
 mod m20251016_220528_fragment_parallelism;
+mod m20251022_294610_source_refresh_mode;
+mod m20251030_120000_refresh_jobs;
+mod m20251112_114514_streaming_job_config_override;
+mod m20251124_195858_pending_sink_state;
+mod m20251126_093529_add_is_iceberg_compactor;
+mod m20251130_120000_streaming_job_backfill_parallelism;
+mod m20251208_134652_clean_watermark_indices;
+mod m20251224_142321_sink_schema_change;
 mod utils;
 
 pub struct Migrator;
@@ -148,6 +156,14 @@ impl MigratorTrait for Migrator {
             Box::new(m20250916_120000_add_refresh_fields::Migration),
             Box::new(m20251005_000000_fragment_splits::Migration),
             Box::new(m20251016_220528_fragment_parallelism::Migration),
+            Box::new(m20251022_294610_source_refresh_mode::Migration),
+            Box::new(m20251030_120000_refresh_jobs::Migration),
+            Box::new(m20251112_114514_streaming_job_config_override::Migration),
+            Box::new(m20251126_093529_add_is_iceberg_compactor::Migration),
+            Box::new(m20251124_195858_pending_sink_state::Migration),
+            Box::new(m20251130_120000_streaming_job_backfill_parallelism::Migration),
+            Box::new(m20251208_134652_clean_watermark_indices::Migration),
+            Box::new(m20251224_142321_sink_schema_change::Migration),
         ]
     }
 }

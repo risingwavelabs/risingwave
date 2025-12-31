@@ -29,7 +29,8 @@ pub enum TemplateEncoder {
     String(TemplateStringEncoder),
     RedisGeoKey(TemplateRedisGeoKeyEncoder),
     RedisGeoValue(TemplateRedisGeoValueEncoder),
-    RedisPubSubKey(TemplateRedisPubSubKeyEncoder),
+    RedisPubSubKey(TemplateRedisPubSubStreamKeyEncoder),
+    RedisStreamValue(TemplateRedisStreamValueEncoder),
 }
 impl TemplateEncoder {
     pub fn new_string(schema: Schema, col_indices: Option<Vec<usize>>, template: String) -> Self {
@@ -58,14 +59,28 @@ impl TemplateEncoder {
         ))
     }
 
-    pub fn new_pubsub_key(
+    pub fn new_pubsub_stream_key(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
         channel: Option<String>,
         channel_column: Option<String>,
     ) -> Result<Self> {
         Ok(TemplateEncoder::RedisPubSubKey(
-            TemplateRedisPubSubKeyEncoder::new(schema, col_indices, channel, channel_column)?,
+            TemplateRedisPubSubStreamKeyEncoder::new(schema, col_indices, channel, channel_column)?,
+        ))
+    }
+
+    pub fn new_stream_value(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        key_template: String,
+        value_template: String,
+    ) -> Self {
+        TemplateEncoder::RedisStreamValue(TemplateRedisStreamValueEncoder::new(
+            schema,
+            col_indices,
+            key_template,
+            value_template,
         ))
     }
 }
@@ -78,6 +93,7 @@ impl RowEncoder for TemplateEncoder {
             TemplateEncoder::RedisGeoValue(encoder) => &encoder.schema,
             TemplateEncoder::RedisGeoKey(encoder) => &encoder.key_encoder.schema,
             TemplateEncoder::RedisPubSubKey(encoder) => &encoder.schema,
+            TemplateEncoder::RedisStreamValue(encoder) => &encoder.value_encoder.schema,
         }
     }
 
@@ -87,6 +103,9 @@ impl RowEncoder for TemplateEncoder {
             TemplateEncoder::RedisGeoValue(encoder) => encoder.col_indices.as_deref(),
             TemplateEncoder::RedisGeoKey(encoder) => encoder.key_encoder.col_indices.as_deref(),
             TemplateEncoder::RedisPubSubKey(encoder) => encoder.col_indices.as_deref(),
+            TemplateEncoder::RedisStreamValue(encoder) => {
+                encoder.value_encoder.col_indices.as_deref()
+            }
         }
     }
 
@@ -102,6 +121,7 @@ impl RowEncoder for TemplateEncoder {
             TemplateEncoder::RedisGeoValue(encoder) => encoder.encode_cols(row, col_indices),
             TemplateEncoder::RedisGeoKey(encoder) => encoder.encode_cols(row, col_indices),
             TemplateEncoder::RedisPubSubKey(encoder) => encoder.encode_cols(row, col_indices),
+            TemplateEncoder::RedisStreamValue(encoder) => encoder.encode_cols(row, col_indices),
         }
     }
 }
@@ -288,17 +308,17 @@ impl TemplateRedisGeoKeyEncoder {
     }
 }
 
-pub enum TemplateRedisPubSubKeyEncoderInner {
-    PubSubName(String),
-    PubSubColumnIndex(usize),
+pub enum TemplateRedisPubSubStreamKeyEncoderInner {
+    PubSubStreamName(String),
+    PubSubStreamColumnIndex(usize),
 }
-pub struct TemplateRedisPubSubKeyEncoder {
-    inner: TemplateRedisPubSubKeyEncoderInner,
+pub struct TemplateRedisPubSubStreamKeyEncoder {
+    inner: TemplateRedisPubSubStreamKeyEncoderInner,
     schema: Schema,
     col_indices: Option<Vec<usize>>,
 }
 
-impl TemplateRedisPubSubKeyEncoder {
+impl TemplateRedisPubSubStreamKeyEncoder {
     pub fn new(
         schema: Schema,
         col_indices: Option<Vec<usize>>,
@@ -307,7 +327,7 @@ impl TemplateRedisPubSubKeyEncoder {
     ) -> Result<Self> {
         if let Some(channel) = channel {
             return Ok(Self {
-                inner: TemplateRedisPubSubKeyEncoderInner::PubSubName(channel),
+                inner: TemplateRedisPubSubStreamKeyEncoderInner::PubSubStreamName(channel),
                 schema,
                 col_indices,
             });
@@ -324,7 +344,9 @@ impl TemplateRedisPubSubKeyEncoder {
                     ))
                 })?;
             return Ok(Self {
-                inner: TemplateRedisPubSubKeyEncoderInner::PubSubColumnIndex(channel_column_index),
+                inner: TemplateRedisPubSubStreamKeyEncoderInner::PubSubStreamColumnIndex(
+                    channel_column_index,
+                ),
                 schema,
                 col_indices,
             });
@@ -340,17 +362,54 @@ impl TemplateRedisPubSubKeyEncoder {
         _col_indices: impl Iterator<Item = usize>,
     ) -> Result<TemplateEncoderOutput> {
         match &self.inner {
-            TemplateRedisPubSubKeyEncoderInner::PubSubName(channel) => {
-                Ok(TemplateEncoderOutput::RedisPubSubKey(channel.clone()))
+            TemplateRedisPubSubStreamKeyEncoderInner::PubSubStreamName(channel) => {
+                Ok(TemplateEncoderOutput::RedisPubSubStreamKey(channel.clone()))
             }
-            TemplateRedisPubSubKeyEncoderInner::PubSubColumnIndex(pubsub_col) => {
+            TemplateRedisPubSubStreamKeyEncoderInner::PubSubStreamColumnIndex(pubsub_col) => {
                 let pubsub_key = row
                     .datum_at(*pubsub_col)
                     .ok_or_else(|| SinkError::Redis("pubsub_key is null".to_owned()))?
                     .to_text();
-                Ok(TemplateEncoderOutput::RedisPubSubKey(pubsub_key))
+                Ok(TemplateEncoderOutput::RedisPubSubStreamKey(pubsub_key))
             }
         }
+    }
+}
+
+pub struct TemplateRedisStreamValueEncoder {
+    key_encoder: TemplateStringEncoder,
+    value_encoder: TemplateStringEncoder,
+}
+
+impl TemplateRedisStreamValueEncoder {
+    pub fn new(
+        schema: Schema,
+        col_indices: Option<Vec<usize>>,
+        key_template: String,
+        value_template: String,
+    ) -> Self {
+        let key_encoder =
+            TemplateStringEncoder::new(schema.clone(), col_indices.clone(), key_template);
+        let value_encoder = TemplateStringEncoder::new(schema, col_indices, value_template);
+        Self {
+            key_encoder,
+            value_encoder,
+        }
+    }
+
+    pub fn encode_cols(
+        &self,
+        row: impl Row,
+        col_indices: impl Iterator<Item = usize>,
+    ) -> Result<TemplateEncoderOutput> {
+        let col_indices: Vec<_> = col_indices.collect();
+        let key = self
+            .key_encoder
+            .encode_cols(&row, col_indices.clone().into_iter())?;
+        let value = self
+            .value_encoder
+            .encode_cols(row, col_indices.into_iter())?;
+        Ok(TemplateEncoderOutput::RedisStreamValue((key, value)))
     }
 }
 
@@ -362,7 +421,8 @@ pub enum TemplateEncoderOutput {
     // The key of redis's geospatial, including redis's key and member
     RedisGeoKey((String, String)),
 
-    RedisPubSubKey(String),
+    RedisPubSubStreamKey(String),
+    RedisStreamValue((String, String)),
 }
 
 impl TemplateEncoderOutput {
@@ -373,9 +433,12 @@ impl TemplateEncoderOutput {
                 "RedisGeoKey can't convert to string".to_owned(),
             )),
             TemplateEncoderOutput::RedisGeoValue(_) => Err(SinkError::Encode(
-                "RedisGeoVelue can't convert to string".to_owned(),
+                "RedisGeoValue can't convert to string".to_owned(),
             )),
-            TemplateEncoderOutput::RedisPubSubKey(s) => Ok(s),
+            TemplateEncoderOutput::RedisPubSubStreamKey(s) => Ok(s),
+            TemplateEncoderOutput::RedisStreamValue((_, _)) => Err(SinkError::Encode(
+                "RedisStreamValue can't convert to string".to_owned(),
+            )),
         }
     }
 }
@@ -388,9 +451,12 @@ impl SerTo<String> for TemplateEncoderOutput {
                 "RedisGeoKey can't convert to string".to_owned(),
             )),
             TemplateEncoderOutput::RedisGeoValue(_) => Err(SinkError::Encode(
-                "RedisGeoVelue can't convert to string".to_owned(),
+                "RedisGeoValue can't convert to string".to_owned(),
             )),
-            TemplateEncoderOutput::RedisPubSubKey(s) => Ok(s),
+            TemplateEncoderOutput::RedisPubSubStreamKey(s) => Ok(s),
+            TemplateEncoderOutput::RedisStreamValue((_, _)) => Err(SinkError::Encode(
+                "RedisStreamValue can't convert to string".to_owned(),
+            )),
         }
     }
 }
@@ -404,7 +470,8 @@ pub enum RedisSinkPayloadWriterInput {
     RedisGeoValue((String, String)),
     // The key of redis's geospatial, including redis's key and member
     RedisGeoKey((String, String)),
-    RedisPubSubKey(String),
+    RedisPubSubStreamKey(String),
+    RedisStreamValue((String, String)),
 }
 
 impl SerTo<RedisSinkPayloadWriterInput> for TemplateEncoderOutput {
@@ -417,8 +484,11 @@ impl SerTo<RedisSinkPayloadWriterInput> for TemplateEncoderOutput {
             TemplateEncoderOutput::RedisGeoValue((key, member)) => {
                 Ok(RedisSinkPayloadWriterInput::RedisGeoValue((key, member)))
             }
-            TemplateEncoderOutput::RedisPubSubKey(s) => {
-                Ok(RedisSinkPayloadWriterInput::RedisPubSubKey(s))
+            TemplateEncoderOutput::RedisPubSubStreamKey(s) => {
+                Ok(RedisSinkPayloadWriterInput::RedisPubSubStreamKey(s))
+            }
+            TemplateEncoderOutput::RedisStreamValue((key, value)) => {
+                Ok(RedisSinkPayloadWriterInput::RedisStreamValue((key, value)))
             }
         }
     }

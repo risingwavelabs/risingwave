@@ -15,7 +15,6 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::RESERVED_PG_SCHEMA_PREFIX;
-use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
@@ -71,7 +70,7 @@ pub async fn handle_create_schema(
             .read_guard()
             .get_user_by_name(&owner)
             .map(|u| u.id)
-            .ok_or_else(|| CatalogError::NotFound("user", owner.clone()))?
+            .ok_or_else(|| CatalogError::not_found("user", &owner))?
     } else {
         session.user_id()
     };
@@ -80,7 +79,7 @@ pub async fn handle_create_schema(
         db_owner,
         AclMode::Create,
         db_name,
-        Object::DatabaseId(db_id),
+        db_id,
     )])?;
 
     let catalog_writer = session.catalog_writer()?;

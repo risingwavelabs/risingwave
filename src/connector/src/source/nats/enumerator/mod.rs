@@ -19,15 +19,18 @@ use risingwave_common::bail;
 
 use super::NatsProperties;
 use super::source::{NatsOffset, NatsSplit};
+use crate::connector_common::NatsCommon;
 use crate::error::ConnectorResult;
 use crate::source::{SourceEnumeratorContextRef, SplitEnumerator, SplitId};
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct NatsSplitEnumerator {
     subject: String,
     #[expect(dead_code)]
     split_id: SplitId,
-    client: async_nats::Client,
+    /// Hold the client Arc to keep it alive. This allows the shared client cache to reuse
+    /// the connection while we're still using it.
+    client: Arc<async_nats::Client>,
 }
 
 #[async_trait]
@@ -42,7 +45,7 @@ impl SplitEnumerator for NatsSplitEnumerator {
         let client = properties.common.build_client().await?;
 
         // check if the stream exists or allow create stream
-        let jetstream = properties.common.build_context().await?;
+        let jetstream = NatsCommon::build_context_from_client(&client);
         let _ = properties
             .common
             .build_or_get_stream(jetstream, properties.stream.clone())

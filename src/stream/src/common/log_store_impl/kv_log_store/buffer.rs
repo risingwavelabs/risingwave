@@ -21,6 +21,7 @@ use parking_lot::{Mutex, MutexGuard};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult, TruncateOffset};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use tokio::sync::Notify;
 
 use crate::common::log_store_impl::kv_log_store::{
@@ -47,6 +48,8 @@ pub(crate) enum LogStoreBufferItem {
     Barrier {
         is_checkpoint: bool,
         next_epoch: u64,
+        schema_change: Option<PbSinkSchemaChange>,
+        is_stop: bool,
     },
 }
 
@@ -256,6 +259,7 @@ impl<T> SharedMutex<T> {
 pub(crate) struct LogStoreBufferSender {
     buffer: SharedMutex<LogStoreBufferInner>,
     update_notify: Arc<Notify>,
+    truncate_notify: Arc<Notify>,
 }
 
 impl LogStoreBufferSender {
@@ -290,12 +294,21 @@ impl LogStoreBufferSender {
         ret
     }
 
-    pub(crate) fn barrier(&self, epoch: u64, is_checkpoint: bool, next_epoch: u64) {
+    pub(crate) fn barrier(
+        &self,
+        epoch: u64,
+        is_checkpoint: bool,
+        next_epoch: u64,
+        schema_change: Option<PbSinkSchemaChange>,
+        is_stop: bool,
+    ) {
         self.buffer.inner().add_item(
             epoch,
             LogStoreBufferItem::Barrier {
                 is_checkpoint,
                 next_epoch,
+                schema_change,
+                is_stop,
             },
         );
         self.update_notify.notify_waiters();
@@ -310,6 +323,36 @@ impl LogStoreBufferSender {
             ret = inner.truncation_list.pop_front();
         }
         ret
+    }
+
+    pub(crate) async fn wait_for_barrier_truncation(
+        &self,
+        curr_epoch: u64,
+    ) -> LogStoreResult<ReaderTruncationOffsetType> {
+        loop {
+            let notified = self.truncate_notify.notified();
+
+            {
+                let mut inner = self.buffer.inner();
+                while let Some((epoch, seq_id)) = inner.truncation_list.pop_front() {
+                    if epoch > curr_epoch {
+                        // TODO: should panic, after we confirm the correctness
+                        return Err(anyhow::anyhow!(
+                            "truncation epoch {} should not be larger than current epoch {}",
+                            epoch,
+                            curr_epoch
+                        ));
+                    }
+                    if epoch == curr_epoch && seq_id.is_none() {
+                        return Ok((epoch, seq_id));
+                    }
+                }
+            }
+
+            notified
+                .instrument_await("Wait For Barrier Truncation")
+                .await;
+        }
     }
 
     pub(crate) fn flush_all_unflushed(
@@ -351,6 +394,7 @@ impl LogStoreBufferSender {
 pub(crate) struct LogStoreBufferReceiver {
     buffer: SharedMutex<LogStoreBufferInner>,
     update_notify: Arc<Notify>,
+    truncate_notify: Arc<Notify>,
 }
 
 impl LogStoreBufferReceiver {
@@ -426,12 +470,14 @@ impl LogStoreBufferReceiver {
         }
         if let Some(offset) = latest_offset {
             inner.add_truncate_offset(offset);
+            self.truncate_notify.notify_waiters();
         }
     }
 
     pub(crate) fn truncate_historical(&mut self, epoch: u64) {
         let mut inner = self.buffer.inner();
         inner.add_truncate_offset((epoch, None));
+        self.truncate_notify.notify_waiters();
     }
 
     pub(crate) fn rewind(&self, log_store_rewind_start_epoch: Option<u64>) {
@@ -455,14 +501,17 @@ pub(crate) fn new_log_store_buffer(
         metrics,
     });
     let update_notify = Arc::new(Notify::new());
+    let truncate_notify = Arc::new(Notify::new());
     let tx = LogStoreBufferSender {
         buffer: buffer.clone(),
         update_notify: update_notify.clone(),
+        truncate_notify: truncate_notify.clone(),
     };
 
     let rx = LogStoreBufferReceiver {
         buffer,
         update_notify,
+        truncate_notify,
     };
 
     (tx, rx)

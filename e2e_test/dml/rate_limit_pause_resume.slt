@@ -10,9 +10,8 @@ alter table t set dml_rate_limit to 0;
 
 include ./inserts.slt.part
 
-sleep 3s
 
-query I
+query I retry 4 backoff 1s
 select count(*) from t;
 ----
 0
@@ -21,9 +20,8 @@ select count(*) from t;
 statement ok
 alter table t set dml_rate_limit to 1;
 
-sleep 5s
 
-query II
+query II retry 6 backoff 1s
 select case when count(*) between 1 and 5 then 3 else 0 end from t;
 ----
 3

@@ -23,6 +23,7 @@ use std::time::Duration;
 
 use anyhow::Context;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::ObjectId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::panic_if_debug;
 use risingwave_connector::WithOptionsSecResolved;
@@ -55,7 +56,7 @@ pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>
 pub type DiscoveredSourceSplits = HashMap<SourceId, Vec<SplitImpl>>;
 pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
-pub type ConnectorPropsChange = HashMap<u32, HashMap<String, String>>;
+pub type ConnectorPropsChange = HashMap<ObjectId, HashMap<String, String>>;
 
 const DEFAULT_SOURCE_TICK_TIMEOUT: Duration = Duration::from_secs(10);
 
@@ -110,7 +111,7 @@ impl SourceManagerCore {
         let mut fragment_replacements = Default::default();
         let mut dropped_source_fragments = Default::default();
         let mut dropped_source_ids = Default::default();
-        let mut recreate_source_id_map_new_props: Vec<(u32, HashMap<String, String>)> =
+        let mut recreate_source_id_map_new_props: Vec<(SourceId, HashMap<String, String>)> =
             Default::default();
 
         match source_change {
@@ -221,7 +222,6 @@ impl SourceManagerCore {
         }
 
         for (source_id, new_props) in recreate_source_id_map_new_props {
-            tracing::info!("recreate source {source_id} in source manager");
             if let Some(handle) = self.managed_sources.get_mut(&(source_id as _)) {
                 // the update here should not involve fragments change and split change
                 // Or we need to drop and recreate the source worker instead of updating inplace
@@ -229,6 +229,9 @@ impl SourceManagerCore {
                     WithOptionsSecResolved::without_secrets(new_props.into_iter().collect());
                 let props = ConnectorProperties::extract(props_wrapper, false).unwrap(); // already checked when sending barrier
                 handle.update_props(props);
+                tracing::info!("update source {source_id} properties in source manager");
+            } else {
+                tracing::info!("job id {source_id} is not registered in source manager");
             }
         }
     }
@@ -311,18 +314,7 @@ impl SourceManager {
         let backfill_fragments = metadata_manager
             .catalog_controller
             .load_backfill_fragment_ids()
-            .await?
-            .into_iter()
-            .map(|(source_id, fragment_ids)| {
-                (
-                    source_id as SourceId,
-                    fragment_ids
-                        .into_iter()
-                        .map(|(id, up_id)| (id as _, up_id as _))
-                        .collect(),
-                )
-            })
-            .collect();
+            .await?;
 
         let core = Mutex::new(SourceManagerCore::new(
             metadata_manager,
@@ -342,7 +334,7 @@ impl SourceManager {
 
     pub async fn validate_source_once(
         &self,
-        source_id: u32,
+        source_id: SourceId,
         new_source_props: WithOptionsSecResolved,
     ) -> MetaResult<()> {
         let props = ConnectorProperties::extract(new_source_props, false).unwrap();
@@ -386,8 +378,25 @@ impl SourceManager {
     /// e.g., split change (`post_collect` barrier) or scaling (`post_apply_reschedule`).
     #[await_tree::instrument("apply_source_change({source_change})")]
     pub async fn apply_source_change(&self, source_change: SourceChange) {
-        let mut core = self.core.lock().await;
-        core.apply_source_change(source_change);
+        let need_force_tick = matches!(source_change, SourceChange::UpdateSourceProps { .. });
+        let updated_source_ids = if let SourceChange::UpdateSourceProps {
+            ref source_id_map_new_props,
+        } = source_change
+        {
+            source_id_map_new_props.keys().cloned().collect::<Vec<_>>()
+        } else {
+            Vec::new()
+        };
+
+        {
+            let mut core = self.core.lock().await;
+            core.apply_source_change(source_change);
+        }
+
+        // Force tick for updated source workers
+        if need_force_tick {
+            self.force_tick_updated_sources(updated_source_ids).await;
+        }
     }
 
     /// create and register connector worker for source.
@@ -395,7 +404,7 @@ impl SourceManager {
     pub async fn register_source(&self, source: &Source) -> MetaResult<()> {
         tracing::debug!("register_source: {}", source.get_id());
         let mut core = self.core.lock().await;
-        let source_id = source.get_id() as _;
+        let source_id = source.get_id();
         if core.managed_sources.contains_key(&source_id) {
             tracing::warn!("source {} already registered", source_id);
             return Ok(());
@@ -415,16 +424,14 @@ impl SourceManager {
         &self,
         source_id: SourceId,
         handle: ConnectorSourceWorkerHandle,
-    ) -> MetaResult<()> {
+    ) {
         let mut core = self.core.lock().await;
         if core.managed_sources.contains_key(&source_id) {
             tracing::warn!("source {} already registered", source_id);
-            return Ok(());
+            return;
         }
 
         core.managed_sources.insert(source_id, handle);
-
-        Ok(())
     }
 
     pub async fn get_running_info(&self) -> SourceManagerRunningInfo {
@@ -483,6 +490,28 @@ impl SourceManager {
         tracing::debug!("pausing tick lock in source manager");
         self.paused.lock().await
     }
+
+    /// Force tick for specific updated source workers after properties update.
+    async fn force_tick_updated_sources(&self, updated_source_ids: Vec<SourceId>) {
+        let core = self.core.lock().await;
+        for source_id in updated_source_ids {
+            if let Some(handle) = core.managed_sources.get(&source_id) {
+                tracing::info!("forcing tick for updated source {}", source_id.as_raw_id());
+                if let Err(e) = handle.force_tick().await {
+                    tracing::warn!(
+                        error = %e.as_report(),
+                        "failed to force tick for source {} after properties update",
+                        source_id.as_raw_id()
+                    );
+                }
+            } else {
+                tracing::warn!(
+                    "source {} not found when trying to force tick after update",
+                    source_id.as_raw_id()
+                );
+            }
+        }
+    }
 }
 
 #[derive(strum::Display, Debug)]
@@ -497,7 +526,7 @@ pub enum SourceChange {
     UpdateSourceProps {
         // the new properties to be set for each source_id
         // and the props should not affect split assignment and fragments
-        source_id_map_new_props: HashMap<u32, HashMap<String, String>>,
+        source_id_map_new_props: HashMap<SourceId, HashMap<String, String>>,
     },
     /// `CREATE SOURCE` (shared), or `CREATE MV` is _finished_ (backfill is done).
     /// This is applied after `wait_streaming_job_finished`.
@@ -521,7 +550,7 @@ pub enum SourceChange {
 
 pub fn build_actor_connector_splits(
     splits: &HashMap<ActorId, Vec<SplitImpl>>,
-) -> HashMap<u32, ConnectorSplits> {
+) -> HashMap<ActorId, ConnectorSplits> {
     splits
         .iter()
         .map(|(&actor_id, splits)| {
@@ -536,7 +565,7 @@ pub fn build_actor_connector_splits(
 }
 
 pub fn build_actor_split_impls(
-    actor_splits: &HashMap<u32, ConnectorSplits>,
+    actor_splits: &HashMap<ActorId, ConnectorSplits>,
 ) -> HashMap<ActorId, Vec<SplitImpl>> {
     actor_splits
         .iter()

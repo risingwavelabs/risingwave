@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
@@ -21,6 +22,7 @@ use risingwave_common::bail;
 use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta_model::{CreateType, DatabaseId};
 use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::id::JobId;
 use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::{mpsc, oneshot};
@@ -28,12 +30,13 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::MetaResult;
+use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{BarrierManagerRequest, BarrierManagerStatus, RecoveryReason, schedule};
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
-use crate::stream::{ScaleControllerRef, SourceManagerRef};
+use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 pub struct GlobalBarrierManager {
     status: Arc<ArcSwap<BarrierManagerStatus>>,
@@ -59,13 +62,13 @@ impl GlobalBarrierManager {
         let job_info = self
             .metadata_manager
             .catalog_controller
-            .list_background_creating_jobs(true)
+            .list_background_creating_jobs(true, None)
             .await?;
         for (job_id, definition, _init_at) in job_info {
-            if let Entry::Vacant(e) = ddl_progress.entry(job_id as _) {
-                warn!(job_id, "background job has no ddl progress");
+            if let Entry::Vacant(e) = ddl_progress.entry(job_id) {
+                warn!(%job_id, "background job has no ddl progress");
                 e.insert(DdlProgress {
-                    id: job_id as u64,
+                    id: job_id.as_raw_id() as u64,
                     statement: definition,
                     create_type: CreateType::Background.as_str().into(),
                     progress: "0.0%".into(),
@@ -74,6 +77,14 @@ impl GlobalBarrierManager {
         }
 
         Ok(ddl_progress.into_values().collect())
+    }
+
+    pub async fn get_cdc_progress(&self) -> MetaResult<HashMap<JobId, CdcProgress>> {
+        let (tx, rx) = oneshot::channel();
+        self.request_tx
+            .send(BarrierManagerRequest::GetCdcProgress(tx))
+            .context("failed to send get ddl progress request")?;
+        Ok(rx.await.context("failed to receive get ddl progress")?)
     }
 
     pub async fn adhoc_recovery(&self) -> MetaResult<()> {
@@ -94,7 +105,7 @@ impl GlobalBarrierManager {
         let (tx, rx) = oneshot::channel();
         self.request_tx
             .send(BarrierManagerRequest::UpdateDatabaseBarrier {
-                database_id: (database_id as u32).into(),
+                database_id,
                 barrier_interval_ms,
                 checkpoint_frequency,
                 sender: tx,
@@ -143,6 +154,7 @@ impl GlobalBarrierManager {
         sink_manager: SinkCoordinatorManager,
         scale_controller: ScaleControllerRef,
         barrier_scheduler: schedule::BarrierScheduler,
+        refresh_manager: GlobalRefreshManagerRef,
     ) -> (Arc<Self>, JoinHandle<()>, oneshot::Sender<()>) {
         let (request_tx, request_rx) = unbounded_channel();
         let hummock_manager_clone = hummock_manager.clone();
@@ -157,6 +169,7 @@ impl GlobalBarrierManager {
             scale_controller,
             request_rx,
             barrier_scheduler,
+            refresh_manager,
         )
         .await;
         let manager = Self {

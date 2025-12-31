@@ -135,7 +135,7 @@ impl LogicalTopN {
         stream_input: StreamPlanRef,
         dist_key: &[usize],
     ) -> Result<StreamPlanRef> {
-        // use projectiton to add a column for vnode, and use this column as group key.
+        // use projection to add a column for vnode, and use this column as group key.
         let project = StreamProject::new(generic::Project::with_vnode_col(stream_input, dist_key));
         let vnode_col_idx = project.base.schema().len() - 1;
 
@@ -340,7 +340,20 @@ impl ToStream for LogicalTopN {
     ) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        Ok((top_n.into(), out_col_change))
+
+        if self.limit_attr().max_one_row() {
+            // We can use the group key as the stream key when there is at most one record for each
+            // value of the group key. In this case, we can strip the stream key added by the input.
+            // TODO: support `output_indices` in `StreamTopN` or `StreamGroupTopN`.
+            let inv = out_col_change.inverse().unwrap();
+            let project = LogicalProject::with_mapping(top_n.into(), inv);
+            Ok((
+                project.into(),
+                ColIndexMapping::identity(self.schema().len()),
+            ))
+        } else {
+            Ok((top_n.into(), out_col_change))
+        }
     }
 }
 

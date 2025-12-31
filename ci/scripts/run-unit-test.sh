@@ -19,7 +19,7 @@ export LLVM_PROFILE_FILE='/risingwave/target/risingwave-unit-test-%4m.profraw'
 
 echo "+++ Run unit tests"
 # use tee to disable progress bar
-NEXTEST_PROFILE=ci cargo nextest run --features failpoints,sync_point --workspace --exclude risingwave_simulation
+NEXTEST_PROFILE=ci cargo nextest run --features failpoints,sync_point,datafusion --workspace --exclude risingwave_simulation
 
 echo "--- Show sccache stats"
 sccache --show-stats

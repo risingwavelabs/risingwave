@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
 
@@ -22,9 +21,10 @@ use risingwave_common::array::{DataChunk, ListRef, ListValue, StructRef, StructV
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, ToText,
+    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, Serial, Timestamptz, ToText,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::row_id::row_id_to_unix_millis;
 use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
 use risingwave_expr::{ExprError, Result, function};
 use risingwave_pb::expr::expr_node::PbType;
@@ -140,6 +140,13 @@ where
     elem.into()
 }
 
+/// Extract the timestamp from row id.
+#[function("cast(serial) -> timestamptz")]
+pub fn serial_to_timestamptz(elem: Serial) -> Result<Timestamptz> {
+    let unix_ms = row_id_to_unix_millis(elem.as_row_id()).ok_or(ExprError::NumericOutOfRange)?;
+    Timestamptz::from_millis(unix_ms).ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("cast(varchar) -> boolean")]
 pub fn str_to_bool(input: &str) -> Result<bool> {
     cast::str_to_bool(input).map_err(|err| ExprError::Parse(err.into()))
@@ -164,18 +171,18 @@ pub fn int_to_bool(input: i32) -> bool {
 #[function("cast(bytea) -> varchar")]
 #[function("cast(anyarray) -> varchar")]
 #[function("cast(vector) -> varchar")]
-pub fn general_to_text(elem: impl ToText, mut writer: &mut impl Write) {
+pub fn general_to_text(elem: impl ToText, mut writer: &mut impl std::fmt::Write) {
     elem.write(&mut writer).unwrap();
 }
 
 // TODO: use `ToBinary` and support all types
 #[function("pgwire_send(int8) -> bytea")]
-fn pgwire_send(elem: i64) -> Box<[u8]> {
-    elem.to_be_bytes().into()
+fn pgwire_send(elem: i64, writer: &mut impl std::io::Write) {
+    writer.write_all(&elem.to_be_bytes()).unwrap();
 }
 
 #[function("cast(boolean) -> varchar")]
-pub fn bool_to_varchar(input: bool, writer: &mut impl Write) {
+pub fn bool_to_varchar(input: bool, writer: &mut impl std::fmt::Write) {
     writer
         .write_str(if input { "true" } else { "false" })
         .unwrap();
@@ -184,13 +191,13 @@ pub fn bool_to_varchar(input: bool, writer: &mut impl Write) {
 /// `bool_out` is different from `cast(boolean) -> varchar` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
 #[function("bool_out(boolean) -> varchar")]
-pub fn bool_out(input: bool, writer: &mut impl Write) {
+pub fn bool_out(input: bool, writer: &mut impl std::fmt::Write) {
     writer.write_str(if input { "t" } else { "f" }).unwrap();
 }
 
 #[function("cast(varchar) -> bytea")]
-pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
-    cast::str_to_bytea(elem).map_err(|err| ExprError::Parse(err.into()))
+pub fn str_to_bytea(elem: &str, writer: &mut impl std::io::Write) -> Result<()> {
+    cast::str_to_bytea(elem, writer).map_err(|err| ExprError::Parse(err.into()))
 }
 
 #[function("cast(varchar) -> anyarray", type_infer = "unreachable")]

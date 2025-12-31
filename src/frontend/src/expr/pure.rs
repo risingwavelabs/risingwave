@@ -320,6 +320,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MakeTimestamptz
             | Type::PgIsInRecovery
             | Type::RwRecoveryStatus
+            | Type::RwClusterId
+            | Type::RwFragmentVnodes
+            | Type::RwActorVnodes
             | Type::PgTableIsVisible
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding

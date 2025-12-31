@@ -524,6 +524,24 @@ static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(true)],
+            ApplyOrder::BottomUp,
+        )
+    });
+
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(false)],
+            ApplyOrder::BottomUp,
+        )
+    });
+
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
         plan: LogicalPlanRef,
@@ -670,6 +688,8 @@ impl LogicalOptimizer {
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM)?;
+
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
         if has_logical_max_one_row(plan.clone()) {
             // `MaxOneRow` is currently only used for the runtime check of
@@ -784,7 +804,7 @@ impl LogicalOptimizer {
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
-        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH)?;
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
@@ -833,6 +853,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&SIMPLIFY_AGG)?;
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
+
+        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
 
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);

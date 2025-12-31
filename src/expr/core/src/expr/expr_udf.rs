@@ -214,7 +214,7 @@ impl Build for UserDefinedFunction {
             name,
             // batch query does not have a fragment_id
             &FRAGMENT_ID::try_with(ToOwned::to_owned)
-                .unwrap_or(0)
+                .unwrap_or(0.into())
                 .to_string(),
         );
 

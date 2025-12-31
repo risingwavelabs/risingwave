@@ -14,7 +14,6 @@
 
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
@@ -53,21 +52,16 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwFunction>> {
             schema
                 .iter_function_with_acl(current_user)
                 .map(|function| RwFunction {
-                    id: function.id.function_id() as i32,
+                    id: function.id.as_i32_id(),
                     name: function.name.clone(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_i32_id(),
                     owner: function.owner as i32,
                     r#type: function.kind.to_string(),
                     arg_type_ids: function.arg_types.iter().map(|t| t.to_oid()).collect(),
                     return_type_id: function.return_type.to_oid(),
                     language: function.language.clone(),
                     link: function.link.clone(),
-                    acl: get_acl_items(
-                        &Object::FunctionId(function.id.function_id()),
-                        false,
-                        &users,
-                        username_map,
-                    ),
+                    acl: get_acl_items(function.id, false, &users, username_map),
                     always_retry_on_network_error: function.always_retry_on_network_error,
                     created_at: function.created_at_epoch.map(|e| e.as_timestamptz()),
                     created_at_cluster_version: function.created_at_cluster_version.clone(),

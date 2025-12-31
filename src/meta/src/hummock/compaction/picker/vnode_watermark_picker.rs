@@ -145,7 +145,7 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![2],
+            table_ids: vec![2.into()],
             ..Default::default()
         }
         .into();
@@ -166,7 +166,7 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
         }
         .into();
@@ -187,7 +187,7 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
         }
         .into();
@@ -208,7 +208,7 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
         }
         .into();
@@ -229,7 +229,7 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
         }
         .into();

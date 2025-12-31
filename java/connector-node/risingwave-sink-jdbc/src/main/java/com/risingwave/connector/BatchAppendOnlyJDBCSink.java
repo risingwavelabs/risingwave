@@ -50,13 +50,7 @@ public class BatchAppendOnlyJDBCSink implements SinkWriter {
         var factory = JdbcUtils.getDialectFactory(jdbcUrl);
         this.config = config;
         try {
-            conn =
-                    JdbcUtils.getConnection(
-                            config.getJdbcUrl(),
-                            config.getUser(),
-                            config.getPassword(),
-                            config.isAutoCommit(),
-                            config.getBatchInsertRows());
+            conn = config.getConnection();
             // column name -> java.sql.Types
             Map<String, Integer> columnTypeMapping =
                     getColumnTypeMapping(conn, config.getTableName(), config.getSchemaName());

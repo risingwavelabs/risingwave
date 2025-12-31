@@ -271,6 +271,12 @@ seed_old_cluster() {
   echo "--- SINK INTO TABLE TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/validate_original.slt"
 
+  echo "--- CDC TEST: Seeding old cluster with data"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/seed.slt"
+
+  echo "--- CDC TEST: Validating old cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_original.slt"
+
   # work around https://github.com/risingwavelabs/risingwave/issues/18650
   echo "--- wait for a version checkpoint"
   sleep 60
@@ -318,6 +324,9 @@ validate_new_cluster() {
 
   echo "--- SINK INTO TABLE TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/sink_into_table/validate_restart.slt"
+
+  echo "--- CDC TEST: Validating new cluster"
+  sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_restart.slt"
 
   kill_cluster
 }

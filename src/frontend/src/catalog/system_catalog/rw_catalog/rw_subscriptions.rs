@@ -14,7 +14,6 @@
 
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
@@ -50,17 +49,12 @@ fn read_rw_subscriptions_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSub
             schema
                 .iter_subscription_with_acl(current_user)
                 .map(|subscription| RwSubscription {
-                    id: subscription.id.subscription_id as i32,
+                    id: subscription.id.as_i32_id(),
                     name: subscription.name.clone(),
-                    schema_id: schema.id() as i32,
+                    schema_id: schema.id().as_i32_id(),
                     owner: subscription.owner.user_id as i32,
                     definition: subscription.definition.clone(),
-                    acl: get_acl_items(
-                        &Object::SubscriptionId(subscription.id.subscription_id),
-                        false,
-                        &users,
-                        username_map,
-                    ),
+                    acl: get_acl_items(subscription.id, false, &users, username_map),
                     initialized_at: subscription
                         .initialized_at_epoch
                         .map(|e| e.as_timestamptz()),

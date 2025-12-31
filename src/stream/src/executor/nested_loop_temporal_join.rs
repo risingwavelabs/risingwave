@@ -111,7 +111,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
     ) -> Self {
         let _metrics_info = MetricsInfo::new(
             metrics.clone(),
-            table.table_id().table_id,
+            table.table_id(),
             ctx.id,
             "nested loop temporal join",
         );

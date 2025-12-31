@@ -216,16 +216,16 @@ impl Connection for IcebergConnection {
             match scheme.as_str() {
                 "s3" | "s3a" => {
                     let mut builder = S3::default();
-                    if let Some(region) = &common.region {
+                    if let Some(region) = &common.s3_region {
                         builder = builder.region(region);
                     }
-                    if let Some(endpoint) = &common.endpoint {
+                    if let Some(endpoint) = &common.s3_endpoint {
                         builder = builder.endpoint(endpoint);
                     }
-                    if let Some(access_key) = &common.access_key {
+                    if let Some(access_key) = &common.s3_access_key {
                         builder = builder.access_key_id(access_key);
                     }
-                    if let Some(secret_key) = &common.secret_key {
+                    if let Some(secret_key) = &common.s3_secret_key {
                         builder = builder.secret_access_key(secret_key);
                     }
                     builder = builder.root(root.as_str()).bucket(bucket.as_str());

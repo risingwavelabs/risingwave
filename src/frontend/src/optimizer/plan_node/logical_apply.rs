@@ -171,6 +171,10 @@ impl LogicalApply {
         self.correlated_indices.clone()
     }
 
+    pub fn on_condition(&self) -> &Condition {
+        &self.on
+    }
+
     pub fn translated(&self) -> bool {
         self.translated
     }

@@ -17,7 +17,9 @@ pub mod progress;
 
 pub use progress::CreateMviewProgressReporter;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::util::epoch::EpochPair;
+use risingwave_pb::id::FragmentId;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -38,26 +40,27 @@ pub(super) enum LocalBarrierEvent {
     },
     ReportCreateProgress {
         epoch: EpochPair,
+        fragment_id: FragmentId,
         actor: ActorId,
         state: BackfillState,
     },
     ReportSourceListFinished {
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        associated_source_id: u32,
+        table_id: TableId,
+        associated_source_id: SourceId,
     },
     ReportSourceLoadFinished {
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        associated_source_id: u32,
+        table_id: TableId,
+        associated_source_id: SourceId,
     },
     RefreshFinished {
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        staging_table_id: u32,
+        table_id: TableId,
+        staging_table_id: TableId,
     },
     RegisterBarrierSender {
         actor_id: ActorId,
@@ -114,9 +117,7 @@ impl LocalBarrierManager {
 
     pub fn for_test() -> Self {
         Self::new(
-            DatabaseId {
-                database_id: 114514,
-            },
+            114514.into(),
             "114514".to_owned(),
             StreamEnvironment::for_test(),
         )
@@ -160,7 +161,7 @@ impl LocalBarrierManager {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
     ) -> permit::Receiver {
-        let (tx, rx) = channel_from_config(self.env.config());
+        let (tx, rx) = channel_from_config(self.env.global_config());
         self.send_event(LocalBarrierEvent::RegisterLocalUpstreamOutput {
             actor_id,
             upstream_actor_id,
@@ -173,8 +174,8 @@ impl LocalBarrierManager {
         &self,
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        associated_source_id: u32,
+        table_id: TableId,
+        associated_source_id: SourceId,
     ) {
         self.send_event(LocalBarrierEvent::ReportSourceListFinished {
             epoch,
@@ -188,8 +189,8 @@ impl LocalBarrierManager {
         &self,
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        associated_source_id: u32,
+        table_id: TableId,
+        associated_source_id: SourceId,
     ) {
         self.send_event(LocalBarrierEvent::ReportSourceLoadFinished {
             epoch,
@@ -203,8 +204,8 @@ impl LocalBarrierManager {
         &self,
         epoch: EpochPair,
         actor_id: ActorId,
-        table_id: u32,
-        staging_table_id: u32,
+        table_id: TableId,
+        staging_table_id: TableId,
     ) {
         self.send_event(LocalBarrierEvent::RefreshFinished {
             epoch,

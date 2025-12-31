@@ -1,6 +1,13 @@
 from ..common import *
 from . import section
 
+def _sum_fragment_metric_by_mv(expr: str) -> str:
+    return (
+        f"sum(({expr})"
+        f"* on(fragment_id) group_left(materialized_view_id)"
+        f"max by (fragment_id, materialized_view_id) ({metric('table_info')}))"
+        f"by (materialized_view_id)"
+    )
 
 @section
 def _(outer_panels: Panels):
@@ -9,6 +16,22 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Streaming (Source/Sink/Materialized View/Barrier)",
             [
+                panels.subheader("General"),
+                panels.timeseries_percentage(
+                    "CPU Usage Per Streaming Job",
+                    "The figure shows the CPU usage of each streaming job",
+                    [
+                        panels.target(
+                            f"label_replace("
+                            f"({_sum_fragment_metric_by_mv(f'sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id) / on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)')}"
+                            f"/ 1000000000), "
+                            f"'id', '$1', 'materialized_view_id', '(.*)'"
+                            f") * on(id) group_left(name, type) {metric('relation_info')}",
+                            "{{type}} {{name}} id {{id}}",
+                        )
+                    ],
+                ),
+
                 panels.subheader("Source"),
                 panels.timeseries_rowsps(
                     "Source Throughput(rows/s)",
@@ -202,6 +225,26 @@ def _(outer_panels: Panels):
                             # Here we use `min` but actually no much difference. Any of the sampled `current_epoch` makes sense.
                             f"min({metric('stream_mview_current_epoch')} != 0) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
                             "{{table_id}} {{table_name}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Latency of Materialize Views & Sinks",
+                    "The current epoch that the Materialize Executors or Sink Executor are processing. If an MV/Sink's epoch is far behind the others, "
+                    "it's very likely to be the performance bottleneck",
+                    [
+                        panels.target(
+                            # Here we use `min` but actually no much difference. Any of the sampled `current_epoch` makes sense.
+                            f"max(timestamp({metric('stream_mview_current_epoch')}) - {epoch_to_unix_millis(metric('stream_mview_current_epoch'))}/1000) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
+                            "{{table_id}} {{table_name}}",
+                        ),
+                        panels.target(
+                            f"max(timestamp({metric('log_store_latest_read_epoch')}) - {epoch_to_unix_millis(metric('log_store_latest_read_epoch'))}/1000) by (sink_id, sink_name)",
+                            "{{sink_id}} {{sink_name}} (output)",
+                        ),
+                        panels.target(
+                            f"max(timestamp({metric('log_store_latest_write_epoch')}) - {epoch_to_unix_millis(metric('log_store_latest_write_epoch'))}/1000) by (sink_id, sink_name)",
+                            "{{sink_id}} {{sink_name}} (enqueue)",
                         ),
                     ],
                 ),

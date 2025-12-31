@@ -160,7 +160,7 @@ mod tests {
             Field::unnamed(DataType::Int64), // pk
             Field::unnamed(DataType::Int64),
         ]);
-        let input_pk_indices = vec![0];
+        let input_stream_key = vec![0];
 
         // state table schema = input schema
         let table_columns = vec![
@@ -185,7 +185,7 @@ mod tests {
         .await;
 
         let (tx, source) = MockSource::channel();
-        let source = source.into_executor(input_schema, input_pk_indices);
+        let source = source.into_executor(input_schema, input_stream_key);
         let sort_executor = SortExecutor::new(SortExecutorArgs {
             actor_ctx: ActorContext::for_test(123),
             schema: source.schema().clone(),

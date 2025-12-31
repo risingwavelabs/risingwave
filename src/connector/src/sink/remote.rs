@@ -28,7 +28,7 @@ use phf::phf_set;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
@@ -46,13 +46,13 @@ use risingwave_pb::connector_service::{
     ValidateSinkResponse, sink_coordinator_stream_request, sink_coordinator_stream_response,
     sink_writer_stream_response,
 };
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
     BidiStreamReceiver, BidiStreamSender, DEFAULT_BUFFER_SIZE, SinkCoordinatorStreamHandle,
     SinkWriterStreamHandle,
 };
 use rw_futures_util::drop_either_future;
-use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{Receiver, UnboundedSender, unbounded_channel};
@@ -60,7 +60,6 @@ use tokio::task::spawn_blocking;
 use tokio_stream::wrappers::ReceiverStream;
 use tracing::warn;
 
-use super::SinkCommittedEpochSubscriber;
 use super::elasticsearch_opensearch::elasticsearch_converter::{
     StreamChunkConverter, is_remote_es_sink,
 };
@@ -72,8 +71,8 @@ use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::log_store::{LogStoreReadItem, LogStoreResult, TruncateOffset};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    LogSinker, Result, Sink, SinkCommitCoordinator, SinkError, SinkLogReader, SinkParam,
-    SinkWriterMetrics, SinkWriterParam,
+    LogSinker, Result, SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError,
+    SinkLogReader, SinkParam, SinkWriterMetrics, SinkWriterParam,
 };
 
 macro_rules! def_remote_sink {
@@ -543,7 +542,6 @@ impl<R: RemoteSinkTrait> TryFrom<SinkParam> for CoordinatedRemoteSink<R> {
 }
 
 impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
-    type Coordinator = RemoteCoordinator;
     type LogSinker = CoordinatedLogSinker<CoordinatedRemoteSinkWriter>;
 
     const SINK_NAME: &'static str = R::SINK_NAME;
@@ -570,10 +568,10 @@ impl<R: RemoteSinkTrait> Sink for CoordinatedRemoteSink<R> {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
-        RemoteCoordinator::new::<R>(self.param.clone()).await
+    ) -> Result<SinkCommitCoordinator> {
+        let coordinator = RemoteCoordinator::new::<R>(self.param.clone()).await?;
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -691,21 +689,21 @@ impl RemoteCoordinator {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for RemoteCoordinator {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-        Ok(None)
+impl SinglePhaseCommitCoordinator for RemoteCoordinator {
+    async fn init(&mut self) -> Result<()> {
+        Ok(())
     }
 
     async fn commit(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<()> {
-        if let Some(add_columns) = add_columns {
+        if let Some(schema_change) = schema_change {
             return Err(anyhow!(
-                "remote coordinator not support add columns, but got: {:?}",
-                add_columns
+                "remote coordinator not support schema change, but got: {:?}",
+                schema_change
             )
             .into());
         }
@@ -844,8 +842,8 @@ mod test {
     use risingwave_pb::connector_service::{SinkWriterStreamRequest, SinkWriterStreamResponse};
     use tokio::sync::mpsc;
 
-    use crate::sink::SinkWriter;
     use crate::sink::remote::CoordinatedRemoteSinkWriter;
+    use crate::sink::writer::SinkWriter;
 
     #[tokio::test]
     async fn test_epoch_check() {

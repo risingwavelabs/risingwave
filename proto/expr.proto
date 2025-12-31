@@ -362,6 +362,9 @@ message ExprNode {
     PG_TABLE_IS_VISIBLE = 2414;
     HAS_FUNCTION_PRIVILEGE = 2415;
     HAS_DATABASE_PRIVILEGE = 2416;
+    RW_CLUSTER_ID = 2417;
+    RW_FRAGMENT_VNODES = 2418;
+    RW_ACTOR_VNODES = 2419;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
@@ -687,6 +690,9 @@ message UserDefinedFunctionMetadata {
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 14;
+  optional bool is_batched = 15;
 
   UdfExprVersion version = 1000;
 }

@@ -43,6 +43,25 @@ public class Binding {
 
     static native boolean iteratorNext(long pointer);
 
+    /**
+     * Initialize object store configuration for integration tests. Must be called before any
+     * putObject/getObject operations if compute node is not running.
+     *
+     * @param stateStoreUrl State store URL (e.g., "hummock+memory")
+     * @param dataDirectory Data directory for schema history files
+     */
+    public static native void initObjectStoreForTest(String stateStoreUrl, String dataDirectory);
+
+    public static native void putObject(String object, byte[] data);
+
+    public static native String getObjectStoreType();
+
+    public static native void deleteObjects(String dir);
+
+    public static native byte[] getObject(String object);
+
+    public static native String[] listObject(String dir);
+
     static native void iteratorClose(long pointer);
 
     static native long newStreamChunkFromPayload(byte[] streamChunkPayload);

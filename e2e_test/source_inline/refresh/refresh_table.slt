@@ -54,6 +54,7 @@ statement error
 CREATE TABLE no_pk_refresh_t (id int, name varchar) WITH (
     connector = '__for_testing_only_batch_posix_fs',
     batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    refresh_mode = 'FULL_RELOAD',
     match_pattern = '*.csv'
 ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
 ----
@@ -67,21 +68,21 @@ statement error
 CREATE SOURCE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
     connector = '__for_testing_only_batch_posix_fs',
     batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    refresh_mode = 'FULL_RELOAD',
     match_pattern = '*.csv'
 ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
 ----
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Bind error: can't CREATE SOURCE with refreshable batch connector
-
-Hint: use CREATE TABLE instead
+  Protocol error: `refresh_mode` only supported for CREATE TABLE
 
 
 statement ok
 CREATE TABLE refresh_fs_t (id int PRIMARY KEY, name varchar) WITH (
     connector = '__for_testing_only_batch_posix_fs',
     batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    refresh_mode = 'FULL_RELOAD',
     match_pattern = '*.csv'
 ) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
 
@@ -102,6 +103,7 @@ ON CONFLICT IGNORE
 WITH (
     connector = '__for_testing_only_batch_posix_fs',
     batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_table_tmp',
+    refresh_mode = 'FULL_RELOAD',
     match_pattern = '*.csv'
 )
 FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
@@ -138,10 +140,9 @@ echo "3,charlie" > ./e2e_test/source_inline/refresh/refresh_table_tmp/file3.csv
 system ok
 echo "4,david" > ./e2e_test/source_inline/refresh/refresh_table_tmp/new_file.csv
 
-sleep 2s
 
 # won't see new data after load finish, before next refresh
-query II rowsort
+query II rowsort retry 4 backoff 1s
 SELECT * FROM refresh_fs_t;
 ----
 1 alice

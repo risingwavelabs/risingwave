@@ -184,7 +184,7 @@ impl StreamCdcTableScan {
             .to_internal_table_prost();
 
         // We need to pass the id of upstream source job here
-        let upstream_source_id = self.core.cdc_table_desc.source_id.table_id;
+        let upstream_source_id = self.core.cdc_table_desc.source_id;
 
         // filter upstream source chunk by the value of `_rw_table_name` column
         let filter_expr =
@@ -193,7 +193,7 @@ impl StreamCdcTableScan {
         let filter_operator_id = self.core.ctx.next_plan_node_id();
         // The filter node receive chunks in `(payload, _rw_offset, _rw_table_name)` schema
         let filter_stream_node = StreamNode {
-            operator_id: filter_operator_id.0 as _,
+            operator_id: filter_operator_id.to_stream_node_operator_id(),
             input: vec![
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
@@ -230,7 +230,7 @@ impl StreamCdcTableScan {
         };
         // Add a simple exchange node between filter and stream scan
         let exchange_stream_node = StreamNode {
-            operator_id: exchange_operator_id.0 as _,
+            operator_id: exchange_operator_id.to_stream_node_operator_id(),
             input: vec![filter_stream_node],
             stream_key: vec![], // not used
             stream_kind: PbStreamKind::AppendOnly as _,
@@ -270,7 +270,7 @@ impl StreamCdcTableScan {
 
         let options = self.core.options.to_proto();
         let stream_scan_body = PbNodeBody::StreamCdcScan(Box::new(StreamCdcScanNode {
-            table_id: upstream_source_id,
+            table_id: upstream_source_id.as_cdc_table_id(),
             upstream_column_ids,
             output_indices,
             // The table desc used by backfill executor
@@ -287,7 +287,7 @@ impl StreamCdcTableScan {
             input: vec![exchange_stream_node],
             node_body: Some(stream_scan_body),
             stream_key,
-            operator_id: self.base.id().0 as u64,
+            operator_id: self.base.id().to_stream_node_operator_id(),
             identity: self.distill_to_string(),
             stream_kind: self.stream_kind().to_protobuf() as i32,
         })

@@ -28,6 +28,7 @@ use itertools::Itertools;
 use risingwave_common::hash::{
     ActorAlignmentId, ActorAlignmentMapping, ActorMapping, VnodeCountCompat,
 };
+use risingwave_common::id::JobId;
 use risingwave_common::util::stream_graph_visitor::visit_fragment;
 use risingwave_common::{bail, hash};
 use risingwave_connector::source::cdc::{CDC_BACKFILL_MAX_PARALLELISM, CdcScanOptions};
@@ -137,7 +138,7 @@ impl Distribution {
     pub fn actors(&self) -> impl Iterator<Item = ActorAlignmentId> + '_ {
         match self {
             Distribution::Singleton(p) => {
-                Either::Left(std::iter::once(ActorAlignmentId::new(*p as _, 0)))
+                Either::Left(std::iter::once(ActorAlignmentId::new(*p, 0)))
             }
             Distribution::Hash(mapping) => Either::Right(mapping.iter_unique()),
         }
@@ -175,10 +176,7 @@ impl Distribution {
                     .collect();
 
                 let actor_mapping = ActorMapping::from_bitmaps(&actor_bitmaps);
-                let actor_location = actor_location
-                    .iter()
-                    .map(|(&k, &v)| (k, v as u32))
-                    .collect();
+                let actor_location = actor_location.iter().map(|(&k, &v)| (k, v)).collect();
                 let mapping = actor_mapping.to_actor_alignment(&actor_location);
 
                 Distribution::Hash(mapping)
@@ -216,8 +214,8 @@ impl Scheduler {
     ///
     /// For different streaming jobs, we even out possible scheduling skew by using the streaming job id as the salt for the scheduling algorithm.
     pub fn new(
-        streaming_job_id: u32,
-        workers: &HashMap<u32, WorkerNode>,
+        streaming_job_id: JobId,
+        workers: &HashMap<WorkerId, WorkerNode>,
         default_parallelism: NonZeroUsize,
         expected_vnode_count: usize,
     ) -> MetaResult<Self> {
@@ -348,6 +346,17 @@ impl Scheduler {
                             return;
                         }
                     }
+                    NodeBody::GapFill(node) => {
+                        // GapFill node uses buffer_table for vnode count requirement
+                        let buffer_table = node.get_state_table().unwrap();
+                        // Check if vnode_count is a placeholder, skip if so as it will be filled later
+                        if let Some(vnode_count) = buffer_table.vnode_count_inner().value_opt() {
+                            vnode_count
+                        } else {
+                            // Skip this node as vnode_count is still a placeholder
+                            return;
+                        }
+                    }
                     _ => return,
                 };
                 facts.push(Fact::Req {
@@ -443,7 +452,7 @@ impl Locations {
     pub fn worker_actors(&self) -> HashMap<WorkerId, Vec<ActorId>> {
         self.actor_locations
             .iter()
-            .map(|(actor_id, alignment_id)| (alignment_id.worker_id() as WorkerId, *actor_id))
+            .map(|(actor_id, alignment_id)| (alignment_id.worker_id(), *actor_id))
             .into_group_map()
     }
 
@@ -451,8 +460,8 @@ impl Locations {
     pub fn actor_infos(&self) -> impl Iterator<Item = ActorInfo> + '_ {
         self.actor_locations
             .iter()
-            .map(|(actor_id, alignment_id)| ActorInfo {
-                actor_id: *actor_id,
+            .map(|(&actor_id, alignment_id)| ActorInfo {
+                actor_id,
                 host: self.worker_locations[&(alignment_id.worker_id() as WorkerId)]
                     .host
                     .clone(),
@@ -564,7 +573,7 @@ mod tests {
         #[rustfmt::skip]
         let facts = [
             Fact::Req { id: 1.into(), req: Req::Hash(1) },
-            Fact::Req { id: 2.into(), req: Req::Singleton(0) },
+            Fact::Req { id: 2.into(), req: Req::Singleton(0.into()) },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle },
             Fact::Edge { from: 2.into(), to: 102.into(), dt: NoShuffle },
             Fact::Edge { from: 101.into(), to: 103.into(), dt: Hash },
@@ -574,7 +583,7 @@ mod tests {
 
         let expected = maplit::hashmap! {
             101.into() => Result::Required(Req::Hash(1)),
-            102.into() => Result::Required(Req::Singleton(0)),
+            102.into() => Result::Required(Req::Singleton(0.into())),
             103.into() => Result::DefaultHash,
             104.into() => Result::DefaultSingleton,
         };
@@ -707,13 +716,13 @@ mod tests {
     fn test_backfill_singleton_vnode_count() {
         #[rustfmt::skip]
         let facts = [
-            Fact::Req { id: 1.into(), req: Req::Singleton(0) },
+            Fact::Req { id: 1.into(), req: Req::Singleton(0.into()) },
             Fact::Req { id: 101.into(), req: Req::AnySingleton },
             Fact::Edge { from: 1.into(), to: 101.into(), dt: NoShuffle }, // or `Simple`
         ];
 
         let expected = maplit::hashmap! {
-            101.into() => Result::Required(Req::Singleton(0)),
+            101.into() => Result::Required(Req::Singleton(0.into())),
         };
 
         test_success(facts, expected);

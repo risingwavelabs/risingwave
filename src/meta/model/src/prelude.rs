@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use risingwave_pb::id::*;
 pub use {Source as SourceModel, Table as TableModel};
 
-pub use super::actor::Entity as Actor;
 pub use super::catalog_version::Entity as CatalogVersion;
 pub use super::cluster::Entity as Cluster;
 pub use super::compaction_config::Entity as CompactionConfig;
@@ -34,6 +34,7 @@ pub use super::hummock_version_stats::Entity as HummockVersionStats;
 pub use super::index::Entity as Index;
 pub use super::object::Entity as Object;
 pub use super::object_dependency::Entity as ObjectDependency;
+pub use super::refresh_job::Entity as RefreshJob;
 pub use super::schema::Entity as Schema;
 pub use super::secret::Entity as Secret;
 pub use super::session_parameter::Entity as SessionParameter;

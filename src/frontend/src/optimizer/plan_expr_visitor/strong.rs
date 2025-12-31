@@ -348,6 +348,9 @@ impl Strong {
             | ExprType::PgIsInRecovery
             | ExprType::PgTableIsVisible
             | ExprType::RwRecoveryStatus
+            | ExprType::RwClusterId
+            | ExprType::RwFragmentVnodes
+            | ExprType::RwActorVnodes
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
             | ExprType::HasFunctionPrivilege

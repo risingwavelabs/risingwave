@@ -142,17 +142,12 @@ impl StreamChunkBuilder {
     #[must_use]
     pub fn append_record(&mut self, record: Record<impl Row>) -> Option<StreamChunk> {
         match record {
-            Record::Insert { new_row } => {
-                self.append_iter_inner::<true>(Op::Insert, new_row.iter().enumerate())
-            }
-            Record::Delete { old_row } => {
-                self.append_iter_inner::<true>(Op::Delete, old_row.iter().enumerate())
-            }
+            Record::Insert { new_row } => self.append_row(Op::Insert, new_row),
+            Record::Delete { old_row } => self.append_row(Op::Delete, old_row),
             Record::Update { old_row, new_row } => {
-                let none =
-                    self.append_iter_inner::<true>(Op::UpdateDelete, old_row.iter().enumerate());
+                let none = self.append_row(Op::UpdateDelete, old_row);
                 assert!(none.is_none());
-                self.append_iter_inner::<true>(Op::UpdateInsert, new_row.iter().enumerate())
+                self.append_row(Op::UpdateInsert, new_row)
             }
         }
     }

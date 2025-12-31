@@ -30,6 +30,7 @@ pub mod stats;
 
 pub use client_context::*;
 pub use enumerator::*;
+use risingwave_common::id::FragmentId;
 pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
@@ -211,7 +212,7 @@ impl KafkaProperties {
         self.rdkafka_properties_consumer.set_client(c);
     }
 
-    pub fn group_id(&self, fragment_id: u32) -> String {
+    pub fn group_id(&self, fragment_id: FragmentId) -> String {
         format!(
             "{}-{}",
             self.group_id_prefix.as_deref().unwrap_or("rw-consumer"),

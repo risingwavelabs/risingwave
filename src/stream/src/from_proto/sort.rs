@@ -33,7 +33,7 @@ impl ExecutorBuilder for SortExecutorBuilder {
         let [input]: [_; 1] = params.input.try_into().unwrap();
         let vnodes = Arc::new(params.vnode_bitmap.expect("vnodes not set for sort"));
         let state_table = StateTableBuilder::new(node.get_state_table()?, store, Some(vnodes))
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
         let exec = SortExecutor::new(SortExecutorArgs {
@@ -41,7 +41,7 @@ impl ExecutorBuilder for SortExecutorBuilder {
             schema: params.info.schema.clone(),
             input,
             buffer_table: state_table,
-            chunk_size: params.env.config().developer.chunk_size,
+            chunk_size: params.config.developer.chunk_size,
             sort_column_index: node.sort_column_index as _,
         });
         Ok((params.info, exec).into())

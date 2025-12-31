@@ -13,9 +13,11 @@
 // limitations under the License.
 
 mod graph;
+use anyhow::Context;
 use graph::*;
 use risingwave_common::util::recursive::{self, Recurse as _};
 use risingwave_connector::WithPropertiesExt;
+use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 mod parallelism;
 mod rewrite;
@@ -29,6 +31,7 @@ use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::session_config::parallelism::ConfigParallelism;
 use risingwave_connector::source::cdc::CdcScanOptions;
+use risingwave_pb::id::{LocalOperatorId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::JoinType;
 use risingwave_pb::stream_plan::{
     BackfillOrder, DispatchStrategy, DispatcherType, ExchangeNode, NoOpNode,
@@ -37,6 +40,7 @@ use risingwave_pb::stream_plan::{
 };
 
 use self::rewrite::build_delta_join_without_arrange;
+use crate::catalog::FragmentId;
 use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
@@ -50,7 +54,7 @@ pub struct BuildFragmentGraphState {
     /// fragment graph field, transformed from input streaming plan.
     fragment_graph: StreamFragmentGraph,
     /// local fragment id
-    next_local_fragment_id: u32,
+    next_local_fragment_id: FragmentId,
 
     /// Next local table id to be allocated. It equals to total table ids cnt when finish stream
     /// node traversing.
@@ -64,13 +68,15 @@ pub struct BuildFragmentGraphState {
     dependent_table_ids: HashSet<TableId>,
 
     /// operator id to `LocalFragmentId` mapping used by share operator.
-    share_mapping: HashMap<u32, LocalFragmentId>,
+    share_mapping: HashMap<StreamNodeLocalOperatorId, LocalFragmentId>,
     /// operator id to `StreamNode` mapping used by share operator.
-    share_stream_node_mapping: HashMap<u32, StreamNode>,
+    share_stream_node_mapping: HashMap<StreamNodeLocalOperatorId, StreamNode>,
 
     has_source_backfill: bool,
     has_snapshot_backfill: bool,
     has_cross_db_snapshot_backfill: bool,
+    has_any_backfill: bool,
+    tables: HashMap<TableId, Table>,
 }
 
 impl BuildFragmentGraphState {
@@ -82,9 +88,9 @@ impl BuildFragmentGraphState {
     }
 
     /// Generate an operator id
-    fn gen_operator_id(&mut self) -> u32 {
+    fn gen_operator_id(&mut self) -> StreamNodeLocalOperatorId {
         self.next_operator_id -= 1;
-        self.next_operator_id
+        LocalOperatorId::new(self.next_operator_id).into()
     }
 
     /// Generate an table id
@@ -99,12 +105,19 @@ impl BuildFragmentGraphState {
         TableId::new(self.gen_table_id())
     }
 
-    pub fn add_share_stream_node(&mut self, operator_id: u32, stream_node: StreamNode) {
+    pub fn add_share_stream_node(
+        &mut self,
+        operator_id: StreamNodeLocalOperatorId,
+        stream_node: StreamNode,
+    ) {
         self.share_stream_node_mapping
             .insert(operator_id, stream_node);
     }
 
-    pub fn get_share_stream_node(&mut self, operator_id: u32) -> Option<&StreamNode> {
+    pub fn get_share_stream_node(
+        &mut self,
+        operator_id: StreamNodeLocalOperatorId,
+    ) -> Option<&StreamNode> {
         self.share_stream_node_mapping.get(&operator_id)
     }
 
@@ -112,7 +125,7 @@ impl BuildFragmentGraphState {
     /// stream node will also be copied from the `input` node.
     pub fn gen_no_op_stream_node(&mut self, input: StreamNode) -> StreamNode {
         StreamNode {
-            operator_id: self.gen_operator_id() as u64,
+            operator_id: self.gen_operator_id(),
             identity: "StreamNoOp".into(),
             node_body: Some(NodeBody::NoOp(NoOpNode {})),
 
@@ -186,26 +199,42 @@ pub fn build_graph_with_strategy(
     let mut fragment_graph = state.fragment_graph.to_protobuf();
 
     // Set table ids.
-    fragment_graph.dependent_table_ids = state
-        .dependent_table_ids
-        .into_iter()
-        .map(|id| id.table_id)
-        .collect();
+    fragment_graph.dependent_table_ids = state.dependent_table_ids.into_iter().collect();
     fragment_graph.table_ids_cnt = state.next_table_id;
 
     // Set parallelism and vnode count.
     {
         let config = ctx.session_ctx().config();
-        fragment_graph.parallelism = derive_parallelism(
+        let streaming_parallelism = config.streaming_parallelism();
+        let normal_parallelism = derive_parallelism(
             job_type.map(|t| t.to_parallelism(config.deref())),
-            config.streaming_parallelism(),
+            streaming_parallelism,
         );
+        let backfill_parallelism = if state.has_any_backfill {
+            match config.streaming_parallelism_for_backfill() {
+                ConfigParallelism::Default => None,
+                override_parallelism => {
+                    derive_parallelism(Some(override_parallelism), streaming_parallelism)
+                        .or(normal_parallelism)
+                }
+            }
+        } else {
+            None
+        };
+        fragment_graph.parallelism = normal_parallelism;
+        fragment_graph.backfill_parallelism = backfill_parallelism;
         fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
     }
 
-    // Set timezone.
+    // Set context for this streaming job.
+    let config_override = ctx
+        .session_ctx()
+        .config()
+        .to_initial_streaming_config_override()
+        .context("invalid initial streaming config override")?;
     fragment_graph.ctx = Some(StreamContext {
         timezone: ctx.get_session_timezone(),
+        config_override,
     });
 
     fragment_graph.backfill_order = backfill_order;
@@ -254,7 +283,7 @@ fn rewrite_stream_node(
                     node_body: Some(NodeBody::Exchange(ExchangeNode {
                         strategy: Some(strategy),
                     })),
-                    operator_id: state.gen_operator_id() as u64,
+                    operator_id: state.gen_operator_id(),
                     append_only: child_node.append_only,
                     input: vec![child_node],
                     identity: "Exchange (NoShuffle)".to_string(),
@@ -301,7 +330,7 @@ fn build_and_add_fragment(
     state: &mut BuildFragmentGraphState,
     stream_node: StreamNode,
 ) -> Result<Rc<StreamFragment>> {
-    let operator_id = stream_node.operator_id as u32;
+    let operator_id = stream_node.operator_id;
     match state.share_mapping.get(&operator_id) {
         None => {
             let mut fragment = state.new_stream_fragment();
@@ -310,7 +339,7 @@ fn build_and_add_fragment(
             // It's possible that the stream node is rewritten while building the fragment, for
             // example, empty fragment to no-op fragment. We get the operator id again instead of
             // using the original one.
-            let operator_id = node.operator_id as u32;
+            let operator_id = node.operator_id;
 
             assert!(fragment.node.is_none());
             fragment.node = Some(Box::new(node));
@@ -376,6 +405,18 @@ fn build_fragment(
 
             NodeBody::TopN(_) => current_fragment.requires_singleton = true,
 
+            NodeBody::EowcGapFill(node) => {
+                let table = node.buffer_table.as_ref().unwrap().clone();
+                state.tables.insert(table.id, table);
+                let table = node.prev_row_table.as_ref().unwrap().clone();
+                state.tables.insert(table.id, table);
+            }
+
+            NodeBody::GapFill(node) => {
+                let table = node.state_table.as_ref().unwrap().clone();
+                state.tables.insert(table.id, table);
+            }
+
             NodeBody::StreamScan(node) => {
                 current_fragment
                     .fragment_type_mask
@@ -386,25 +427,32 @@ fn build_fragment(
                             .fragment_type_mask
                             .add(FragmentTypeFlag::SnapshotBackfillStreamScan);
                         state.has_snapshot_backfill = true;
+                        state.has_any_backfill = true;
+                    }
+                    StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
+                        state.has_any_backfill = true;
                     }
                     StreamScanType::CrossDbSnapshotBackfill => {
                         current_fragment
                             .fragment_type_mask
                             .add(FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan);
                         state.has_cross_db_snapshot_backfill = true;
+                        state.has_any_backfill = true;
                     }
                     StreamScanType::Unspecified
                     | StreamScanType::Chain
                     | StreamScanType::Rearrange
-                    | StreamScanType::Backfill
-                    | StreamScanType::UpstreamOnly
-                    | StreamScanType::ArrangementBackfill => {}
+                    | StreamScanType::UpstreamOnly => {}
                 }
                 // memorize table id for later use
                 // The table id could be a upstream CDC source
-                state
-                    .dependent_table_ids
-                    .insert(TableId::new(node.table_id));
+                state.dependent_table_ids.insert(node.table_id);
+
+                // Add state table if present
+                if let Some(state_table) = &node.state_table {
+                    let table = state_table.clone();
+                    state.tables.insert(table.id, table);
+                }
             }
 
             NodeBody::StreamCdcScan(node) => {
@@ -423,6 +471,7 @@ fn build_fragment(
                     current_fragment.requires_singleton = true;
                 }
                 state.has_source_backfill = true;
+                state.has_any_backfill = true;
             }
 
             NodeBody::CdcFilter(node) => {
@@ -432,7 +481,7 @@ fn build_fragment(
                 // memorize upstream source id for later use
                 state
                     .dependent_table_ids
-                    .insert(node.upstream_source_id.into());
+                    .insert(node.upstream_source_id.as_cdc_table_id());
             }
             NodeBody::SourceBackfill(node) => {
                 current_fragment
@@ -440,8 +489,11 @@ fn build_fragment(
                     .add(FragmentTypeFlag::SourceScan);
                 // memorize upstream source id for later use
                 let source_id = node.upstream_source_id;
-                state.dependent_table_ids.insert(source_id.into());
+                state
+                    .dependent_table_ids
+                    .insert(source_id.as_cdc_table_id());
                 state.has_source_backfill = true;
+                state.has_any_backfill = true;
             }
 
             NodeBody::Now(_) => {
@@ -530,7 +582,7 @@ fn build_fragment(
                             StreamFragmentEdge {
                                 dispatch_strategy: exchange_node_strategy.clone(),
                                 // Always use the exchange operator id as the link id.
-                                link_id: child_node.operator_id,
+                                link_id: child_node.operator_id.as_raw_id(),
                             },
                         );
 
@@ -540,7 +592,7 @@ fn build_fragment(
                         if result.is_err() {
                             // Assign a new operator id for the `Exchange`, so we can distinguish it
                             // from duplicate edges and break the sharing.
-                            child_node.operator_id = state.gen_operator_id() as u64;
+                            child_node.operator_id = state.gen_operator_id();
 
                             // Take the upstream plan node as the reference for properties of `NoOp`.
                             let ref_fragment_node = child_fragment.node.as_ref().unwrap();
@@ -553,7 +605,7 @@ fn build_fragment(
                                 .into(),
                             };
 
-                            let no_shuffle_exchange_operator_id = state.gen_operator_id() as u64;
+                            let no_shuffle_exchange_operator_id = state.gen_operator_id();
 
                             let no_op_fragment = {
                                 let node = state.gen_no_op_stream_node(StreamNode {
@@ -583,7 +635,7 @@ fn build_fragment(
                                 StreamFragmentEdge {
                                     // Use `NoShuffle` exhcnage strategy for upstream edge.
                                     dispatch_strategy: no_shuffle_strategy,
-                                    link_id: no_shuffle_exchange_operator_id,
+                                    link_id: no_shuffle_exchange_operator_id.as_raw_id(),
                                 },
                             );
                             state.fragment_graph.add_edge(
@@ -592,7 +644,7 @@ fn build_fragment(
                                 StreamFragmentEdge {
                                     // Use the original exchange strategy for downstream edge.
                                     dispatch_strategy: exchange_node_strategy,
-                                    link_id: child_node.operator_id,
+                                    link_id: child_node.operator_id.as_raw_id(),
                                 },
                             );
                         }

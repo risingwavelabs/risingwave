@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::level::{InputLevel, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
@@ -27,7 +28,7 @@ pub struct SpaceReclaimCompactionPicker {
     pub _max_space_reclaim_bytes: u64,
 
     // for filter
-    pub all_table_ids: HashSet<u32>,
+    pub all_table_ids: HashSet<TableId>,
 }
 
 // According to the execution model of SpaceReclaimCompactionPicker, SpaceReclaimPickerState is
@@ -38,7 +39,7 @@ pub struct SpaceReclaimPickerState {
 }
 
 impl SpaceReclaimCompactionPicker {
-    pub fn new(max_space_reclaim_bytes: u64, all_table_ids: HashSet<u32>) -> Self {
+    pub fn new(max_space_reclaim_bytes: u64, all_table_ids: HashSet<TableId>) -> Self {
         Self {
             _max_space_reclaim_bytes: max_space_reclaim_bytes,
             all_table_ids,

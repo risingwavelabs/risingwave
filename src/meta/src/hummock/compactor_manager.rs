@@ -211,7 +211,7 @@ impl CompactorManagerInner {
         self.compactor_map
             .insert(context_id, Arc::new(Compactor::new(context_id, tx)));
 
-        tracing::info!(context_id = context_id, "Added compactor session");
+        tracing::info!(context_id = %context_id, "Added compactor session");
 
         rx
     }
@@ -225,7 +225,7 @@ impl CompactorManagerInner {
 
     pub fn remove_compactor(&mut self, context_id: HummockContextId) {
         if self.compactor_map.remove(&context_id).is_some() {
-            tracing::info!(context_id = context_id, "Removed compactor session")
+            tracing::info!(context_id = %context_id, "Removed compactor session")
         };
     }
 
@@ -540,7 +540,7 @@ impl IcebergCompactorManager {
             .write()
             .compactor_map
             .insert(context_id, Arc::new(IcebergCompactor::new(context_id, tx)));
-        tracing::info!(context_id = context_id, "Added iceberg compactor session");
+        tracing::info!(context_id = %context_id, "Added iceberg compactor session");
         rx
     }
 
@@ -552,7 +552,7 @@ impl IcebergCompactorManager {
             .remove(&context_id)
             .is_some()
         {
-            tracing::info!(context_id = context_id, "Removed iceberg compactor session");
+            tracing::info!(context_id = %context_id, "Removed iceberg compactor session");
         }
     }
 
@@ -676,7 +676,7 @@ mod tests {
     #[test]
     fn test_iceberg_compactor_manager() {
         // Test Add and Remove Iceberg Compactor
-        let iceberg_context_id = 1000;
+        let iceberg_context_id = 1000.into();
         let iceberg_compactor_manager = IcebergCompactorManager::new();
         assert_eq!(iceberg_compactor_manager.compactor_num(), 0);
         assert!(

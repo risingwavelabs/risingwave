@@ -18,6 +18,7 @@ use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use itertools::Itertools;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
@@ -212,6 +213,10 @@ enum HummockCommands {
         level0_stop_write_threshold_max_size: Option<u64>,
         #[clap(long)]
         enable_optimize_l0_interval_selection: Option<bool>,
+        #[clap(long)]
+        vnode_aligned_level_size_threshold: Option<u64>,
+        #[clap(long)]
+        max_kv_count_for_xor16: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -616,7 +621,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
                 compaction_group_id,
-                table_id,
+                table_id.into(),
                 level,
                 sst_ids,
             )
@@ -661,6 +666,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             level0_stop_write_threshold_max_sst_count,
             level0_stop_write_threshold_max_size,
             enable_optimize_l0_interval_selection,
+            vnode_aligned_level_size_threshold,
+            max_kv_count_for_xor16,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -700,6 +707,8 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     level0_stop_write_threshold_max_sst_count,
                     level0_stop_write_threshold_max_size,
                     enable_optimize_l0_interval_selection,
+                    vnode_aligned_level_size_threshold,
+                    max_kv_count_for_xor16,
                 ),
             )
             .await?
@@ -712,7 +721,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::split_compaction_group(
                 context,
                 compaction_group_id,
-                &table_ids,
+                &table_ids.into_iter().map_into().collect_vec(),
                 partition_vnode_count,
             )
             .await?;

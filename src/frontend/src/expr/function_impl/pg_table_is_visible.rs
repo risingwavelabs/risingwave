@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::SearchPath;
 use risingwave_expr::{Result, capture_context, function};
 
@@ -24,7 +25,7 @@ use crate::user::user_service::UserInfoReader;
 
 #[function("pg_table_is_visible(int4) -> boolean")]
 fn pg_table_is_visible(oid: i32) -> Result<Option<bool>> {
-    pg_table_is_visible_impl_captured(oid)
+    pg_table_is_visible_impl_captured(ObjectId::new(oid as _))
 }
 
 #[capture_context(CATALOG_READER, USER_INFO_READER, AUTH_CONTEXT, SEARCH_PATH, DB_NAME)]
@@ -34,10 +35,10 @@ fn pg_table_is_visible_impl(
     auth_context: &AuthContext,
     search_path: &SearchPath,
     db_name: &str,
-    oid: i32,
+    oid: ObjectId,
 ) -> Result<Option<bool>> {
     // To maintain consistency with PostgreSQL, we ensure that system catalogs are always visible.
-    if is_system_catalog(oid as u32) {
+    if is_system_catalog(oid) {
         return Ok(Some(true));
     }
 
@@ -53,7 +54,7 @@ fn pg_table_is_visible_impl(
     // 2. User have `USAGE` privilege on the schema.
     for schema in search_path.path() {
         if let Ok(schema) = catalog_reader.get_schema_by_name(db_name, schema)
-            && schema.contains_object(oid as u32)
+            && schema.contains_object(oid)
         {
             return if user_info.is_super || user_info.has_schema_usage_privilege(schema.id()) {
                 Ok(Some(true))

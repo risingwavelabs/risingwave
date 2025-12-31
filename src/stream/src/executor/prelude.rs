@@ -34,7 +34,7 @@ pub use crate::executor::error::{StreamExecutorError, StreamExecutorResult};
 pub use crate::executor::monitor::streaming_stats::StreamingMetrics;
 pub use crate::executor::{
     Barrier, BoxedMessageStream, Execute, Executor, ExecutorInfo, Message, MessageStream,
-    MessageStreamItem, Mutation, PkDataTypes, PkIndices, PkIndicesRef, Watermark,
+    MessageStreamItem, Mutation, StreamKey, StreamKeyDataTypes, StreamKeyRef, Watermark,
     expect_first_barrier, expect_first_barrier_from_aligned_stream,
 };
 pub use crate::task::{ActorId, AtomicU64Ref};

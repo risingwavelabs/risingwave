@@ -61,7 +61,7 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore, const WITH_TIES: bool> {
     schema: Schema,
 
     /// The storage key indices of the `TopNExecutor`
-    storage_key_indices: PkIndices,
+    storage_key_indices: Vec<usize>,
 
     /// We are interested in which element is in the range of [offset, offset+limit).
     managed_state: ManagedTopNState<S>,
@@ -176,7 +176,7 @@ mod tests {
     use super::AppendOnlyTopNExecutor;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, Barrier, Execute, Executor, Message, PkIndices};
+    use crate::executor::{ActorContext, Barrier, Execute, Executor, Message, StreamKey};
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -225,7 +225,7 @@ mod tests {
         ]
     }
 
-    fn pk_indices() -> PkIndices {
+    fn stream_key() -> StreamKey {
         vec![0, 1]
     }
 
@@ -239,7 +239,7 @@ mod tests {
             Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
             Message::Chunk(std::mem::take(&mut chunks[2])),
         ])
-        .into_executor(create_schema(), pk_indices())
+        .into_executor(create_schema(), stream_key())
     }
 
     #[tokio::test]
@@ -249,7 +249,7 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
             &[OrderType::ascending(), OrderType::ascending()],
-            &pk_indices(),
+            &stream_key(),
         )
         .await;
 
@@ -320,7 +320,7 @@ mod tests {
         let state_table = create_in_memory_state_table(
             &[DataType::Int64, DataType::Int64],
             &[OrderType::ascending(), OrderType::ascending()],
-            &pk_indices(),
+            &stream_key(),
         )
         .await;
 

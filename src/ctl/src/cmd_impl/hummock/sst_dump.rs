@@ -32,6 +32,7 @@ use risingwave_hummock_sdk::level::Level;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId};
 use risingwave_object_store::object::{ObjectMetadata, ObjectStoreImpl};
+use risingwave_pb::id::TableId;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
@@ -43,7 +44,7 @@ use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
 use crate::CtlContext;
 use crate::common::HummockServiceOpts;
 
-type TableData = HashMap<u32, TableCatalog>;
+type TableData = HashMap<TableId, TableCatalog>;
 
 #[derive(Args, Debug)]
 pub struct SstDumpArgs {
@@ -367,7 +368,7 @@ fn print_table_column(
     humm_val: HummockValue<&[u8]>,
     table_data: &TableData,
 ) -> anyhow::Result<()> {
-    let table_id = full_key.user_key.table_id.table_id();
+    let table_id = full_key.user_key.table_id;
 
     print!("\t\t table: id={}, ", table_id);
     let table_catalog = match table_data.get(&table_id) {

@@ -15,6 +15,7 @@
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
 use anyhow::Context;
 use risingwave_common::config::{
@@ -33,7 +34,6 @@ use sea_orm::EntityTrait;
 
 use crate::MetaResult;
 use crate::barrier::SharedActorInfos;
-use crate::barrier::cdc_progress::{CdcTableBackfillTracker, CdcTableBackfillTrackerRef};
 use crate::controller::SqlMetaStore;
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
@@ -88,7 +88,7 @@ pub struct MetaSrvEnv {
     /// options read by all services
     pub opts: Arc<MetaOpts>,
 
-    pub cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
+    actor_id_generator: Arc<AtomicU32>,
 }
 
 /// Options shared by all meta service instances
@@ -238,6 +238,9 @@ pub struct MetaOpts {
     /// Whether to split the compaction group when the size of the group exceeds the threshold.
     pub split_group_size_ratio: f64,
 
+    /// The interval in seconds for the refresh scheduler to check and trigger scheduled refreshes.
+    pub refresh_scheduler_interval_sec: u64,
+
     /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
     pub table_stat_high_write_throughput_ratio_for_split: f64,
 
@@ -285,6 +288,9 @@ pub struct MetaOpts {
     pub cdc_table_split_init_sleep_interval_splits: u64,
     pub cdc_table_split_init_sleep_duration_millis: u64,
     pub cdc_table_split_init_insert_batch_size: u64,
+
+    pub enable_legacy_table_migration: bool,
+    pub pause_on_next_bootstrap_offline: bool,
 }
 
 impl MetaOpts {
@@ -377,6 +383,9 @@ impl MetaOpts {
             cdc_table_split_init_sleep_interval_splits: 1000,
             cdc_table_split_init_sleep_duration_millis: 10,
             cdc_table_split_init_insert_batch_size: 1000,
+            enable_legacy_table_migration: true,
+            refresh_scheduler_interval_sec: 60,
+            pause_on_next_bootstrap_offline: false,
         }
     }
 }
@@ -452,9 +461,6 @@ impl MetaSrvEnv {
             )
             .await?,
         );
-        let cdc_table_backfill_tracker = CdcTableBackfillTracker::new(meta_store_impl.clone())
-            .await?
-            .into();
         Ok(Self {
             id_gen_manager_impl: Arc::new(SqlIdGeneratorManager::new(&meta_store_impl.conn).await?),
             system_param_manager_impl: system_param_controller,
@@ -471,7 +477,7 @@ impl MetaSrvEnv {
             opts: opts.into(),
             // Await trees on the meta node is lightweight, thus always enabled.
             await_tree_reg: await_tree::Registry::new(Default::default()),
-            cdc_table_backfill_tracker,
+            actor_id_generator: Arc::new(AtomicU32::new(0)),
         })
     }
 
@@ -501,6 +507,10 @@ impl MetaSrvEnv {
 
     pub fn idle_manager(&self) -> &IdleManager {
         self.idle_manager.deref()
+    }
+
+    pub fn actor_id_generator(&self) -> &AtomicU32 {
+        self.actor_id_generator.deref()
     }
 
     pub async fn system_params_reader(&self) -> SystemParamsReader {
@@ -541,10 +551,6 @@ impl MetaSrvEnv {
 
     pub fn shared_actor_infos(&self) -> &SharedActorInfos {
         &self.shared_actor_info
-    }
-
-    pub fn cdc_table_backfill_tracker(&self) -> CdcTableBackfillTrackerRef {
-        self.cdc_table_backfill_tracker.clone()
     }
 }
 

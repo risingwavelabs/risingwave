@@ -16,10 +16,11 @@ use std::collections::HashMap;
 use std::collections::hash_map::Entry;
 
 use risingwave_common::acl::{AclMode, AclModeSet};
+use risingwave_common::id::ObjectId;
 use risingwave_pb::user::grant_privilege::Object as GrantObject;
 use risingwave_pb::user::{PbAction, PbAuthInfo, PbGrantPrivilege, PbUserInfo};
 
-use crate::catalog::{DatabaseId, SchemaId};
+use crate::catalog::SchemaId;
 use crate::user::UserId;
 
 /// `UserCatalog` is responsible for managing user's information.
@@ -37,8 +38,8 @@ pub struct UserCatalog {
 
     // User owned acl mode set, group by object id.
     // TODO: merge it after we fully migrate to sql-backend.
-    pub database_acls: HashMap<DatabaseId, AclModeSet>,
-    pub schema_acls: HashMap<SchemaId, AclModeSet>,
+    pub database_acls: HashMap<u32, AclModeSet>,
+    pub schema_acls: HashMap<u32, AclModeSet>,
     pub object_acls: HashMap<u32, AclModeSet>,
 }
 
@@ -94,10 +95,10 @@ impl UserCatalog {
         }
     }
 
-    fn get_acl(&self, object: &GrantObject) -> Option<&AclModeSet> {
+    fn get_acl(&self, object: GrantObject) -> Option<&AclModeSet> {
         match object {
-            GrantObject::DatabaseId(id) => self.database_acls.get(id),
-            GrantObject::SchemaId(id) => self.schema_acls.get(id),
+            GrantObject::DatabaseId(id) => self.database_acls.get(&id),
+            GrantObject::SchemaId(id) => self.schema_acls.get(&id),
             GrantObject::TableId(id)
             | GrantObject::SourceId(id)
             | GrantObject::SinkId(id)
@@ -105,7 +106,7 @@ impl UserCatalog {
             | GrantObject::FunctionId(id)
             | GrantObject::SubscriptionId(id)
             | GrantObject::ConnectionId(id)
-            | GrantObject::SecretId(id) => self.object_acls.get(id),
+            | GrantObject::SecretId(id) => self.object_acls.get(&id),
         }
     }
 
@@ -167,13 +168,13 @@ impl UserCatalog {
         self.refresh_acl_modes();
     }
 
-    pub fn has_privilege(&self, object: &GrantObject, mode: AclMode) -> bool {
-        self.get_acl(object)
+    pub fn has_privilege(&self, object: impl Into<GrantObject>, mode: AclMode) -> bool {
+        self.get_acl(object.into())
             .is_some_and(|acl_set| acl_set.has_mode(mode))
     }
 
     pub fn has_schema_usage_privilege(&self, schema_id: SchemaId) -> bool {
-        self.has_privilege(&GrantObject::SchemaId(schema_id), AclMode::Usage)
+        self.has_privilege(schema_id, AclMode::Usage)
     }
 
     pub fn check_privilege_with_grant_option(
@@ -205,7 +206,7 @@ impl UserCatalog {
         action_map.values().all(|&found| found)
     }
 
-    pub fn check_object_visibility(&self, obj_id: u32) -> bool {
+    pub fn check_object_visibility(&self, obj_id: ObjectId) -> bool {
         if self.is_super {
             return true;
         }
@@ -213,10 +214,12 @@ impl UserCatalog {
         // `Select` and `Execute` are the minimum required privileges for object visibility.
         // `Execute` is required for functions.
         // `Usage` is required for connections and secrets.
-        self.object_acls.get(&obj_id).is_some_and(|acl_set| {
-            acl_set.has_mode(AclMode::Select)
-                || acl_set.has_mode(AclMode::Execute)
-                || acl_set.has_mode(AclMode::Usage)
-        })
+        self.object_acls
+            .get(&obj_id.as_raw_id())
+            .is_some_and(|acl_set| {
+                acl_set.has_mode(AclMode::Select)
+                    || acl_set.has_mode(AclMode::Execute)
+                    || acl_set.has_mode(AclMode::Usage)
+            })
     }
 }

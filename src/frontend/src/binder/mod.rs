@@ -34,6 +34,7 @@ mod delete;
 mod expr;
 pub mod fetch_cursor;
 mod for_system;
+mod gap_fill_binder;
 mod insert;
 mod query;
 mod relation;
@@ -48,14 +49,18 @@ pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
 pub use expr::bind_data_type;
+pub use gap_fill_binder::BoundFillStrategy;
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
-    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
+    BoundBackCteRef, BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput,
+    BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
     ResolveQualifiedNameError, WindowTableFunctionKind,
 };
+// Re-export common types
+pub use risingwave_common::gap_fill::FillStrategy;
+use risingwave_common::id::ObjectId;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
@@ -65,7 +70,7 @@ pub use values::BoundValues;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogResult, DatabaseId, TableId, ViewId};
+use crate::catalog::{CatalogResult, DatabaseId, ViewId};
 use crate::error::ErrorCode;
 use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
 use crate::user::user_service::UserInfoReadGuard;
@@ -123,7 +128,7 @@ pub struct Binder {
     shared_views: HashMap<ViewId, ShareId>,
 
     /// The included relations while binding a query.
-    included_relations: HashSet<TableId>,
+    included_relations: HashSet<ObjectId>,
 
     /// The included user-defined functions while binding a query.
     included_udfs: HashSet<FunctionId>,
@@ -313,7 +318,7 @@ impl Binder {
     /// After the plan is built, the referenced relations may be changed. We cannot rely on the
     /// collection result of plan, because we still need to record the dependencies that have been
     /// optimised away.
-    pub fn included_relations(&self) -> &HashSet<TableId> {
+    pub fn included_relations(&self) -> &HashSet<ObjectId> {
         &self.included_relations
     }
 

@@ -18,8 +18,8 @@ mod tests {
 
     use crate::controller::catalog::*;
 
-    const TEST_DATABASE_ID: DatabaseId = 1;
-    const TEST_SCHEMA_ID: SchemaId = 2;
+    const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
+    const TEST_SCHEMA_ID: SchemaId = SchemaId::new(2);
     const TEST_OWNER_ID: UserId = 1;
 
     #[tokio::test]
@@ -59,7 +59,7 @@ mod tests {
     async fn test_schema_func() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_schema = PbSchema {
-            database_id: TEST_DATABASE_ID as _,
+            database_id: TEST_DATABASE_ID,
             name: "schema1".to_owned(),
             owner: TEST_OWNER_ID as _,
             ..Default::default()
@@ -93,8 +93,8 @@ mod tests {
     async fn test_create_view() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_view = PbView {
-            schema_id: TEST_SCHEMA_ID as _,
-            database_id: TEST_DATABASE_ID as _,
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
             name: "view".to_owned(),
             owner: TEST_OWNER_ID as _,
             sql: "CREATE VIEW view AS SELECT 1".to_owned(),
@@ -125,8 +125,8 @@ mod tests {
         };
         let arg_types = vec![test_data_type.clone()];
         let pb_function = PbFunction {
-            schema_id: TEST_SCHEMA_ID as _,
-            database_id: TEST_DATABASE_ID as _,
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
             name: "test_function".to_owned(),
             owner: TEST_OWNER_ID as _,
             arg_types,
@@ -175,8 +175,8 @@ mod tests {
     async fn test_alter_relation_rename() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_source = PbSource {
-            schema_id: TEST_SCHEMA_ID as _,
-            database_id: TEST_DATABASE_ID as _,
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
             name: "s1".to_owned(),
             owner: TEST_OWNER_ID as _,
             definition: r#"CREATE SOURCE s1 (v1 int) with (
@@ -202,14 +202,15 @@ mod tests {
             .unwrap();
 
         let pb_view = PbView {
-            schema_id: TEST_SCHEMA_ID as _,
-            database_id: TEST_DATABASE_ID as _,
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
             name: "view_1".to_owned(),
             owner: TEST_OWNER_ID as _,
             sql: "CREATE VIEW view_1 AS SELECT v1 FROM s1".to_owned(),
             ..Default::default()
         };
-        mgr.create_view(pb_view, HashSet::from([source_id])).await?;
+        mgr.create_view(pb_view, HashSet::from([source_id.as_object_id()]))
+            .await?;
         let view_id: ViewId = View::find()
             .select_only()
             .column(view::Column::ViewId)

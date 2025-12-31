@@ -49,11 +49,14 @@ pub const REDIS_VALUE_TYPE: &str = "redis_value_type";
 pub const REDIS_VALUE_TYPE_STRING: &str = "string";
 pub const REDIS_VALUE_TYPE_GEO: &str = "geospatial";
 pub const REDIS_VALUE_TYPE_PUBSUB: &str = "pubsub";
+pub const REDIS_VALUE_TYPE_STREAM: &str = "stream";
 pub const LON_NAME: &str = "longitude";
 pub const LAT_NAME: &str = "latitude";
 pub const MEMBER_NAME: &str = "member";
 pub const CHANNEL: &str = "channel";
 pub const CHANNEL_COLUMN: &str = "channel_column";
+pub const STREAM: &str = "stream";
+pub const STREAM_COLUMN: &str = "stream_column";
 
 #[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct RedisCommon {
@@ -112,10 +115,16 @@ impl RedisPipe {
                     pipe.geo_add(key, (lon, lat, member));
                 }
                 (
-                    RedisSinkPayloadWriterInput::RedisPubSubKey(key),
+                    RedisSinkPayloadWriterInput::RedisPubSubStreamKey(key),
                     RedisSinkPayloadWriterInput::String(v),
                 ) => {
                     pipe.publish(key, v);
+                }
+                (
+                    RedisSinkPayloadWriterInput::RedisPubSubStreamKey(key),
+                    RedisSinkPayloadWriterInput::RedisStreamValue((field, value)),
+                ) => {
+                    pipe.xadd(key, "*", &[(&field, &value)]);
                 }
                 _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned())),
             },
@@ -133,10 +142,16 @@ impl RedisPipe {
                     pipe.geo_add(key, (lon, lat, member));
                 }
                 (
-                    RedisSinkPayloadWriterInput::RedisPubSubKey(key),
+                    RedisSinkPayloadWriterInput::RedisPubSubStreamKey(key),
                     RedisSinkPayloadWriterInput::String(v),
                 ) => {
                     pipe.publish(key, v);
+                }
+                (
+                    RedisSinkPayloadWriterInput::RedisPubSubStreamKey(key),
+                    RedisSinkPayloadWriterInput::RedisStreamValue((field, value)),
+                ) => {
+                    pipe.xadd(key, "*", &[(&field, &value)]);
                 }
                 _ => return Err(SinkError::Redis("RedisPipe set not match".to_owned())),
             },
@@ -301,7 +316,6 @@ impl Sink for RedisSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        self.config.common.build_conn_and_pipe().await?;
         let all_map: HashMap<String, DataType> = self
             .schema
             .fields()
@@ -423,13 +437,50 @@ impl Sink for RedisSink {
                         })?;
                     TemplateStringEncoder::check_string_format(value_format, &all_map)?;
                 }
+                Some(REDIS_VALUE_TYPE_STREAM) => {
+                    tracing::error!("test:for bug");
+                    risingwave_common::license::Feature::RedisSinkStream
+                        .check_available()
+                        .map_err(|e| anyhow::anyhow!(e))?;
+                    let stream = self.format_desc.options.get(STREAM);
+                    let stream_column = self.format_desc.options.get(STREAM_COLUMN);
+                    if (stream.is_none() && stream_column.is_none())
+                        || (stream.is_some() && stream_column.is_some())
+                    {
+                        return Err(SinkError::Config(anyhow!(
+                            "Please specific either `{STREAM}` or `{STREAM_COLUMN}`. They are mutually exclusive options."
+                        )));
+                    }
+
+                    if let Some(stream_column) = stream_column
+                        && let Some(stream_column_type) = all_map.get(stream_column)
+                        && (stream_column_type != &DataType::Varchar)
+                    {
+                        return Err(SinkError::Config(anyhow!(
+                            "`{STREAM_COLUMN}` must be set to `varchar`"
+                        )));
+                    }
+
+                    let value_format =
+                        self.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                            SinkError::Config(anyhow!("Cannot find `{VALUE_FORMAT}`"))
+                        })?;
+                    let key_format = self.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!(
+                            "Cannot find '{KEY_FORMAT}', please set it or use JSON"
+                        ))
+                    })?;
+                    TemplateStringEncoder::check_string_format(key_format, &pk_map)?;
+                    TemplateStringEncoder::check_string_format(value_format, &all_map)?;
+                }
                 _ => {
                     return Err(SinkError::Config(anyhow!(
-                        "`{REDIS_VALUE_TYPE}` must be set to `{REDIS_VALUE_TYPE_STRING}` or `{REDIS_VALUE_TYPE_GEO}` or `{REDIS_VALUE_TYPE_PUBSUB}`"
+                        "`{REDIS_VALUE_TYPE}` must be set to `{REDIS_VALUE_TYPE_STRING}` or `{REDIS_VALUE_TYPE_GEO}` or `{REDIS_VALUE_TYPE_PUBSUB}` or `{REDIS_VALUE_TYPE_STREAM}`"
                     )));
                 }
             }
         }
+        self.config.common.build_conn_and_pipe().await?;
         Ok(())
     }
 }

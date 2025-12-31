@@ -22,7 +22,8 @@ use risingwave_common::catalog::{
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::iceberg::{
-    IcebergFileScanTask, IcebergProperties, IcebergScanOpts, IcebergSplit, scan_task_to_chunk,
+    IcebergFileScanTask, IcebergProperties, IcebergScanOpts, IcebergSplit,
+    scan_task_to_chunk_with_deletes,
 };
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_expr::expr::LiteralExpression;
@@ -109,13 +110,14 @@ impl IcebergScanExecutor {
 
         for data_file_scan_task in data_file_scan_tasks {
             #[for_await]
-            for chunk in scan_task_to_chunk(
+            for chunk in scan_task_to_chunk_with_deletes(
                 table.clone(),
                 data_file_scan_task,
                 IcebergScanOpts {
                     chunk_size: self.chunk_size,
                     need_seq_num: self.need_seq_num,
                     need_file_path_and_pos: self.need_file_path_and_pos,
+                    handle_delete_files: false,
                 },
                 self.metrics.as_ref().map(|m| m.iceberg_scan_metrics()),
             ) {

@@ -51,7 +51,7 @@ impl ExecutorBuilder for HopWindowExecutorBuilder {
         let window_slide = node.get_window_slide()?.into();
         let window_size = node.get_window_size()?.into();
 
-        let chunk_size = params.env.config().developer.chunk_size;
+        let chunk_size = params.config.developer.chunk_size;
 
         let exec = HopWindowExecutor::new(
             params.actor_context,

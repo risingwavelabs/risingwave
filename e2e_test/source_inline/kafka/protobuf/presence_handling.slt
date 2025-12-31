@@ -137,11 +137,10 @@ format plain encode protobuf (
   message = 'test.TestMessage');
 
 
-sleep 2s
 
 
 # Test 1: Verify all messages are received correctly
-query ITTITTTIII rowsort
+query ITTITTTIII rowsort retry 4 backoff 1s
 select
   regular_int,
   regular_string,

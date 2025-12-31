@@ -135,8 +135,8 @@ impl<S: StateStore> LookupExecutor<S> {
         let arrangement_data_types = arrangement.schema().data_types();
         let stream_data_types = stream.schema().data_types();
 
-        let arrangement_pk_indices = arrangement.pk_indices().to_vec();
-        let stream_pk_indices = stream.pk_indices().to_vec();
+        let arrangement_pk_indices = arrangement.stream_key().to_vec();
+        let stream_pk_indices = stream.stream_key().to_vec();
 
         // check if arrange join key is exactly the same as order rules
         {
@@ -186,7 +186,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let metrics_info = MetricsInfo::new(
             ctx.streaming_metrics.clone(),
-            storage_table.table_id().table_id(),
+            storage_table.table_id(),
             ctx.id,
             "Lookup",
         );

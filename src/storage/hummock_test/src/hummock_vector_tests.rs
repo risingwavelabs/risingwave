@@ -40,7 +40,7 @@ use crate::test_utils::prepare_hummock_test_env;
 
 #[tokio::test]
 async fn test_flat_vector() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     const VECTOR_DIM: usize = 128;
     let base_epoch = test_epoch(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);
@@ -216,7 +216,7 @@ async fn test_flat_vector() {
 
 #[tokio::test]
 async fn test_hnsw_vector() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     const VECTOR_DIM: usize = 128;
     let base_epoch = test_epoch(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);

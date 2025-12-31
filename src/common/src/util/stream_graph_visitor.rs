@@ -62,13 +62,13 @@ pub fn visit_stream_node(stream_node: &StreamNode, mut f: impl FnMut(&StreamNode
 }
 
 /// A utility for to accessing the [`StreamNode`] immutably. The returned bool is used to determine whether the access needs to continue.
-pub fn visit_stream_node_cont<F>(stream_node: &StreamNode, mut f: F)
+pub fn visit_stream_node_cont<'a, F>(stream_node: &'a StreamNode, mut f: F)
 where
-    F: FnMut(&StreamNode) -> bool,
+    F: FnMut(&'a StreamNode) -> bool,
 {
-    fn visit_inner<F>(stream_node: &StreamNode, f: &mut F)
+    fn visit_inner<'a, F>(stream_node: &'a StreamNode, f: &mut F)
     where
-        F: FnMut(&StreamNode) -> bool,
+        F: FnMut(&'a StreamNode) -> bool,
     {
         if !f(stream_node) {
             return;
@@ -266,6 +266,15 @@ pub fn visit_stream_node_tables_inner<F>(
             // Stream Cdc Scan
             NodeBody::StreamCdcScan(node) => {
                 always!(node.state_table, "StreamCdcScan")
+            }
+
+            NodeBody::EowcGapFill(node) => {
+                always!(node.buffer_table, "EowcGapFillBufferTable");
+                always!(node.prev_row_table, "EowcGapFillPrevRowTable");
+            }
+
+            NodeBody::GapFill(node) => {
+                always!(node.state_table, "GapFillStateTable");
             }
 
             // Note: add internal tables for new nodes here.

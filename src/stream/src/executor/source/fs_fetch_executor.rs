@@ -19,8 +19,9 @@ use either::Either;
 use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::ScalarRef;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
@@ -195,7 +196,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     fn build_source_ctx(
         &self,
         source_desc: &SourceDesc,
-        source_id: TableId,
+        source_id: SourceId,
         source_name: &str,
     ) -> SourceContext {
         SourceContext::new(
@@ -231,7 +232,8 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+        // pulsar's `message_id_data_idx` is not used in this executor, so we don't need to get it.
+        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
@@ -420,8 +422,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                 }
                                 let chunk = prune_additional_cols(
                                     &chunk,
-                                    split_idx,
-                                    offset_idx,
+                                    &[split_idx, offset_idx],
                                     &source_desc.columns,
                                 );
                                 yield Message::Chunk(chunk);

@@ -79,6 +79,16 @@ impl<R> Record<R> {
         }
     }
 
+    /// Convert this record to upsert format, by rewriting `Update` to `Insert` and only keeping
+    /// the new row.
+    pub fn into_upsert(self) -> Self {
+        match self {
+            Record::Insert { new_row } => Record::Insert { new_row },
+            Record::Delete { old_row } => Record::Delete { old_row },
+            Record::Update { new_row, .. } => Record::Insert { new_row },
+        }
+    }
+
     /// Try mapping the row in the record to another row, returning error if any of the mapping fails.
     pub fn try_map<R2, E>(self, f: impl Fn(R) -> Result<R2, E>) -> Result<Record<R2>, E> {
         Ok(match self {

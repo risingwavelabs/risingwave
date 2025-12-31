@@ -57,13 +57,7 @@ public class JDBCSink implements SinkWriter {
         this.config = config;
 
         try {
-            conn =
-                    JdbcUtils.getConnection(
-                            config.getJdbcUrl(),
-                            config.getUser(),
-                            config.getPassword(),
-                            config.isAutoCommit(),
-                            DUMMY_BATCH_INSERT_ROWS);
+            conn = config.getConnection();
             // Table schema has been validated before, so we get the PK from it directly
             this.pkColumnNames = tableSchema.getPrimaryKeys();
             // column name -> java.sql.Types
@@ -195,13 +189,7 @@ public class JDBCSink implements SinkWriter {
                         conn.close();
 
                         // create a new connection if the current connection is invalid
-                        conn =
-                                JdbcUtils.getConnection(
-                                        config.getJdbcUrl(),
-                                        config.getUser(),
-                                        config.getPassword(),
-                                        config.isAutoCommit(),
-                                        DUMMY_BATCH_INSERT_ROWS);
+                        conn = config.getConnection();
                         // reset the flag since we will retry to prepare the batch again
                         updateFlag = false;
                         jdbcStatements = new JdbcStatements(conn, config.getQueryTimeout());

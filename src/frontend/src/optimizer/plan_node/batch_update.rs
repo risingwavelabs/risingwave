@@ -94,11 +94,12 @@ impl ToBatchPb for BatchUpdate {
             .collect();
 
         NodeBody::Update(UpdateNode {
-            table_id: self.core.table_id.table_id(),
+            table_id: self.core.table_id,
             table_version_id: self.core.table_version_id,
             returning: self.core.returning,
             old_exprs,
             new_exprs,
+            upsert: self.base.ctx().session_ctx().config().upsert_dml(),
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }

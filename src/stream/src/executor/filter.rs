@@ -230,9 +230,9 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let pk_indices = PkIndices::new();
+        let stream_key = StreamKey::new();
         let source = MockSource::with_chunks(vec![chunk1, chunk2])
-            .into_executor(schema.clone(), pk_indices.clone());
+            .into_executor(schema.clone(), stream_key.clone());
 
         let test_expr = build_from_pretty("(greater_than:boolean $0:int8 $1:int8)");
 
@@ -291,9 +291,9 @@ mod tests {
                 Field::unnamed(DataType::Int64),
             ],
         };
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let source =
-            MockSource::with_chunks(vec![chunk]).into_executor(schema.clone(), pk_indices.clone());
+            MockSource::with_chunks(vec![chunk]).into_executor(schema.clone(), stream_key.clone());
         let test_expr = build_from_pretty("(greater_than:boolean $1:int8 10:int8)");
         let mut filter = UpsertFilterExecutor::new(ActorContext::for_test(123), source, test_expr)
             .boxed()

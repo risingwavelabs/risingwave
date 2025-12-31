@@ -29,6 +29,7 @@ use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use url::form_urlencoded;
+use risingwave_pb::id::ExecutorId;
 use with_options::WithOptions;
 
 use super::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE;
@@ -43,7 +44,8 @@ use super::{
 };
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::decouple_checkpoint_log_sink::DecoupleCheckpointLogSinkerOf;
-use crate::sink::{Result, Sink, SinkWriter, SinkWriterParam};
+use crate::sink::writer::SinkWriter;
+use crate::sink::{Result, Sink, SinkWriterParam};
 
 pub const STARROCKS_SINK: &str = "starrocks";
 const STARROCK_MYSQL_PREFER_SOCKET: &str = "false";
@@ -371,7 +373,7 @@ pub struct StarrocksSinkWriter {
     client: Option<StarrocksClient>,
     txn_client: Arc<StarrocksTxnClient>,
     row_encoder: JsonEncoder,
-    executor_id: u64,
+    executor_id: ExecutorId,
     curr_txn_label: Option<String>,
 }
 
@@ -391,7 +393,7 @@ impl StarrocksSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
-        executor_id: u64,
+        executor_id: ExecutorId,
     ) -> Result<Self> {
         let mut field_names = schema.names_str();
         if !is_append_only {

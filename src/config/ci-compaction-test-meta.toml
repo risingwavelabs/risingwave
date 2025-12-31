@@ -6,6 +6,7 @@ max_heartbeat_interval_secs = 60
 in_flight_barrier_nums = 40
 
 [storage]
+share_buffers_sync_parallelism = 4
 shared_buffer_capacity_mb = 4096
 block_cache_capacity_mb = 4096
 meta_cache_capacity_mb = 1024

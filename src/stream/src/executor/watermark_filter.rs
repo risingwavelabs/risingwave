@@ -415,7 +415,7 @@ mod tests {
         table_id: u32,
     ) -> (BatchTable<MemoryStateStore>, StateTable<MemoryStateStore>) {
         let table = Table {
-            id: table_id,
+            id: table_id.into(),
             columns: data_types
                 .iter()
                 .enumerate()
@@ -491,7 +491,7 @@ mod tests {
         let ctx = ActorContext::for_test(123);
         let info = ExecutorInfo::for_test(
             source.schema().clone(),
-            source.pk_indices().to_vec(),
+            source.stream_key().to_vec(),
             "WatermarkFilterExecutor".to_owned(),
             0,
         );

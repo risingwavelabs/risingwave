@@ -14,7 +14,8 @@ byteorder = "1.5"
 bytes = "1"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 itertools = { workspace = true }
-jsonwebtoken = "9"
+jsonwebtoken = { workspace = true }
+ldap3 = { version = "0.11.3", default-features = false, features = ["tls-rustls"] }
 openssl = "0.10.72"
 panic-message = "0.3"
 parking_lot = { workspace = true }
@@ -23,6 +24,9 @@ postgres-types = { version = "0.2.6" }
 reqwest = "0.12.2"
 risingwave_common = { workspace = true }
 risingwave_sqlparser = { workspace = true }
+rustls = "0.21"
+rustls-native-certs = "0.6.3"
+rustls-pemfile = "1.0"
 serde = { workspace = true }
 serde_json = "1"
 socket2 = "0.6"
@@ -34,11 +38,16 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-openssl = "0.6.3"
 tracing = "0.1"
+url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
 
 [dev-dependencies]
+base64 = "0.22"
+jsonwebtoken = { workspace = true }
+rand = { version = "0.8" }
+rsa = "0.9"
 tempfile = "3"
 tokio-postgres = "0.7"
 

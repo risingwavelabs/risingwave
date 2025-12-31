@@ -54,7 +54,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbDatabase> for ActiveModel {
     fn from(db: PbDatabase) -> Self {
         Self {
-            database_id: Set(db.id as _),
+            database_id: Set(db.id),
             name: Set(db.name),
             resource_group: Set(db.resource_group),
             barrier_interval_ms: Set(db.barrier_interval_ms.map(|v| v as i32)),

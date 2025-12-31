@@ -12,19 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::TableId;
 use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
-use risingwave_meta::model::TableParallelism;
-use risingwave_meta::stream::{
-    JobReschedulePlan, JobReschedulePostUpdates, RescheduleOptions, WorkerReschedule,
-};
-use risingwave_meta_model::FragmentId;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
     GetClusterInfoRequest, GetClusterInfoResponse, GetServerlessStreamingJobsStatusRequest,
-    GetServerlessStreamingJobsStatusResponse, PbWorkerReschedule, RescheduleRequest,
-    RescheduleResponse, UpdateStreamingJobNodeLabelsRequest, UpdateStreamingJobNodeLabelsResponse,
+    GetServerlessStreamingJobsStatusResponse, RescheduleRequest, RescheduleResponse,
+    UpdateStreamingJobNodeLabelsRequest, UpdateStreamingJobNodeLabelsResponse,
 };
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use tonic::{Request, Response, Status};
@@ -35,7 +29,6 @@ use crate::stream::GlobalStreamManagerRef;
 pub struct ScaleServiceImpl {
     metadata_manager: MetadataManager,
     stream_manager: GlobalStreamManagerRef,
-    barrier_manager: BarrierManagerRef,
     env: MetaSrvEnv,
 }
 
@@ -43,13 +36,12 @@ impl ScaleServiceImpl {
     pub fn new(
         metadata_manager: MetadataManager,
         stream_manager: GlobalStreamManagerRef,
-        barrier_manager: BarrierManagerRef,
+        _barrier_manager: BarrierManagerRef,
         env: MetaSrvEnv,
     ) -> Self {
         Self {
             metadata_manager,
             stream_manager,
-            barrier_manager,
             env,
         }
     }
@@ -123,72 +115,10 @@ impl ScaleService for ScaleServiceImpl {
 
     async fn reschedule(
         &self,
-        request: Request<RescheduleRequest>,
+        _request: Request<RescheduleRequest>,
     ) -> Result<Response<RescheduleResponse>, Status> {
-        self.barrier_manager.check_status_running()?;
-
-        let RescheduleRequest {
-            worker_reschedules,
-            resolve_no_shuffle_upstream,
-            ..
-        } = request.into_inner();
-
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock_write_guard().await;
-        for (database_id, worker_reschedules) in self
-            .metadata_manager
-            .split_fragment_map_by_database(worker_reschedules)
-            .await?
-        {
-            let streaming_job_ids = self
-                .metadata_manager
-                .catalog_controller
-                .get_fragment_job_id(
-                    worker_reschedules
-                        .keys()
-                        .map(|id| *id as FragmentId)
-                        .collect(),
-                )
-                .await?;
-
-            let table_parallelisms = streaming_job_ids
-                .into_iter()
-                .map(|id| (TableId::new(id as _), TableParallelism::Custom))
-                .collect();
-
-            self.stream_manager
-                .reschedule_actors(
-                    database_id,
-                    JobReschedulePlan {
-                        reschedules: worker_reschedules
-                            .into_iter()
-                            .map(|(fragment_id, reschedule)| {
-                                let PbWorkerReschedule { worker_actor_diff } = reschedule;
-                                (
-                                    fragment_id,
-                                    WorkerReschedule {
-                                        worker_actor_diff: worker_actor_diff
-                                            .into_iter()
-                                            .map(|(worker_id, diff)| (worker_id as _, diff as _))
-                                            .collect(),
-                                    },
-                                )
-                            })
-                            .collect(),
-                        post_updates: JobReschedulePostUpdates {
-                            parallelism_updates: table_parallelisms,
-                            resource_group_updates: Default::default(),
-                        },
-                    },
-                    RescheduleOptions {
-                        resolve_no_shuffle_upstream,
-                        skip_create_new_actors: false,
-                    },
-                )
-                .await?;
-        }
-
         Ok(Response::new(RescheduleResponse {
-            success: true,
+            success: false,
             revision: 0,
         }))
     }

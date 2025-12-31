@@ -35,7 +35,7 @@ use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_value_indic
 /// `MemTable` is an in-memory buffer used to cache operator operations.
 #[tokio::test]
 async fn test_storage_table_value_indices() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_ids = [
@@ -178,7 +178,7 @@ async fn test_storage_table_value_indices() {
 
 #[tokio::test]
 async fn test_shuffled_column_id_for_storage_table_get_row() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_ids = [ColumnId::from(3), ColumnId::from(2), ColumnId::from(1)];
@@ -286,7 +286,7 @@ async fn test_shuffled_column_id_for_storage_table_get_row() {
 // test row-based encoding in batch mode
 #[tokio::test]
 async fn test_row_based_storage_table_point_get_in_batch_mode() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_ids = [ColumnId::from(0), ColumnId::from(1), ColumnId::from(2)];
@@ -390,7 +390,7 @@ async fn test_row_based_storage_table_point_get_in_batch_mode() {
 
 #[tokio::test]
 async fn test_batch_scan_with_value_indices() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let order_types = vec![OrderType::ascending(), OrderType::descending()];
@@ -490,7 +490,7 @@ async fn test_batch_scan_with_value_indices() {
 
 #[tokio::test]
 async fn test_batch_scan_chunk_with_value_indices() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let order_types = vec![OrderType::ascending(), OrderType::descending()];

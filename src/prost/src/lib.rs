@@ -25,6 +25,8 @@
 // FIXME: This should be fixed!!! https://github.com/risingwavelabs/risingwave/issues/19906
 #![expect(clippy::large_enum_variant)]
 
+pub mod id;
+
 use std::str::FromStr;
 
 use event_recovery::RecoveryEvent;
@@ -34,6 +36,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::id::{FragmentId, SourceId, WorkerId};
 use crate::meta::event_log::event_recovery;
 use crate::stream_plan::PbStreamScanType;
 
@@ -273,11 +276,19 @@ impl common::WorkerNode {
             .parallelism as usize
     }
 
+    fn compactor_node_parallelism(&self) -> usize {
+        assert_eq!(self.r#type(), WorkerType::Compactor);
+        self.property
+            .as_ref()
+            .expect("property should be exist")
+            .parallelism as usize
+    }
+
     pub fn parallelism(&self) -> Option<usize> {
-        if WorkerType::ComputeNode == self.r#type() {
-            Some(self.compute_node_parallelism())
-        } else {
-            None
+        match self.r#type() {
+            WorkerType::ComputeNode => Some(self.compute_node_parallelism()),
+            WorkerType::Compactor => Some(self.compactor_node_parallelism()),
+            _ => None,
         }
     }
 
@@ -302,7 +313,7 @@ impl stream_plan::SourceNode {
 }
 
 impl meta::table_fragments::ActorStatus {
-    pub fn worker_id(&self) -> u32 {
+    pub fn worker_id(&self) -> WorkerId {
         self.location
             .as_ref()
             .expect("actor location should be exist")
@@ -318,7 +329,7 @@ impl common::WorkerNode {
 }
 
 impl common::ActorLocation {
-    pub fn from_worker(worker_node_id: u32) -> Option<Self> {
+    pub fn from_worker(worker_node_id: WorkerId) -> Option<Self> {
         Some(Self { worker_node_id })
     }
 }
@@ -399,7 +410,7 @@ impl stream_plan::StreamNode {
     /// Find the external stream source info inside the stream node, if any.
     ///
     /// Returns `source_id`.
-    pub fn find_stream_source(&self) -> Option<u32> {
+    pub fn find_stream_source(&self) -> Option<SourceId> {
         if let Some(crate::stream_plan::stream_node::NodeBody::Source(source)) =
             self.node_body.as_ref()
             && let Some(inner) = &source.source_inner
@@ -423,7 +434,7 @@ impl stream_plan::StreamNode {
     /// Note: we must get upstream fragment id from the merge node, not from the fragment's
     /// `upstream_fragment_ids`. e.g., DynamicFilter may have 2 upstream fragments, but only
     /// one is the upstream source fragment.
-    pub fn find_source_backfill(&self) -> Option<(u32, u32)> {
+    pub fn find_source_backfill(&self) -> Option<(SourceId, FragmentId)> {
         if let Some(crate::stream_plan::stream_node::NodeBody::SourceBackfill(source)) =
             self.node_body.as_ref()
         {
@@ -515,6 +526,57 @@ impl catalog::Sink {
     pub fn unique_identity(&self) -> String {
         // TODO: use a more unique name
         format!("{}", self.id)
+    }
+}
+
+impl catalog::Table {
+    /// Get clean watermark column indices with backward compatibility.
+    /// Returns the new `clean_watermark_indices` if set, otherwise derives it from the old
+    /// `clean_watermark_index_in_pk` by converting PK index to column index.
+    #[expect(deprecated)]
+    pub fn get_clean_watermark_column_indices(&self) -> Vec<u32> {
+        if !self.clean_watermark_indices.is_empty() {
+            // New format: directly return clean_watermark_indices
+            self.clean_watermark_indices.clone()
+        } else if let Some(pk_idx) = self
+            .clean_watermark_index_in_pk
+            // At the very beginning, the watermark index was hard-coded to the first column of the pk.
+            .or_else(|| (!self.pk.is_empty()).then_some(0))
+        {
+            // Old format: convert PK index to column index
+            // The pk_idx is the position in the PK, we need to find the corresponding column index
+            if let Some(col_order) = self.pk.get(pk_idx as usize) {
+                vec![col_order.column_index]
+            } else {
+                if cfg!(debug_assertions) {
+                    panic!("clean_watermark_index_in_pk is out of range: {self:?}");
+                }
+                vec![]
+            }
+        } else {
+            vec![]
+        }
+    }
+
+    /// Convert clean watermark column indices to PK indices and return the minimum.
+    /// Returns None if no clean watermark is configured.
+    /// This is a backward-compatible method to replace the deprecated `clean_watermark_index_in_pk` field.
+    /// TODO: remove this method after totally deprecating `clean_watermark_index_in_pk`.
+    pub fn get_clean_watermark_index_in_pk_compat(&self) -> Option<usize> {
+        let clean_watermark_column_indices = self.get_clean_watermark_column_indices();
+
+        // Convert column indices to PK indices
+        let clean_watermark_indices_in_pk: Vec<usize> = clean_watermark_column_indices
+            .iter()
+            .filter_map(|&col_idx| {
+                self.pk
+                    .iter()
+                    .position(|col_order| col_order.column_index == col_idx)
+            })
+            .collect();
+
+        // Return the minimum PK index
+        clean_watermark_indices_in_pk.iter().min().copied()
     }
 }
 
@@ -723,5 +785,50 @@ mod tests {
         // box all fields in NodeBody to avoid large_enum_variant
         // see https://github.com/risingwavelabs/risingwave/issues/19910
         const_assert_eq!(std::mem::size_of::<NodeBody>(), 16);
+    }
+
+    #[test]
+    #[expect(deprecated)]
+    fn test_get_clean_watermark_index_in_pk_compat() {
+        use crate::catalog::Table;
+        use crate::common::{ColumnOrder, OrderType};
+
+        fn create_column_order(column_index: u32) -> ColumnOrder {
+            ColumnOrder {
+                column_index,
+                order_type: Some(OrderType::default()),
+            }
+        }
+
+        // Test case 1: both fields are set
+        let table = Table {
+            clean_watermark_indices: vec![3, 2],
+            clean_watermark_index_in_pk: Some(0),
+            pk: vec![
+                create_column_order(1),
+                create_column_order(2),
+                create_column_order(3),
+                create_column_order(4),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(table.get_clean_watermark_index_in_pk_compat(), Some(1));
+
+        // Test case 2: only old field is set
+        let table = Table {
+            clean_watermark_indices: vec![],
+            clean_watermark_index_in_pk: Some(1),
+            pk: vec![create_column_order(0), create_column_order(2)],
+            ..Default::default()
+        };
+        assert_eq!(table.get_clean_watermark_index_in_pk_compat(), Some(1));
+
+        // Test case 3: no clean watermark configured
+        let table = Table {
+            clean_watermark_indices: vec![],
+            clean_watermark_index_in_pk: None,
+            ..Default::default()
+        };
+        assert_eq!(table.get_clean_watermark_index_in_pk_compat(), None);
     }
 }

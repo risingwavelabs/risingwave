@@ -161,12 +161,27 @@ services:
       - pulsar-server
       - mongodb
       - mongodb-setup
-      - mongo_data_generator
       - nats-server
       - vault-server
       - message_queue_sasl_1
       - message_queue_sasl_2
       - rabbitmq-server
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  backward-compatibility-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - mysql
+      - mysql-meta
+      - sqlserver-server
+      - db
+      - message_queue
+      - schemaregistry
+      - pulsar-server
+      - mongodb
+      - mongodb-setup
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
@@ -202,6 +217,15 @@ services:
       - db
       - message_queue
       - schemaregistry
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
+  ldap-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      ldap-server:
+        condition: service_healthy
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
@@ -414,16 +438,6 @@ services:
     volumes:
       - ./mongodb/config-replica.js:/config-replica.js
 
-  mongo_data_generator:
-    build:
-      context: .
-      dockerfile: ./mongodb/Dockerfile.generator
-    depends_on:
-      - mongodb
-    environment:
-      MONGO_HOST: mongodb
-      MONGO_PORT: 27017
-      MONGO_DB_NAME: random_data
   mqtt-server:
     image: eclipse-mosquitto
     command:
@@ -469,3 +483,56 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+
+  ldap-server:
+    image: osixia/openldap:1.5.0
+    hostname: ldap-server
+    environment:
+      LDAP_DISABLE_CHOWN: "true"
+      LDAP_ORGANISATION: "Example Corp"
+      LDAP_DOMAIN: "example.com"
+      LDAP_BASE_DN: "dc=example,dc=com"
+      LDAP_ADMIN_PASSWORD: "admin123"
+      LDAP_CONFIG_PASSWORD: "config123"
+      LDAP_READONLY_USER: "false"
+      LDAP_RFC2307BIS_SCHEMA: "false"
+      LDAP_BACKEND: "mdb"
+      LDAP_REMOVE_CONFIG_AFTER_SETUP: "false"
+      LDAP_TLS: "true"
+      LDAP_TLS_CRT_FILENAME: "server.crt"
+      LDAP_TLS_KEY_FILENAME: "server.key"
+      LDAP_TLS_CA_CRT_FILENAME: "ca.crt"
+      LDAP_TLS_DH_PARAM_FILENAME: "dhparam.pem"
+      LDAP_TLS_ENFORCE: "false"
+      LDAP_TLS_VERIFY_CLIENT: "try"
+      LDAP_TLS_PROTOCOL_MIN: "3.1"
+      LDAP_TLS_CIPHER_SUITE: "SECURE256:+SECURE128:-VERS-TLS-ALL:+VERS-TLS1.2:-RSA:-DHE-DSS:-CAMELLIA-128-CBC:-CAMELLIA-256-CBC"
+    ports:
+      - "389:389"
+      - "636:636"
+    volumes:
+      - ./ldap-test/ldif:/workspace/ldif
+      - ./ldap-test/certs:/container/service/slapd/assets/certs
+      - ./ldap-test/setup-ldap-certs.sh:/workspace/setup-ldap-certs.sh
+    entrypoint:
+      - /bin/bash
+      - -c
+      - |
+        set -euo pipefail
+
+        echo "=== Generating certificates ==="
+        export CERT_DIR=/container/service/slapd/assets/certs
+        bash /workspace/setup-ldap-certs.sh
+
+        echo "=== Importing LDIF files ==="
+        mkdir -p /container/service/slapd/assets/config/bootstrap/ldif/custom
+        cp -r /workspace/ldif/* /container/service/slapd/assets/config/bootstrap/ldif/custom/
+
+        echo "=== Certificates ready, starting OpenLDAP ==="
+        exec /container/tool/run --loglevel debug
+    healthcheck:
+      test: ["CMD-SHELL", "ldapsearch -x -H ldap://localhost:389 -b 'dc=example,dc=com' -D 'cn=admin,dc=example,dc=com' -w 'admin123' >/dev/null 2>&1"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 10s
