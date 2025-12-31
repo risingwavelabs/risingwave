@@ -314,7 +314,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
         // When processing upsert stream, we need to tolerate the inconsistency (mismatched `DELETE`
         // and `INSERT` pairs) when compacting input chunks with derived stream key.
-        let input_compact_ib = if self.input.stream_kind() == StreamKind::Upsert {
+        let input_stream_kind = self.input.stream_kind();
+        let input_compact_ib = if input_stream_kind == StreamKind::Upsert {
             InconsistencyBehavior::Tolerate
         } else {
             InconsistencyBehavior::Panic
@@ -332,7 +333,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let processed_input = Self::process_msg(
             input,
             self.sink_param.sink_type,
-            self.sink_param.ignore_delete,
+            input_stream_kind,
             stream_key,
             self.chunk_size,
             self.input_data_types,
@@ -541,7 +542,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     async fn process_msg(
         input: impl MessageStream,
         sink_type: SinkType,
-        ignore_delete: bool,
+        input_stream_kind: StreamKind,
         stream_key: StreamKey,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
@@ -644,8 +645,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         // Compact the chunk to eliminate any unnecessary updates to external systems.
                         // This should be performed against the downstream pk, not the stream key, to
                         // ensure correct retract/upsert semantics from the downstream's perspective.
-                        // TODO: decide based on input stream kind
-                        if (sink_type != SinkType::AppendOnly || ignore_delete)
+                        if input_stream_kind != StreamKind::AppendOnly
                             && let Some(downstream_pk) = &downstream_pk
                         {
                             if skip_compact {
