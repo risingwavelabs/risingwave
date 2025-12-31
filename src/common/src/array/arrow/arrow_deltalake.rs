@@ -81,7 +81,11 @@ impl ToArrow for DeltaLakeConvert {
         // Convert Decimal to i128:
         let values: Vec<Option<i128>> = array
             .iter()
-            .map(|e| e.and_then(|e| DeltaLakeConvert::decimal_to_i128(e.to_owned_scalar(), precision, max_scale)))
+            .map(|e| {
+                e.and_then(|e| {
+                    DeltaLakeConvert::decimal_to_i128(e.to_owned_scalar(), precision, max_scale)
+                })
+            })
             .collect();
 
         let array = arrow_array::Decimal128Array::from(values)

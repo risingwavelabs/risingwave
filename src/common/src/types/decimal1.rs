@@ -16,6 +16,7 @@ use std::fmt::Debug;
 use std::io::{Cursor, Read, Write};
 use std::ops::{Add, Div, Mul, Neg, Rem, Sub};
 
+use Decimal::Normalized;
 use byteorder::{BigEndian, ReadBytesExt};
 use bytes::{BufMut, BytesMut};
 use num_traits::{
@@ -29,7 +30,6 @@ use rust_decimal::{Decimal as RustDecimal, Error, MathematicalOps as _, Rounding
 use super::DataType;
 use super::to_text::ToText;
 use crate::array::ArrayResult;
-use Decimal::Normalized;
 use crate::types::ordered_float::OrderedFloat;
 
 #[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]

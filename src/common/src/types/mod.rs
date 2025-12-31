@@ -82,7 +82,7 @@ pub use risingwave_fields_derive::Fields;
 
 pub use self::cow::DatumCow;
 pub use self::datetime::{Date, Time, Timestamp};
-pub use self::decimal2::{Decimal, DeciRef, PowError as DecimalPowError};
+pub use self::decimal2::{DeciRef, Decimal, PowError as DecimalPowError};
 pub use self::interval::{DateTimeField, Interval, IntervalDisplay, test_utils};
 pub use self::jsonb::{JsonbRef, JsonbVal};
 pub use self::list_type::ListType;

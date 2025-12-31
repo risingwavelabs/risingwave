@@ -17,7 +17,9 @@ use std::str::FromStr;
 use anyhow::anyhow;
 use bytes::BytesMut;
 use pg_bigdecimal::PgNumeric;
-use risingwave_common::types::{DataType, Decimal, Int256, ListValue, ScalarImpl, ScalarRef, ScalarRefImpl};
+use risingwave_common::types::{
+    DataType, Decimal, Int256, ListValue, ScalarImpl, ScalarRef, ScalarRefImpl,
+};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{FromSql, IsNull, Kind, ToSql, Type, to_sql_checked};
 

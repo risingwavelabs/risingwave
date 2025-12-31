@@ -22,7 +22,7 @@ use futures::FutureExt;
 use risingwave_common::bail;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, Datum, IsNegative, ScalarImpl, ScalarRef, ScalarRefImpl, ToOwnedDatum, ToText
+    DataType, Datum, IsNegative, ScalarImpl, ScalarRef, ScalarRefImpl, ToOwnedDatum, ToText,
 };
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};

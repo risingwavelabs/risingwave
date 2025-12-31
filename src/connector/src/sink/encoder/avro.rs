@@ -20,7 +20,9 @@ use apache_avro::types::{Record, Value};
 use risingwave_common::array::VECTOR_AS_LIST_TYPE;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ListType, ScalarRef, ScalarRefImpl, StructType};
+use risingwave_common::types::{
+    DataType, DatumRef, ListType, ScalarRef, ScalarRefImpl, StructType,
+};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
 use risingwave_connector_codec::decoder::utils::rust_decimal_to_scaled_bigint;
 use thiserror_ext::AsReport;

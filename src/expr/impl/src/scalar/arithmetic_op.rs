@@ -17,7 +17,8 @@ use std::fmt::Debug;
 use chrono::{Duration, NaiveDateTime};
 use num_traits::{CheckedDiv, CheckedMul, CheckedNeg, CheckedRem, CheckedSub, Zero};
 use risingwave_common::types::{
-    CheckedAdd, Date, DeciRef, Decimal, F64, FloatExt, Interval, IsNegative, ScalarRef, Time, Timestamp,
+    CheckedAdd, Date, DeciRef, Decimal, F64, FloatExt, Interval, IsNegative, ScalarRef, Time,
+    Timestamp,
 };
 use risingwave_expr::{ExprError, Result, function};
 use rust_decimal::MathematicalOps;
@@ -607,7 +608,10 @@ mod tests {
             F64::from(f64::INFINITY)
         );
         assert!(sqrt_f64(F64::from(f64::NEG_INFINITY)).is_err());
-        assert_eq!(sqrt_decimal(dec("25.0").as_scalar_ref()).unwrap(), dec("5.0"));
+        assert_eq!(
+            sqrt_decimal(dec("25.0").as_scalar_ref()).unwrap(),
+            dec("5.0")
+        );
         assert_eq!(
             sqrt_decimal(dec("107").as_scalar_ref()).unwrap(),
             dec("10.344080432788600469738599442")
@@ -617,8 +621,14 @@ mod tests {
             dec("3.4977945908815171589625746860")
         );
         assert!(sqrt_decimal(dec("-25.0").as_scalar_ref()).is_err());
-        assert_eq!(sqrt_decimal(dec("nan").as_scalar_ref()).unwrap(), dec("nan"));
-        assert_eq!(sqrt_decimal(dec("inf").as_scalar_ref()).unwrap(), dec("inf"));
+        assert_eq!(
+            sqrt_decimal(dec("nan").as_scalar_ref()).unwrap(),
+            dec("nan")
+        );
+        assert_eq!(
+            sqrt_decimal(dec("inf").as_scalar_ref()).unwrap(),
+            dec("inf")
+        );
         assert_eq!(sqrt_decimal(dec("-0").as_scalar_ref()).unwrap(), dec("-0"));
         assert!(sqrt_decimal(dec("-inf").as_scalar_ref()).is_err());
     }

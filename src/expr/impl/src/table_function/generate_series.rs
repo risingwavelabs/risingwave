@@ -14,7 +14,9 @@
 
 use chrono_tz::Tz;
 use num_traits::One;
-use risingwave_common::types::{CheckedAdd, DeciRef, Decimal, Interval, IsNegative, ScalarRef, Timestamptz};
+use risingwave_common::types::{
+    CheckedAdd, DeciRef, Decimal, Interval, IsNegative, ScalarRef, Timestamptz,
+};
 use risingwave_expr::expr_context::TIME_ZONE;
 use risingwave_expr::{ExprError, Result, capture_context, function};
 
@@ -28,7 +30,10 @@ where
 }
 
 #[function("generate_series(decimal, decimal) -> setof decimal")]
-fn generate_series_decimal(start: DeciRef<'_>, stop: DeciRef<'_>) -> Result<impl Iterator<Item = Decimal>>
+fn generate_series_decimal(
+    start: DeciRef<'_>,
+    stop: DeciRef<'_>,
+) -> Result<impl Iterator<Item = Decimal>>
 where
 {
     let start = start.to_owned_scalar();
@@ -185,7 +190,10 @@ where
             _ => {}
         };
         let ret = self.cur.clone();
-        self.cur = self.cur.clone().checked_add_with_extra(self.step.clone(), self.extra.clone())?;
+        self.cur = self
+            .cur
+            .clone()
+            .checked_add_with_extra(self.step.clone(), self.extra.clone())?;
         Some(ret)
     }
 }
@@ -208,7 +216,7 @@ where
             reason: "step size cannot equal zero".into(),
         });
     }
-    
+
     let neg = step.is_negative();
     Ok(RangeState {
         cur: start,

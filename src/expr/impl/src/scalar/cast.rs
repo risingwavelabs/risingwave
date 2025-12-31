@@ -21,7 +21,8 @@ use risingwave_common::array::{DataChunk, ListRef, ListValue, StructRef, StructV
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, DeciRef, F32, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef, Serial, Timestamptz, ToText,
+    DataType, DeciRef, F32, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef, Serial,
+    Timestamptz, ToText,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::row_id::row_id_to_unix_millis;
@@ -110,22 +111,19 @@ where
 #[function("cast(decimal) -> int2")]
 pub fn try_cast_decimal_i16(elem: DeciRef<'_>) -> Result<i16> {
     let d = elem.to_owned_scalar();
-    d.try_into()
-        .map_err(|_| ExprError::CastOutOfRange("int2"))
+    d.try_into().map_err(|_| ExprError::CastOutOfRange("int2"))
 }
 
 #[function("cast(decimal) -> int4")]
 pub fn try_cast_decimal_i32(elem: DeciRef<'_>) -> Result<i32> {
     let d = elem.to_owned_scalar();
-    d.try_into()
-        .map_err(|_| ExprError::CastOutOfRange("int4"))
+    d.try_into().map_err(|_| ExprError::CastOutOfRange("int4"))
 }
 
 #[function("cast(decimal) -> int8")]
 pub fn try_cast_decimal_i64(elem: DeciRef<'_>) -> Result<i64> {
     let d = elem.to_owned_scalar();
-    d.try_into()
-        .map_err(|_| ExprError::CastOutOfRange("int8"))
+    d.try_into().map_err(|_| ExprError::CastOutOfRange("int8"))
 }
 
 #[function("cast(decimal) -> float4")]

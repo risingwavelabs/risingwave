@@ -24,7 +24,9 @@ use itertools::Itertools;
 use risingwave_common::array::{ArrayError, ArrayResult};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, ToText};
+use risingwave_common::types::{
+    DataType, DatumRef, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, ToText,
+};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{Map, Value, json};
 use thiserror_ext::AsReport;

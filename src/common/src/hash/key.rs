@@ -533,12 +533,12 @@ impl HashKeyDe for F64 {
 //         let b = Decimal::unordered_serialize(&self.normalize());
 //         buf.put_slice(b.as_ref());
 //     }
-// 
+//
 //     fn exact_size() -> Option<usize> {
 //         Some(16)
 //     }
 // }
-// 
+//
 // impl HashKeyDe for Decimal {
 //     fn deserialize(_data_type: &DataType, mut buf: impl Buf) -> Self {
 //         let mut value = [0; 16];

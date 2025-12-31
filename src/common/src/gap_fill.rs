@@ -68,9 +68,9 @@ pub fn calculate_interpolation_step(d1: DatumRef<'_>, d2: DatumRef<'_>, steps: u
         (ScalarRefImpl::Float64(v1), ScalarRefImpl::Float64(v2)) => {
             Some(ScalarImpl::Float64((v2 - v1) / steps as f64))
         }
-        (ScalarRefImpl::Decimal(v1), ScalarRefImpl::Decimal(v2)) => {
-            Some(ScalarImpl::Decimal((v2.to_owned_scalar() - v1.to_owned_scalar()) / Decimal::from(steps)))
-        }
+        (ScalarRefImpl::Decimal(v1), ScalarRefImpl::Decimal(v2)) => Some(ScalarImpl::Decimal(
+            (v2.to_owned_scalar() - v1.to_owned_scalar()) / Decimal::from(steps),
+        )),
         _ => None,
     }
 }

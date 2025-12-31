@@ -199,7 +199,8 @@ impl ArrayBuilder for DecimalArrayBuilder {
         match value {
             Some(x) => {
                 self.bitmap.append_n(n, true);
-                self.data.extend(std::iter::repeat_n(x.to_owned_scalar(), n));
+                self.data
+                    .extend(std::iter::repeat_n(x.to_owned_scalar(), n));
             }
             None => {
                 self.bitmap.append_n(n, false);

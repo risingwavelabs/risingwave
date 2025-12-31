@@ -867,11 +867,26 @@ mod tests {
         ];
         for (d_lhs, f_lhs) in decimals.iter().zip_eq_fast(floats.iter()) {
             for (d_rhs, f_rhs) in decimals.iter().zip_eq_fast(floats.iter()) {
-                assert!(check((d_lhs.clone() + d_rhs.clone()).try_into().unwrap(), f_lhs + f_rhs));
-                assert!(check((d_lhs.clone() - d_rhs.clone()).try_into().unwrap(), f_lhs - f_rhs));
-                assert!(check((d_lhs.clone() * d_rhs.clone()).try_into().unwrap(), f_lhs * f_rhs));
-                assert!(check((d_lhs.clone() / d_rhs.clone()).try_into().unwrap(), f_lhs / f_rhs));
-                assert!(check((d_lhs.clone() % d_rhs.clone()).try_into().unwrap(), f_lhs % f_rhs));
+                assert!(check(
+                    (d_lhs.clone() + d_rhs.clone()).try_into().unwrap(),
+                    f_lhs + f_rhs
+                ));
+                assert!(check(
+                    (d_lhs.clone() - d_rhs.clone()).try_into().unwrap(),
+                    f_lhs - f_rhs
+                ));
+                assert!(check(
+                    (d_lhs.clone() * d_rhs.clone()).try_into().unwrap(),
+                    f_lhs * f_rhs
+                ));
+                assert!(check(
+                    (d_lhs.clone() / d_rhs.clone()).try_into().unwrap(),
+                    f_lhs / f_rhs
+                ));
+                assert!(check(
+                    (d_lhs.clone() % d_rhs.clone()).try_into().unwrap(),
+                    f_lhs % f_rhs
+                ));
             }
         }
     }
