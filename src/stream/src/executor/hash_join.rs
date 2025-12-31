@@ -772,9 +772,9 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         };
 
         // State cleaning
-        if side_update.join_key_indices[0] == watermark.col_idx {
+        // if side_update.join_key_indices[0] == watermark.col_idx {
             side_match.ht.update_watermark(watermark.val.clone());
-        }
+        // }
 
         // Select watermarks to yield.
         let wm_in_jk = side_update
