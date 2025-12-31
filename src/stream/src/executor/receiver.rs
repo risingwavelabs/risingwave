@@ -95,14 +95,8 @@ mod tests {
 
         let b1 = Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Update(
             UpdateMutation {
-                dispatchers: Default::default(),
                 merges: merge_updates,
-                vnode_bitmaps: Default::default(),
-                dropped_actors: Default::default(),
-                actor_splits: Default::default(),
-                actor_new_dispatchers: Default::default(),
-                actor_cdc_table_snapshot_splits: Default::default(),
-                sink_add_columns: Default::default(),
+                ..Default::default()
             },
         ));
 

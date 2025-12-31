@@ -1048,7 +1048,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
             LogStoreBufferItem::Barrier {
                 is_checkpoint: barrier.is_checkpoint(),
                 next_epoch: barrier.epoch.curr,
-                add_columns: None,
+                schema_change: None,
                 is_stop: false,
             },
         ));

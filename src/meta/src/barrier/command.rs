@@ -33,6 +33,7 @@ use risingwave_pb::catalog::CreateType;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
+use risingwave_pb::plan_common::PbField;
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
 };
@@ -40,14 +41,15 @@ use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
+use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
-    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumns, PbUpstreamSinkInfo,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
-    ThrottleMutation, UpdateMutation,
+    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkSchemaChange,
+    PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation, StopMutation,
+    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -145,7 +147,6 @@ impl ReplaceStreamJobPlan {
             let fragment_change = CommandFragmentChanges::NewFragment {
                 job_id: self.streaming_job.id(),
                 info: new_fragment,
-                is_existing: false,
             };
             fragment_changes
                 .try_insert(fragment_id, fragment_change)
@@ -169,7 +170,6 @@ impl ReplaceStreamJobPlan {
                 let fragment_change = CommandFragmentChanges::NewFragment {
                     job_id: sink.original_sink.id.as_job_id(),
                     info: sink.new_fragment_info(),
-                    is_existing: false,
                 };
                 fragment_changes
                     .try_insert(sink.new_fragment.fragment_id, fragment_change)
@@ -508,7 +508,6 @@ impl Command {
                             CommandFragmentChanges::NewFragment {
                                 job_id: info.streaming_job.id(),
                                 info: fragment_infos,
-                                is_existing: false,
                             },
                         )
                     })
@@ -1229,7 +1228,8 @@ impl Command {
                     actor_cdc_table_snapshot_splits: Some(PbCdcTableSnapshotSplitsWithGeneration {
                         splits: actor_cdc_table_snapshot_splits,
                     }),
-                    sink_add_columns: Default::default(),
+                    sink_schema_change: Default::default(),
+                    subscriptions_to_drop: vec![],
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Some(mutation)
@@ -1440,19 +1440,38 @@ impl Command {
             dropped_actors,
             actor_splits,
             actor_cdc_table_snapshot_splits: cdc_table_snapshot_split_assignment,
-            sink_add_columns: auto_refresh_schema_sinks
+            sink_schema_change: auto_refresh_schema_sinks
                 .as_ref()
                 .into_iter()
                 .flat_map(|sinks| {
                     sinks.iter().map(|sink| {
                         (
-                            sink.original_sink.id,
-                            PbSinkAddColumns {
-                                fields: sink
-                                    .newly_add_fields
+                            sink.original_sink.id.as_raw_id(),
+                            PbSinkSchemaChange {
+                                original_schema: sink
+                                    .original_sink
+                                    .columns
                                     .iter()
-                                    .map(|field| field.to_prost())
+                                    .map(|col| PbField {
+                                        data_type: Some(
+                                            col.column_desc
+                                                .as_ref()
+                                                .unwrap()
+                                                .column_type
+                                                .as_ref()
+                                                .unwrap()
+                                                .clone(),
+                                        ),
+                                        name: col.column_desc.as_ref().unwrap().name.clone(),
+                                    })
                                     .collect(),
+                                op: Some(PbSinkSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
+                                    fields: sink
+                                        .newly_add_fields
+                                        .iter()
+                                        .map(|field| field.to_prost())
+                                        .collect(),
+                                })),
                             },
                         )
                     })

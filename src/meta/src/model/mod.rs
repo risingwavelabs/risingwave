@@ -27,7 +27,7 @@ pub use stream::*;
 use uuid::Uuid;
 
 /// Should be used together with `ActorId` to uniquely identify a dispatcher
-pub type DispatcherId = u64;
+pub type DispatcherId = FragmentId;
 
 #[derive(Clone, Debug)]
 pub struct ClusterId(String);

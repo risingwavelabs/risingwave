@@ -97,6 +97,7 @@ use crate::compaction_catalog_manager::{
 };
 use crate::hummock::compactor::compaction_utils::calculate_task_parallelism;
 use crate::hummock::compactor::compactor_runner::{compact_and_build_sst, compact_done};
+use crate::hummock::compactor::iceberg_compaction::TaskKey;
 use crate::hummock::iterator::{Forward, HummockIterator};
 use crate::hummock::{
     BlockedXor16FilterBuilder, FilterBuilder, SharedComapctorObjectIdManager, SstableWriterFactory,
@@ -362,23 +363,21 @@ pub fn start_iceberg_compactor(
     );
 
     let join_handle = tokio::spawn(async move {
-        // Initialize task queue with event-driven scheduling using Notify
+        // Initialize task queue with event-driven scheduling
         let pending_parallelism_budget = (max_task_parallelism as f32
             * compactor_context
                 .storage_opts
                 .iceberg_compaction_pending_parallelism_budget_multiplier)
             .ceil() as u32;
-        let (mut task_queue, _schedule_notify) =
-            IcebergTaskQueue::new_with_notify(max_task_parallelism, pending_parallelism_budget);
+        let mut task_queue =
+            IcebergTaskQueue::new(max_task_parallelism, pending_parallelism_budget);
 
-        // Shutdown tracking for running tasks (task_id -> shutdown_sender)
-        let shutdown_map = Arc::new(Mutex::new(
-            HashMap::<u64, tokio::sync::oneshot::Sender<()>>::new(),
-        ));
+        // Shutdown tracking for running tasks (task_key -> shutdown_sender)
+        let shutdown_map = Arc::new(Mutex::new(HashMap::<TaskKey, Sender<()>>::new()));
 
         // Channel for task completion notifications
         let (task_completion_tx, mut task_completion_rx) =
-            tokio::sync::mpsc::unbounded_channel::<u64>();
+            tokio::sync::mpsc::unbounded_channel::<TaskKey>();
 
         let mut min_interval = tokio::time::interval(stream_retry_interval);
         let mut periodic_event_interval = tokio::time::interval(periodic_event_update_interval);
@@ -439,9 +438,9 @@ pub fn start_iceberg_compactor(
                 let request_sender = request_sender.clone();
                 let event: Option<Result<SubscribeIcebergCompactionEventResponse, _>> = tokio::select! {
                     // Handle task completion notifications
-                    Some(completed_task_id) = task_completion_rx.recv() => {
-                        tracing::debug!(task_id = completed_task_id, "Task completed, updating queue state");
-                        task_queue.finish_running(completed_task_id);
+                    Some(completed_task_key) = task_completion_rx.recv() => {
+                        tracing::debug!(task_id = completed_task_key.0, plan_index = completed_task_key.1, "Task completed, updating queue state");
+                        task_queue.finish_running(completed_task_key);
                         continue 'consume_stream;
                     }
 
@@ -597,6 +596,13 @@ pub fn start_iceberg_compactor(
                                                 task_id = task_id,
                                                 required_parallelism = required_parallelism,
                                                 "Iceberg plan runner rejected - invalid parallelism"
+                                            );
+                                        },
+                                        PushResult::RejectedDuplicate => {
+                                            tracing::error!(
+                                                task_id = task_id,
+                                                plan_index = meta.plan_index,
+                                                "Iceberg plan runner rejected - duplicate (task_id, plan_index)"
                                             );
                                         }
                                     }
@@ -1169,11 +1175,13 @@ fn get_task_progress(
 fn schedule_queued_tasks(
     task_queue: &mut IcebergTaskQueue,
     compactor_context: &CompactorContext,
-    shutdown_map: &Arc<Mutex<HashMap<u64, tokio::sync::oneshot::Sender<()>>>>,
-    task_completion_tx: &tokio::sync::mpsc::UnboundedSender<u64>,
+    shutdown_map: &Arc<Mutex<HashMap<TaskKey, Sender<()>>>>,
+    task_completion_tx: &tokio::sync::mpsc::UnboundedSender<TaskKey>,
 ) {
     while let Some(popped_task) = task_queue.pop() {
         let task_id = popped_task.meta.task_id;
+        let plan_index = popped_task.meta.plan_index;
+        let task_key = (task_id, plan_index);
 
         // Get unique_ident before moving runner
         let unique_ident = popped_task.runner.as_ref().map(|r| r.unique_ident());
@@ -1181,9 +1189,10 @@ fn schedule_queued_tasks(
         let Some(runner) = popped_task.runner else {
             tracing::error!(
                 task_id = task_id,
+                plan_index = plan_index,
                 "Popped task missing runner - this should not happen"
             );
-            task_queue.finish_running(task_id);
+            task_queue.finish_running(task_key);
             continue;
         };
 
@@ -1193,6 +1202,7 @@ fn schedule_queued_tasks(
 
         tracing::info!(
             task_id = task_id,
+            plan_index = plan_index,
             unique_ident = ?unique_ident,
             required_parallelism = popped_task.meta.required_parallelism,
             "Starting iceberg compaction task from queue"
@@ -1202,26 +1212,26 @@ fn schedule_queued_tasks(
             let (tx, rx) = tokio::sync::oneshot::channel();
             {
                 let mut shutdown_guard = shutdown_map_clone.lock().unwrap();
-                shutdown_guard.insert(task_id, tx);
+                shutdown_guard.insert(task_key, tx);
             }
 
             let _cleanup_guard = scopeguard::guard(
-                (task_id, shutdown_map_clone, completion_tx_clone),
-                move |(task_id, shutdown_map, completion_tx)| {
+                (task_key, shutdown_map_clone, completion_tx_clone),
+                move |(task_key, shutdown_map, completion_tx)| {
                     {
                         let mut shutdown_guard = shutdown_map.lock().unwrap();
-                        shutdown_guard.remove(&task_id);
+                        shutdown_guard.remove(&task_key);
                     }
                     // Notify main loop that task is completed
                     // Multiple tasks can send completion notifications concurrently via mpsc
-                    if completion_tx.send(task_id).is_err() {
-                        tracing::warn!(task_id = task_id, "Failed to notify task completion - main loop may have shut down");
+                    if completion_tx.send(task_key).is_err() {
+                        tracing::warn!(task_id = task_key.0, plan_index = task_key.1, "Failed to notify task completion - main loop may have shut down");
                     }
                 },
             );
 
             if let Err(e) = runner.compact(rx).await {
-                tracing::warn!(error = %e.as_report(), "Failed to compact iceberg runner {}", task_id);
+                tracing::warn!(error = %e.as_report(), task_id = task_key.0, plan_index = task_key.1, "Failed to compact iceberg runner");
             }
         });
     }

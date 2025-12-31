@@ -16,11 +16,13 @@ use core::num::NonZeroU64;
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
@@ -752,20 +754,30 @@ impl SinglePhaseCommitCoordinator for SnowflakeSinkCommitter {
         &mut self,
         _epoch: u64,
         _metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<()> {
         let client = self.client.as_mut().ok_or_else(|| {
             SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
         })?;
         client.execute_flush_pipe().await?;
 
-        if let Some(add_columns) = add_columns {
+        if let Some(schema_change) = schema_change {
+            use risingwave_pb::stream_plan::sink_schema_change::PbOp as SinkSchemaChangeOp;
+            let schema_change_op = schema_change.op.ok_or_else(|| {
+                SinkError::Coordinator(anyhow!("Invalid schema change operation"))
+            })?;
+            let SinkSchemaChangeOp::AddColumns(add_columns) = schema_change_op else {
+                return Err(SinkError::Coordinator(anyhow!(
+                    "Only AddColumns schema change is supported for Snowflake sink"
+                )));
+            };
             client
                 .execute_alter_add_columns(
                     &add_columns
-                        .iter()
-                        .map(|f| (f.name.clone(), f.data_type.to_string()))
-                        .collect::<Vec<_>>(),
+                        .fields
+                        .into_iter()
+                        .map(|f| (f.name, DataType::from(f.data_type.unwrap()).to_string()))
+                        .collect_vec(),
                 )
                 .await?;
         }
