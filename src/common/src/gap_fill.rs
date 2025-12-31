@@ -83,12 +83,12 @@ pub fn calculate_interpolation_step(d1: DatumRef<'_>, d2: DatumRef<'_>, steps: u
 pub fn apply_interpolation_step(current: &mut Datum, step: &ScalarImpl) {
     if let Some(curr) = current.as_mut() {
         match (curr, step) {
-            (ScalarImpl::Int16(v1), &ScalarImpl::Int16(v2)) => *v1 += v2,
-            (ScalarImpl::Int32(v1), &ScalarImpl::Int32(v2)) => *v1 += v2,
-            (ScalarImpl::Int64(v1), &ScalarImpl::Int64(v2)) => *v1 += v2,
-            (ScalarImpl::Float32(v1), &ScalarImpl::Float32(v2)) => *v1 += v2,
-            (ScalarImpl::Float64(v1), &ScalarImpl::Float64(v2)) => *v1 += v2,
-            (ScalarImpl::Decimal(v1), &ScalarImpl::Decimal(v2)) => *v1 = *v1 + v2,
+            (ScalarImpl::Int16(v1), ScalarImpl::Int16(v2)) => *v1 += v2,
+            (ScalarImpl::Int32(v1), ScalarImpl::Int32(v2)) => *v1 += v2,
+            (ScalarImpl::Int64(v1), ScalarImpl::Int64(v2)) => *v1 += v2,
+            (ScalarImpl::Float32(v1), ScalarImpl::Float32(v2)) => *v1 += v2,
+            (ScalarImpl::Float64(v1), ScalarImpl::Float64(v2)) => *v1 += v2,
+            (ScalarImpl::Decimal(v1), ScalarImpl::Decimal(v2)) => *v1 = v1.clone() + v2.clone(),
             _ => (),
         }
     }

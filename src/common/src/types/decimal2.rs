@@ -34,7 +34,7 @@ use super::to_text::ToText;
 use crate::array::ArrayResult;
 use crate::types::ordered_float::OrderedFloat;
 
-#[derive(Debug, Copy, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
+#[derive(Debug, parse_display::Display, Clone, PartialEq, Hash, Eq, Ord, PartialOrd)]
 pub enum Decimal {
     #[display("-Infinity")]
     NegativeInf,
@@ -234,7 +234,7 @@ macro_rules! checked_proxy {
                     (Self::Normalized(lhs), Self::Normalized(rhs)) => {
                         lhs.$func(rhs).map(Decimal::Normalized)
                     }
-                    (lhs, rhs) => Some(*lhs $op *rhs),
+                    (lhs, _rhs) => Some(lhs.clone() $op other.clone()),
                 }
             }
         }
@@ -468,41 +468,43 @@ impl Decimal {
                 let new_d = d.round_dp_with_strategy(dp, RoundingStrategy::MidpointAwayFromZero);
                 Self::Normalized(new_d)
             }
-            d => *d,
+            d => d.clone(),
         }
     }
 
     /// Round to the left of the decimal point, for example `31.5` -> `30`.
     #[must_use]
     pub fn round_left_ties_away(&self, left: u32) -> Option<Self> {
-        let &Self::Normalized(mut d) = self else {
-            return Some(*self);
-        };
+        match self {
+            Self::Normalized(d_ref) => {
+                let mut d = d_ref.clone();
+                // First, move the decimal point to the left so that we can reuse `round`. This is more
+                // efficient than division.
+                let old_scale = d.scale();
+                let new_scale = old_scale.saturating_add(left);
+                const MANTISSA_UP: i128 = 5 * 10i128.pow(Decimal::MAX_PRECISION as _);
+                let d = match new_scale.cmp(&Self::MAX_PRECISION.add(1).into()) {
+                    // trivial within 28 digits
+                    std::cmp::Ordering::Less => {
+                        d.set_scale(new_scale).unwrap();
+                        d.round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
+                    }
+                    // Special case: scale cannot be 29, but it may or may not be >= 0.5e+29
+                    std::cmp::Ordering::Equal => (d.mantissa() / MANTISSA_UP).signum().into(),
+                    // always 0 for >= 30 digits
+                    std::cmp::Ordering::Greater => 0.into(),
+                };
 
-        // First, move the decimal point to the left so that we can reuse `round`. This is more
-        // efficient than division.
-        let old_scale = d.scale();
-        let new_scale = old_scale.saturating_add(left);
-        const MANTISSA_UP: i128 = 5 * 10i128.pow(Decimal::MAX_PRECISION as _);
-        let d = match new_scale.cmp(&Self::MAX_PRECISION.add(1).into()) {
-            // trivial within 28 digits
-            std::cmp::Ordering::Less => {
-                d.set_scale(new_scale).unwrap();
-                d.round_dp_with_strategy(0, RoundingStrategy::MidpointAwayFromZero)
+                // Then multiply back. Note that we cannot move decimal point to the right in order to get
+                // more zeros.
+                match left > Decimal::MAX_PRECISION.into() {
+                    true => d.is_zero().then(|| 0.into()),
+                    false => d
+                        .checked_mul(RustDecimal::from_i128_with_scale(10i128.pow(left), 0))
+                        .map(Self::Normalized),
+                }
             }
-            // Special case: scale cannot be 29, but it may or may not be >= 0.5e+29
-            std::cmp::Ordering::Equal => (d.mantissa() / MANTISSA_UP).signum().into(),
-            // always 0 for >= 30 digits
-            std::cmp::Ordering::Greater => 0.into(),
-        };
-
-        // Then multiply back. Note that we cannot move decimal point to the right in order to get
-        // more zeros.
-        match left > Decimal::MAX_PRECISION.into() {
-            true => d.is_zero().then(|| 0.into()),
-            false => d
-                .checked_mul(RustDecimal::from_i128_with_scale(10i128.pow(left), 0))
-                .map(Self::Normalized),
+            other => Some(other.clone()),
         }
     }
 
@@ -516,7 +518,7 @@ impl Decimal {
                 }
                 Self::Normalized(d)
             }
-            d => *d,
+            d => d.clone(),
         }
     }
 
@@ -524,7 +526,7 @@ impl Decimal {
     pub fn floor(&self) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(d.floor()),
-            d => *d,
+            d => d.clone(),
         }
     }
 
@@ -538,7 +540,7 @@ impl Decimal {
                 }
                 Self::Normalized(d)
             }
-            d => *d,
+            d => d.clone(),
         }
     }
 
@@ -546,7 +548,7 @@ impl Decimal {
     pub fn round_ties_even(&self) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(d.round()),
-            d => *d,
+            d => d.clone(),
         }
     }
 
@@ -558,7 +560,7 @@ impl Decimal {
     pub fn normalize(&self) -> Self {
         match self {
             Self::Normalized(d) => Self::Normalized(d.normalize()),
-            d => *d,
+            d => d.clone(),
         }
     }
 
@@ -852,11 +854,11 @@ mod tests {
         ];
         for (d_lhs, f_lhs) in decimals.iter().zip_eq_fast(floats.iter()) {
             for (d_rhs, f_rhs) in decimals.iter().zip_eq_fast(floats.iter()) {
-                assert!(check((*d_lhs + *d_rhs).try_into().unwrap(), f_lhs + f_rhs));
-                assert!(check((*d_lhs - *d_rhs).try_into().unwrap(), f_lhs - f_rhs));
-                assert!(check((*d_lhs * *d_rhs).try_into().unwrap(), f_lhs * f_rhs));
-                assert!(check((*d_lhs / *d_rhs).try_into().unwrap(), f_lhs / f_rhs));
-                assert!(check((*d_lhs % *d_rhs).try_into().unwrap(), f_lhs % f_rhs));
+                assert!(check((d_lhs.clone() + d_rhs.clone()).try_into().unwrap(), f_lhs + f_rhs));
+                assert!(check((d_lhs.clone() - d_rhs.clone()).try_into().unwrap(), f_lhs - f_rhs));
+                assert!(check((d_lhs.clone() * d_rhs.clone()).try_into().unwrap(), f_lhs * f_rhs));
+                assert!(check((d_lhs.clone() / d_rhs.clone()).try_into().unwrap(), f_lhs / f_rhs));
+                assert!(check((d_lhs.clone() % d_rhs.clone()).try_into().unwrap(), f_lhs % f_rhs));
             }
         }
     }
@@ -976,8 +978,8 @@ mod tests {
         for i in 1..ordered.len() {
             assert!(ordered[i - 1] < ordered[i]);
             assert!(
-                memcomparable::Decimal::from(ordered[i - 1])
-                    < memcomparable::Decimal::from(ordered[i])
+                memcomparable::Decimal::from(ordered[i - 1].clone())
+                    < memcomparable::Decimal::from(ordered[i].clone())
             );
         }
     }

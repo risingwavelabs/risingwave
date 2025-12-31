@@ -39,7 +39,7 @@ mod tests {
             builder.append(Some(i.as_scalar_ref()));
         }
         let a = builder.finish();
-        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| Some(*a) == b.map(|x| x.to_owned_scalar()));
+        let res = v.iter().zip_eq_fast(a.iter()).all(|(a, b)| Some(a.clone()) == b.map(|x| x.to_owned_scalar()));
         assert!(res);
     }
 

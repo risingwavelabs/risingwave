@@ -33,7 +33,7 @@ where
 {
     let start = start.to_owned_scalar();
     let stop = stop.to_owned_scalar();
-    validate_range_parameters(start, stop, Decimal::one())?;
+    validate_range_parameters(&start, &stop, &Decimal::one())?;
     range_generic::<Decimal, Decimal, _, true>(start, stop, Decimal::one(), ())
 }
 
@@ -57,7 +57,7 @@ fn generate_series_step_decimal(
     let start = start.to_owned_scalar();
     let stop = stop.to_owned_scalar();
     let step = step.to_owned_scalar();
-    validate_range_parameters(start, stop, step)?;
+    validate_range_parameters(&start, &stop, &step)?;
     range_generic::<_, _, _, true>(start, stop, step, ())
 }
 
@@ -107,7 +107,7 @@ where
 {
     let start = start.to_owned_scalar();
     let stop = stop.to_owned_scalar();
-    validate_range_parameters(start, stop, Decimal::one())?;
+    validate_range_parameters(&start, &stop, &Decimal::one())?;
     range_generic::<Decimal, Decimal, _, false>(start, stop, Decimal::one(), ())
 }
 
@@ -131,7 +131,7 @@ fn range_step_decimal(
     let start = start.to_owned_scalar();
     let stop = stop.to_owned_scalar();
     let step = step.to_owned_scalar();
-    validate_range_parameters(start, stop, step)?;
+    validate_range_parameters(&start, &stop, &step)?;
     range_generic::<_, _, _, false>(start, stop, step, ())
 }
 
@@ -159,6 +159,37 @@ impl CheckedAddWithExtra<Interval, Tz> for Timestamptz {
     }
 }
 
+struct RangeState<T, S, E> {
+    cur: T,
+    stop: T,
+    step: S,
+    extra: E,
+    neg: bool,
+    inclusive: bool,
+}
+
+impl<T, S, E> Iterator for RangeState<T, S, E>
+where
+    T: CheckedAddWithExtra<S, E, Output = T> + PartialOrd + Clone,
+    S: IsNegative + Clone,
+    E: Clone,
+{
+    type Item = T;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        match (self.inclusive, self.neg) {
+            (true, true) if self.cur < self.stop => return None,
+            (true, false) if self.cur > self.stop => return None,
+            (false, true) if self.cur <= self.stop => return None,
+            (false, false) if self.cur >= self.stop => return None,
+            _ => {}
+        };
+        let ret = self.cur.clone();
+        self.cur = self.cur.clone().checked_add_with_extra(self.step.clone(), self.extra.clone())?;
+        Some(ret)
+    }
+}
+
 #[inline]
 fn range_generic<T, S, E, const INCLUSIVE: bool>(
     start: T,
@@ -167,9 +198,9 @@ fn range_generic<T, S, E, const INCLUSIVE: bool>(
     extra: E,
 ) -> Result<impl Iterator<Item = T>>
 where
-    T: CheckedAddWithExtra<S, E, Output = T> + PartialOrd + Copy,
-    S: IsNegative + Copy,
-    E: Copy,
+    T: CheckedAddWithExtra<S, E, Output = T> + PartialOrd + Clone,
+    S: IsNegative + Clone,
+    E: Clone,
 {
     if step.is_zero() {
         return Err(ExprError::InvalidParam {
@@ -177,29 +208,24 @@ where
             reason: "step size cannot equal zero".into(),
         });
     }
-    let mut cur = start;
+    
     let neg = step.is_negative();
-    let next = move || {
-        match (INCLUSIVE, neg) {
-            (true, true) if cur < stop => return None,
-            (true, false) if cur > stop => return None,
-            (false, true) if cur <= stop => return None,
-            (false, false) if cur >= stop => return None,
-            _ => {}
-        };
-        let ret = cur;
-        cur = cur.checked_add_with_extra(step, extra)?;
-        Some(ret)
-    };
-    Ok(std::iter::from_fn(next))
+    Ok(RangeState {
+        cur: start,
+        stop,
+        step,
+        extra,
+        neg,
+        inclusive: INCLUSIVE,
+    })
 }
 
 /// Validate decimals can not be `NaN` or `infinity`.
 #[inline]
-fn validate_range_parameters(start: Decimal, stop: Decimal, step: Decimal) -> Result<()> {
-    validate_decimal(start, "start")?;
-    validate_decimal(stop, "stop")?;
-    validate_decimal(step, "step")?;
+fn validate_range_parameters(start: &Decimal, stop: &Decimal, step: &Decimal) -> Result<()> {
+    validate_decimal(start.clone(), "start")?;
+    validate_decimal(stop.clone(), "stop")?;
+    validate_decimal(step.clone(), "step")?;
     Ok(())
 }
 
