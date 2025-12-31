@@ -545,6 +545,7 @@ async fn main() {
             columns: table_schema.get_sink_schema(),
             downstream_pk: table_schema.pk_indices,
             sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
             format_desc,
             db_name: "not_need_set".to_owned(),
             sink_from_name: "not_need_set".to_owned(),

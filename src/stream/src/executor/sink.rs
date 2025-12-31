@@ -207,7 +207,7 @@ fn compact_output_kind(sink_type: SinkType) -> OutputKind {
         SinkType::Upsert => output_kind::UPSERT,
         SinkType::Retract => output_kind::RETRACT,
         // There won't be any `Update` or `Delete` in the chunk, so it doesn't matter.
-        SinkType::AppendOnly | SinkType::ForceAppendOnly => output_kind::RETRACT,
+        SinkType::AppendOnly => output_kind::RETRACT,
     }
 }
 
@@ -332,6 +332,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let processed_input = Self::process_msg(
             input,
             self.sink_param.sink_type,
+            self.sink_param.ignore_delete,
             stream_key,
             self.chunk_size,
             self.input_data_types,
@@ -528,6 +529,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     async fn process_msg(
         input: impl MessageStream,
         sink_type: SinkType,
+        ignore_delete: bool,
         stream_key: StreamKey,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
@@ -630,7 +632,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         // Compact the chunk to eliminate any unnecessary updates to external systems.
                         // This should be performed against the downstream pk, not the stream key, to
                         // ensure correct retract/upsert semantics from the downstream's perspective.
-                        if sink_type != SinkType::AppendOnly
+                        // TODO: decide based on input stream kind
+                        if (sink_type != SinkType::AppendOnly || ignore_delete)
                             && let Some(downstream_pk) = &downstream_pk
                         {
                             if skip_compact {
@@ -647,16 +650,13 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 });
                             }
                         }
-                        match sink_type {
-                            SinkType::AppendOnly => yield Message::Chunk(chunk),
-                            SinkType::ForceAppendOnly => {
-                                // Force append-only by dropping UPDATE/DELETE messages. We do this when the
-                                // user forces the sink to be append-only while it is actually not based on
-                                // the frontend derivation result.
-                                yield Message::Chunk(force_append_only(chunk))
-                            }
-                            SinkType::Upsert | SinkType::Retract => yield Message::Chunk(chunk),
+                        if ignore_delete {
+                            // Force append-only by dropping UPDATE/DELETE messages. We do this when the
+                            // user forces the sink to be append-only while it is actually not based on
+                            // the frontend derivation result.
+                            chunk = force_append_only(chunk);
                         }
+                        yield Message::Chunk(chunk);
                     }
                     Message::Barrier(barrier) => {
                         yield Message::Barrier(barrier);
@@ -924,7 +924,8 @@ mod test {
                 .map(|col| col.column_desc.clone())
                 .collect(),
             downstream_pk: Some(stream_key.clone()),
-            sink_type: SinkType::ForceAppendOnly,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: true,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
@@ -1063,6 +1064,7 @@ mod test {
                 .collect(),
             downstream_pk: Some(vec![0]),
             sink_type,
+            ignore_delete: false,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
@@ -1169,7 +1171,8 @@ mod test {
                 .map(|col| col.column_desc.clone())
                 .collect(),
             downstream_pk: Some(stream_key.clone()),
-            sink_type: SinkType::ForceAppendOnly,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: true,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
@@ -1292,6 +1295,7 @@ mod test {
                 .collect(),
             downstream_pk: Some(vec![0, 1]),
             sink_type: SinkType::Upsert,
+            ignore_delete: false,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),

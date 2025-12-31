@@ -527,6 +527,34 @@ impl catalog::Sink {
         // TODO: use a more unique name
         format!("{}", self.id)
     }
+
+    /// Get `ignore_delete` with backward compatibility.
+    ///
+    /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
+    #[allow(deprecated)]
+    pub fn get_ignore_delete_compat(&self) -> bool {
+        self.ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    }
+}
+
+impl stream_plan::SinkDesc {
+    /// Get `ignore_delete` with backward compatibility.
+    ///
+    /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
+    #[allow(deprecated)]
+    pub fn get_ignore_delete_compat(&self) -> bool {
+        self.ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    }
+}
+
+impl connector_service::SinkParam {
+    /// Get `ignore_delete` with backward compatibility.
+    ///
+    /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
+    #[allow(deprecated)]
+    pub fn get_ignore_delete_compat(&self) -> bool {
+        self.ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    }
 }
 
 impl catalog::Table {

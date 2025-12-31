@@ -338,6 +338,10 @@ message SinkDesc {
   optional uint32 target_table = 14;
   optional uint64 extra_partition_col_idx = 15;
   map<string, secret.SecretRef> secret_refs = 16;
+  // Backward-compatible replacement for `SINK_TYPE_FORCE_APPEND_ONLY`.
+  //
+  // Should not directly access this field. Use `get_ignore_delete_compat` instead.
+  bool ignore_delete = 17;
 }
 
 enum SinkLogStoreType {

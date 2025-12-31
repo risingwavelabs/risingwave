@@ -228,6 +228,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 sink_type_from_proto
             }
         };
+        let ignore_delete = sink_desc.get_ignore_delete_compat();
 
         let sink_param = SinkParam {
             sink_id,
@@ -240,6 +241,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 .collect(),
             downstream_pk,
             sink_type,
+            ignore_delete,
             format_desc,
             db_name,
             sink_from_name,

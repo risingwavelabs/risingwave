@@ -343,6 +343,7 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             distribution_key: value.0.distribution_key.0,
             downstream_pk: value.0.downstream_pk.0,
             sink_type: PbSinkType::from(value.0.sink_type) as _,
+            ignore_delete: value.0.ignore_delete,
             owner: value.1.owner_id as _,
             properties: value.0.properties.0,
             definition: value.0.definition,
