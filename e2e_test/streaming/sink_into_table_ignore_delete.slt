@@ -1,0 +1,57 @@
+statement ok
+set implicit_flush = true;
+
+# Test `ignore_delete` for sink-into-table (non-append-only sink on non-append-only input).
+#
+# Expected behavior:
+# - DELETE messages are dropped.
+# - UPDATE is treated as DELETE+INSERT, and since DELETE is dropped, it becomes an INSERT
+#   (while conflict handling will still make it an UPDATE).
+statement ok
+create table src (k int primary key, v int);
+
+statement ok
+create table t (k int primary key, v int);
+
+statement ok
+create sink s into t from src with (ignore_delete = 'true');
+
+statement ok
+insert into src values (1, 10), (2, 20);
+
+query II
+select * from t order by k, v;
+----
+1 10
+2 20
+
+statement ok
+update src set v = 11 where k = 1;
+
+# `update` becomes DELETE (dropped) + INSERT (kept).
+query II
+select * from t order by k;
+----
+1 11
+2 20
+
+statement ok
+delete from src where k = 2
+
+query II
+select * from src;
+----
+1 11
+
+# DELETE is ignored, so row (2, 20) remains.
+query II
+select * from t order by k;
+----
+1 11
+2 20
+
+statement ok
+drop table src cascade;
+
+statement ok
+drop table t cascade;
