@@ -344,6 +344,18 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             self.sink.is_blackhole(), // skip compact for blackhole for better benchmark results
         );
 
+        let processed_input = if self.sink_param.ignore_delete {
+            // Drop UPDATE/DELETE messages if specified `ignore_delete` (formerly `force_append_only`).
+            processed_input
+                .map_ok(|msg| match msg {
+                    Message::Chunk(chunk) => Message::Chunk(force_append_only(chunk)),
+                    other => other,
+                })
+                .left_stream()
+        } else {
+            processed_input.right_stream()
+        };
+
         if self.sink.is_sink_into_table() {
             // TODO(hzxa21): support rate limit?
             processed_input.boxed()
@@ -654,12 +666,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     )
                                 });
                             }
-                        }
-                        if ignore_delete {
-                            // Force append-only by dropping UPDATE/DELETE messages. We do this when the
-                            // user forces the sink to be append-only while it is actually not based on
-                            // the frontend derivation result.
-                            chunk = force_append_only(chunk);
                         }
                         yield Message::Chunk(chunk);
                     }
