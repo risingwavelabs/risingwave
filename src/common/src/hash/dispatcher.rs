@@ -180,7 +180,7 @@ mod tests {
         compare_key_kinds(&[3], HashKeyKind::Key64);
         compare_key_kinds(&[8], HashKeyKind::Key128);
         compare_key_kinds(&[3, 4], HashKeyKind::Key128);
-        compare_key_kinds(&[3, 4, 6], HashKeyKind::Key256);
+        compare_key_kinds(&[3, 4, 6], HashKeyKind::KeySerialized);
         compare_key_kinds(&[7], HashKeyKind::KeySerialized);
         compare_key_kinds(&[1, 7], HashKeyKind::KeySerialized);
     }

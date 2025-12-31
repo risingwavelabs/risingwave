@@ -539,7 +539,7 @@ fn test_1() {
             Borrowed(Utf8("7172"))
             Borrowed(Utf8("info9"))
             Borrowed(Utf8("2021-05-18T07:59:58.714Z"))
-            Owned(Decimal(Normalized(99999999.99)))
+            Owned(Decimal(DeciRef(Normalized(99999999.99))))
             Owned(null)
             Owned(null)
             Owned(null)
