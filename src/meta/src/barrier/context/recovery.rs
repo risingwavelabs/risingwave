@@ -353,20 +353,16 @@ impl GlobalBarrierWorkerContextImpl {
                 }
             });
 
-            if has_upstream_union {
-                match upstream_targets.entry(fragment.job_id) {
-                    Entry::Vacant(entry) => {
-                        entry.insert(fragment.fragment_id);
-                    }
-                    Entry::Occupied(entry) => {
-                        warn!(
-                            job_id = %fragment.job_id,
-                            fragment_id = %fragment.fragment_id,
-                            kept_fragment_id = %entry.get(),
-                            "multiple upstream sink union fragments found for job, keeping first"
-                        );
-                    }
-                }
+            if has_upstream_union
+                && let Some(previous) =
+                    upstream_targets.insert(fragment.job_id, fragment.fragment_id)
+            {
+                bail!(
+                    "multiple upstream sink union fragments found for job {}, fragment {}, kept {}",
+                    fragment.job_id,
+                    fragment.fragment_id,
+                    previous
+                );
             }
         }
 
@@ -627,16 +623,16 @@ impl GlobalBarrierWorkerContextImpl {
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
                     // following steps will be no-op, while the compute nodes will still be reset.
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
-                    let mut recovery_context = if unreschedulable_jobs.is_empty() {
-                        info!("trigger offline scaling");
-                        self.load_recovery_context(None).await?
-                    } else {
+                    if !unreschedulable_jobs.is_empty() {
                         bail!(
                             "Recovery for unreschedulable background jobs is not yet implemented. \
                              This path is triggered when the following jobs have at least one scan type that is not reschedulable: {:?}.",
                             unreschedulable_jobs
                         );
-                    };
+                    }
+
+                    info!("trigger offline re-rendering");
+                    let mut recovery_context = self.load_recovery_context(None).await?;
 
                     let mut info = self
                         .render_actor_assignments(
@@ -648,6 +644,8 @@ impl GlobalBarrierWorkerContextImpl {
                         .inspect_err(|err| {
                             warn!(error = %err.as_report(), "render actor assignments failed");
                         })?;
+
+                    info!("offline re-rendering completed");
 
                     let dropped_table_ids = self.scheduled_barriers.pre_apply_drop_cancel(None);
                     if !dropped_table_ids.is_empty() {
