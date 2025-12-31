@@ -772,6 +772,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         };
 
         // State cleaning
+        tracing::info!(join_key_indices=?side_update.join_key_indices, ?watermark, "!!!");
         if side_update.join_key_indices[0] == watermark.col_idx {
             side_match.ht.update_watermark(watermark.val.clone());
         }
