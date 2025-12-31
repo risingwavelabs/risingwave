@@ -656,6 +656,7 @@ impl StreamSink {
             ),
         };
 
+        // TODO: allow `ignore_delete` on sink type other than `append-only`
         if user_force_append_only
             && user_defined_sink_type.is_some()
             && user_defined_sink_type != Some(SinkType::AppendOnly)
@@ -711,6 +712,7 @@ impl StreamSink {
                     }
                 }
             }
+            // TODO: follow user specified `ignore_delete` here
             Ok((user_defined_sink_type, false))
         } else {
             // No specification at all, follow the optimizer's derivation.
@@ -721,6 +723,7 @@ impl StreamSink {
                 StreamKind::Retract | StreamKind::Upsert => SinkType::Upsert,
                 StreamKind::AppendOnly => SinkType::AppendOnly,
             };
+            // TODO: follow user specified `ignore_delete` here
             Ok((sink_type, false))
         }
     }
