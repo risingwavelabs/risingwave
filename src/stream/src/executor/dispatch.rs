@@ -56,7 +56,7 @@ use crate::common::log_store_impl::kv_log_store::{FlushInfo, SeqId};
 use crate::common::log_store_impl::kv_log_store::state::{LogStoreStateWriteChunkFuture, LogStoreWriteState};
 use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
-use crate::executor::{FlushedChunkInfo, prelude::*};
+use crate::executor::{FlushedChunkInfo, SyncedKvLogStoreMetrics, prelude::*};
 use crate::executor::{StopMutation, StreamConsumer};
 use crate::executor::sync_kv_log_store::{ReadFlushedChunkFuture};
 use crate::task::{DispatcherId, NewOutputRequest};
@@ -530,7 +530,7 @@ impl DispatchExecutor {
 type MessageBatchStreamItem = StreamResult<MessageBatch>;
 type BoxedMessageBatchStream = BoxStream<'static, MessageBatchStreamItem>;
 
-fn make_batched_input(
+async fn make_batched_input(
     max_barrier_count_per_batch: u32,
     input: BoxedMessageStream,
 ) -> BoxedMessageBatchStream {
@@ -548,7 +548,7 @@ fn make_batched_input(
 
 enum WriteFuture<S: LocalStateStore> {
     ReceiveFromUpstream {
-        future: StreamFuture<BoxedMessageStream>,
+        future: StreamFuture<BoxedMessageBatchStream>,
         write_state: LogStoreWriteState<S>,
     },
     FlushingChunk {
@@ -556,21 +556,21 @@ enum WriteFuture<S: LocalStateStore> {
         start_seq_id: SeqId,
         end_seq_id: SeqId,
         future: Pin<Box<LogStoreStateWriteChunkFuture<S>>>,
-        stream: BoxedMessageStream,
+        stream: BoxedMessageBatchStream,
     },
     EndOfStream,
     Empty,
 }
 
 enum WriteFutureEvent {
-    UpstreamMessageReceived(Message),
+    UpstreamMessageReceived(MessageBatch),
     ChunkFlushed(FlushedChunkInfo),
     EndofStream,
 }
 
 impl<S: LocalStateStore> WriteFuture<S> {
     fn flush_chunk(
-        stream: BoxedMessageStream,
+        stream: BoxedMessageBatchStream,
         write_state: LogStoreWriteState<S>,
         chunk: StreamChunk,
         epoch: u64,
@@ -599,50 +599,21 @@ impl<S: LocalStateStore> WriteFuture<S> {
     }
 
     fn receive_from_upstream(
-        stream: BoxedMessageStream,
+        stream: BoxedMessageBatchStream,
         write_state: LogStoreWriteState<S>,
     ) -> Self {
         Self::ReceiveFromUpstream { 
-            future: stream.into_future(), 
-            write_state 
+            future: futures::StreamExt::into_future(stream), 
+            write_state,
         }
-    }
-
-    fn paused(
-        duration: Duration,
-        barrier: Barrier,
-        stream: BoxedMessageStream,
-        write_state: LogStoreWriteState<S>,
-    ) -> Self {
-        let now = Instant::now();
-        tracing::trace!(?now, ?duration, "write_future_pause");
-        Self::Paused { 
-            start_instant: now, 
-            sleep_future: Some(Box::pin(sleep_until(now + duration))), 
-            barrier, 
-            stream, 
-            write_state }
     }
 
     // TODO: add metrics
     async fn next_event(
         &mut self,
-    ) -> StreamExecutorResult<(BoxedMessageStream, LogStoreWriteState<S>, WriteFutureEvent)> {
+        metrics: &SyncedKvLogStoreMetrics,
+    ) -> StreamResult<(BoxedMessageBatchStream, LogStoreWriteState<S>, WriteFutureEvent)> {
         match self {
-            WriteFuture::Paused { 
-                start_instant,
-                sleep_future, 
-                ..
-            } => {
-                if let Some(sleep_future) = sleep_future {
-                    sleep_future.await;
-                    tracing::trace!("resuming write future");
-                }
-                must_match!(replace(self, WriteFuture::Empty), WriteFuture::Paused { stream, write_state, barrier, .. } => {
-                    Ok((stream, write_state, WriteFutureEvent::UpstreamMessageReceived(Message::Barrier(barrier))))
-                })
-            }
-
             WriteFuture::ReceiveFromUpstream { future, .. } => {
                 let (opt, stream) = future.await;
                 
@@ -687,11 +658,12 @@ impl<S: LocalStateStore> WriteFuture<S> {
 }
 
 type ReadingChunkFuture = BoxFuture<'static, StreamExecutorResult<StreamChunk>>;
-type DispatchingFuture = BoxFuture<'static, StreamExecutorResult<()>>;
 
 enum ConsumerFuture {
     ReadingChunk { future: ReadingChunkFuture },
-    Dispatching { future: DispatchingFuture },
+    Dispatching { 
+        future: DispatchingFuture,
+        log_store_stream: ReadingChunkFuture, },
     Empty,
 }
 
@@ -703,8 +675,16 @@ enum ConsumerFutureEvent {
 // TODO: add metrics here
 impl ConsumerFuture {
     async fn next_event(
-        &mut self
+        &mut self,
+        barriers: &VecDeque<MessageBatch>,
     ) -> StreamExecutorResult<ConsumerFutureEvent> {
+        if !barriers.is_empty() {
+            match self {
+                ConsumerFuture::ReadingChunk { future } => {
+                    self = ConsumerFuture::Dispatching {}
+                }
+            }
+        }
         match self {
             ConsumerFuture::ReadingChunk{future} => {
                 let result = future.await?;
@@ -720,6 +700,95 @@ impl ConsumerFuture {
             }
             ConsumerFuture::Empty => {
                 unreachable!("ConsumerFuture::Empty should be handled!")
+            }
+        }
+    }
+}
+
+type DispatchInnerFuture = BoxFuture<'static, (DispatchExecutorInner, StreamResult<()>)>;
+enum DispatchingFuture {
+    DispatchingBarriers {
+        future: DispatchInnerFuture,
+        to_yield: MessageBatch,
+    },
+    DispatchingChunk {
+        future: DispatchInnerFuture,
+    },
+    Idle {
+        inner: DispatchExecutorInner,
+    },
+}
+
+impl DispatchingFuture {
+    fn start_chunk_or_watermark(self, message: MessageBatch) -> Self {
+        let DispatchFuture::Idle { mut inner } = self else { unreachable!() };
+        let fut = match message {
+            chunk @ MessageBatch::Chunk(_) => {
+                async move {
+                    let r = inner
+                    .dispatch(chunk)
+                    .instrument(tracing::info_span!("dispatch_chunk"))
+                    .instrument_await("dispatch_chunk")
+                    .await?;
+                    (inner, r)
+                }
+                .boxed();
+            }
+            watermark @ MessageBatch::Watermark(_) => {
+                async move {
+                    let r = inner
+                    .dispatch(watermark)
+                    .instrument(tracing::info_span!("dispatch_watermark"))
+                    .instrument_await("dispatch_watermark")
+                    .await?;
+                    (inner, r)
+                }
+                .boxed();
+            }
+            _ => {
+                unreachable!("barrier should not be handled here!")
+            }
+        };
+        DispatchFuture::DispatchingChunk { future: fut }
+    }
+
+    fn start_barrier(self, mut barriers: &VecDeque<MessageBatch>) -> Self {
+        let DispatchFuture::Idle { mut inner } = self else { unreachable!() };
+        assert!(!barriers.is_empty());
+        let to_yield_barrier = barriers.pop_back().unwrap();
+        let MessageBatch::BarrierBatch(barrier_batch) = to_yield_barrier.clone() else {
+            unreachable!("to_yield_barrier must be BarrierBatch");
+        };
+        assert!(!barrier_batch.is_empty());
+        let fut = async move {
+            let r = inner
+            .dispatch(barrier_batch)
+            .instrument(tracing::info_span!("dispatch_barrier_batch"))
+            .instrument_await("dispatch_barrier_batch")
+            .await?;
+            inner
+            .metrics
+            .metrics
+            .barrier_batch_size
+            .observe(barrier_batch.len() as f64);
+            (inner, r)
+        }
+        .boxed();
+        DispatchFuture::DispatchingBarriers { future: fut, to_yield: to_yield_barrier }
+    }
+
+    async fn next_event (
+        &mut self,
+        buffer: &mut VecDeque<MessageBatch>,
+    ) -> StreamResult<Option<MessageBatch>>{
+        match self {
+            DispatchingFuture::DispatchingChunk { future } => {
+                let (dispatch_inner, _) = future.await?;
+                *self = DispatchingFuture::Idle{ inner: dispatch_inner };
+                Ok(None)
+            }
+            DispatchingFuture::DispatchingBarriers { future, to_yield } => {
+
             }
         }
     }
@@ -789,87 +858,6 @@ impl StreamConsumer for DispatchExecutor {
         }
     }
 }
-
-// make sure the buffer is not empty when calling this function
-// divide the logistics of dispatching data to downstream from sending barriers to localbarriermanager
-async fn dispatch_message_to_downstream(
-    buffer: &mut VecDeque<MessageBatch>,
-    inner: &mut DispatchExecutorInner,
-) -> StreamResult<()>{
-    let msg = buffer.pop_back().expect("buffer is not empty when reading message");
-    match msg {
-        chunk @ MessageBatch::Chunk(_) => {
-            inner
-            .dispatch(chunk)
-            .instrument(tracing::info_span!("dispatch_chunk"))
-            .instrument_await("dispatch_chunk")
-            .await?;
-        }
-        MessageBatch::BarrierBatch(barrier_batch) => {
-            assert!(!barrier_batch.is_empty());
-            inner
-                .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
-                .instrument(tracing::info_span!("dispatch_barrier_batch"))
-                .instrument_await("dispatch_barrier_batch")
-                .await?;
-            inner
-                .metrics
-                .metrics
-                .barrier_batch_size
-                .observe(barrier_batch.len() as f64);
-            // TODO: send barriers to localbarriermanager
-            // for barrier in barrier_batch {
-            //     yield barrier;
-            // }
-        }
-        watermark @ MessageBatch::Watermark(_) => {
-            inner
-                .dispatch(watermark)
-                .instrument(tracing::info_span!("dispatch_watermark"))
-                .instrument_await("dispatch_watermark")
-                .await?;
-        }                                                                
-    }
-    Ok(())
-}
-
-// impl StreamConsumer for DispatchExecutorForSyncLogStore {
-//     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
-
-//     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-//         let max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
-        
-//         let mut input = self.input.execute().peekable();
-        
-//         // init first epoch + local state store
-//         let first_barrier = expect_first_barrier(&mut input).await?;
-//         // #[try_stream]
-//         // async move {
-//         //     let mut input = self.input.execute().peekable();
-//         //     let mut end_of_stream = false;
-//         //     let mut buffer: VecDeque<MessageBatch> = VecDeque::new();
-//         //     loop {
-//         //         let select_result = {
-//         //             let read_future = async {
-//         //                 match try_batch_barriers(max_barrier_count_per_batch, &mut input).await?
-//         //             };
-//         //             pin_mut!(read_future);
-//         //             let write_future = async {
-//         //                 if buffer.is_empty() {
-//         //                     pending().await
-//         //                 } else {
-//         //                     dispatch_message_to_downstream(&mut buffer, &mut self.inner).await
-//         //                 }
-//         //             };
-//         //             pin_mut!(write_future);
-//         //             let output = select(write_future, read_future).await;
-//         //             drop_either_future(output)
-//         //         };
-//         //     }
-//         // }
-//     }
-
-// }
 
 /// Tries to batch up to `max_barrier_count_per_batch` consecutive barriers within a single message batch.
 ///
