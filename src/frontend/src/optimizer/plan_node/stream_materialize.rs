@@ -730,6 +730,10 @@ impl StreamNode for StreamMaterialize {
                 .copied()
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
+
+            // Equavalency: `clean_watermark_indices` is set iff there's a TTL watermark column.
+            // See `StreamMaterialize::derive_table_catalog`.
+            cleaned_by_ttl_watermark: !self.table.clean_watermark_indices.is_empty(),
         }))
     }
 }
