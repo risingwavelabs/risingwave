@@ -79,7 +79,7 @@ impl ToText for Decimal {
 
 impl Decimal {
     /// Used by `PrimitiveArray` to serialize the array to protobuf.
-    pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {
+    pub fn to_protobuf(&self, output: &mut impl Write) -> ArrayResult<usize> {
         let buf = self.unordered_serialize();
         output.write_all(&buf)?;
         Ok(buf.len())
@@ -490,7 +490,7 @@ impl Decimal {
     pub fn round_left_ties_away(&self, left: u32) -> Option<Self> {
         match self {
             Self::Normalized(d_ref) => {
-                let mut d = d_ref.clone();
+                let mut d = *d_ref;
                 // First, move the decimal point to the left so that we can reuse `round`. This is more
                 // efficient than division.
                 let old_scale = d.scale();
