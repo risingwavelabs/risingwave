@@ -384,7 +384,7 @@ impl SinkCatalog {
             owner: self.owner.into(),
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
-            ignore_delete: self.ignore_delete,
+            raw_ignore_delete: self.ignore_delete,
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             connection_id: self.connection_id,
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
@@ -449,7 +449,7 @@ impl SinkCatalog {
 impl From<PbSink> for SinkCatalog {
     fn from(pb: PbSink) -> Self {
         let sink_type = pb.get_sink_type().unwrap();
-        let ignore_delete = pb.get_ignore_delete_compat();
+        let ignore_delete = pb.ignore_delete();
         let create_type = pb.get_create_type().unwrap_or(PbCreateType::Foreground);
         let stream_job_status = pb
             .get_stream_job_status()

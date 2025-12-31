@@ -532,8 +532,8 @@ impl catalog::Sink {
     ///
     /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
     #[allow(deprecated)]
-    pub fn get_ignore_delete_compat(&self) -> bool {
-        self.ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    pub fn ignore_delete(&self) -> bool {
+        self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
     }
 }
 
@@ -542,8 +542,8 @@ impl stream_plan::SinkDesc {
     ///
     /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
     #[allow(deprecated)]
-    pub fn get_ignore_delete_compat(&self) -> bool {
-        self.ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    pub fn ignore_delete(&self) -> bool {
+        self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
     }
 }
 
@@ -552,8 +552,8 @@ impl connector_service::SinkParam {
     ///
     /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
     #[allow(deprecated)]
-    pub fn get_ignore_delete_compat(&self) -> bool {
-        self.ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    pub fn ignore_delete(&self) -> bool {
+        self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
     }
 }
 

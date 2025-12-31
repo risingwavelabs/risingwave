@@ -263,7 +263,7 @@ pub struct SinkParam {
 
 impl SinkParam {
     pub fn from_proto(pb_param: PbSinkParam) -> Self {
-        let ignore_delete = pb_param.get_ignore_delete_compat();
+        let ignore_delete = pb_param.ignore_delete();
         let table_schema = pb_param.table_schema.expect("should contain table schema");
         let format_desc = match pb_param.format_desc {
             Some(f) => f.try_into().ok(),
@@ -314,7 +314,7 @@ impl SinkParam {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
-            ignore_delete: self.ignore_delete,
+            raw_ignore_delete: self.ignore_delete,
         }
     }
 

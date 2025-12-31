@@ -117,7 +117,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSink> for ActiveModel {
     fn from(pb_sink: PbSink) -> Self {
         let sink_type = pb_sink.sink_type();
-        let ignore_delete = pb_sink.get_ignore_delete_compat();
+        let ignore_delete = pb_sink.ignore_delete();
 
         Self {
             sink_id: Set(pb_sink.id),

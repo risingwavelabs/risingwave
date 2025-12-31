@@ -30,8 +30,8 @@ message SinkParam {
   string sink_name = 8;
   // Backward-compatible replacement for `SINK_TYPE_FORCE_APPEND_ONLY`.
   //
-  // Should not directly access this field. Use `get_ignore_delete_compat` instead.
-  bool ignore_delete = 9;
+  // Should not directly access this field. Use method `ignore_delete()` instead.
+  bool raw_ignore_delete = 9;
 }
 
 message SinkWriterStreamRequest {
