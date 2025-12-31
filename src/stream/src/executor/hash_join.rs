@@ -779,17 +779,17 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         };
 
         // State cleaning: align watermarks for configured join-key positions.
-        if let Some(pos) = side_update
-            .join_key_indices
-            .iter()
-            .position(|idx| *idx == watermark.col_idx)
-            && self
-                .watermark_indices_in_jk
-                .iter()
-                .any(|(jk_pos, do_clean)| *jk_pos == pos && *do_clean)
-        {
+        // if let Some(pos) = side_update
+        //     .join_key_indices
+        //     .iter()
+        //     .position(|idx| *idx == watermark.col_idx)
+        //     && self
+        //         .watermark_indices_in_jk
+        //         .iter()
+        //         .any(|(jk_pos, do_clean)| *jk_pos == pos && *do_clean)
+        // {
             side_match.ht.update_watermark(watermark.val.clone());
-        }
+        // }
 
         // Select watermarks to yield.
         let wm_in_jk = side_update
@@ -803,13 +803,13 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 .entry(idx)
                 .or_insert_with(|| BufferedWatermarks::with_ids([SideType::Left, SideType::Right]));
             if let Some(selected_watermark) = buffers.handle_watermark(side, watermark.clone()) {
-                if self
-                    .watermark_indices_in_jk
-                    .iter()
-                    .any(|(jk_pos, do_clean)| *jk_pos == idx && *do_clean)
-                {
+                // if self
+                //     .watermark_indices_in_jk
+                //     .iter()
+                //     .any(|(jk_pos, do_clean)| *jk_pos == idx && *do_clean)
+                // {
                     side_match.ht.update_watermark(watermark.val.clone());
-                }
+                // }
 
                 let empty_indices = vec![];
                 let output_indices = side_update

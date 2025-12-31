@@ -1297,7 +1297,7 @@ where
     ///
     /// * `watermark` - Latest watermark received.
     pub fn update_watermark(&mut self, watermark: ScalarImpl) {
-        trace!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
+        info!(table_id = %self.table_id, watermark = ?watermark, "update watermark");
         self.pending_watermark = Some(watermark);
     }
 
