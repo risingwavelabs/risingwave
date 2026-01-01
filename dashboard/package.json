@@ -67,7 +67,7 @@
     "eslint-plugin-n": "^15.2.5",
     "eslint-plugin-promise": "^6.0.1",
     "eslint-plugin-react": "^7.31.6",
-    "express": "^4.21.1",
+    "express": "^4.22.1",
     "prettier": "^2.7.1",
     "prettier-plugin-organize-imports": "^3.1.1",
     "typescript": "5.4.2"
