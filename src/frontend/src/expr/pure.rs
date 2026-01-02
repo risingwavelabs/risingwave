@@ -172,6 +172,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArraySum
             | Type::ArraySort
             | Type::ArrayAppend
+            | Type::ArrayReverse
             | Type::ArrayPrepend
             | Type::FormatType
             | Type::ArrayDistinct
