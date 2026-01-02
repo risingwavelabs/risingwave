@@ -17,6 +17,10 @@ jobs:
     name: license-header-check
     steps:
     - uses: actions/checkout@v4
-    - uses: dtolnay/rust-toolchain@stable
+      with:
+        fetch-depth: 0
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: hawkeye@6
     - name: Check License Header
-      uses: korandoru/hawkeye@v6
+      run: hawkeye check
