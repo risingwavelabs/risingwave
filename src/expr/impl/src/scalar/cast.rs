@@ -66,8 +66,14 @@ pub fn to_int256<T: TryInto<Int256>>(elem: T) -> Result<Int256> {
 }
 
 #[function("cast(jsonb) -> boolean")]
-pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
-    v.as_bool().map_err(|e| ExprError::Parse(e.into()))
+pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<Option<bool>> {
+    if v.is_jsonb_null() {
+        Ok(None)
+    } else {
+        v.as_bool()
+            .map(Some)
+            .map_err(|e| ExprError::Parse(e.into()))
+    }
 }
 
 /// Note that PostgreSQL casts JSON numbers from arbitrary precision `numeric` but we use `f64`.
@@ -78,11 +84,16 @@ pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
 #[function("cast(jsonb) -> decimal")]
 #[function("cast(jsonb) -> float4")]
 #[function("cast(jsonb) -> float8")]
-pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
-    v.as_number()
-        .map_err(|e| ExprError::Parse(e.into()))?
-        .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<Option<T>> {
+    if v.is_jsonb_null() {
+        Ok(None)
+    } else {
+        v.as_number()
+            .map_err(|e| ExprError::Parse(e.into()))?
+            .try_into()
+            .map(Some)
+            .map_err(|_| ExprError::NumericOutOfRange)
+    }
 }
 
 #[function("cast(int4) -> int2")]
