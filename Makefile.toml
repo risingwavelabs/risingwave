@@ -1256,6 +1256,26 @@ if ! typos ; then
 fi
 """
 
+[tasks.check-license-header]
+category = "RiseDev - Check"
+description = "Check license headers by HawkEye"
+install_crate = { min_version = "6.3.0", crate_name = "hawkeye", binary = "hawkeye", test_arg = [
+    "--help",
+], install_command = "binstall" }
+command = "hawkeye"
+args = ["check", "${@}"]
+env = { RUST_LOG = "info" }
+
+[tasks.fix-license-header]
+category = "RiseDev - Check"
+description = "Auto-fix license headers by HawkEye"
+install_crate = { min_version = "6.3.0", crate_name = "hawkeye", binary = "hawkeye", test_arg = [
+    "--help",
+], install_command = "binstall" }
+command = "hawkeye"
+args = ["format", "${@}"]
+env = { RUST_LOG = "info" }
+
 [tasks.check-udeps]
 private = true
 category = "RiseDev - Check"
