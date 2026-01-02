@@ -2,6 +2,7 @@ header:
   license:
     spdx-id: Apache-2.0
     copyright-owner: RisingWave Labs
+    copyright-year: "2022"
 
   paths:
     - "src/**/*.rs"
