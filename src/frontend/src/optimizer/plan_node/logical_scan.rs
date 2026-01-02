@@ -682,21 +682,20 @@ impl ToStream for LogicalScan {
     }
 
     fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if !self
+        if columns.is_empty() {
+            return None;
+        }
+        let enable_index_selection = self
             .core
             .ctx()
             .session_ctx()
             .config()
-            .enable_index_selection()
-        {
-            return None;
-        }
-        if columns.is_empty() {
-            return None;
-        }
-        if self.table_indexes().is_empty() {
-            return None;
-        }
+            .enable_index_selection();
+        let has_indexes = !self.table_indexes().is_empty();
+        let primary_order = self.get_out_column_index_order();
+        let primary_dist_key_satisfied = self
+            .distribution_key()
+            .is_some_and(|dist_key| dist_key.iter().all(|k| columns.contains(k)));
         let orders = if columns.len() <= 3 {
             OrderType::all()
         } else {
@@ -716,6 +715,14 @@ impl ToStream for LogicalScan {
             let required_order = Order {
                 column_orders: order_type_combo,
             };
+
+            if primary_dist_key_satisfied && primary_order.satisfies(&required_order) {
+                return Some(self.clone().into());
+            }
+
+            if !enable_index_selection || !has_indexes {
+                continue;
+            }
 
             let order_satisfied_index = self.indexes_satisfy_order(&required_order);
             for index in order_satisfied_index {
