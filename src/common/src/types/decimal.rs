@@ -554,7 +554,8 @@ impl Decimal {
     /// represented even after truncation.
     pub fn truncated_i128_and_scale(mut num: i128, mut scale: u32) -> Option<Self> {
         if num.abs() > Self::MAX_I128_REPR {
-            let diff_scale = scale - ((num.abs().ilog10() + 1) - Self::MAX_PRECISION as u32);
+            let digits = num.abs().ilog10() + 1;
+            let diff_scale = digits.saturating_sub(Self::MAX_PRECISION as u32);
             if scale < diff_scale {
                 return None;
             }
