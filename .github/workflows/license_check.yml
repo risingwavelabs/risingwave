@@ -17,5 +17,6 @@ jobs:
     name: license-header-check
     steps:
     - uses: actions/checkout@v4
+    - uses: dtolnay/rust-toolchain@stable
     - name: Check License Header
-      uses: apache/skywalking-eyes@v0.8.0
+      uses: korandoru/hawkeye@v6
