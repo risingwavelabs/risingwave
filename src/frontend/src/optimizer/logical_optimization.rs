@@ -516,6 +516,31 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
     )
 });
 
+static POPULATE_ICEBERG_TASK_AND_TRANSFORM_DELETE: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Populate Iceberg Task And Transform Delete",
+            vec![PopulateIcebergTaskAndTransformDeleteRule::create()],
+            ApplyOrder::BottomUp,
+        )
+    });
+
+static LOGICAL_ICEBERG_PREDICATE_PUSHDOWN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Logical Iceberg Predicate Pushdown",
+        vec![LogicalIcebergPredicatePushDownRule::create()],
+        ApplyOrder::BottomUp,
+    )
+});
+
+static LOGICAL_ICEBGER_COUNT_STAR: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Logical Iceberg Count Star",
+        vec![IcebergCountStarRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
 static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "TopN to Vector Search",
@@ -855,6 +880,13 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
 
         plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
+
+        // plan = plan.optimize_by_rules(&LOGICAL_ICEBGER_COUNT_STAR)?;
+
+        // Iceberg-specific predicate pushdown (for zone-map optimization)
+        plan = plan.optimize_by_rules(&LOGICAL_ICEBERG_PREDICATE_PUSHDOWN)?;
+
+        plan = plan.optimize_by_rules(&POPULATE_ICEBERG_TASK_AND_TRANSFORM_DELETE)?;
 
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);

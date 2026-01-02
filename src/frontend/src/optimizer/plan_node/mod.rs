@@ -1088,6 +1088,7 @@ mod batch_mysql_query;
 mod derive;
 mod logical_file_scan;
 mod logical_iceberg_scan;
+mod logical_imm_iceberg_scan;
 mod logical_postgres_query;
 
 mod batch_vector_search;
@@ -1152,6 +1153,7 @@ pub use logical_gap_fill::LogicalGapFill;
 pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_scan::LogicalIcebergScan;
+pub use logical_imm_iceberg_scan::LogicalImmIcebergScan;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
@@ -1293,6 +1295,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, GetChannelDeltaStats }
             , { Logical, LocalityProvider }
             , { Logical, VectorSearchLookupJoin }
+            , { Logical, ImmIcebergScan }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
