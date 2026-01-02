@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::array::{ListRef, ListValue};
+use risingwave_common::array::ListRef;
 use risingwave_expr::function;
 
 #[function("array_reverse(anyarray) -> anyarray")]
-fn array_reverse(list: ListRef<'_>) -> ListValue {
-    ListValue::from_datum_iter(&list.elem_type(), list.iter().rev())
+fn array_reverse(list: ListRef<'_>, writer: &mut impl risingwave_common::array::ListWrite) {
+    writer.write_iter(list.iter().rev());
 }
