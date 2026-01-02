@@ -21,6 +21,13 @@ jobs:
         fetch-depth: 0
     - uses: taiki-e/install-action@v2
       with:
-        tool: hawkeye@6
+        tool: hawkeye@6.3
     - name: Check License Header
       run: hawkeye check
+    - name: Hint to fix license headers
+      if: failure()
+      run: |
+        echo "::error::License header check failed."
+        echo "Hint: rebase latest main, then auto-fix:"
+        echo "  git fetch origin main && git rebase origin/main"
+        echo "  ./risedev fix-license-header"
