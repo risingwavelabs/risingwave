@@ -5,7 +5,6 @@ on:
     types:
       - closed
       - labeled
-    # 增加 workflow_dispatch 方便你手动点击按钮测试调试，无需真的反复合并 PR
   workflow_dispatch: 
     inputs:
       pr_number:
@@ -15,9 +14,7 @@ on:
 jobs:
   ai_doc_generation:
     runs-on: ubuntu-latest
-    # 只有 merged 为 true (通过 check) 或者 手动触发 时运行
     steps:
-      # --- 复用原逻辑开始 ---
       - name: Check if PR is merged (Skip if manual trigger)
         if: github.event_name != 'workflow_dispatch'
         id: check_merged
@@ -33,7 +30,7 @@ jobs:
           fi
 
       - name: Retrieve PR information (for Checkbox/Labels)
-        # 如果是手动触发，我们需要手动 fetch PR info，这里为了简化，假设手动触发时不检查 label
+        # fetch PR info when manual trigger
         if: github.event_name != 'workflow_dispatch' && steps.check_merged.outputs.merged == 'true'
         uses: 8BitJonny/gh-get-current-pr@3.0.0
         id: PR
@@ -42,7 +39,6 @@ jobs:
 
       - name: Check trigger conditions
         id: check_condition
-        # 逻辑：如果是手动触发 -> pass; 如果是自动触发 -> 必须 merged 且 (label符合 或 body勾选)
         run: |
           if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
             echo "should_run=true" >> $GITHUB_OUTPUT
@@ -66,9 +62,8 @@ jobs:
           else
             echo "should_run=false" >> $GITHUB_OUTPUT
           fi
-      # --- 复用原逻辑结束 ---
-
-      # --- AI Agent 核心步骤 ---
+      
+      
       - name: Checkout Code
         if: steps.check_condition.outputs.should_run == 'true'
         uses: actions/checkout@v4
@@ -87,7 +82,7 @@ jobs:
         if: steps.check_condition.outputs.should_run == 'true'
         env:
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          DOC_REPO_PAT: ${{ secrets.DOC_REPO_PAT }} # 使用刚才配置的 Token
+          DOC_REPO_PAT: ${{ secrets.DOC_REPO_PAT }}
           PR_NUMBER: ${{ steps.pr_info.outputs.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: python scripts/ai_doc_writer.py
+        run: python scripts/docs/ai_doc_writer.py
