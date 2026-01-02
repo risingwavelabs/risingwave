@@ -1273,10 +1273,8 @@ impl TryFrom<&arrow_array::Decimal128Array> for DecimalArray {
                 NAN => Decimal::NaN,
                 i128::MAX => Decimal::PositiveInf,
                 i128::MIN => Decimal::NegativeInf,
-                _ => Decimal::Normalized(
-                    rust_decimal::Decimal::try_from_i128_with_scale(value, array.scale() as u32)
-                        .map_err(ArrayError::internal)?,
-                ),
+                _ => Decimal::truncated_i128_and_scale(value, array.scale() as u32)
+                    .ok_or_else(|| ArrayError::from_arrow("decimal overflow"))?,
             };
             Ok(res)
         };

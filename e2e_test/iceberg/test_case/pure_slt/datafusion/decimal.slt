@@ -1,0 +1,773 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+# ============================================
+# Test 1: Basic decimal table creation and insert
+# ============================================
+statement ok
+CREATE TABLE decimal_basic (
+    id INT PRIMARY KEY,
+    val DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_basic VALUES
+    (1, 0),
+    (2, 1),
+    (3, -1),
+    (4, 123.456),
+    (5, -123.456),
+    (6, 0.0000000001),
+    (7, -0.0000000001);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ??
+SELECT * FROM decimal_basic ORDER BY id;
+----
+1 0.0000000000
+2 1.0000000000
+3 -1.0000000000
+4 123.4560000000
+5 -123.4560000000
+6 0.0000000001
+7 -0.0000000001
+
+statement ok
+DROP TABLE decimal_basic;
+
+# ============================================
+# Test 2: Special values (infinity, NaN)
+# ============================================
+statement ok
+CREATE TABLE decimal_special (
+    id INT PRIMARY KEY,
+    val DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_special VALUES
+    (1, 'inf'),
+    (2, '-inf'),
+    (3, 'nan'),
+    (4, '+infinity'),
+    (5, '-infinity');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Note: Iceberg stores inf as max decimal value, -inf as min decimal value, nan as NULL
+query ?? rowsort
+SELECT * FROM decimal_special;
+----
+1 999999999999999999.9999999999
+2 -999999999999999999.9999999999
+3 NULL
+4 999999999999999999.9999999999
+5 -999999999999999999.9999999999
+
+statement ok
+DROP TABLE decimal_special;
+
+# ============================================
+# Test 3: Large precision values (near max)
+# ============================================
+statement ok
+CREATE TABLE decimal_precision (
+    id INT PRIMARY KEY,
+    val DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_precision VALUES
+    (1, '999999999999999999999999999'),
+    (2, '-999999999999999999999999999'),
+    (3, '0.9999999999999999999999999999'),
+    (4, '-0.9999999999999999999999999999'),
+    (5, '1234567890.1234567890'),
+    (6, '999999999999999999.9999999999'),
+    (7, '-999999999999999999.9999999999');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?? rowsort
+SELECT * FROM decimal_precision;
+----
+1 999999999999999999.9999999999
+2 -999999999999999999.9999999999
+3 0.9999999999
+4 -0.9999999999
+5 1234567890.1234567890
+6 999999999999999999.9999999999
+7 -999999999999999999.9999999999
+
+statement ok
+DROP TABLE decimal_precision;
+
+# ============================================
+# Test 4: Basic arithmetic operations
+# ============================================
+statement ok
+CREATE TABLE decimal_arithmetic (
+    id INT PRIMARY KEY,
+    a DECIMAL,
+    b DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_arithmetic VALUES
+    (1, 10, 3),
+    (2, 100.5, 2.5),
+    (3, -50.25, 10.05),
+    (4, 0.1, 0.2),
+    (5, 1, 3);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Arithmetic operations
+query ????????
+SELECT id, a, b, a + b, a - b, a * b, a / b, a % b FROM decimal_arithmetic ORDER BY id;
+----
+1 10.0000000000 3.0000000000 13.0000000000 7.0000000000 30.00000000000000000000 3.33333333333333 1.0000000000
+2 100.5000000000 2.5000000000 103.0000000000 98.0000000000 251.25000000000000000000 40.20000000000000 0.5000000000
+3 -50.2500000000 10.0500000000 -40.2000000000 -60.3000000000 -505.01250000000000000000 -5.00000000000000 0.0000000000
+4 0.1000000000 0.2000000000 0.3000000000 -0.1000000000 0.02000000000000000000 0.50000000000000 0.1000000000
+5 1.0000000000 3.0000000000 4.0000000000 -2.0000000000 3.00000000000000000000 0.33333333333333 1.0000000000
+
+statement ok
+DROP TABLE decimal_arithmetic;
+
+# ============================================
+# Test 5: Division edge cases
+# ============================================
+statement ok
+CREATE TABLE decimal_division (
+    id INT PRIMARY KEY,
+    a DECIMAL,
+    b DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_division VALUES
+    (1, 1, 0.0000000001),
+    (2, 0.0000000001, 1000000000),
+    (3, 10, 7),
+    (4, 22, 7);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Division edge cases
+query ????
+SELECT id, a, b, a / b FROM decimal_division ORDER BY id;
+----
+1 1.0000000000 0.0000000001 10000000000.00000000000000
+2 0.0000000001 1000000000.0000000000 0.00000000000000
+3 10.0000000000 7.0000000000 1.42857142857142
+4 22.0000000000 7.0000000000 3.14285714285714
+
+statement ok
+DROP TABLE decimal_division;
+
+# ============================================
+# Test 6: Negation and absolute value
+# ============================================
+statement ok
+CREATE TABLE decimal_unary (
+    id INT PRIMARY KEY,
+    val DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_unary VALUES
+    (1, 123.456),
+    (2, -123.456),
+    (3, 0),
+    (4, 0.0000000001),
+    (5, -0.0000000001);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ???
+SELECT id, val, -val FROM decimal_unary ORDER BY id;
+----
+1 123.4560000000 -123.4560000000
+2 -123.4560000000 123.4560000000
+3 0.0000000000 0.0000000000
+4 0.0000000001 -0.0000000001
+5 -0.0000000001 0.0000000001
+
+query ???
+SELECT id, val, abs(val) FROM decimal_unary ORDER BY id;
+----
+1 123.4560000000 123.4560000000
+2 -123.4560000000 123.4560000000
+3 0.0000000000 0.0000000000
+4 0.0000000001 0.0000000001
+5 -0.0000000001 0.0000000001
+
+statement ok
+DROP TABLE decimal_unary;
+
+# ============================================
+# Test 7: Comparison operations
+# ============================================
+statement ok
+CREATE TABLE decimal_compare (
+    id INT PRIMARY KEY,
+    a DECIMAL,
+    b DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_compare VALUES
+    (1, 1.0, 1.00),
+    (2, 1.0, 1.0000000001),
+    (3, 0.1, 0.10),
+    (4, -0.1, -0.10),
+    (5, 0, -0),
+    (6, 100, 99.9999999999);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ????
+SELECT id, a, b, a = b FROM decimal_compare ORDER BY id;
+----
+1 1.0000000000 1.0000000000 t
+2 1.0000000000 1.0000000001 f
+3 0.1000000000 0.1000000000 t
+4 -0.1000000000 -0.1000000000 t
+5 0.0000000000 0.0000000000 t
+6 100.0000000000 99.9999999999 f
+
+query ????
+SELECT id, a, b, a > b FROM decimal_compare ORDER BY id;
+----
+1 1.0000000000 1.0000000000 f
+2 1.0000000000 1.0000000001 f
+3 0.1000000000 0.1000000000 f
+4 -0.1000000000 -0.1000000000 f
+5 0.0000000000 0.0000000000 f
+6 100.0000000000 99.9999999999 t
+
+query ????
+SELECT id, a, b, a < b FROM decimal_compare ORDER BY id;
+----
+1 1.0000000000 1.0000000000 f
+2 1.0000000000 1.0000000001 t
+3 0.1000000000 0.1000000000 f
+4 -0.1000000000 -0.1000000000 f
+5 0.0000000000 0.0000000000 f
+6 100.0000000000 99.9999999999 f
+
+statement ok
+DROP TABLE decimal_compare;
+
+# ============================================
+# Test 8: Rounding functions
+# ============================================
+statement ok
+CREATE TABLE decimal_rounding (
+    id INT PRIMARY KEY,
+    val DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_rounding VALUES
+    (1, 1.4),
+    (2, 1.5),
+    (3, 1.6),
+    (4, -1.4),
+    (5, -1.5),
+    (6, -1.6),
+    (7, 2.5),
+    (8, -2.5),
+    (9, 0.5),
+    (10, -0.5);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ???
+SELECT id, val, round(val) FROM decimal_rounding ORDER BY id;
+----
+1 1.4000000000 1
+2 1.5000000000 2
+3 1.6000000000 2
+4 -1.4000000000 -1
+5 -1.5000000000 -2
+6 -1.6000000000 -2
+7 2.5000000000 3
+8 -2.5000000000 -3
+9 0.5000000000 1
+10 -0.5000000000 -1
+
+query ???
+SELECT id, val, ceil(val) FROM decimal_rounding ORDER BY id;
+----
+1 1.4000000000 2
+2 1.5000000000 2
+3 1.6000000000 2
+4 -1.4000000000 -1
+5 -1.5000000000 -1
+6 -1.6000000000 -1
+7 2.5000000000 3
+8 -2.5000000000 -2
+9 0.5000000000 1
+10 -0.5000000000 -0
+
+query ???
+SELECT id, val, floor(val) FROM decimal_rounding ORDER BY id;
+----
+1 1.4000000000 1
+2 1.5000000000 1
+3 1.6000000000 1
+4 -1.4000000000 -2
+5 -1.5000000000 -2
+6 -1.6000000000 -2
+7 2.5000000000 2
+8 -2.5000000000 -3
+9 0.5000000000 0
+10 -0.5000000000 -1
+
+query ???
+SELECT id, val, trunc(val) FROM decimal_rounding ORDER BY id;
+----
+1 1.4000000000 1.0000000000
+2 1.5000000000 1.0000000000
+3 1.6000000000 1.0000000000
+4 -1.4000000000 -1.0000000000
+5 -1.5000000000 -1.0000000000
+6 -1.6000000000 -1.0000000000
+7 2.5000000000 2.0000000000
+8 -2.5000000000 -2.0000000000
+9 0.5000000000 0.0000000000
+10 -0.5000000000 0.0000000000
+
+statement ok
+DROP TABLE decimal_rounding;
+
+# ============================================
+# Test 9: Round with precision
+# ============================================
+statement ok
+CREATE TABLE decimal_round_precision (
+    id INT PRIMARY KEY,
+    val DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_round_precision VALUES
+    (1, 123.456789),
+    (2, -123.456789),
+    (3, 0.123456789),
+    (4, 999.9999999);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ????
+SELECT id, val, round(val, 2), round(val, 4) FROM decimal_round_precision ORDER BY id;
+----
+1 123.4567890000 123.4600000000 123.4568000000
+2 -123.4567890000 -123.4600000000 -123.4568000000
+3 0.1234567890 0.1200000000 0.1235000000
+4 999.9999999000 1000.0000000000 1000.0000000000
+
+# Round with negative precision (round to left of decimal)
+query ????
+SELECT id, val, round(val, -1), round(val, -2) FROM decimal_round_precision ORDER BY id;
+----
+1 123.4567890000 120.0000000000 100.0000000000
+2 -123.4567890000 -120.0000000000 -100.0000000000
+3 0.1234567890 0.0000000000 0.0000000000
+4 999.9999999000 1000.0000000000 1000.0000000000
+
+statement ok
+DROP TABLE decimal_round_precision;
+
+# ============================================
+# Test 10: Power and square root
+# ============================================
+statement ok
+CREATE TABLE decimal_power (
+    id INT PRIMARY KEY,
+    base DECIMAL,
+    exp DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_power VALUES
+    (1, 2, 10),
+    (2, 10, 2),
+    (3, 2.5, 2),
+    (4, 0, 5),
+    (5, 1, 1000000);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Power operations
+query ????
+SELECT id, base, exp, pow(base, exp) FROM decimal_power ORDER BY id;
+----
+1 2.0000000000 10.0000000000 1024
+2 10.0000000000 2.0000000000 100
+3 2.5000000000 2.0000000000 6.25
+4 0.0000000000 5.0000000000 0
+5 1.0000000000 1000000.0000000000 1
+
+statement ok
+DROP TABLE decimal_power;
+
+# ============================================
+# Test 11: Square root corner cases
+# ============================================
+statement ok
+CREATE TABLE decimal_sqrt (
+    id INT PRIMARY KEY,
+    val DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_sqrt VALUES
+    (1, 0),
+    (2, 1),
+    (3, 2),
+    (4, 4),
+    (5, 100),
+    (6, 0.25),
+    (7, 0.0001);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ???
+SELECT id, val, sqrt(val) FROM decimal_sqrt ORDER BY id;
+----
+1 0.0000000000 0
+2 1.0000000000 1
+3 2.0000000000 1.414213562373095
+4 4.0000000000 2
+5 100.0000000000 10
+6 0.2500000000 0.5
+7 0.0001000000 0.01
+
+statement ok
+DROP TABLE decimal_sqrt;
+
+# ============================================
+# Test 12: Aggregation functions with decimal
+# ============================================
+statement ok
+CREATE TABLE decimal_agg (
+    id INT PRIMARY KEY,
+    category VARCHAR,
+    val DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_agg VALUES
+    (1, 'A', 10.5),
+    (2, 'A', 20.5),
+    (3, 'A', 30.5),
+    (4, 'B', 100.25),
+    (5, 'B', 200.75),
+    (6, 'C', 0.0001),
+    (7, 'C', 0.0002),
+    (8, 'C', 0.0003);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ????
+SELECT category, sum(val), avg(val), count(val) FROM decimal_agg GROUP BY category ORDER BY category;
+----
+A 61.5000000000 20.50000000000000 3
+B 301.0000000000 150.50000000000000 2
+C 0.0006000000 0.00020000000000 3
+
+query ??
+SELECT min(val), max(val) FROM decimal_agg;
+----
+0.0001000000 200.7500000000
+
+statement ok
+DROP TABLE decimal_agg;
+
+# ============================================
+# Test 13: Mixed type arithmetic
+# ============================================
+statement ok
+CREATE TABLE decimal_mixed (
+    id INT PRIMARY KEY,
+    d_val DECIMAL,
+    i_val INT,
+    f_val REAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_mixed VALUES
+    (1, 100.5, 10, 2.5),
+    (2, 0.1, 3, 0.1),
+    (3, -50.25, -5, -10.5);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Decimal + Integer
+query ???
+SELECT id, d_val, d_val + i_val FROM decimal_mixed ORDER BY id;
+----
+1 100.5000000000 110.5000000000
+2 0.1000000000 3.1000000000
+3 -50.2500000000 -55.2500000000
+
+# Decimal * Integer
+query ???
+SELECT id, d_val, d_val * i_val FROM decimal_mixed ORDER BY id;
+----
+1 100.5000000000 1005.00000000000000000000
+2 0.1000000000 0.30000000000000000000
+3 -50.2500000000 251.25000000000000000000
+
+# Decimal / Integer
+query ???
+SELECT id, d_val, d_val / i_val FROM decimal_mixed ORDER BY id;
+----
+1 100.5000000000 10.05000000000000
+2 0.1000000000 0.03333333333333
+3 -50.2500000000 10.05000000000000
+
+statement ok
+DROP TABLE decimal_mixed;
+
+# ============================================
+# Test 14: CASE expression with decimal
+# ============================================
+statement ok
+CREATE TABLE decimal_case (
+    id INT PRIMARY KEY,
+    val DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_case VALUES
+    (1, 100),
+    (2, 50),
+    (3, 0),
+    (4, -50),
+    (5, -100);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ???
+SELECT id, val, CASE WHEN val > 0 THEN 'positive' WHEN val < 0 THEN 'negative' ELSE 'zero' END AS sign_text
+FROM decimal_case ORDER BY id;
+----
+1 100.0000000000 positive
+2 50.0000000000 positive
+3 0.0000000000 zero
+4 -50.0000000000 negative
+5 -100.0000000000 negative
+
+statement ok
+DROP TABLE decimal_case;
+
+# ============================================
+# Test 15: NULL handling with decimal
+# ============================================
+statement ok
+CREATE TABLE decimal_null (
+    id INT PRIMARY KEY,
+    a DECIMAL,
+    b DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_null VALUES
+    (1, 10, NULL),
+    (2, NULL, 20),
+    (3, NULL, NULL),
+    (4, 0, 0);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ????
+SELECT id, a, b, a + b FROM decimal_null ORDER BY id;
+----
+1 10.0000000000 NULL NULL
+2 NULL 20.0000000000 NULL
+3 NULL NULL NULL
+4 0.0000000000 0.0000000000 0.0000000000
+
+query ????
+SELECT id, a, b, COALESCE(a, 0) + COALESCE(b, 0) FROM decimal_null ORDER BY id;
+----
+1 10.0000000000 NULL 10.0000000000
+2 NULL 20.0000000000 20.0000000000
+3 NULL NULL 0.0000000000
+4 0.0000000000 0.0000000000 0.0000000000
+
+statement ok
+DROP TABLE decimal_null;
+
+# ============================================
+# Test 16: Complex expressions
+# ============================================
+statement ok
+CREATE TABLE decimal_complex (
+    id INT PRIMARY KEY,
+    a DECIMAL,
+    b DECIMAL,
+    c DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO decimal_complex VALUES
+    (1, 10, 2, 3),
+    (2, 100, 0.5, 4),
+    (3, 5, 5, 5);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# (a + b) * c
+query ????
+SELECT id, a, b, (a + b) * c FROM decimal_complex ORDER BY id;
+----
+1 10.0000000000 2.0000000000 36.00000000000000000000
+2 100.0000000000 0.5000000000 402.00000000000000000000
+3 5.0000000000 5.0000000000 50.00000000000000000000
+
+# a / b + c
+query ????
+SELECT id, a, b, a / b + c FROM decimal_complex ORDER BY id;
+----
+1 10.0000000000 2.0000000000 8.00000000000000
+2 100.0000000000 0.5000000000 204.00000000000000
+3 5.0000000000 5.0000000000 6.00000000000000
+
+# (a * b) / c
+query ????
+SELECT id, a, b, (a * b) / c FROM decimal_complex ORDER BY id;
+----
+1 10.0000000000 2.0000000000 6.666666666666666666666666
+2 100.0000000000 0.5000000000 12.500000000000000000000000
+3 5.0000000000 5.0000000000 5.000000000000000000000000
+
+# sqrt(a) + pow(b, c)
+query ????
+SELECT id, a, b, sqrt(a) + pow(b, c) FROM decimal_complex ORDER BY id;
+----
+1 10.0000000000 2.0000000000 11.16227766016838
+2 100.0000000000 0.5000000000 10.0625
+3 5.0000000000 5.0000000000 3127.2360679775
+
+statement ok
+DROP TABLE decimal_complex;
+
+# ============================================
+# Test 17: Boundary values for decimal
+# ============================================
+statement ok
+CREATE TABLE decimal_boundary (
+    id INT PRIMARY KEY,
+    val DECIMAL
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+# Max precision is 28 digits in RisingWave
+statement ok
+INSERT INTO decimal_boundary VALUES
+    (1, '1234567890123456789012345678'),
+    (2, '-1234567890123456789012345678'),
+    (3, '0.1234567890123456789012345678'),
+    (4, '-0.1234567890123456789012345678'),
+    (5, '12345678901234.56789012345678'),
+    (6, '-12345678901234.56789012345678');
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ?? rowsort
+SELECT * FROM decimal_boundary;
+----
+1 999999999999999999.9999999999
+2 -999999999999999999.9999999999
+3 0.1234567890
+4 -0.1234567890
+5 12345678901234.5678901234
+6 -12345678901234.5678901234
+
+statement ok
+DROP TABLE decimal_boundary;
+
+# ============================================
+# Cleanup
+# ============================================
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

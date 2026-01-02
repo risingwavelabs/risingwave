@@ -14,7 +14,7 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ops::{Div, Mul};
+use std::ops::Div;
 use std::sync::{Arc, LazyLock};
 
 use arrow_array::ArrayRef;
@@ -155,6 +155,7 @@ impl ToArrow for IcebergArrowConvert {
         };
 
         // Convert Decimal to i128:
+        let max_value = 10_i128.pow(precision as u32) - 1;
         let values: Vec<Option<i128>> = array
             .iter()
             .map(|e| {
@@ -164,7 +165,16 @@ impl ToArrow for IcebergArrowConvert {
                         let scale = e.scale() as i8;
                         let diff_scale = abs(max_scale - scale);
                         let value = match scale {
-                            _ if scale < max_scale => value.mul(10_i128.pow(diff_scale as u32)),
+                            _ if scale < max_scale => value
+                                .checked_mul(10_i128.pow(diff_scale as u32))
+                                .and_then(|v| if abs(v) <= max_value { Some(v) } else { None })
+                                .unwrap_or_else(|| {
+                                    tracing::warn!(
+                                        "Decimal overflow when converting to arrow decimal with precision {} and scale {}. It will be replaced with inf/-inf.",
+                                        precision, max_scale
+                                    );
+                                    if value >= 0 { max_value } else { -max_value }
+                                }),
                             _ if scale > max_scale => value.div(10_i128.pow(diff_scale as u32)),
                             _ => value,
                         };
@@ -172,11 +182,9 @@ impl ToArrow for IcebergArrowConvert {
                     }
                     // For Inf, we replace them with the max/min value within the precision.
                     crate::array::Decimal::PositiveInf => {
-                        let max_value = 10_i128.pow(precision as u32) - 1;
                         Some(max_value)
                     }
                     crate::array::Decimal::NegativeInf => {
-                        let max_value = 10_i128.pow(precision as u32) - 1;
                         Some(-max_value)
                     }
                     crate::array::Decimal::NaN => None,
