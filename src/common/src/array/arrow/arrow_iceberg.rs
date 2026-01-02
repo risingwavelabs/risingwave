@@ -31,7 +31,15 @@ use crate::types::StructType;
 
 pub struct IcebergArrowConvert;
 
-pub const ICEBERG_DECIMAL_PRECISION: u8 = 28;
+// Arrow Decimal128 supports up to 38 decimal digits. We use precision=38, scale=10:
+// - Integer range: up to 10^28 - 1 (28 digits)
+// - Fractional precision: 10 digits
+// - Covers all RisingWave decimal values (MAX_PRECISION=28)
+//
+// Note: When reading Arrow decimals that exceed RisingWave's 96-bit / 28-digit
+// storage limit, the conversion code in arrow_impl.rs will reduce scale and
+// truncate the mantissa (via truncated_i128_and_scale) to make them fit.
+pub const ICEBERG_DECIMAL_PRECISION: u8 = 38;
 pub const ICEBERG_DECIMAL_SCALE: i8 = 10;
 
 impl IcebergArrowConvert {
@@ -361,13 +369,123 @@ mod test {
             Decimal128Array::from(vec![
                 None,
                 None,
-                Some(9999999999999999999999999999),
-                Some(-9999999999999999999999999999),
+                // With precision=38, max value is 10^38 - 1
+                Some(99999999999999999999999999999999999999),
+                Some(-99999999999999999999999999999999999999),
                 Some(1234000000000),
                 Some(1234560000000),
             ])
             .with_data_type(ty),
         ) as ArrayRef;
         assert_eq!(&arrow_array, &expect_array);
+    }
+
+    #[test]
+    fn decimal_edge_cases_risingwave_precision() {
+        // Test edge cases between RisingWave decimal precision (28 digits) and Arrow Decimal128(38,10)
+        let array = DecimalArray::from_iter([
+            // Large 27-digit integer (previously would overflow with precision=28, scale=10)
+            Some(Decimal::Normalized(
+                "999999999999999999999999999".parse().unwrap(),
+            )),
+            // RisingWave MAX_PRECISION: 28-digit integer
+            Some(Decimal::Normalized(
+                "9999999999999999999999999999".parse().unwrap(),
+            )),
+            // Large integer with fractional part
+            Some(Decimal::Normalized(
+                "999999999999999999.9999999999".parse().unwrap(),
+            )),
+            // Small value with maximum fractional digits
+            Some(Decimal::Normalized(
+                "0.9999999999999999999999999999".parse().unwrap(),
+            )),
+            // Negative large integer
+            Some(Decimal::Normalized(
+                "-999999999999999999999999999".parse().unwrap(),
+            )),
+            // Edge case: exactly 10^18 (18 digits) - boundary for old precision=28,scale=10
+            Some(Decimal::Normalized("1000000000000000000".parse().unwrap())),
+            // Very small decimal
+            Some(Decimal::Normalized("0.0000000001".parse().unwrap())),
+            // Zero with fractional representation
+            Some(Decimal::Normalized("0.0000000000".parse().unwrap())),
+        ]);
+
+        let ty = DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
+        let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
+
+        let expect_array = Arc::new(
+            Decimal128Array::from(vec![
+                // 999999999999999999999999999 * 10^10 (scale 0 → 10)
+                Some(9999999999999999999999999990000000000),
+                // 9999999999999999999999999999 * 10^10
+                Some(99999999999999999999999999990000000000),
+                // 999999999999999999.9999999999 already at scale 10
+                Some(9999999999999999999999999999),
+                // 0.9999999999999999999999999999: scale 28 → 10, truncates to 0.9999999999
+                Some(9999999999),
+                // -999999999999999999999999999 * 10^10
+                Some(-9999999999999999999999999990000000000),
+                // 1000000000000000000 * 10^10
+                Some(10000000000000000000000000000),
+                // 0.0000000001 already at scale 10
+                Some(1),
+                // 0.0000000000 (scale 10)
+                Some(0),
+            ])
+            .with_data_type(ty),
+        ) as ArrayRef;
+
+        assert_eq!(&arrow_array, &expect_array);
+    }
+
+    #[test]
+    fn decimal_special_values_roundtrip() {
+        // Test that special decimal values (inf, -inf, nan) can be written and read back correctly
+        use crate::array::Array;
+
+        let original_array = DecimalArray::from_iter([
+            Some(Decimal::PositiveInf),
+            Some(Decimal::NegativeInf),
+            Some(Decimal::NaN),
+            Some(Decimal::Normalized("123.45".parse().unwrap())),
+            None,
+        ]);
+
+        // Convert to Arrow
+        let ty = DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
+        let arrow_array = IcebergArrowConvert
+            .decimal_to_arrow(&ty, &original_array)
+            .unwrap();
+
+        // Convert back to RisingWave
+        let arrow_decimal: &arrow_array::Decimal128Array = arrow_array
+            .as_any()
+            .downcast_ref()
+            .expect("should be Decimal128Array");
+
+        let roundtrip_array: DecimalArray = arrow_decimal.try_into().unwrap();
+
+        // Verify special values roundtrip correctly
+        assert_eq!(original_array.len(), roundtrip_array.len());
+
+        // PositiveInf -> max value -> PositiveInf
+        assert_eq!(roundtrip_array.value_at(0), Some(Decimal::PositiveInf));
+
+        // NegativeInf -> min value -> NegativeInf
+        assert_eq!(roundtrip_array.value_at(1), Some(Decimal::NegativeInf));
+
+        // NaN -> NULL -> None (NaN cannot roundtrip, becomes NULL in Arrow)
+        assert_eq!(roundtrip_array.value_at(2), None);
+
+        // Normal value roundtrips correctly (scale may be adjusted)
+        assert!(matches!(
+            roundtrip_array.value_at(3),
+            Some(Decimal::Normalized(_))
+        ));
+
+        // NULL -> NULL -> None
+        assert_eq!(roundtrip_array.value_at(4), None);
     }
 }
