@@ -513,7 +513,7 @@ impl CreatingStreamingJobControl {
                 .status
                 .fragment_infos()
                 .map(|fragment_infos| {
-                    InflightFragmentInfo::contains_worker(fragment_infos.values(), worker_id)
+                    !InflightFragmentInfo::contains_worker(fragment_infos.values(), worker_id)
                 })
                 .unwrap_or(true)
     }

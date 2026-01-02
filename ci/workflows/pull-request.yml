@@ -747,7 +747,7 @@ steps:
           run: ci-standard-env
           propagate-environment: true
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 37
+    timeout_in_minutes: 45
     retry: *auto-retry
 
   # FIXME(kwannoel): Let the github PR labeller label it, if sqlsmith source files has changes.

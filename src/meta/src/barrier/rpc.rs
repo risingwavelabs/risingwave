@@ -874,18 +874,20 @@ impl ControlStreamManager {
         }?;
 
         let mut builder = FragmentEdgeBuilder::new(
-            database_jobs.values().flat_map(|job| {
-                job.fragment_infos()
-                    .map(|info| (info, to_partial_graph_id(database_id, None)))
-                    .chain(ongoing_snapshot_backfill_jobs.iter().flat_map(
-                        |(job_id, (fragments, ..))| {
-                            let partial_graph_id = to_partial_graph_id(database_id, Some(*job_id));
-                            fragments
-                                .values()
-                                .map(move |fragment| (fragment, partial_graph_id))
-                        },
-                    ))
-            }),
+            database_jobs
+                .values()
+                .flat_map(|job| {
+                    job.fragment_infos()
+                        .map(|info| (info, to_partial_graph_id(database_id, None)))
+                })
+                .chain(ongoing_snapshot_backfill_jobs.iter().flat_map(
+                    |(job_id, (fragments, ..))| {
+                        let partial_graph_id = to_partial_graph_id(database_id, Some(*job_id));
+                        fragments
+                            .values()
+                            .map(move |fragment| (fragment, partial_graph_id))
+                    },
+                )),
             self,
         );
         builder.add_relations(fragment_relations);

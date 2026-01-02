@@ -1,6 +1,10 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
+# high barrier latency in snapshot backfilling jobs won't cause high barrier latency in upstream database
+statement ok
+set streaming_use_snapshot_backfill = false;
+
 statement ok
 create table t(v1 int);
 

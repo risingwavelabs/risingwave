@@ -288,8 +288,11 @@ default_parallelism = {default_parallelism}
             meta_nodes: 1,
             compactor_nodes: 1,
             compute_node_cores: 1,
-            per_session_queries: vec!["SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".into()]
-                .into(),
+            per_session_queries: vec![
+                "SET STREAMING_USE_ARRANGEMENT_BACKFILL = true;".into(),
+                "SET STREAMING_USE_SNAPSHOT_BACKFILL = false;".into(),
+            ]
+            .into(),
             ..Default::default()
         }
     }
