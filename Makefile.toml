@@ -1264,6 +1264,7 @@ install_crate = { min_version = "6.3.0", crate_name = "hawkeye", binary = "hawke
 ], install_command = "binstall" }
 command = "hawkeye"
 args = ["check", "${@}"]
+env = { RUST_LOG = "info" }
 
 [tasks.fix-license-header]
 category = "RiseDev - Check"
@@ -1273,6 +1274,7 @@ install_crate = { min_version = "6.3.0", crate_name = "hawkeye", binary = "hawke
 ], install_command = "binstall" }
 command = "hawkeye"
 args = ["format", "${@}"]
+env = { RUST_LOG = "info" }
 
 [tasks.check-udeps]
 private = true
