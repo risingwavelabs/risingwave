@@ -12,27 +12,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
-use std::future::Future;
+use anyhow::{anyhow};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::fs::write;
+use std::future::{Future, pending};
 use std::iter::repeat_with;
+use std::mem::replace;
 use std::ops::{Deref, DerefMut};
+use std::pin::Pin;
 use std::time::Duration;
 
-use anyhow::anyhow;
 use futures::{FutureExt, TryStreamExt};
+use futures::future::{BoxFuture, select};
+use futures::stream::{BoxStream, StreamFuture};
 use itertools::Itertools;
 use risingwave_common::array::Op;
-use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
+use risingwave_common::must_match;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
+use risingwave_storage::store::{LocalStateStore, StateStoreRead};
+use rw_futures_util::drop_either_future;
 use smallvec::{SmallVec, smallvec};
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio::time::Instant;
+use tokio::time::{Instant, Sleep, sleep_until};
 use tokio_stream::StreamExt;
 use tokio_stream::adapters::Peekable;
 use tracing::{Instrument, event};
@@ -42,8 +52,13 @@ use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
-use crate::executor::prelude::*;
+use crate::common::log_store_impl::kv_log_store::{FlushInfo, SeqId};
+use crate::common::log_store_impl::kv_log_store::state::{LogStoreStateWriteChunkFuture, LogStoreWriteState};
+use crate::common::log_store_impl::kv_log_store::reader::timeout_auto_rebuild::TimeoutAutoRebuildIter;
+use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
+use crate::executor::{FlushedChunkInfo, SyncedKvLogStoreMetrics, prelude::*};
 use crate::executor::{StopMutation, StreamConsumer};
+use crate::executor::sync_kv_log_store::{ReadFlushedChunkFuture};
 use crate::task::{DispatcherId, NewOutputRequest};
 
 mod output_mapping;
@@ -53,9 +68,23 @@ use risingwave_common::id::FragmentId;
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
 /// such as barriers will be distributed to all receivers.
+pub(crate) struct SyncLogStoreDispatchConfig {
+    pub table_id: TableId,
+    pub serde: LogStoreRowSerde,
+    pub max_buffer_size: usize,
+    pub pause_duration_ms: Duration,
+    pub aligned: bool,
+}
+
+pub(crate) enum DispatchMode {
+    Direct,
+    SyncLogStore(SyncLogStoreDispatchConfig)
+}
+
 pub struct DispatchExecutor {
     input: Executor,
     inner: DispatchExecutorInner,
+    mode: DispatchMode
 }
 
 struct DispatcherWithMetrics {
@@ -395,6 +424,7 @@ impl DispatchExecutor {
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         dispatchers: Vec<stream_plan::Dispatcher>,
         actor_context: &ActorContextRef,
+        mode: DispatchMode,
     ) -> StreamResult<Self> {
         let mut executor = Self::new_inner(
             input,
@@ -404,6 +434,7 @@ impl DispatchExecutor {
             actor_context.fragment_id,
             actor_context.config.clone(),
             actor_context.streaming_metrics.clone(),
+            mode,
         );
         let inner = &mut executor.inner;
         for dispatcher in dispatchers {
@@ -425,6 +456,7 @@ impl DispatchExecutor {
         fragment_id: FragmentId,
         actor_config: Arc<StreamingConfig>,
         metrics: Arc<StreamingMetrics>,
+        mode: DispatchMode,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedSender<(ActorId, NewOutputRequest)>,
@@ -440,6 +472,7 @@ impl DispatchExecutor {
                 fragment_id,
                 actor_config,
                 metrics,
+                mode,
             ),
             tx,
         )
@@ -453,6 +486,7 @@ impl DispatchExecutor {
         fragment_id: FragmentId,
         actor_config: Arc<StreamingConfig>,
         metrics: Arc<StreamingMetrics>,
+        mode: DispatchMode,
     ) -> Self {
         if crate::consistency::insane() {
             // make some trouble before dispatching to avoid generating invalid dist key.
@@ -488,57 +522,309 @@ impl DispatchExecutor {
                 new_output_request_rx,
                 pending_new_output_requests: Default::default(),
             },
+            mode,
         }
     }
 }
+
+type MessageBatchStreamItem = StreamResult<MessageBatch>;
+type BoxedMessageBatchStream = BoxStream<'static, MessageBatchStreamItem>;
+
+async fn make_batched_input(
+    max_barrier_count_per_batch: u32,
+    input: BoxedMessageStream,
+) -> BoxedMessageBatchStream {
+    Box::pin(
+        #[try_stream]
+        async move {
+            let mut input = input.peekable();
+            while let Some(batch) = try_batch_barriers(max_barrier_count_per_batch, &mut input).await?
+            {
+                yield batch;
+            }
+        }
+    )
+}
+
+enum WriteFuture<S: LocalStateStore> {
+    ReceiveFromUpstream {
+        future: StreamFuture<BoxedMessageBatchStream>,
+        write_state: LogStoreWriteState<S>,
+    },
+    FlushingChunk {
+        epoch: u64,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
+        future: Pin<Box<LogStoreStateWriteChunkFuture<S>>>,
+        stream: BoxedMessageBatchStream,
+    },
+    EndOfStream,
+    Empty,
+}
+
+enum WriteFutureEvent {
+    UpstreamMessageReceived(MessageBatch),
+    ChunkFlushed(FlushedChunkInfo),
+    EndofStream,
+}
+
+impl<S: LocalStateStore> WriteFuture<S> {
+    fn flush_chunk(
+        stream: BoxedMessageBatchStream,
+        write_state: LogStoreWriteState<S>,
+        chunk: StreamChunk,
+        epoch: u64,
+        start_seq_id: SeqId,
+        end_seq_id: SeqId,
+    ) -> Self {
+        tracing::trace!(
+            start_seq_id,
+            end_seq_id,
+            epoch,
+            cardinality = chunk.cardinality(),
+            "write_future: flushing chunk"
+        );
+        Self::FlushingChunk { 
+            epoch, 
+            start_seq_id, 
+            end_seq_id, 
+            future: Box::pin(write_state.into_write_chunk_future(
+                chunk, 
+                epoch, 
+                start_seq_id, 
+                end_seq_id,
+            )), 
+            stream,
+        }
+    }
+
+    fn receive_from_upstream(
+        stream: BoxedMessageBatchStream,
+        write_state: LogStoreWriteState<S>,
+    ) -> Self {
+        Self::ReceiveFromUpstream { 
+            future: futures::StreamExt::into_future(stream), 
+            write_state,
+        }
+    }
+
+    // TODO: add metrics
+    async fn next_event(
+        &mut self,
+        metrics: &SyncedKvLogStoreMetrics,
+    ) -> StreamResult<(BoxedMessageBatchStream, LogStoreWriteState<S>, WriteFutureEvent)> {
+        match self {
+            WriteFuture::ReceiveFromUpstream { future, .. } => {
+                let (opt, stream) = future.await;
+                
+                match opt {
+                    Some(result) => {
+                        must_match!(replace(self, WriteFuture::Empty), WriteFuture::ReceiveFromUpstream { write_state, .. } => {
+                            result.map(|item| {
+                                (stream, write_state, WriteFutureEvent::UpstreamMessageReceived(item))
+                            })
+                        })
+                    }
+                    None => {
+                        must_match!(replace(self, WriteFuture::Empty), WriteFuture::ReceiveFromUpstream { write_state, .. } => {
+                            Ok((stream, write_state, WriteFutureEvent::EndofStream))
+                        })
+                    }
+                }
+            }
+            WriteFuture::FlushingChunk { future, .. } => {
+                let (write_state, result) = future.await;
+                let result = must_match!(replace(self, WriteFuture::Empty), WriteFuture::FlushingChunk { epoch, start_seq_id, end_seq_id, stream, ..  } => {
+                    result.map(|(flush_info, vnode_bitmap)| {
+                        (stream, write_state, WriteFutureEvent::ChunkFlushed(FlushedChunkInfo {
+                            epoch,
+                            start_seq_id,
+                            end_seq_id,
+                            flush_info,
+                            vnode_bitmap,
+                        }))
+                    })
+                });
+                result.map_err(Into::into)
+            }
+            WriteFuture::EndOfStream => {
+                pending().await
+            }
+            WriteFuture::Empty => {
+                unreachable!("should not be polled after ready")
+            }
+        }
+    }
+}
+
+type ReadingChunkFuture = BoxFuture<'static, StreamExecutorResult<StreamChunk>>;
+type DispatchingFuture = BoxFuture<'static, StreamExecutorResult<()>>;
+enum ConsumerFuture {
+    ReadingChunk { future: ReadingChunkFuture },
+    Dispatching { 
+        future: DispatchingFuture,
+        log_store_stream: ReadingChunkFuture, },
+    Empty,
+}
+
+enum ConsumerFutureEvent {
+    ReadOutChunk(StreamChunk),
+    BarrierDispatched(MessageBatch),
+    ChunkDispatched,
+}
+
+// TODO: add metrics here
+impl ConsumerFuture {
+    fn dispatch(
+        inner: DispatchExecutorInner,
+        message: MessageBatch,
+        log_store_stream: ReadingChunkFuture,
+    ) -> Self{
+        tracing::trace!(
+            "consumer_future: dispatching future created"
+        );
+        let fut = match message {
+            chunk @ MessageBatch::Chunk(_) => {
+                Box::pin(async move {
+                    inner.dispatch(chunk)
+                    .instrument(tracing::info_span!("dispatch_chunk"))
+                    .instrument_await("dispatch_chunk")
+                    .await?;
+                    Ok(())
+                })
+            }
+            MessageBatch::BarrierBatch(barrier_batch) => {
+                Box::pin(async move {
+                    assert!(!barrier_batch.is_empty());
+                    inner
+                    .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
+                    .instrument(tracing::info_span!("dispatch_barrier_batch"))
+                    .instrument_await("dispatch_barrier_batch")
+                    .await?;
+                    inner
+                    .metrics
+                    .metrics
+                    .barrier_batch_size
+                    .observe(barrier_batch.len() as f64);
+                    Ok(())
+                })
+            }
+            watermark @ MessageBatch::Watermark(_) => {
+                Box::pin(async move {
+                    inner
+                    .dispatch(watermark)
+                    .instrument(tracing::info_span!("dispatch_watermark"))
+                    .instrument_await("dispatch_watermark")
+                    .await?;
+                    Ok(())
+                })
+            }
+        };
+        Self::Dispatching { future:fut, log_store_stream }
+    }
+
+    fn read_chunk(
+        future: ReadingChunkFuture,
+    ) -> Self {
+        tracing::trace!(
+            "consumer_future: reading chunk future created"
+        );
+        Self::ReadingChunk { future }
+    }
+
+    async fn next_event(
+        &mut self,
+        barriers: &VecDeque<MessageBatch>,
+    ) -> StreamExecutorResult<ConsumerFutureEvent> {
+        if !barriers.is_empty() {
+            match self {
+                ConsumerFuture::ReadingChunk { future } => {
+                    let dispatch_future = 
+                }
+            }
+        }
+        match self {
+            ConsumerFuture::ReadingChunk{future} => {
+                let result = future.await?;
+                must_match!(replace(self, ConsumerFuture::Empty), ConsumerFuture::ReadingChunk{future} => {
+                    Ok(ConsumerFutureEvent::ReadOutChunk(result))
+                })
+            }
+            ConsumerFuture::Dispatching {future} => {
+                let result = future.await?;
+                must_match!(replace(self, ConsumerFuture::Empty), ConsumerFuture::Dispatching { future } => {
+                    Ok(ConsumerFutureEvent::DispatchFinished)
+                })
+            }
+            ConsumerFuture::Empty => {
+                unreachable!("ConsumerFuture::Empty should be handled!")
+            }
+        }
+    }
+}
+
+type DispatchInnerFuture = BoxFuture<'static, (DispatchExecutorInner, StreamResult<()>)>;
 
 impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
         let max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
-        #[try_stream]
-        async move {
-            let mut input = self.input.execute().peekable();
-            loop {
-                let Some(message) =
-                    try_batch_barriers(max_barrier_count_per_batch, &mut input).await?
-                else {
-                    // end_of_stream
-                    break;
-                };
-                match message {
-                    chunk @ MessageBatch::Chunk(_) => {
-                        self.inner
-                            .dispatch(chunk)
-                            .instrument(tracing::info_span!("dispatch_chunk"))
-                            .instrument_await("dispatch_chunk")
-                            .await?;
-                    }
-                    MessageBatch::BarrierBatch(barrier_batch) => {
-                        assert!(!barrier_batch.is_empty());
-                        self.inner
-                            .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
-                            .instrument(tracing::info_span!("dispatch_barrier_batch"))
-                            .instrument_await("dispatch_barrier_batch")
-                            .await?;
-                        self.inner
-                            .metrics
-                            .metrics
-                            .barrier_batch_size
-                            .observe(barrier_batch.len() as f64);
-                        for barrier in barrier_batch {
-                            yield barrier;
+        match self.mode {
+            DispatchMode::Direct => {
+                #[try_stream]
+                async move {
+                    let mut input = self.input.execute().peekable();
+                    loop {
+                        let Some(message) =
+                            try_batch_barriers(max_barrier_count_per_batch, &mut input).await?
+                        else {
+                            // end_of_stream
+                            break;
+                        };
+                        match message {
+                            chunk @ MessageBatch::Chunk(_) => {
+                                self.inner
+                                    .dispatch(chunk)
+                                    .instrument(tracing::info_span!("dispatch_chunk"))
+                                    .instrument_await("dispatch_chunk")
+                                    .await?;
+                            }
+                            MessageBatch::BarrierBatch(barrier_batch) => {
+                                assert!(!barrier_batch.is_empty());
+                                self.inner
+                                    .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
+                                    .instrument(tracing::info_span!("dispatch_barrier_batch"))
+                                    .instrument_await("dispatch_barrier_batch")
+                                    .await?;
+                                self.inner
+                                    .metrics
+                                    .metrics
+                                    .barrier_batch_size
+                                    .observe(barrier_batch.len() as f64);
+                                for barrier in barrier_batch {
+                                    yield barrier;
+                                }
+                            }
+                            watermark @ MessageBatch::Watermark(_) => {
+                                self.inner
+                                    .dispatch(watermark)
+                                    .instrument(tracing::info_span!("dispatch_watermark"))
+                                    .instrument_await("dispatch_watermark")
+                                    .await?;
+                            }
                         }
                     }
-                    watermark @ MessageBatch::Watermark(_) => {
-                        self.inner
-                            .dispatch(watermark)
-                            .instrument(tracing::info_span!("dispatch_watermark"))
-                            .instrument_await("dispatch_watermark")
-                            .await?;
-                    }
                 }
+            }
+            DispatchMode::SyncLogStore(log_store_config) => {
+                // TODO: Add sync log store logistics here
+                // Create a synclogstore following log_store_config
+                let mut input = self.input.execute().peekable();
+
+                // #[try_stream]
+                // async { yield Barrier::new_test_barrier(1); }
+                
             }
         }
     }
@@ -1386,6 +1672,7 @@ mod tests {
                 new_output_request_rx,
                 vec![broadcast_dispatcher, simple_dispatcher],
                 &ActorContext::for_test(actor_id),
+                DispatchMode::Direct,
             )
             .await
             .unwrap(),
