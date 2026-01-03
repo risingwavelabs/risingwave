@@ -479,10 +479,9 @@ message Table {
   optional uint64 initialized_at_epoch = 28;
   optional uint64 created_at_epoch = 29;
 
-  // This field is introduced in v1.2.0. It is used to indicate whether the
-  // table should use watermark_cache to avoid state cleaning as a performance
-  // optimization. In older versions we can just initialize without it.
-  bool cleaned_by_watermark = 30;
+  // Deprecated: reserved for compatibility with older streaming plans.
+  // Dynamic filter used to set this, but now carries this flag in its plan node body instead.
+  bool cleaned_by_watermark = 30 [deprecated = true];
 
   // Used to filter created / creating tables in meta.
   StreamJobStatus stream_job_status = 31;
