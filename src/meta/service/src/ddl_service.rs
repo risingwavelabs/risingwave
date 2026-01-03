@@ -1108,6 +1108,38 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(AlterParallelismResponse {}))
     }
 
+    async fn alter_backfill_parallelism(
+        &self,
+        request: Request<AlterBackfillParallelismRequest>,
+    ) -> Result<Response<AlterBackfillParallelismResponse>, Status> {
+        let req = request.into_inner();
+
+        let job_id = req.get_table_id();
+        let deferred = req.get_deferred();
+
+        let parallelism = match req.parallelism {
+            None => None,
+            Some(parallelism) => {
+                let parallelism = match parallelism.get_parallelism()? {
+                    Parallelism::Fixed(FixedParallelism { parallelism }) => {
+                        StreamingParallelism::Fixed(*parallelism as _)
+                    }
+                    Parallelism::Auto(_) | Parallelism::Adaptive(_) => {
+                        StreamingParallelism::Adaptive
+                    }
+                    _ => bail_unavailable!(),
+                };
+                Some(parallelism)
+            }
+        };
+
+        self.ddl_controller
+            .reschedule_streaming_job_backfill_parallelism(job_id, parallelism, deferred)
+            .await?;
+
+        Ok(Response::new(AlterBackfillParallelismResponse {}))
+    }
+
     async fn alter_fragment_parallelism(
         &self,
         request: Request<AlterFragmentParallelismRequest>,

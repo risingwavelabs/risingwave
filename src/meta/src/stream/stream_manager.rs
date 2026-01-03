@@ -770,6 +770,63 @@ impl GlobalStreamManager {
         Ok(())
     }
 
+    pub(crate) async fn reschedule_streaming_job_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<StreamingParallelism>,
+        deferred: bool,
+    ) -> MetaResult<()> {
+        let _reschedule_job_lock = self.reschedule_lock_write_guard().await;
+
+        let background_jobs = self
+            .metadata_manager
+            .list_background_creating_jobs()
+            .await?;
+
+        if !background_jobs.is_empty() {
+            let unreschedulable = self
+                .metadata_manager
+                .collect_unreschedulable_backfill_jobs(&background_jobs)
+                .await?;
+
+            if unreschedulable.contains(&job_id) {
+                bail!(
+                    "Cannot alter the job {} because it is a non-reschedulable background backfill job",
+                    job_id,
+                );
+            }
+        }
+
+        let worker_nodes = self
+            .metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await?
+            .into_iter()
+            .filter(|w| w.is_streaming_schedulable())
+            .collect_vec();
+        let workers = worker_nodes.into_iter().map(|x| (x.id, x)).collect();
+
+        let commands = self
+            .scale_controller
+            .reschedule_backfill_parallelism_inplace(
+                HashMap::from([(job_id, parallelism)]),
+                workers,
+            )
+            .await?;
+
+        if !deferred {
+            let _source_pause_guard = self.source_manager.pause_tick().await;
+
+            for (database_id, command) in commands {
+                self.barrier_scheduler
+                    .run_command(database_id, command)
+                    .await?;
+            }
+        }
+
+        Ok(())
+    }
+
     /// This method is copied from `GlobalStreamManager::reschedule_streaming_job` and modified to handle reschedule CDC table backfill.
     pub(crate) async fn reschedule_cdc_table_backfill(
         &self,
