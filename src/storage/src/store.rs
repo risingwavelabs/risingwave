@@ -37,7 +37,7 @@ use risingwave_hummock_trace::{
     TracedInitOptions, TracedNewLocalOptions, TracedOpConsistencyLevel, TracedPrefetchOptions,
     TracedReadOptions, TracedSealCurrentEpochOptions, TracedTryWaitEpochOptions,
 };
-use risingwave_pb::hummock::PbVnodeWatermark;
+use risingwave_pb::hummock::{PbVnodeWatermark, PbWatermarkSerdeType};
 
 use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
@@ -785,10 +785,7 @@ impl From<SealCurrentEpochOptions> for TracedSealCurrentEpochOptions {
                                 Message::encode_to_vec(&pb_watermark)
                             })
                             .collect(),
-                        match watermark_type {
-                            WatermarkSerdeType::NonPkPrefix => true,
-                            WatermarkSerdeType::PkPrefix => false,
-                        },
+                        PbWatermarkSerdeType::from(watermark_type) as i32,
                     )
                 },
             ),
@@ -803,7 +800,7 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
     fn from(value: TracedSealCurrentEpochOptions) -> SealCurrentEpochOptions {
         SealCurrentEpochOptions {
             table_watermarks: value.table_watermarks.map(
-                |(is_ascending, watermarks, is_non_pk_prefix)| {
+                |(is_ascending, watermarks, watermark_serde_type)| {
                     (
                         if is_ascending {
                             WatermarkDirection::Ascending
@@ -818,10 +815,11 @@ impl From<TracedSealCurrentEpochOptions> for SealCurrentEpochOptions {
                                     .expect("should not failed")
                             })
                             .collect(),
-                        if is_non_pk_prefix {
-                            WatermarkSerdeType::NonPkPrefix
-                        } else {
-                            WatermarkSerdeType::PkPrefix
+                        match PbWatermarkSerdeType::try_from(watermark_serde_type).unwrap() {
+                            PbWatermarkSerdeType::TypeUnspecified => unreachable!(),
+                            PbWatermarkSerdeType::PkPrefix => WatermarkSerdeType::PkPrefix,
+                            PbWatermarkSerdeType::NonPkPrefix => WatermarkSerdeType::NonPkPrefix,
+                            PbWatermarkSerdeType::Value => WatermarkSerdeType::Value,
                         },
                     )
                 },
