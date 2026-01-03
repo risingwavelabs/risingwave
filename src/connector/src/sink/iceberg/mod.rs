@@ -1883,39 +1883,37 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
         Ok(())
     }
 
-    async fn commit(
-        &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<()> {
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         tracing::info!("Starting iceberg direct commit in epoch {epoch}");
 
         // Commit data if present
         if let Some((write_results, snapshot_id)) = self.pre_commit_inner(epoch, metadata)? {
-            self.commit_datafile(epoch, write_results, snapshot_id)
+            self.commit_data_impl(epoch, write_results, snapshot_id)
                 .await?;
         }
 
-        // Commit schema change if present
-        if let Some(schema_change) = schema_change {
-            let risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(add_columns) =
-                schema_change.op.unwrap()
-            else {
-                return Err(SinkError::Iceberg(anyhow!(
-                    "Only AddColumns schema change is supported for Iceberg sink"
-                )));
-            };
-            let add_fields = add_columns
-                .fields
-                .into_iter()
-                .map(|pb_field| Field::from_prost(&pb_field))
-                .collect_vec();
-            tracing::info!(?epoch, "Committing schema change");
-            self.commit_schema_change(add_fields).await?;
-        }
-
         Ok(())
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        epoch: u64,
+        schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        let risingwave_pb::stream_plan::sink_schema_change::Op::AddColumns(add_columns) =
+            schema_change.op.unwrap()
+        else {
+            return Err(SinkError::Iceberg(anyhow!(
+                "Only AddColumns schema change is supported for Iceberg sink"
+            )));
+        };
+        let add_fields = add_columns
+            .fields
+            .into_iter()
+            .map(|pb_field| Field::from_prost(&pb_field))
+            .collect_vec();
+        tracing::info!(?epoch, "Committing schema change");
+        self.commit_schema_change_impl(add_fields).await
     }
 }
 
@@ -1935,7 +1933,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         epoch: u64,
         metadata: Vec<SinkMetadata>,
         schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<Vec<u8>> {
+    ) -> Result<Option<Vec<u8>>> {
         tracing::info!("Starting iceberg pre commit in epoch {epoch}");
 
         // TwoPhaseCommitCoordinator does not support schema change yet
@@ -1950,8 +1948,8 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         let (write_results, snapshot_id) = match self.pre_commit_inner(epoch, metadata)? {
             Some((write_results, snapshot_id)) => (write_results, snapshot_id),
             None => {
-                tracing::debug!(?epoch, "no data to commit");
-                return Ok(vec![]);
+                tracing::debug!(?epoch, "no data to pre commit");
+                return Ok(None);
             }
         };
 
@@ -1966,15 +1964,10 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
         write_results_bytes.push(snapshot_id_bytes);
 
         let pre_commit_metadata_bytes: Vec<u8> = serialize_metadata(write_results_bytes);
-        Ok(pre_commit_metadata_bytes)
+        Ok(Some(pre_commit_metadata_bytes))
     }
 
-    async fn commit(
-        &mut self,
-        epoch: u64,
-        commit_metadata: Vec<u8>,
-        _schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<()> {
+    async fn commit_data(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()> {
         tracing::info!("Starting iceberg commit in epoch {epoch}");
         if commit_metadata.is_empty() {
             tracing::debug!(?epoch, "no data to commit");
@@ -2007,7 +2000,7 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
             write_results.push(write_result);
         }
 
-        self.commit_datafile(epoch, write_results, snapshot_id)
+        self.commit_data_impl(epoch, write_results, snapshot_id)
             .await?;
 
         Ok(())
@@ -2057,7 +2050,7 @@ impl IcebergSinkCommitter {
         Ok(Some((write_results, snapshot_id)))
     }
 
-    async fn commit_datafile(
+    async fn commit_data_impl(
         &mut self,
         epoch: u64,
         write_results: Vec<IcebergCommitResult>,
@@ -2240,7 +2233,7 @@ impl IcebergSinkCommitter {
     /// Commit schema changes (e.g., add columns) to the iceberg table.
     /// This function uses Transaction API to atomically update the table schema
     /// with optimistic locking to prevent concurrent conflicts.
-    async fn commit_schema_change(&mut self, add_columns: Vec<Field>) -> Result<()> {
+    async fn commit_schema_change_impl(&mut self, add_columns: Vec<Field>) -> Result<()> {
         use iceberg::spec::NestedField;
 
         tracing::info!(
