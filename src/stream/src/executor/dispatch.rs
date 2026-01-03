@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
+use anyhow::{anyhow};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fs::write;
 use std::future::{Future, pending};
@@ -658,7 +658,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
 }
 
 type ReadingChunkFuture = BoxFuture<'static, StreamExecutorResult<StreamChunk>>;
-
+type DispatchingFuture = BoxFuture<'static, StreamExecutorResult<()>>;
 enum ConsumerFuture {
     ReadingChunk { future: ReadingChunkFuture },
     Dispatching { 
@@ -669,11 +669,69 @@ enum ConsumerFuture {
 
 enum ConsumerFutureEvent {
     ReadOutChunk(StreamChunk),
-    DispatchFinished,
+    BarrierDispatched(MessageBatch),
+    ChunkDispatched,
 }
 
 // TODO: add metrics here
 impl ConsumerFuture {
+    fn dispatch(
+        inner: DispatchExecutorInner,
+        message: MessageBatch,
+        log_store_stream: ReadingChunkFuture,
+    ) -> Self{
+        tracing::trace!(
+            "consumer_future: dispatching future created"
+        );
+        let fut = match message {
+            chunk @ MessageBatch::Chunk(_) => {
+                Box::pin(async move {
+                    inner.dispatch(chunk)
+                    .instrument(tracing::info_span!("dispatch_chunk"))
+                    .instrument_await("dispatch_chunk")
+                    .await?;
+                    Ok(())
+                })
+            }
+            MessageBatch::BarrierBatch(barrier_batch) => {
+                Box::pin(async move {
+                    assert!(!barrier_batch.is_empty());
+                    inner
+                    .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
+                    .instrument(tracing::info_span!("dispatch_barrier_batch"))
+                    .instrument_await("dispatch_barrier_batch")
+                    .await?;
+                    inner
+                    .metrics
+                    .metrics
+                    .barrier_batch_size
+                    .observe(barrier_batch.len() as f64);
+                    Ok(())
+                })
+            }
+            watermark @ MessageBatch::Watermark(_) => {
+                Box::pin(async move {
+                    inner
+                    .dispatch(watermark)
+                    .instrument(tracing::info_span!("dispatch_watermark"))
+                    .instrument_await("dispatch_watermark")
+                    .await?;
+                    Ok(())
+                })
+            }
+        };
+        Self::Dispatching { future:fut, log_store_stream }
+    }
+
+    fn read_chunk(
+        future: ReadingChunkFuture,
+    ) -> Self {
+        tracing::trace!(
+            "consumer_future: reading chunk future created"
+        );
+        Self::ReadingChunk { future }
+    }
+
     async fn next_event(
         &mut self,
         barriers: &VecDeque<MessageBatch>,
@@ -681,7 +739,7 @@ impl ConsumerFuture {
         if !barriers.is_empty() {
             match self {
                 ConsumerFuture::ReadingChunk { future } => {
-                    self = ConsumerFuture::Dispatching {}
+                    let dispatch_future = 
                 }
             }
         }
@@ -706,93 +764,6 @@ impl ConsumerFuture {
 }
 
 type DispatchInnerFuture = BoxFuture<'static, (DispatchExecutorInner, StreamResult<()>)>;
-enum DispatchingFuture {
-    DispatchingBarriers {
-        future: DispatchInnerFuture,
-        to_yield: MessageBatch,
-    },
-    DispatchingChunk {
-        future: DispatchInnerFuture,
-    },
-    Idle {
-        inner: DispatchExecutorInner,
-    },
-}
-
-impl DispatchingFuture {
-    fn start_chunk_or_watermark(self, message: MessageBatch) -> Self {
-        let DispatchFuture::Idle { mut inner } = self else { unreachable!() };
-        let fut = match message {
-            chunk @ MessageBatch::Chunk(_) => {
-                async move {
-                    let r = inner
-                    .dispatch(chunk)
-                    .instrument(tracing::info_span!("dispatch_chunk"))
-                    .instrument_await("dispatch_chunk")
-                    .await?;
-                    (inner, r)
-                }
-                .boxed();
-            }
-            watermark @ MessageBatch::Watermark(_) => {
-                async move {
-                    let r = inner
-                    .dispatch(watermark)
-                    .instrument(tracing::info_span!("dispatch_watermark"))
-                    .instrument_await("dispatch_watermark")
-                    .await?;
-                    (inner, r)
-                }
-                .boxed();
-            }
-            _ => {
-                unreachable!("barrier should not be handled here!")
-            }
-        };
-        DispatchFuture::DispatchingChunk { future: fut }
-    }
-
-    fn start_barrier(self, mut barriers: &VecDeque<MessageBatch>) -> Self {
-        let DispatchFuture::Idle { mut inner } = self else { unreachable!() };
-        assert!(!barriers.is_empty());
-        let to_yield_barrier = barriers.pop_back().unwrap();
-        let MessageBatch::BarrierBatch(barrier_batch) = to_yield_barrier.clone() else {
-            unreachable!("to_yield_barrier must be BarrierBatch");
-        };
-        assert!(!barrier_batch.is_empty());
-        let fut = async move {
-            let r = inner
-            .dispatch(barrier_batch)
-            .instrument(tracing::info_span!("dispatch_barrier_batch"))
-            .instrument_await("dispatch_barrier_batch")
-            .await?;
-            inner
-            .metrics
-            .metrics
-            .barrier_batch_size
-            .observe(barrier_batch.len() as f64);
-            (inner, r)
-        }
-        .boxed();
-        DispatchFuture::DispatchingBarriers { future: fut, to_yield: to_yield_barrier }
-    }
-
-    async fn next_event (
-        &mut self,
-        buffer: &mut VecDeque<MessageBatch>,
-    ) -> StreamResult<Option<MessageBatch>>{
-        match self {
-            DispatchingFuture::DispatchingChunk { future } => {
-                let (dispatch_inner, _) = future.await?;
-                *self = DispatchingFuture::Idle{ inner: dispatch_inner };
-                Ok(None)
-            }
-            DispatchingFuture::DispatchingBarriers { future, to_yield } => {
-
-            }
-        }
-    }
-}
 
 impl StreamConsumer for DispatchExecutor {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
