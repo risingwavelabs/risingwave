@@ -56,7 +56,7 @@ use crate::task::{
 pub const CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY: u64 = 256;
 pub type ConfigOverrideCache = moka::sync::Cache<String, Arc<StreamingConfig>>;
 
-/// [Spawning actors](`Self::spawn_actor`), called by [`crate::task::barrier_worker::managed_state::DatabaseManagedBarrierState`].
+/// [Spawning actors](`Self::spawn_actor`), called by [`crate::task::barrier_worker::managed_state::PartialGraphState`].
 ///
 /// See [`crate::task`] for architecture overview.
 pub(crate) struct StreamActorManager {
