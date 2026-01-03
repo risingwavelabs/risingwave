@@ -577,6 +577,19 @@ impl CreateMviewProgressTracker {
                 .map(|fragment| (fragment.fragment_type_mask, fragment.actors.keys().copied())),
         );
 
+        #[cfg(debug_assertions)]
+        {
+            let old_actor_ids: HashSet<_> = progress.states.keys().copied().collect();
+            let new_actor_ids: HashSet<_> = new_tracking_actors
+                .iter()
+                .map(|(actor_id, _)| *actor_id)
+                .collect();
+            debug_assert!(
+                old_actor_ids.is_disjoint(&new_actor_ids),
+                "reschedule should rebuild backfill actors; old={old_actor_ids:?}, new={new_actor_ids:?}"
+            );
+        }
+
         let mut new_states = HashMap::new();
         let mut new_backfill_types = HashMap::new();
         for (actor_id, upstream_type) in new_tracking_actors {
@@ -591,7 +604,7 @@ impl CreateMviewProgressTracker {
 
         let newly_scheduled = progress
             .backfill_order_state
-            .refresh_actors(&fragment_actors, &HashSet::new());
+            .refresh_actors(&fragment_actors);
 
         progress.backfill_upstream_types = new_backfill_types;
         progress.states = new_states;
