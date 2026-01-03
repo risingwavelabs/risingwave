@@ -20,7 +20,10 @@ use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use risingwave_pb::id::FragmentId;
 use risingwave_pb::task_service::stream_exchange_service_server::StreamExchangeService;
-use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse, PbPermits, permits};
+use risingwave_pb::task_service::{
+    GetMuxStreamRequest, GetMuxStreamResponse, GetStreamRequest, GetStreamResponse, PbPermits,
+    permits,
+};
 use risingwave_stream::executor::DispatcherMessageBatch;
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
 use risingwave_stream::task::LocalStreamManager;
@@ -28,8 +31,11 @@ use tonic::{Request, Response, Status, Streaming};
 
 pub mod metrics;
 pub use metrics::{GLOBAL_STREAM_EXCHANGE_SERVICE_METRICS, StreamExchangeServiceMetrics};
+mod mux;
 
 pub type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
+pub type MuxStreamDataStream =
+    impl Stream<Item = std::result::Result<GetMuxStreamResponse, Status>>;
 
 #[derive(Clone)]
 pub struct StreamExchangeServiceImpl {
@@ -39,6 +45,7 @@ pub struct StreamExchangeServiceImpl {
 
 #[async_trait::async_trait]
 impl StreamExchangeService for StreamExchangeServiceImpl {
+    type GetMuxStreamStream = MuxStreamDataStream;
     type GetStreamStream = StreamDataStream;
 
     #[define_opaque(StreamDataStream)]
@@ -90,6 +97,20 @@ impl StreamExchangeService for StreamExchangeServiceImpl {
             receiver,
             add_permits_stream,
             (up_fragment_id, down_fragment_id),
+        )))
+    }
+
+    #[define_opaque(MuxStreamDataStream)]
+    async fn get_mux_stream(
+        &self,
+        request: Request<Streaming<GetMuxStreamRequest>>,
+    ) -> std::result::Result<Response<Self::GetMuxStreamStream>, Status> {
+        let request_stream = request.into_inner();
+
+        Ok(Response::new(Self::get_mux_stream_impl(
+            self.metrics.clone(),
+            self.stream_mgr.clone(),
+            request_stream,
         )))
     }
 }
