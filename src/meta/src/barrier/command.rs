@@ -73,7 +73,7 @@ use crate::model::{
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder, SplitAssignment,
-    SplitState, ThrottleConfig, UpstreamSinkInfo, build_actor_connector_splits,
+    SplitState, UpstreamSinkInfo, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -358,7 +358,10 @@ pub enum Command {
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
-    Throttle(ThrottleConfig),
+    Throttle {
+        jobs: HashSet<JobId>,
+        config: HashMap<FragmentId, Option<u32>>,
+    },
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
     /// materialize executor to start storing old value for subscription.
@@ -418,7 +421,7 @@ impl std::fmt::Display for Command {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
             Command::SourceChangeSplit { .. } => write!(f, "SourceChangeSplit"),
-            Command::Throttle(_) => write!(f, "Throttle"),
+            Command::Throttle { .. } => write!(f, "Throttle"),
             Command::CreateSubscription {
                 subscription_id, ..
             } => write!(f, "CreateSubscription: {subscription_id}"),
@@ -607,7 +610,7 @@ impl Command {
                     })
                     .collect(),
             )),
-            Command::Throttle(_) => None,
+            Command::Throttle { .. } => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
             Command::ConnectorPropsChange(_) => None,
@@ -886,18 +889,14 @@ impl Command {
                 }))
             }
 
-            Command::Throttle(config) => {
-                let mut actor_to_apply = HashMap::new();
-                for per_fragment in config.values() {
-                    actor_to_apply.extend(
-                        per_fragment
-                            .iter()
-                            .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit })),
-                    );
+            Command::Throttle { config, .. } => {
+                let mut fragment_to_apply = HashMap::new();
+                for (fragment_id, limit) in config {
+                    fragment_to_apply.insert(*fragment_id, RateLimit { rate_limit: *limit });
                 }
 
                 Some(Mutation::Throttle(ThrottleMutation {
-                    actor_throttle: actor_to_apply,
+                    fragment_throttle: fragment_to_apply,
                 }))
             }
 

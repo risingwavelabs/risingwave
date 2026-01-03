@@ -558,60 +558,40 @@ impl MetadataManager {
         &self,
         source_id: SourceId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
-        let fragment_actors = self
-            .catalog_controller
+    ) -> MetaResult<(HashSet<JobId>, HashSet<FragmentId>)> {
+        self.catalog_controller
             .update_source_rate_limit_by_source_id(source_id as _, rate_limit)
-            .await?;
-        Ok(fragment_actors
-            .into_iter()
-            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
-            .collect())
+            .await
     }
 
     pub async fn update_backfill_rate_limit_by_job_id(
         &self,
         job_id: JobId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
-        let fragment_actors = self
-            .catalog_controller
+    ) -> MetaResult<HashSet<FragmentId>> {
+        self.catalog_controller
             .update_backfill_rate_limit_by_job_id(job_id, rate_limit)
-            .await?;
-        Ok(fragment_actors
-            .into_iter()
-            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
-            .collect())
+            .await
     }
 
     pub async fn update_sink_rate_limit_by_sink_id(
         &self,
         sink_id: SinkId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
-        let fragment_actors = self
-            .catalog_controller
+    ) -> MetaResult<HashSet<FragmentId>> {
+        self.catalog_controller
             .update_sink_rate_limit_by_job_id(sink_id, rate_limit)
-            .await?;
-        Ok(fragment_actors
-            .into_iter()
-            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
-            .collect())
+            .await
     }
 
     pub async fn update_dml_rate_limit_by_job_id(
         &self,
         job_id: JobId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
-        let fragment_actors = self
-            .catalog_controller
+    ) -> MetaResult<HashSet<FragmentId>> {
+        self.catalog_controller
             .update_dml_rate_limit_by_job_id(job_id, rate_limit)
-            .await?;
-        Ok(fragment_actors
-            .into_iter()
-            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
-            .collect())
+            .await
     }
 
     pub async fn update_sink_props_by_sink_id(
@@ -645,15 +625,10 @@ impl MetadataManager {
         &self,
         fragment_id: FragmentId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
-        let fragment_actors = self
-            .catalog_controller
+    ) -> MetaResult<()> {
+        self.catalog_controller
             .update_fragment_rate_limit_by_fragment_id(fragment_id as _, rate_limit)
-            .await?;
-        Ok(fragment_actors
-            .into_iter()
-            .map(|(id, actors)| (id as _, actors.into_iter().map(|id| id as _).collect()))
-            .collect())
+            .await
     }
 
     #[await_tree::instrument]

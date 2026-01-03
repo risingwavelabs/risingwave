@@ -263,7 +263,7 @@ impl CommandContext {
         match command {
             Command::Flush => {}
 
-            Command::Throttle(_) => {}
+            Command::Throttle { .. } => {}
 
             Command::Pause => {}
 
