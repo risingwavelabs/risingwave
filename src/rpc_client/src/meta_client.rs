@@ -653,6 +653,22 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_backfill_parallelism(
+        &self,
+        job_id: JobId,
+        parallelism: Option<PbTableParallelism>,
+        deferred: bool,
+    ) -> Result<()> {
+        let request = AlterBackfillParallelismRequest {
+            table_id: job_id,
+            parallelism,
+            deferred,
+        };
+
+        self.inner.alter_backfill_parallelism(request).await?;
+        Ok(())
+    }
+
     pub async fn alter_streaming_job_config(
         &self,
         job_id: JobId,
@@ -2593,6 +2609,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_owner, AlterOwnerRequest, AlterOwnerResponse }
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
+            ,{ ddl_client, alter_backfill_parallelism, AlterBackfillParallelismRequest, AlterBackfillParallelismResponse }
             ,{ ddl_client, alter_streaming_job_config, AlterStreamingJobConfigRequest, AlterStreamingJobConfigResponse }
             ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }

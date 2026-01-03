@@ -700,6 +700,15 @@ impl CatalogWriter for MockCatalogWriter {
         todo!()
     }
 
+    async fn alter_backfill_parallelism(
+        &self,
+        _job_id: JobId,
+        _parallelism: Option<PbTableParallelism>,
+        _deferred: bool,
+    ) -> Result<()> {
+        todo!()
+    }
+
     async fn alter_config(
         &self,
         _job_id: JobId,

@@ -175,6 +175,62 @@ impl ScaleController {
         Ok(commands)
     }
 
+    pub async fn reschedule_backfill_parallelism_inplace(
+        &self,
+        policy: HashMap<JobId, Option<StreamingParallelism>>,
+        workers: HashMap<WorkerId, PbWorkerNode>,
+    ) -> MetaResult<HashMap<DatabaseId, Command>> {
+        if policy.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        for (table_id, parallelism) in &policy {
+            let streaming_job = StreamingJob::find_by_id(*table_id)
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", table_id))?;
+
+            let max_parallelism = streaming_job.max_parallelism;
+
+            let mut streaming_job = streaming_job.into_active_model();
+
+            if let Some(StreamingParallelism::Fixed(n)) = parallelism
+                && *n > max_parallelism as usize
+            {
+                bail!(format!(
+                    "specified backfill parallelism {n} should not exceed max parallelism {max_parallelism}"
+                ));
+            }
+
+            streaming_job.backfill_parallelism = Set(parallelism.clone());
+            streaming_job.update(&txn).await?;
+        }
+
+        let jobs = policy.keys().copied().collect();
+
+        let workers = workers
+            .into_iter()
+            .map(|(id, worker)| {
+                (
+                    id,
+                    WorkerInfo {
+                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        resource_group: worker.resource_group(),
+                    },
+                )
+            })
+            .collect();
+
+        let command = self.rerender_inner(&txn, jobs, workers).await?;
+
+        txn.commit().await?;
+
+        Ok(command)
+    }
+
     pub async fn reschedule_fragment_inplace(
         &self,
         policy: HashMap<risingwave_meta_model::FragmentId, Option<StreamingParallelism>>,

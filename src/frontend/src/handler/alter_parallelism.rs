@@ -63,6 +63,38 @@ pub async fn handle_alter_parallelism(
     Ok(builder.into())
 }
 
+pub async fn handle_alter_backfill_parallelism(
+    handler_args: HandlerArgs,
+    obj_name: ObjectName,
+    parallelism: SetVariableValue,
+    stmt_type: StatementType,
+    deferred: bool,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session;
+
+    let job_id =
+        resolve_streaming_job_id_for_alter(&session, obj_name, stmt_type, "backfill_parallelism")?;
+
+    let target_parallelism = extract_backfill_parallelism(parallelism)?;
+
+    let mut builder = RwPgResponse::builder(stmt_type);
+
+    let catalog_writer = session.catalog_writer()?;
+    execute_with_long_running_notification(
+        catalog_writer.alter_backfill_parallelism(job_id, target_parallelism, deferred),
+        &session,
+        "ALTER BACKFILL PARALLELISM",
+        LongRunningNotificationAction::SuggestRecover,
+    )
+    .await?;
+
+    if deferred {
+        builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());
+    }
+
+    Ok(builder.into())
+}
+
 pub async fn handle_alter_fragment_parallelism(
     handler_args: HandlerArgs,
     fragment_ids: Vec<FragmentId>,
@@ -124,6 +156,13 @@ fn extract_table_parallelism(parallelism: SetVariableValue) -> Result<TableParal
     };
 
     Ok(target_parallelism)
+}
+
+fn extract_backfill_parallelism(parallelism: SetVariableValue) -> Result<Option<TableParallelism>> {
+    match parallelism {
+        SetVariableValue::Default => Ok(None),
+        other => extract_table_parallelism(other).map(Some),
+    }
 }
 
 fn extract_fragment_parallelism(parallelism: SetVariableValue) -> Result<Option<TableParallelism>> {
