@@ -38,7 +38,7 @@ impl LoaderV2 {
 #[async_trait::async_trait]
 impl Loader<MetadataV2> for LoaderV2 {
     async fn load(&self, target_id: MetaSnapshotId) -> BackupResult<MetaSnapshot<MetadataV2>> {
-        let snapshot_list = &self.backup_store.manifest().snapshot_metadata;
+        let snapshot_list = &self.backup_store.manifest().await.snapshot_metadata;
         let mut target_snapshot: MetaSnapshotV2 = self.backup_store.get(target_id).await?;
         tracing::debug!(
             "snapshot {} before rewrite:\n{}",

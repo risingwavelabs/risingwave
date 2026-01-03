@@ -72,7 +72,7 @@ impl BackupService for BackupServiceImpl {
         _request: Request<GetMetaSnapshotManifestRequest>,
     ) -> Result<Response<GetMetaSnapshotManifestResponse>, Status> {
         Ok(Response::new(GetMetaSnapshotManifestResponse {
-            manifest: Some(self.backup_manager.manifest().deref().into()),
+            manifest: Some(self.backup_manager.manifest().await.deref().into()),
         }))
     }
 }
