@@ -27,8 +27,6 @@ use crate::{
 pub enum SinkType {
     #[sea_orm(string_value = "APPEND_ONLY")]
     AppendOnly,
-    #[sea_orm(string_value = "FORCE_APPEND_ONLY")]
-    ForceAppendOnly,
     #[sea_orm(string_value = "UPSERT")]
     Upsert,
     #[sea_orm(string_value = "RETRACT")]
@@ -39,7 +37,6 @@ impl From<SinkType> for PbSinkType {
     fn from(sink_type: SinkType) -> Self {
         match sink_type {
             SinkType::AppendOnly => Self::AppendOnly,
-            SinkType::ForceAppendOnly => Self::ForceAppendOnly,
             SinkType::Upsert => Self::Upsert,
             SinkType::Retract => Self::Retract,
         }
@@ -49,8 +46,8 @@ impl From<SinkType> for PbSinkType {
 impl From<PbSinkType> for SinkType {
     fn from(sink_type: PbSinkType) -> Self {
         match sink_type {
-            PbSinkType::AppendOnly => Self::AppendOnly,
-            PbSinkType::ForceAppendOnly => Self::ForceAppendOnly,
+            // `ForceAppendOnly` is now denoted by `AppendOnly` + `ignore_delete`.
+            PbSinkType::AppendOnly | PbSinkType::ForceAppendOnly => Self::AppendOnly,
             PbSinkType::Upsert => Self::Upsert,
             PbSinkType::Retract => Self::Retract,
             PbSinkType::Unspecified => unreachable!("Unspecified sink type"),
@@ -69,6 +66,7 @@ pub struct Model {
     pub distribution_key: I32Array,
     pub downstream_pk: I32Array,
     pub sink_type: SinkType,
+    pub ignore_delete: bool,
     pub properties: Property,
     pub definition: String,
     pub connection_id: Option<ConnectionId>,
@@ -119,6 +117,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSink> for ActiveModel {
     fn from(pb_sink: PbSink) -> Self {
         let sink_type = pb_sink.sink_type();
+        let ignore_delete = pb_sink.ignore_delete();
 
         Self {
             sink_id: Set(pb_sink.id),
@@ -128,6 +127,7 @@ impl From<PbSink> for ActiveModel {
             distribution_key: Set(pb_sink.distribution_key.into()),
             downstream_pk: Set(pb_sink.downstream_pk.into()),
             sink_type: Set(sink_type.into()),
+            ignore_delete: Set(ignore_delete),
             properties: Set(pb_sink.properties.into()),
             definition: Set(pb_sink.definition),
             connection_id: Set(pb_sink.connection_id),
