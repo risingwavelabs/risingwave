@@ -209,7 +209,6 @@ impl BackfillOrderState {
     pub fn refresh_actors(
         &mut self,
         fragment_actors: &HashMap<FragmentId, HashSet<ActorId>>,
-        done_actors: &HashSet<ActorId>,
     ) -> Vec<FragmentId> {
         self.actor_to_fragment_id = fragment_actors
             .iter()
@@ -224,11 +223,7 @@ impl BackfillOrderState {
             .chain(self.remaining_backfill_nodes.values_mut())
         {
             if let Some(actors) = fragment_actors.get(&node.fragment_id) {
-                node.remaining_actors = actors
-                    .iter()
-                    .filter(|actor_id| !done_actors.contains(actor_id))
-                    .copied()
-                    .collect();
+                node.remaining_actors = actors.iter().copied().collect();
             } else {
                 node.remaining_actors.clear();
             }

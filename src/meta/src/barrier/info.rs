@@ -584,12 +584,13 @@ impl InflightDatabaseInfo {
                 "RescheduleFragment should not carry vnode bitmap updates when actors are rebuilt"
             );
 
-            let touched_jobs = reschedules
+            // Collect jobs that own the rescheduled fragments; de-duplicate via HashSet.
+            let related_job_ids = reschedules
                 .keys()
                 .filter_map(|fragment_id| self.fragment_location.get(fragment_id))
                 .cloned()
                 .collect::<HashSet<_>>();
-            for job_id in touched_jobs {
+            for job_id in related_job_ids {
                 if let Some(job) = self.jobs.get_mut(&job_id)
                     && let CreateStreamingJobStatus::Creating(tracker) = &mut job.status
                 {
