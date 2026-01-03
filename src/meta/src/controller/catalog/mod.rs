@@ -916,34 +916,29 @@ impl CatalogControllerInner {
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(
-                streaming_job::Column::JobStatus.eq(JobStatus::Created).or(
-                    table::Column::TableType
-                        .eq(TableType::MaterializedView)
-                        .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
-                ),
-            )
-            .all(&self.db)
-            .await?;
-
-        let job_statuses: HashMap<JobId, JobStatus> = StreamingJob::find()
-            .select_only()
-            .column(streaming_job::Column::JobId)
-            .column(streaming_job::Column::JobStatus)
-            .filter(
                 streaming_job::Column::JobStatus
                     .eq(JobStatus::Created)
                     .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
             )
-            .into_tuple::<(JobId, JobStatus)>()
             .all(&self.db)
-            .await?
-            .into_iter()
-            .collect();
+            .await?;
 
-        let sink_ids: HashSet<SinkId> = Sink::find()
+        let creating_mvs: HashSet<_> = StreamingJob::find()
             .select_only()
-            .column(sink::Column::SinkId)
-            .into_tuple::<SinkId>()
+            .column(streaming_job::Column::JobId)
+            .filter(
+                streaming_job::Column::JobStatus
+                    .eq(JobStatus::Creating)
+                    .and(
+                        streaming_job::Column::JobId.is_in(
+                            table_objs
+                                .iter()
+                                .filter(|(t, _)| t.table_type == TableType::MaterializedView)
+                                .map(|(t, _)| t.table_id),
+                        ),
+                    ),
+            )
+            .into_tuple::<TableId>()
             .all(&self.db)
             .await?
             .into_iter()
@@ -952,8 +947,6 @@ impl CatalogControllerInner {
         let job_ids: HashSet<JobId> = table_objs
             .iter()
             .map(|(t, _)| t.table_id.as_job_id())
-            .chain(job_statuses.keys().cloned())
-            .chain(sink_ids.into_iter().map(|s| s.as_job_id()))
             .collect();
 
         let internal_table_objs = Table::find()
@@ -970,19 +963,18 @@ impl CatalogControllerInner {
             .into_iter()
             .chain(internal_table_objs.into_iter())
             .map(|(table, obj)| {
-                // Correctly set the stream job status for creating materialized views and internal tables.
-                // If the table is not contained in `job_statuses`, it means the job is a creating mv.
                 let status: PbStreamJobStatus = if table.table_type == TableType::Internal {
-                    (*job_statuses
-                        .get(&table.belongs_to_job_id.unwrap())
-                        .unwrap_or(&JobStatus::Creating))
-                    .into()
+                    PbStreamJobStatus::Created.into()
+                } else if table.table_type == TableType::MaterializedView {
+                    if creating_mvs.contains(&table.table_id) {
+                        PbStreamJobStatus::Creating.into()
+                    } else {
+                        PbStreamJobStatus::Created.into()
+                    }
                 } else {
-                    (*job_statuses
-                        .get(&table.table_id.as_job_id())
-                        .unwrap_or(&JobStatus::Creating))
-                    .into()
+                    PbStreamJobStatus::Created.into()
                 };
+
                 let mut pb_table: PbTable = ObjectModel(table, obj.unwrap()).into();
                 pb_table.stream_job_status = status.into();
                 pb_table
