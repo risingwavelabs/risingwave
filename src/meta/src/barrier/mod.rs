@@ -114,6 +114,8 @@ pub(crate) enum BarrierManagerRequest {
         checkpoint_frequency: Option<u64>,
         sender: Sender<()>,
     },
+    Pause(Sender<()>),
+    Resume(Sender<()>),
 }
 
 #[derive(Debug)]

@@ -91,6 +91,8 @@ pub(super) struct GlobalBarrierWorker<C> {
     control_stream_manager: ControlStreamManager,
 
     term_id: String,
+
+    paused: bool,
 }
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
@@ -111,6 +113,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         let periodic_barriers = PeriodicBarriers::default();
 
         let checkpoint_control = CheckpointControl::new(env.clone());
+
+        let paused = Self::take_pause_on_bootstrap(&env).await;
+
         Self {
             enable_recovery,
             periodic_barriers,
@@ -123,6 +128,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             active_streaming_nodes,
             control_stream_manager,
             term_id: "uninitialized".into(),
+            paused,
         }
     }
 }
@@ -168,15 +174,13 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
         (join_handle, shutdown_tx)
     }
+}
 
+impl<C> GlobalBarrierWorker<C> {
     /// Check whether we should pause on bootstrap from the system parameter and reset it.
-    async fn take_pause_on_bootstrap(&mut self) -> MetaResult<bool> {
-        let paused = self
-            .env
-            .system_params_reader()
-            .await
-            .pause_on_next_bootstrap()
-            || self.env.opts.pause_on_next_bootstrap_offline;
+    async fn take_pause_on_bootstrap(env: &MetaSrvEnv) -> bool {
+        let paused = env.system_params_reader().await.pause_on_next_bootstrap()
+            || env.opts.pause_on_next_bootstrap_offline;
 
         if paused {
             warn!(
@@ -185,14 +189,19 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                  To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
                 PAUSE_ON_NEXT_BOOTSTRAP_KEY
             );
-            self.env
+            if let Err(e) = env
                 .system_params_manager_impl_ref()
                 .set_param(PAUSE_ON_NEXT_BOOTSTRAP_KEY, Some("false".to_owned()))
-                .await?;
+                .await
+            {
+                warn!(e = %e.as_report(), "failed to reset PAUSE_ON_NEXT_BOOTSTRAP_KEY");
+            }
         }
-        Ok(paused)
+        paused
     }
+}
 
+impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     /// Start an infinite loop to take scheduled barriers and send them.
     async fn run(mut self, shutdown_rx: Receiver<()>) {
         tracing::info!(
@@ -232,9 +241,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
                 None,
             );
 
-            let paused = self.take_pause_on_bootstrap().await.unwrap_or(false);
-
-            self.recovery(paused, RecoveryReason::Bootstrap)
+            self.recovery(RecoveryReason::Bootstrap)
                 .instrument(span)
                 .await;
         }
@@ -313,6 +320,20 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     warn!("failed to notify finish of update database barrier");
                                 }
                             }
+                            BarrierManagerRequest::Pause(tx) => {
+                                if !self.paused {
+                                    self.paused = true;
+                                    self.recovery(RecoveryReason::Adhoc).await;
+                                }
+                                let _ = tx.send(());
+                            }
+                            BarrierManagerRequest::Resume(tx) => {
+                                if self.paused {
+                                    self.paused = false;
+                                    self.recovery(RecoveryReason::Adhoc).await;
+                                }
+                                let _ = tx.send(());
+                            }
                         }
                     } else {
                         tracing::info!("end of request stream. meta node may be shutting down. Stop global barrier manager");
@@ -320,7 +341,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     }
                 }
 
-                changed_worker = self.active_streaming_nodes.changed() => {
+                changed_worker = self.active_streaming_nodes.changed(), if !self.paused => {
                     #[cfg(debug_assertions)]
                     {
                         self.active_streaming_nodes.validate_change().await;
@@ -357,7 +378,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &mut self.control_stream_manager,
                         &self.context,
                         &self.env,
-                ) => {
+                ), if !self.paused => {
                     match complete_result {
                         Ok(output) => {
                             self.checkpoint_control.ack_completed(output);
@@ -367,7 +388,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                     }
                 },
-                event = self.checkpoint_control.next_event() => {
+                event = self.checkpoint_control.next_event(), if !self.paused => {
                     let result: MetaResult<()> = try {
                         match event {
                             CheckpointControlEvent::EnteringInitializing(entering_initializing) => {
@@ -415,7 +436,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         self.failure_recovery(e).await;
                     }
                 }
-                (worker_id, event) = self.control_stream_manager.next_event(&self.term_id, &self.context) => {
+                (worker_id, event) = self.control_stream_manager.next_event(&self.term_id, &self.context), if !self.paused => {
                     let resp_result = match event {
                         WorkerNodeEvent::Response(result) => {
                             result
@@ -486,7 +507,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         self.failure_recovery(e).await;
                     }
                 }
-                new_barrier = self.periodic_barriers.next_barrier(&*self.context) => {
+                new_barrier = self.periodic_barriers.next_barrier(&*self.context), if !self.paused => {
                     let database_id = new_barrier.database_id;
                     if let Err(e) = self.checkpoint_control.handle_new_barrier(new_barrier, &mut self.control_stream_manager) {
                         if !self.enable_recovery {
@@ -609,7 +630,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
             // No need to clean dirty tables for barrier recovery,
             // The foreground stream job should cleanup their own tables.
-            self.recovery(false, reason).instrument(span).await;
+            self.recovery(reason).instrument(span).await;
         } else {
             panic!(
                 "a streaming error occurred while recovery is disabled, aborting: {:?}",
@@ -638,9 +659,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         // No need to clean dirty tables for barrier recovery,
         // The foreground stream job should cleanup their own tables.
-        self.recovery(false, RecoveryReason::Adhoc)
-            .instrument(span)
-            .await;
+        self.recovery(RecoveryReason::Adhoc).instrument(span).await;
     }
 }
 
@@ -722,7 +741,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
-    pub async fn recovery(&mut self, is_paused: bool, recovery_reason: RecoveryReason) {
+    pub(super) async fn recovery(&mut self, recovery_reason: RecoveryReason) {
         // Clear all control streams to release resources (connections to compute nodes) first.
         self.control_stream_manager.clear();
 
@@ -735,14 +754,18 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         };
         self.context.abort_and_mark_blocked(None, recovery_reason);
 
-        self.recovery_inner(is_paused, reason_str).await;
+        self.recovery_inner(reason_str).await;
         self.context.mark_ready(MarkReadyOptions::Global {
             blocked_databases: self.checkpoint_control.recovering_databases().collect(),
         });
     }
 
     #[await_tree::instrument("recovery({recovery_reason})")]
-    async fn recovery_inner(&mut self, is_paused: bool, recovery_reason: String) {
+    async fn recovery_inner(&mut self, recovery_reason: String) {
+        if self.paused {
+            info!("skip recovery when paused");
+            return;
+        }
         let event_log_manager_ref = self.env.event_log_manager_ref();
 
         tracing::info!("recovery start!");
@@ -825,7 +848,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &mut source_splits,
                         &mut background_jobs,
                         &mut mv_depended_subscriptions,
-                        is_paused,
                         &hummock_version_stats,
                         &mut cdc_table_snapshot_splits,
                     );

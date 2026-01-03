@@ -524,12 +524,11 @@ impl PeriodicBarriers {
                 scheduled = context.next_scheduled() => {
                     let database_id = scheduled.database_id;
                     self.reset_database_timer(database_id);
-                    let checkpoint = scheduled.command.need_checkpoint() || self.try_get_checkpoint(database_id);
                     NewBarrier {
                         database_id: scheduled.database_id,
                         command: Some((scheduled.command, scheduled.notifiers)),
                         span: scheduled.span,
-                        checkpoint,
+                        checkpoint: true, // always ckpt on command
                     }
                 },
                 // If there is no database, we won't wait for `Interval`, but only wait for command.

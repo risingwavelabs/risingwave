@@ -347,26 +347,24 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             for msg in upstream.by_ref() {
                 match msg? {
                     Message::Barrier(barrier) => {
-                        match barrier.mutation.as_deref() {
-                            Some(crate::executor::Mutation::Pause) => {
-                                is_snapshot_paused = true;
-                                tracing::info!(
-                                    %table_id,
-                                    upstream_table_name,
-                                    "snapshot is paused by barrier"
-                                );
-                            }
-                            Some(crate::executor::Mutation::Resume) => {
-                                is_snapshot_paused = false;
-                                tracing::info!(
-                                    %table_id,
-                                    upstream_table_name,
-                                    "snapshot is resumed by barrier"
-                                );
-                            }
-                            _ => {
-                                // ignore other mutations
-                            }
+                        if let Some(mutation) = &barrier.mutation {
+                            mutation.on_new_pause_resume(|new_pause| {
+                                if new_pause {
+                                    is_snapshot_paused = true;
+                                    tracing::info!(
+                                        %table_id,
+                                        upstream_table_name,
+                                        "snapshot is paused by barrier"
+                                    );
+                                } else {
+                                    is_snapshot_paused = false;
+                                    tracing::info!(
+                                        %table_id,
+                                        upstream_table_name,
+                                        "snapshot is resumed by barrier"
+                                    );
+                                }
+                            });
                         }
                         // commit state just to bump the epoch of state table
                         state_impl.commit_state(barrier.epoch).await?;
@@ -439,15 +437,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         use crate::executor::Mutation;
-                                        match mutation {
-                                            Mutation::Pause => {
+                                        mutation.on_new_pause_resume(|new_pause| {
+                                            if new_pause {
                                                 is_snapshot_paused = true;
                                                 snapshot_valve.pause();
-                                            }
-                                            Mutation::Resume => {
+                                            } else {
                                                 is_snapshot_paused = false;
                                                 snapshot_valve.resume();
                                             }
+                                        });
+                                        match mutation {
                                             Mutation::Throttle(some) => {
                                                 if let Some(new_rate_limit) =
                                                     some.get(&self.actor_ctx.id)

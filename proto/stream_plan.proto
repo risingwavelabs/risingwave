@@ -36,9 +36,8 @@ message AddMutation {
   // `Source` and `SourceBackfill` are handled together here.
   // TODO: we may allow multiple mutations in a single barrier.
   map<uint32, source.ConnectorSplits> actor_splits = 2;
-  // We may embed a pause mutation here.
-  // TODO: we may allow multiple mutations in a single barrier.
-  bool pause = 4;
+  reserved "pause";
+  reserved 4;
   repeated SubscriptionUpstreamInfo subscriptions_to_add = 5;
   // nodes which should be paused initially.
   repeated uint32 backfill_nodes_to_pause = 6;
@@ -106,10 +105,6 @@ message SourceChangeSplitMutation {
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
-message PauseMutation {}
-
-message ResumeMutation {}
-
 message ThrottleMutation {
   message RateLimit {
     optional uint32 rate_limit = 1;
@@ -165,10 +160,6 @@ message BarrierMutation {
     UpdateMutation update = 5;
     // Change the split of some sources.
     SourceChangeSplitMutation splits = 6;
-    // Pause the dataflow of the whole streaming graph, only used for scaling.
-    PauseMutation pause = 7;
-    // Resume the dataflow of the whole streaming graph, only used for scaling.
-    ResumeMutation resume = 8;
     // Throttle specific source exec or backfill exec.
     ThrottleMutation throttle = 10;
     // Drop subscription on mv
@@ -188,6 +179,8 @@ message BarrierMutation {
     // List finish signal for refreshing tables
     ListFinishMutation list_finish = 17;
   }
+  reserved "pause", "resume";
+  reserved 7, 8;
 }
 
 message Barrier {

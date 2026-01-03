@@ -167,7 +167,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
     let (_shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
 
     let _join_handle = tokio::spawn(async move {
-        worker.recovery(false, RecoveryReason::Bootstrap).await;
+        worker.recovery(RecoveryReason::Bootstrap).await;
         worker.run_inner(shutdown_rx).await
     });
 

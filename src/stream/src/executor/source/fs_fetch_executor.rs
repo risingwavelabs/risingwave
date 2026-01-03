@@ -289,24 +289,25 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                             match msg {
                                 Message::Barrier(barrier) => {
                                     if let Some(mutation) = barrier.mutation.as_deref() {
-                                        match mutation {
-                                            Mutation::Pause => stream.pause_stream(),
-                                            Mutation::Resume => stream.resume_stream(),
-                                            Mutation::Throttle(actor_to_apply) => {
-                                                if let Some(new_rate_limit) =
-                                                    actor_to_apply.get(&self.actor_ctx.id)
-                                                    && *new_rate_limit != self.rate_limit_rps
-                                                {
-                                                    tracing::info!(
-                                                        "updating rate limit from {:?} to {:?}",
-                                                        self.rate_limit_rps,
-                                                        *new_rate_limit
-                                                    );
-                                                    self.rate_limit_rps = *new_rate_limit;
-                                                    splits_on_fetch = 0;
-                                                }
+                                        mutation.on_new_pause_resume(|new_pause| {
+                                            if new_pause {
+                                                stream.pause_stream();
+                                            } else {
+                                                stream.resume_stream();
                                             }
-                                            _ => (),
+                                        });
+                                        if let Mutation::Throttle(actor_to_apply) = mutation
+                                            && let Some(new_rate_limit) =
+                                                actor_to_apply.get(&self.actor_ctx.id)
+                                            && *new_rate_limit != self.rate_limit_rps
+                                        {
+                                            tracing::info!(
+                                                "updating rate limit from {:?} to {:?}",
+                                                self.rate_limit_rps,
+                                                *new_rate_limit
+                                            );
+                                            self.rate_limit_rps = *new_rate_limit;
+                                            splits_on_fetch = 0;
                                         }
                                     }
 

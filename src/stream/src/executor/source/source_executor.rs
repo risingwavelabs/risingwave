@@ -620,15 +620,15 @@ impl<S: StateStore> SourceExecutor<S> {
                     let mut split_change = None;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
+                        mutation.on_new_pause_resume(|new_pause| {
+                            command_paused = new_pause;
+                            if new_pause {
+                                stream.pause_stream();
+                            } else {
+                                stream.resume_stream();
+                            }
+                        });
                         match mutation {
-                            Mutation::Pause => {
-                                command_paused = true;
-                                stream.pause_stream()
-                            }
-                            Mutation::Resume => {
-                                command_paused = false;
-                                stream.resume_stream()
-                            }
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 tracing::info!(
                                     actor_id = %self.actor_ctx.id,

@@ -718,15 +718,9 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                             self.metrics.unclean_state.inc();
                                         } else {
                                             if let Some(mutation) = barrier.mutation.as_deref() {
-                                                match mutation {
-                                                    Mutation::Pause => {
-                                                        pause_stream = true;
-                                                    }
-                                                    Mutation::Resume => {
-                                                        pause_stream = false;
-                                                    }
-                                                    _ => {}
-                                                }
+                                                mutation.on_new_pause_resume(|new_pause| {
+                                                    pause_stream = new_pause;
+                                                });
                                             }
                                             let write_state_post_write_barrier =
                                                 Self::write_barrier(

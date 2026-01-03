@@ -18,6 +18,7 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use either::Either;
+use futures::StreamExt;
 use futures::stream::{PollNext, select_with_strategy};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -534,19 +535,20 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                 }
 
                                 let mut maybe_muatation = None;
-                                if let Some(ref mutation) = barrier.mutation.as_deref() {
-                                    match mutation {
-                                        Mutation::Pause => {
-                                            // pause_reader should not be invoked consecutively more than once.
+                                if let Some(mutation) = barrier.mutation.as_deref() {
+                                    let mut pause_resume = None;
+                                    mutation.on_new_pause_resume(|new_pause| {
+                                        pause_resume = Some(new_pause);
+                                    });
+                                    if let Some(new_pause) = pause_resume {
+                                        if new_pause {
                                             pause_control.command_pause();
                                             pause_reader!();
+                                        } else if pause_control.command_resume() {
+                                            resume_reader!();
                                         }
-                                        Mutation::Resume => {
-                                            // pause_reader.take should not be invoked consecutively more than once.
-                                            if pause_control.command_resume() {
-                                                resume_reader!();
-                                            }
-                                        }
+                                    }
+                                    match mutation {
                                         Mutation::StartFragmentBackfill { fragment_ids } => {
                                             if fragment_ids.contains(&self.actor_ctx.fragment_id)
                                                 && pause_control.backfill_resume()
@@ -830,9 +832,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     let mut split_changed = None;
                     if let Some(ref mutation) = barrier.mutation.as_deref() {
                         match mutation {
-                            Mutation::Pause | Mutation::Resume => {
-                                // We don't need to do anything. Handled by upstream.
-                            }
                             Mutation::SourceChangeSplit(actor_splits) => {
                                 tracing::info!(
                                     actor_splits = ?actor_splits,

@@ -47,9 +47,9 @@ use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
-    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkSchemaChange,
-    PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    ListFinishMutation, LoadFinishMutation, PbSinkAddColumnsOp, PbSinkSchemaChange,
+    PbUpstreamSinkInfo, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
+    ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -293,15 +293,6 @@ pub enum Command {
     /// all messages before the checkpoint barrier should have been committed.
     Flush,
 
-    /// `Pause` command generates a `Pause` barrier **only if**
-    /// the cluster is not already paused. Otherwise, a barrier with no mutation will be generated.
-    Pause,
-
-    /// `Resume` command generates a `Resume` barrier **only
-    /// if** the cluster is paused with the same reason. Otherwise, a barrier with no mutation
-    /// will be generated.
-    Resume,
-
     /// `DropStreamingJobs` command generates a `Stop` barrier to stop the given
     /// [`Vec<ActorId>`]. The catalog has ensured that these streaming jobs are safe to be
     /// dropped by reference counts before.
@@ -399,8 +390,6 @@ impl std::fmt::Display for Command {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
             Command::Flush => write!(f, "Flush"),
-            Command::Pause => write!(f, "Pause"),
-            Command::Resume => write!(f, "Resume"),
             Command::DropStreamingJobs {
                 streaming_job_ids, ..
             } => {
@@ -455,14 +444,6 @@ impl std::fmt::Display for Command {
 }
 
 impl Command {
-    pub fn pause() -> Self {
-        Self::Pause
-    }
-
-    pub fn resume() -> Self {
-        Self::Resume
-    }
-
     #[expect(clippy::type_complexity)]
     pub(super) fn fragment_changes(
         &self,
@@ -472,8 +453,6 @@ impl Command {
     )> {
         match self {
             Command::Flush => None,
-            Command::Pause => None,
-            Command::Resume => None,
             Command::DropStreamingJobs {
                 unregistered_fragment_ids,
                 dropped_sink_fragment_by_targets,
@@ -615,11 +594,6 @@ impl Command {
             Command::ListFinish { .. } => None, // ListFinish doesn't change fragment structure
             Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
         }
-    }
-
-    pub fn need_checkpoint(&self) -> bool {
-        // todo! Reviewing the flow of different command to reduce the amount of checkpoint
-        !matches!(self, Command::Resume)
     }
 }
 
@@ -845,32 +819,12 @@ impl Command {
     /// `edges` contains the information of `dispatcher`s of `DispatchExecutor` and `actor_upstreams`s of `MergeNode`
     pub(super) fn to_mutation(
         &self,
-        is_currently_paused: bool,
         edges: &mut Option<FragmentEdgeBuildResult>,
         control_stream_manager: &ControlStreamManager,
         database_info: &mut InflightDatabaseInfo,
     ) -> MetaResult<Option<Mutation>> {
         let mutation = match self {
             Command::Flush => None,
-
-            Command::Pause => {
-                // Only pause when the cluster is not already paused.
-                // XXX: what if pause(r1) - pause(r2) - resume(r1) - resume(r2)??
-                if !is_currently_paused {
-                    Some(Mutation::Pause(PauseMutation {}))
-                } else {
-                    None
-                }
-            }
-
-            Command::Resume => {
-                // Only resume when the cluster is paused with the same reason.
-                if is_currently_paused {
-                    Some(Mutation::Resume(ResumeMutation {}))
-                } else {
-                    None
-                }
-            }
 
             Command::SourceChangeSplit(SplitState {
                 split_assignment, ..
@@ -1010,8 +964,6 @@ impl Command {
                         .collect(),
                     added_actors,
                     actor_splits,
-                    // If the cluster is already paused, the new actors should be paused too.
-                    pause: is_currently_paused,
                     subscriptions_to_add,
                     backfill_nodes_to_pause,
                     actor_cdc_table_snapshot_splits,
@@ -1243,7 +1195,6 @@ impl Command {
                 actor_dispatchers: Default::default(),
                 added_actors: vec![],
                 actor_splits: Default::default(),
-                pause: false,
                 subscriptions_to_add: vec![SubscriptionUpstreamInfo {
                     upstream_mv_table_id: *upstream_mv_table_id,
                     subscriber_id: subscription_id.as_subscriber_id(),
