@@ -70,6 +70,7 @@ impl Strong {
             ExprImpl::UserDefinedFunction(_) => false,
             ExprImpl::Parameter(_) => false,
             ExprImpl::Now(_) => false,
+            ExprImpl::SecretRefExpr(_) => false,
         }
     }
 

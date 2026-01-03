@@ -26,17 +26,18 @@ use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_sqlparser::ast::{
     self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident,
-    OrderByExpr, Statement, Window,
+    OrderByExpr, SecretRefValue, Statement, Window,
 };
 use risingwave_sqlparser::parser::Parser;
 
 use crate::binder::Binder;
 use crate::binder::bind_context::Clause;
 use crate::catalog::function_catalog::FunctionCatalog;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
-    Expr, ExprImpl, ExprType, FunctionCallWithLambda, InputRef, TableFunction, TableFunctionType,
-    UserDefinedFunction,
+    Expr, ExprImpl, ExprType, FunctionCallWithLambda, InputRef, SecretRefExpr, TableFunction,
+    TableFunctionType, UserDefinedFunction,
 };
 use crate::handler::privilege::ObjectCheckItem;
 
@@ -763,6 +764,7 @@ impl Binder {
             .into()),
             FunctionArgExpr::Wildcard(None) => Ok(vec![]),
             FunctionArgExpr::Wildcard(Some(_)) => unreachable!(),
+            FunctionArgExpr::SecretRef(secret_ref) => Ok(vec![self.bind_secret_ref(secret_ref)?]),
         }
     }
 
@@ -774,5 +776,29 @@ impl Binder {
             FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr),
             FunctionArg::Named { .. } => todo!(),
         }
+    }
+
+    pub(in crate::binder) fn bind_secret_ref(
+        &mut self,
+        secret_ref: &SecretRefValue,
+    ) -> Result<ExprImpl> {
+        // Resolve secret name to secret ID using catalog
+        let db_name: &str = &self.db_name;
+        let (schema, name) =
+            Binder::resolve_schema_qualified_name(db_name, &secret_ref.secret_name)?;
+        let reader = &self.catalog;
+        let (secret_catalog, _) = reader
+            .get_secret_by_name(
+                db_name,
+                SchemaPath::new(
+                    schema.as_deref(),
+                    &self.search_path,
+                    &self.auth_context.user_name,
+                ),
+                &name,
+            )
+            .map_err(|e| crate::error::ErrorCode::BindError(e.to_string()))?;
+        // Return resolved SecretRefExpr with secret_id set
+        Ok(SecretRefExpr::new(secret_ref.ref_as.clone(), secret_catalog.id).into())
     }
 }
