@@ -1549,8 +1549,8 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
-      └─BatchFilter { predicate: (row_number <= 1:Int32) }
-        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─BatchFilter { predicate: (rank <= 1:Int32) }
+        └─BatchOverWindow { window_functions: [rank() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
           └─BatchExchange { order: [bidder ASC, auction ASC, date_time DESC], dist: HashShard(auction, bidder) }
             └─BatchSort { order: [bidder ASC, auction ASC, date_time DESC] }
               └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
