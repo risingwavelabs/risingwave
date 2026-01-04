@@ -15,6 +15,7 @@
 use super::*;
 
 /// The subsections `[udf]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct UdfConfig {
     /// Allow embedded Python UDFs to be created.

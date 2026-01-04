@@ -225,7 +225,7 @@ mod tests {
     // the aliasing. Therefore, using a prefixed config key in config override will result in
     // a duplicate field error.
     #[test]
-    fn tets_override_with_legacy_prefixed_config() {
+    fn test_override_with_legacy_prefixed_config() {
         let base = StreamingConfig::default();
         let partial = r#"
             [streaming.developer]
@@ -237,5 +237,32 @@ mod tests {
             in `developer`
         "#]]
         .assert_eq(&error.to_report_string());
+    }
+
+    // Show that by explicitly overriding to empty string, we can set a `Some` back to `None`.
+    #[test]
+    fn test_some_back_to_none() {
+        assert!(
+            StreamingConfig::default()
+                .actor_runtime_worker_threads_num
+                .is_none()
+        );
+
+        let base = toml::from_str(
+            r#"
+            [streaming]
+            actor_runtime_worker_threads_num = 114514
+        "#,
+        )
+        .unwrap();
+        let partial = r#"
+            [streaming]
+            actor_runtime_worker_threads_num = ""
+        "#;
+
+        let merged = merge_streaming_config_section(&base, partial)
+            .unwrap()
+            .unwrap();
+        assert!(merged.actor_runtime_worker_threads_num.is_none());
     }
 }
