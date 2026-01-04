@@ -195,12 +195,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .get_fragment_streaming_job_id(fragment_id)
                     .await?;
                 jobs = [job_id].into_iter().collect();
-                raw_object_id = self
-                    .metadata_manager
-                    .catalog_controller
-                    .get_fragment_streaming_job_id(request.id.into())
-                    .await?
-                    .as_raw_id();
+                raw_object_id = job_id.as_raw_id();
             }
             ThrottleTarget::Unspecified => {
                 return Err(Status::invalid_argument("unspecified throttle target"));
