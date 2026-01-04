@@ -162,6 +162,7 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.fragment_splits.clone(), db).await?;
         insert_models(metadata.pending_sink_state.clone(), db).await?;
         insert_models(metadata.refresh_jobs.clone(), db).await?;
+        insert_models(metadata.cdc_table_snapshot_splits.clone(), db).await?;
         // update_auto_inc must be called last.
         update_auto_inc(&metadata, db).await?;
         Ok(())
