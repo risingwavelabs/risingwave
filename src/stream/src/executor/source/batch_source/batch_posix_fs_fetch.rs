@@ -285,9 +285,14 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                             let need_rebuild_reader = false;
 
                             if let Some(mutation) = barrier.mutation.as_deref() {
+                                mutation.on_new_pause_resume(|new_pause| {
+                                    if new_pause {
+                                        stream.pause_stream();
+                                    } else {
+                                        stream.resume_stream();
+                                    }
+                                });
                                 match mutation {
-                                    Mutation::Pause => stream.pause_stream(),
-                                    Mutation::Resume => stream.resume_stream(),
                                     Mutation::RefreshStart {
                                         associated_source_id,
                                         ..

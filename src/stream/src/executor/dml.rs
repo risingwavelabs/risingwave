@@ -156,28 +156,27 @@ impl DmlExecutor {
                         // We should handle barrier messages here to pause or resume the data from
                         // DML.
                         if let Some(mutation) = barrier.mutation.as_deref() {
-                            match mutation {
-                                Mutation::Pause => stream.pause_stream(),
-                                Mutation::Resume => stream.resume_stream(),
-                                Mutation::Throttle(actor_to_apply) => {
-                                    if let Some(new_rate_limit) =
-                                        actor_to_apply.get(&self.actor_ctx.id)
-                                    {
-                                        let new_rate_limit = (*new_rate_limit).into();
-                                        let old_rate_limit =
-                                            self.rate_limiter.update(new_rate_limit);
-
-                                        if old_rate_limit != new_rate_limit {
-                                            tracing::info!(
-                                                old_rate_limit = ?old_rate_limit,
-                                                new_rate_limit = ?new_rate_limit,
-                                                %actor_id,
-                                                "dml rate limit changed",
-                                            );
-                                        }
-                                    }
+                            mutation.on_new_pause_resume(|new_pause| {
+                                if new_pause {
+                                    stream.pause_stream();
+                                } else {
+                                    stream.resume_stream();
                                 }
-                                _ => {}
+                            });
+                            if let Mutation::Throttle(actor_to_apply) = mutation
+                                && let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
+                            {
+                                let new_rate_limit = (*new_rate_limit).into();
+                                let old_rate_limit = self.rate_limiter.update(new_rate_limit);
+
+                                if old_rate_limit != new_rate_limit {
+                                    tracing::info!(
+                                        old_rate_limit = ?old_rate_limit,
+                                        new_rate_limit = ?new_rate_limit,
+                                        %actor_id,
+                                        "dml rate limit changed",
+                                    );
+                                }
                             }
                         }
 

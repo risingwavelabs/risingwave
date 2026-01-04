@@ -50,9 +50,6 @@ pub(in crate::barrier) struct BarrierWorkerState {
 
     /// The `prev_epoch` of pending non checkpoint barriers
     pending_non_checkpoint_barriers: Vec<u64>,
-
-    /// Whether the cluster is paused.
-    is_paused: bool,
 }
 
 impl BarrierWorkerState {
@@ -60,30 +57,13 @@ impl BarrierWorkerState {
         Self {
             in_flight_prev_epoch: TracedEpoch::new(Epoch::now()),
             pending_non_checkpoint_barriers: vec![],
-            is_paused: false,
         }
     }
 
-    pub fn recovery(in_flight_prev_epoch: TracedEpoch, is_paused: bool) -> Self {
+    pub fn recovery(in_flight_prev_epoch: TracedEpoch) -> Self {
         Self {
             in_flight_prev_epoch,
             pending_non_checkpoint_barriers: vec![],
-            is_paused,
-        }
-    }
-
-    pub fn is_paused(&self) -> bool {
-        self.is_paused
-    }
-
-    fn set_is_paused(&mut self, is_paused: bool) {
-        if self.is_paused != is_paused {
-            tracing::info!(
-                currently_paused = self.is_paused,
-                newly_paused = is_paused,
-                "update paused state"
-            );
-            self.is_paused = is_paused;
         }
     }
 
@@ -161,7 +141,6 @@ impl DatabaseCheckpointControl {
                     }
                 }
                 CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
-                    assert!(!self.state.is_paused());
                     let snapshot_epoch = barrier_info.prev_epoch();
                     // set snapshot epoch of upstream table for snapshot backfill
                     for snapshot_backfill_epoch in snapshot_backfill_info
@@ -263,21 +242,8 @@ impl DatabaseCheckpointControl {
             self.database_info.post_apply(post_apply_changes);
         }
 
-        let prev_is_paused = self.state.is_paused();
-        let curr_is_paused = match command {
-            Some(Command::Pause) => true,
-            Some(Command::Resume) => false,
-            _ => prev_is_paused,
-        };
-        self.state.set_is_paused(curr_is_paused);
-
         let mutation = if let Some(c) = &command {
-            c.to_mutation(
-                prev_is_paused,
-                &mut edges,
-                control_stream_manager,
-                &mut self.database_info,
-            )?
+            c.to_mutation(&mut edges, control_stream_manager, &mut self.database_info)?
         } else {
             None
         };

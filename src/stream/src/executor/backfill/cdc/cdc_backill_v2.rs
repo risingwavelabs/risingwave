@@ -412,15 +412,16 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     state_impl.commit_state(barrier.epoch).await?;
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         use crate::executor::Mutation;
-                                        match mutation {
-                                            Mutation::Pause => {
+                                        mutation.on_new_pause_resume(|new_pause| {
+                                            if new_pause {
                                                 is_snapshot_paused = true;
                                                 snapshot_valve.pause();
-                                            }
-                                            Mutation::Resume => {
+                                            } else {
                                                 is_snapshot_paused = false;
                                                 snapshot_valve.resume();
                                             }
+                                        });
+                                        match mutation {
                                             Mutation::Throttle(some) => {
                                                 // TODO(zw): optimization: improve throttle.
                                                 // 1. Handle rate limit 0. Currently, to resume the process, the actor must be rebuilt.

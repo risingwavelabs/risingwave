@@ -454,7 +454,6 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &mut source_splits,
                 &mut background_jobs,
                 &mut mv_depended_subscriptions,
-                false,
                 &self.control.hummock_version_stats,
                 &mut cdc_table_snapshot_splits,
             )?

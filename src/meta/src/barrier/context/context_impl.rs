@@ -265,10 +265,6 @@ impl CommandContext {
 
             Command::Throttle(_) => {}
 
-            Command::Pause => {}
-
-            Command::Resume => {}
-
             Command::SourceChangeSplit(SplitState {
                 split_assignment: assignment,
                 ..

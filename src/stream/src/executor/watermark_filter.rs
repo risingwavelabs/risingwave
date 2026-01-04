@@ -236,15 +236,9 @@ impl<S: StateStore> WatermarkFilterExecutor<S> {
                     let post_commit = table.commit(barrier.epoch).await?;
 
                     if let Some(mutation) = barrier.mutation.as_deref() {
-                        match mutation {
-                            Mutation::Pause => {
-                                is_paused = true;
-                            }
-                            Mutation::Resume => {
-                                is_paused = false;
-                            }
-                            _ => (),
-                        }
+                        mutation.on_new_pause_resume(|new_pause| {
+                            is_paused = new_pause;
+                        });
                     }
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
