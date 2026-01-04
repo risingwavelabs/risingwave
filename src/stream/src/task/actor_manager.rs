@@ -476,6 +476,7 @@ impl StreamActorManager {
                         SyncLogStoreDispatchConfig {
                             table_id: table.id,
                             serde,
+                            state_store: self.env.state_store(),
                             max_buffer_size,
                             pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
                             aligned: sync.aligned,

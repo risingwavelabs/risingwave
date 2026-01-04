@@ -28,7 +28,7 @@ use futures::stream::{BoxStream, StreamFuture};
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{ActorMapping, ExpandedActorMapping, VirtualNode};
 use risingwave_common::metrics::LabelGuardedIntCounter;
@@ -38,7 +38,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::sink::log_store::{ChunkId, LogStoreResult};
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
-use risingwave_storage::store::{LocalStateStore, StateStoreRead};
+use risingwave_storage::{StateStoreImpl, dispatch_state_store};
+use risingwave_storage::store::{LocalStateStore, NewLocalOptions, OpConsistencyLevel, StateStoreRead};
 use rw_futures_util::drop_either_future;
 use smallvec::{SmallVec, smallvec};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -71,6 +72,7 @@ use risingwave_common::id::FragmentId;
 pub(crate) struct SyncLogStoreDispatchConfig {
     pub table_id: TableId,
     pub serde: LogStoreRowSerde,
+    pub state_store: StateStoreImpl,
     pub max_buffer_size: usize,
     pub pause_duration_ms: Duration,
     pub aligned: bool,
@@ -801,10 +803,10 @@ impl StreamConsumer for DispatchExecutor {
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
         let max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
-        match self.mode {
-            DispatchMode::Direct => {
-                #[try_stream]
-                async move {
+        #[try_stream]
+        async move {
+            match self.mode {
+                DispatchMode::Direct => {
                     let mut input = self.input.execute().peekable();
                     loop {
                         let Some(message) =
@@ -842,20 +844,32 @@ impl StreamConsumer for DispatchExecutor {
                                     .dispatch(watermark)
                                     .instrument(tracing::info_span!("dispatch_watermark"))
                                     .instrument_await("dispatch_watermark")
-                                    .await?;
+                                .await?;
                             }
                         }
                     }
                 }
-            }
-            DispatchMode::SyncLogStore(log_store_config) => {
-                // TODO: Add sync log store logistics here
-                // Create a synclogstore following log_store_config
-                let mut input = self.input.execute().peekable();
+                DispatchMode::SyncLogStore(log_store_config) => {
+                    // TODO: Add sync log store logistics here.
+                    // Create a synclogstore following log_store_config.
+                    let mut input = self.input.execute();
+                    let first_barrier = expect_first_barrier(&mut input).await?;
+                    let first_write_epoch = first_barrier.epoch;
+                    yield first_barrier;
 
-                // #[try_stream]
-                // async { yield Barrier::new_test_barrier(1); }
-                
+                    let local_state_store = dispatch_state_store!(log_store_config.state_store.clone(), store, {
+                        store
+                        .new_local(NewLocalOptions {
+                            table_id: log_store_config.table_id,
+                            op_consistency_level: OpConsistencyLevel::Inconsistent,
+                            table_option: TableOption { retention_seconds: None },
+                            is_replicated: false,
+                            vnodes: log_store_config.serde.vnodes().clone(),
+                            upload_on_flush: false,
+                        })
+                        .await
+                    });
+                }
             }
         }
     }
