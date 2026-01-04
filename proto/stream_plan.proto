@@ -115,7 +115,7 @@ message ThrottleMutation {
     optional uint32 rate_limit = 1;
   }
 
-  map<uint32, RateLimit> actor_throttle = 1;
+  map<uint32, RateLimit> fragment_throttle = 1;
 }
 
 message SubscriptionUpstreamInfo {

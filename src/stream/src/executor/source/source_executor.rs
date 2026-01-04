@@ -685,8 +685,9 @@ impl<S: StateStore> SourceExecutor<S> {
                                     },
                                 );
                             }
-                            Mutation::Throttle(actor_to_apply) => {
-                                if let Some(new_rate_limit) = actor_to_apply.get(&self.actor_ctx.id)
+                            Mutation::Throttle(fragment_to_apply) => {
+                                if let Some(new_rate_limit) =
+                                    fragment_to_apply.get(&self.actor_ctx.fragment_id)
                                     && *new_rate_limit != self.rate_limit_rps
                                 {
                                     tracing::info!(
