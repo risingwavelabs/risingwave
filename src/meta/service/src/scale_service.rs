@@ -12,7 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::ObjectId;
 use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
+use risingwave_meta::model::TableParallelism;
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::meta::scale_service_server::ScaleService;
 use risingwave_pb::meta::{
@@ -61,8 +63,14 @@ impl ScaleService for ScaleServiceImpl {
             .table_fragments()
             .await?;
 
+        let job_parallelisms = self
+            .metadata_manager
+            .catalog_controller
+            .get_all_streaming_parallelisms()
+            .await?;
+
         let mut table_fragments = Vec::with_capacity(stream_job_fragments.len());
-        for (_, stream_job_fragments) in stream_job_fragments {
+        for (job_id, stream_job_fragments) in stream_job_fragments {
             let upstreams = self
                 .metadata_manager
                 .catalog_controller
@@ -78,7 +86,16 @@ impl ScaleService for ScaleServiceImpl {
                         .collect(),
                 )
                 .await?;
-            table_fragments.push(stream_job_fragments.to_protobuf(&upstreams, &dispatchers))
+            let parallelism = job_parallelisms
+                .get(&ObjectId::new(job_id.as_raw_id()))
+                .cloned()
+                .map(TableParallelism::from)
+                .unwrap_or(TableParallelism::Adaptive);
+            table_fragments.push(stream_job_fragments.to_protobuf(
+                &upstreams,
+                &dispatchers,
+                parallelism,
+            ))
         }
 
         let worker_nodes = self
