@@ -35,7 +35,6 @@ use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tokio::time::sleep;
 
 use crate::error::{StreamError, StreamResult};
 use crate::executor::Barrier;
@@ -89,7 +88,6 @@ struct BarrierState {
 use risingwave_common::must_match;
 use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_service::InjectBarrierRequest;
-use rw_futures_util::run_future_with_sleep_fn;
 
 use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
@@ -650,15 +648,7 @@ impl DatabaseManagedBarrierState {
 
         for (actor_id, state) in self.actor_states.drain() {
             tracing::debug!("join actor {}", actor_id);
-            let start_time = Instant::now();
-            let result = run_future_with_sleep_fn(
-                state.join_handle,
-                || sleep(Duration::from_secs(10)),
-                move || {
-                    warn!(%actor_id, elapsed = ?start_time.elapsed(), "joining actor");
-                },
-            )
-            .await;
+            let result = state.join_handle.await;
             assert!(result.is_ok() || result.unwrap_err().is_cancelled());
         }
     }

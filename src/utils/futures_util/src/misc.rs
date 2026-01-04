@@ -18,7 +18,7 @@ use std::task::{Context, Poll, ready};
 
 use futures::future::{Either, pending, select};
 use futures::stream::Peekable;
-use futures::{FutureExt, Stream, StreamExt, pin_mut};
+use futures::{FutureExt, Stream, StreamExt};
 
 /// Convert a list of streams into a [`Stream`] of results from the streams.
 pub fn select_all<S: Stream + Unpin>(
@@ -44,22 +44,6 @@ pub fn drop_either_future<A, B>(
     match either {
         Either::Left((left, _)) => Either::Left(left),
         Either::Right((right, _)) => Either::Right(right),
-    }
-}
-
-pub async fn run_future_with_sleep_fn<F: Future, SleepFut: Future>(
-    future: F,
-    sleep_futures: impl Fn() -> SleepFut,
-    mut f: impl FnMut(),
-) -> F::Output {
-    pin_mut!(future);
-    loop {
-        match select(&mut future, pin!(sleep_futures())).await {
-            Either::Left((output, _)) => {
-                break output;
-            }
-            Either::Right(_) => f(),
-        }
     }
 }
 
