@@ -658,12 +658,19 @@ impl<S: LocalStateStore> WriteFuture<S> {
 }
 
 type ReadingChunkFuture = BoxFuture<'static, StreamExecutorResult<StreamChunk>>;
-type DispatchingFuture = BoxFuture<'static, StreamExecutorResult<()>>;
+type DispatchingFuture = BoxFuture<'static, (DispatchExecutorInner, StreamResult<()>)>;
+
+enum DispatchType {
+    ChunkOrWatermark,
+    Barrier(MessageBatch),
+}
 enum ConsumerFuture {
     ReadingChunk { future: ReadingChunkFuture },
     Dispatching { 
         future: DispatchingFuture,
-        log_store_stream: ReadingChunkFuture, },
+        log_store_stream: ReadingChunkFuture, 
+        kind: DispatchType
+    },
     Empty,
 }
 
@@ -676,51 +683,64 @@ enum ConsumerFutureEvent {
 // TODO: add metrics here
 impl ConsumerFuture {
     fn dispatch(
-        inner: DispatchExecutorInner,
+        mut inner: DispatchExecutorInner,
         message: MessageBatch,
         log_store_stream: ReadingChunkFuture,
     ) -> Self{
         tracing::trace!(
             "consumer_future: dispatching future created"
         );
-        let fut = match message {
+        let (fut, kind) = match message {
             chunk @ MessageBatch::Chunk(_) => {
-                Box::pin(async move {
-                    inner.dispatch(chunk)
-                    .instrument(tracing::info_span!("dispatch_chunk"))
-                    .instrument_await("dispatch_chunk")
-                    .await?;
-                    Ok(())
-                })
+                let fut = async move {
+                    let r = inner
+                        .dispatch(chunk)
+                        .instrument(tracing::info_span!("dispatch_chunk"))
+                        .instrument_await("dispatch_chunk")
+                        .await;
+                    (inner, r)
+                }
+                .boxed();
+                (fut, DispatchType::ChunkOrWatermark)
             }
             MessageBatch::BarrierBatch(barrier_batch) => {
-                Box::pin(async move {
-                    assert!(!barrier_batch.is_empty());
+                assert!(!barrier_batch.is_empty());
+                let barrier_batch_len = barrier_batch.len();
+                let to_yield = MessageBatch::BarrierBatch(barrier_batch.clone());
+                let fut = async move {
+                    let r = inner
+                        .dispatch(MessageBatch::BarrierBatch(barrier_batch))
+                        .instrument(tracing::info_span!("dispatch_barrier_batch"))
+                        .instrument_await("dispatch_barrier_batch")
+                        .await;
                     inner
-                    .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
-                    .instrument(tracing::info_span!("dispatch_barrier_batch"))
-                    .instrument_await("dispatch_barrier_batch")
-                    .await?;
-                    inner
-                    .metrics
-                    .metrics
-                    .barrier_batch_size
-                    .observe(barrier_batch.len() as f64);
-                    Ok(())
-                })
+                        .metrics
+                        .metrics
+                        .barrier_batch_size
+                        .observe(barrier_batch_len as f64);
+                    (inner, r)
+                }
+                .boxed();
+                (fut, DispatchType::Barrier(to_yield))
             }
             watermark @ MessageBatch::Watermark(_) => {
-                Box::pin(async move {
-                    inner
-                    .dispatch(watermark)
-                    .instrument(tracing::info_span!("dispatch_watermark"))
-                    .instrument_await("dispatch_watermark")
-                    .await?;
-                    Ok(())
-                })
+                let fut = async move {
+                    let r = inner
+                        .dispatch(watermark)
+                        .instrument(tracing::info_span!("dispatch_watermark"))
+                        .instrument_await("dispatch_watermark")
+                        .await;
+                    (inner, r)
+                }
+                .boxed();
+                (fut, DispatchType::ChunkOrWatermark)
             }
         };
-        Self::Dispatching { future:fut, log_store_stream }
+        Self::Dispatching {
+            future: fut,
+            log_store_stream,
+            kind,
+        }
     }
 
     fn read_chunk(
@@ -734,13 +754,20 @@ impl ConsumerFuture {
 
     async fn next_event(
         &mut self,
-        barriers: &VecDeque<MessageBatch>,
-    ) -> StreamExecutorResult<ConsumerFutureEvent> {
+        mut inner: DispatchExecutorInner,
+        barriers: &mut VecDeque<MessageBatch>,
+    ) -> StreamResult<ConsumerFutureEvent> {
         if !barriers.is_empty() {
             match self {
                 ConsumerFuture::ReadingChunk { future } => {
-                    let dispatch_future = 
+                    let msg = barriers.pop_back().expect("barrier queue should not be empty!");
+                    let log_store_stream = must_match!(
+                        std::mem::replace(self, ConsumerFuture::Empty),
+                        ConsumerFuture::ReadingChunk { future } => future
+                    );
+                    *self = Self::dispatch(inner, msg, log_store_stream);
                 }
+                ConsumerFuture::Dispatching{..} | ConsumerFuture::Empty => {}
             }
         }
         match self {
@@ -750,10 +777,14 @@ impl ConsumerFuture {
                     Ok(ConsumerFutureEvent::ReadOutChunk(result))
                 })
             }
-            ConsumerFuture::Dispatching {future} => {
-                let result = future.await?;
-                must_match!(replace(self, ConsumerFuture::Empty), ConsumerFuture::Dispatching { future } => {
-                    Ok(ConsumerFutureEvent::DispatchFinished)
+            ConsumerFuture::Dispatching {future, ..} => {
+                let (inner, result) = future.await;
+                result?;
+                must_match!(replace(self, ConsumerFuture::Empty), ConsumerFuture::Dispatching { kind, .. } => {
+                    Ok(match kind {
+                        DispatchType::Barrier(msg) => ConsumerFutureEvent::BarrierDispatched(msg),
+                        DispatchType::ChunkOrWatermark => ConsumerFutureEvent::ChunkDispatched,
+                    })
                 })
             }
             ConsumerFuture::Empty => {
