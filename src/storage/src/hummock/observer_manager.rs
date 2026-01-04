@@ -14,11 +14,9 @@
 
 use risingwave_common::license::LicenseManager;
 use risingwave_common_service::ObserverState;
-use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::id::TableId;
 use risingwave_pb::meta::SubscribeResponse;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
@@ -123,21 +121,15 @@ impl ObserverState for HummockObserverNode {
                 .expect("should get hummock_write_limits")
                 .write_limits,
         );
-        let table_change_logs = snapshot
-            .table_change_logs
-            .iter()
-            .map(|(id, change_log)| (TableId::new(*id), TableChangeLog::from_protobuf(change_log)))
-            .collect();
         let _ = self
             .version_update_sender
-            .send(HummockVersionUpdate::PinnedVersion(
-                Box::new(HummockVersion::from_rpc_protobuf(
+            .send(HummockVersionUpdate::PinnedVersion(Box::new(
+                HummockVersion::from_rpc_protobuf(
                     &snapshot
                         .hummock_version
                         .expect("should get hummock version"),
-                )),
-                Box::new(table_change_logs),
-            ))
+                ),
+            )))
             .inspect_err(|e| {
                 tracing::error!(event = ?e.0, "unable to send full version");
             });

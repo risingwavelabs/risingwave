@@ -16,6 +16,7 @@ use std::backtrace::Backtrace;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
+use std::iter;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
@@ -24,17 +25,19 @@ use std::time::{Duration, Instant};
 
 use bytes::Bytes;
 use foyer::Hint;
-use futures::{Stream, StreamExt, pin_mut};
+use futures::{Stream, StreamExt, future, pin_mut};
 use parking_lot::Mutex;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
     EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
+use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::{Receiver, Sender, channel};
 
 use super::{HummockError, HummockResult, SstableStoreRef};
@@ -628,7 +631,7 @@ pub(crate) async fn wait_for_epoch(
                 )))
             };
             *prev_committed_epoch = committed_epoch;
-            ret
+            future::ready(ret)
         },
         || {
             format!(
@@ -641,16 +644,17 @@ pub(crate) async fn wait_for_epoch(
     Ok(version)
 }
 
-pub(crate) async fn wait_for_update(
+pub(crate) async fn wait_for_update<T: Future<Output = HummockResult<bool>> + Send>(
     notifier: &tokio::sync::watch::Sender<PinnedVersion>,
-    mut inspect_fn: impl FnMut(&PinnedVersion) -> HummockResult<bool>,
+    mut inspect_fn: impl FnMut(&PinnedVersion) -> T,
     mut periodic_debug_info: impl FnMut() -> String,
 ) -> HummockResult<PinnedVersion> {
     let mut receiver = notifier.subscribe();
     {
-        let version = receiver.borrow_and_update();
-        if inspect_fn(&version)? {
-            return Ok(version.clone());
+        // The clone is lightweight.
+        let version_clone = receiver.borrow_and_update().clone();
+        if inspect_fn(&version_clone).await? {
+            return Ok(version_clone);
         }
     }
     let start_time = Instant::now();
@@ -683,13 +687,34 @@ pub(crate) async fn wait_for_update(
                 return Err(HummockError::wait_epoch("tx dropped"));
             }
             Ok(Ok(_)) => {
-                let version = receiver.borrow_and_update();
-                if inspect_fn(&version)? {
-                    return Ok(version.clone());
+                // The clone is lightweight.
+                let version_clone = receiver.borrow_and_update().clone();
+                if inspect_fn(&version_clone).await? {
+                    return Ok(version_clone);
                 }
             }
         }
     }
+}
+
+/// `epoch_range` start and end are both inclusive.
+pub(crate) async fn fetch_table_change_logs(
+    hummock_meta_client: Arc<dyn HummockMetaClient>,
+    table_id: TableId,
+    epoch_range: (u64, u64),
+    include_epoch_only: bool,
+) -> HummockResult<TableChangeLogs> {
+    hummock_meta_client
+        .get_table_change_logs(
+            include_epoch_only,
+            Some(epoch_range.0),
+            Some(epoch_range.1),
+            Some(iter::once(table_id).collect()),
+            false,
+            None,
+        )
+        .await
+        .map_err(HummockError::meta_error)
 }
 
 pub struct HummockMemoryCollector {

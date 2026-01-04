@@ -18,7 +18,6 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::{Epoch, INVALID_EPOCH};
-use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{
     FrontendHummockVersion, FrontendHummockVersionDelta, HummockVersionId, INVALID_VERSION_ID,
@@ -199,20 +198,6 @@ impl PinnedSnapshot {
     pub fn version(&self) -> &FrontendHummockVersion {
         &self.value
     }
-
-    pub fn list_change_log_epochs(
-        &self,
-        table_id: TableId,
-        min_epoch: u64,
-        max_count: u32,
-    ) -> Vec<u64> {
-        if let Some(table_change_log) = self.value.table_change_log.get(&table_id) {
-            let table_change_log = table_change_log.clone();
-            table_change_log.get_non_empty_epochs(min_epoch, max_count as usize)
-        } else {
-            vec![]
-        }
-    }
 }
 
 /// Returns an invalid snapshot, used for initial values.
@@ -220,7 +205,6 @@ fn invalid_snapshot() -> FrontendHummockVersion {
     FrontendHummockVersion {
         id: INVALID_VERSION_ID,
         state_table_info: HummockVersionStateTableInfo::from_protobuf(&HashMap::new()),
-        table_change_log: Default::default(),
     }
 }
 
@@ -241,10 +225,7 @@ pub struct HummockSnapshotManager {
 }
 
 #[derive(Default)]
-struct TableChangeLogNotificationMsg {
-    updated_change_log_table_ids: HashSet<TableId>,
-    deleted_table_ids: HashSet<TableId>,
-}
+struct TableChangeLogNotificationMsg {}
 
 pub type HummockSnapshotManagerRef = Arc<HummockSnapshotManager>;
 
@@ -270,22 +251,9 @@ impl HummockSnapshotManager {
         self.latest_snapshot.borrow().clone()
     }
 
-    pub fn init(&self, version: FrontendHummockVersion, table_change_logs: TableChangeLogs) {
-        let updated_change_log_table_ids: HashSet<_> = table_change_logs
-            .iter()
-            .filter_map(|(table_id, change_log)| {
-                if change_log.get_non_empty_epochs(0, usize::MAX).is_empty() {
-                    None
-                } else {
-                    Some(*table_id)
-                }
-            })
-            .collect();
+    pub fn init(&self, version: FrontendHummockVersion) {
         self.table_change_log_notification_sender
-            .send(TableChangeLogNotificationMsg {
-                updated_change_log_table_ids,
-                deleted_table_ids: Default::default(),
-            })
+            .send(TableChangeLogNotificationMsg {})
             .ok();
 
         self.update_inner(|_| Some(version));
@@ -295,35 +263,6 @@ impl HummockSnapshotManager {
     ///
     /// Should only be called by the observer manager.
     pub fn update(&self, deltas: HummockVersionDeltas) {
-        let updated_change_log_table_ids: HashSet<_> = deltas
-            .version_deltas
-            .iter()
-            .flat_map(|version_deltas| &version_deltas.change_log_delta)
-            .filter_map(|(table_id, change_log)| match change_log.new_log.as_ref() {
-                Some(new_log) => {
-                    let new_value_empty = new_log.new_value.is_empty();
-                    let old_value_empty = new_log.old_value.is_empty();
-                    if !new_value_empty || !old_value_empty {
-                        Some(*table_id)
-                    } else {
-                        None
-                    }
-                }
-                None => None,
-            })
-            .collect();
-        let deleted_table_ids: HashSet<_> = deltas
-            .version_deltas
-            .iter()
-            .flat_map(|version_deltas| version_deltas.removed_table_ids.iter().copied())
-            .collect();
-        self.table_change_log_notification_sender
-            .send(TableChangeLogNotificationMsg {
-                updated_change_log_table_ids,
-                deleted_table_ids,
-            })
-            .ok();
-
         self.update_inner(|old_snapshot| {
             if deltas.version_deltas.is_empty() {
                 return None;
@@ -333,7 +272,10 @@ impl HummockSnapshotManager {
                 snapshot.apply_delta(FrontendHummockVersionDelta::from_protobuf(delta));
             }
             Some(snapshot)
-        })
+        });
+        self.table_change_log_notification_sender
+            .send(TableChangeLogNotificationMsg {})
+            .ok();
     }
 
     pub fn add_table_for_test(&self, table_id: TableId) {
@@ -387,28 +329,30 @@ impl HummockSnapshotManager {
     pub async fn wait_table_change_log_notification(
         &self,
         table_id: TableId,
+        seek_timestamp: u64,
     ) -> Result<(), RwError> {
         let mut rx = self.table_change_log_notification_sender.subscribe();
         loop {
             rx.changed()
                 .await
                 .map_err(|_| ErrorCode::InternalError("cursor notify channel is closed.".into()))?;
-            let table_change_log_notification_msg = rx.borrow_and_update();
-            if table_change_log_notification_msg
-                .deleted_table_ids
-                .contains(&table_id)
+            let _ = rx.borrow_and_update();
+            if let Some(info) = self
+                .acquire()
+                .version()
+                .state_table_info
+                .info()
+                .get(&table_id)
             {
+                if info.committed_epoch >= seek_timestamp {
+                    break;
+                }
+            } else {
                 return Err(ErrorCode::InternalError(format!(
                     "Cursor dependent table deleted: table_id is {:?}",
                     table_id
                 ))
                 .into());
-            }
-            if table_change_log_notification_msg
-                .updated_change_log_table_ids
-                .contains(&table_id)
-            {
-                break;
             }
         }
         Ok(())

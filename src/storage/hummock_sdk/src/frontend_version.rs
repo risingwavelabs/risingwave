@@ -18,14 +18,11 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
 use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{
-    PbEpochNewChangeLog, PbHummockVersion, PbHummockVersionDelta, PbSstableInfo, PbTableChangeLog,
+    PbEpochNewChangeLog, PbHummockVersion, PbHummockVersionDelta, PbSstableInfo,
     StateTableInfoDelta,
 };
 
-use crate::change_log::{
-    ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLogCommon, TableChangeLogs,
-    resolve_pb_log_epochs,
-};
+use crate::change_log::{ChangeLogDeltaCommon, EpochNewChangeLogCommon, resolve_pb_log_epochs};
 use crate::version::{HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo};
 use crate::{HummockVersionId, INVALID_VERSION_ID};
 
@@ -33,30 +30,13 @@ use crate::{HummockVersionId, INVALID_VERSION_ID};
 pub struct FrontendHummockVersion {
     pub id: HummockVersionId,
     pub state_table_info: HummockVersionStateTableInfo,
-    pub table_change_log: HashMap<TableId, TableChangeLogCommon<()>>,
 }
 
 impl FrontendHummockVersion {
-    pub fn from_version(version: &HummockVersion, table_change_logs: &TableChangeLogs) -> Self {
+    pub fn from_version(version: &HummockVersion) -> Self {
         Self {
             id: version.id,
             state_table_info: version.state_table_info.clone(),
-            table_change_log: table_change_logs
-                .iter()
-                .map(|(table_id, change_log)| {
-                    (
-                        *table_id,
-                        TableChangeLogCommon::new(change_log.iter().map(|change_log| {
-                            EpochNewChangeLogCommon {
-                                new_value: vec![(); change_log.new_value.len()],
-                                old_value: vec![(); change_log.new_value.len()],
-                                non_checkpoint_epochs: change_log.non_checkpoint_epochs.clone(),
-                                checkpoint_epoch: change_log.checkpoint_epoch,
-                            }
-                        })),
-                    )
-                })
-                .collect(),
         }
     }
 
@@ -67,31 +47,7 @@ impl FrontendHummockVersion {
             levels: Default::default(),
             max_committed_epoch: INVALID_EPOCH,
             table_watermarks: Default::default(),
-            table_change_logs: self
-                .table_change_log
-                .iter()
-                .map(|(table_id, change_log)| {
-                    (
-                        *table_id,
-                        PbTableChangeLog {
-                            change_logs: change_log
-                                .iter()
-                                .map(|change_log| PbEpochNewChangeLog {
-                                    old_value: vec![
-                                        PbSstableInfo::default();
-                                        change_log.old_value.len()
-                                    ],
-                                    new_value: vec![
-                                        PbSstableInfo::default();
-                                        change_log.new_value.len()
-                                    ],
-                                    epochs: change_log.epochs().collect(),
-                                })
-                                .collect(),
-                        },
-                    )
-                })
-                .collect(),
+            table_change_logs: Default::default(),
             state_table_info: self.state_table_info.info().clone(),
             vector_indexes: Default::default(),
         }
@@ -101,28 +57,6 @@ impl FrontendHummockVersion {
         Self {
             id: HummockVersionId(value.id),
             state_table_info: HummockVersionStateTableInfo::from_protobuf(&value.state_table_info),
-            table_change_log: value
-                .table_change_logs
-                .into_iter()
-                .map(|(table_id, change_log)| {
-                    (
-                        table_id,
-                        TableChangeLogCommon::new(change_log.change_logs.into_iter().map(
-                            |change_log| {
-                                let (non_checkpoint_epochs, checkpoint_epoch) =
-                                    resolve_pb_log_epochs(&change_log.epochs);
-                                EpochNewChangeLogCommon {
-                                    // Here we need to determine if value is null but don't care what the value is, so we fill him in using `()`
-                                    new_value: vec![(); change_log.new_value.len()],
-                                    old_value: vec![(); change_log.old_value.len()],
-                                    non_checkpoint_epochs,
-                                    checkpoint_epoch,
-                                }
-                            },
-                        )),
-                    )
-                })
-                .collect(),
         }
     }
 
@@ -131,17 +65,8 @@ impl FrontendHummockVersion {
             assert_eq!(self.id, delta.prev_id);
         }
         self.id = delta.id;
-        let (changed_table_info, _) = self
-            .state_table_info
+        self.state_table_info
             .apply_delta(&delta.state_table_info_delta, &delta.removed_table_id);
-        HummockVersion::apply_change_log_delta(
-            &mut self.table_change_log,
-            &delta.change_log_delta,
-            &delta.removed_table_id,
-            &delta.state_table_info_delta,
-            &changed_table_info,
-            false,
-        );
     }
 }
 

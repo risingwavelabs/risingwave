@@ -23,7 +23,7 @@ use fail::fail_point;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
-use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
+use risingwave_hummock_sdk::change_log::{TableChangeLogs, build_table_change_log_delta};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -393,6 +393,18 @@ impl HummockMetaClient for MockHummockMetaClient {
         UnboundedSender<SubscribeIcebergCompactionEventRequest>,
         BoxStream<'static, IcebergCompactionEventItem>,
     )> {
+        unimplemented!()
+    }
+
+    async fn get_table_change_logs(
+        &self,
+        _epoch_only: bool,
+        _start_epoch_inclusive: Option<u64>,
+        _end_epoch_inclusive: Option<u64>,
+        _table_ids: Option<HashSet<TableId>>,
+        _exclude_empty: bool,
+        _limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
         unimplemented!()
     }
 }
