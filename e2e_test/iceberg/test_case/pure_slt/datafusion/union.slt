@@ -1,0 +1,319 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+CREATE TABLE t1 (
+    id INT,
+    name VARCHAR,
+    value FLOAT,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+CREATE TABLE t2 (
+    id INT,
+    name VARCHAR,
+    value FLOAT,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t1 VALUES
+    (1, 'Alice', 10.0),
+    (2, 'Bob', 20.0),
+    (3, 'Charlie', 30.0);
+
+statement ok
+INSERT INTO t2 VALUES
+    (3, 'Charlie', 30.0),
+    (4, 'Diana', 40.0),
+    (5, 'Eve', 50.0);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Test: Basic UNION (removes duplicates)
+query ??? rowsort
+SELECT id, name, value FROM t1
+UNION
+SELECT id, name, value FROM t2;
+----
+1 Alice 10
+2 Bob 20
+3 Charlie 30
+4 Diana 40
+5 Eve 50
+
+# Test: UNION ALL (keeps duplicates)
+query ??? rowsort
+SELECT id, name, value FROM t1
+UNION ALL
+SELECT id, name, value FROM t2;
+----
+1 Alice 10
+2 Bob 20
+3 Charlie 30
+3 Charlie 30
+4 Diana 40
+5 Eve 50
+
+# Test: UNION with WHERE clause
+query ??? rowsort
+SELECT id, name, value FROM t1 WHERE id <= 2
+UNION
+SELECT id, name, value FROM t2 WHERE id >= 4;
+----
+1 Alice 10
+2 Bob 20
+4 Diana 40
+5 Eve 50
+
+# Test: UNION ALL with WHERE clause
+query ??? rowsort
+SELECT id, name, value FROM t1 WHERE value < 25
+UNION ALL
+SELECT id, name, value FROM t2 WHERE value > 35;
+----
+1 Alice 10
+2 Bob 20
+4 Diana 40
+5 Eve 50
+
+# Test: UNION with ORDER BY (applied to result)
+query ???
+SELECT id, name, value FROM t1
+UNION
+SELECT id, name, value FROM t2
+ORDER BY id;
+----
+1 Alice 10
+2 Bob 20
+3 Charlie 30
+4 Diana 40
+5 Eve 50
+
+# Test: UNION ALL with ORDER BY DESC
+query ???
+SELECT id, name, value FROM t1
+UNION ALL
+SELECT id, name, value FROM t2
+ORDER BY id DESC;
+----
+5 Eve 50
+4 Diana 40
+3 Charlie 30
+3 Charlie 30
+2 Bob 20
+1 Alice 10
+
+# Test: UNION with LIMIT
+query ???
+SELECT id, name, value FROM t1
+UNION
+SELECT id, name, value FROM t2
+ORDER BY id
+LIMIT 3;
+----
+1 Alice 10
+2 Bob 20
+3 Charlie 30
+
+# Test: UNION ALL with LIMIT and OFFSET
+query ???
+SELECT id, name, value FROM t1
+UNION ALL
+SELECT id, name, value FROM t2
+ORDER BY id
+LIMIT 3 OFFSET 2;
+----
+3 Charlie 30
+3 Charlie 30
+4 Diana 40
+
+# Test: Multiple UNIONs
+query ??? rowsort
+SELECT id, name, value FROM t1 WHERE id = 1
+UNION
+SELECT id, name, value FROM t1 WHERE id = 2
+UNION
+SELECT id, name, value FROM t2 WHERE id = 4;
+----
+1 Alice 10
+2 Bob 20
+4 Diana 40
+
+# Test: UNION with column expressions
+query ?? rowsort
+SELECT id * 2 AS doubled_id, name FROM t1
+UNION
+SELECT id * 2 AS doubled_id, name FROM t2;
+----
+10 Eve
+2 Alice
+4 Bob
+6 Charlie
+8 Diana
+
+# Test: UNION with aggregation in subqueries
+query ?? rowsort
+SELECT 't1' AS source, SUM(value) AS total FROM t1
+UNION ALL
+SELECT 't2' AS source, SUM(value) AS total FROM t2;
+----
+t1 60
+t2 120
+
+# Test: UNION with same table
+query ??? rowsort
+SELECT id, name, value FROM t1 WHERE id <= 2
+UNION
+SELECT id, name, value FROM t1 WHERE id >= 2;
+----
+1 Alice 10
+2 Bob 20
+3 Charlie 30
+
+# Test: UNION ALL with same table (shows duplicate for id=2)
+query ??? rowsort
+SELECT id, name, value FROM t1 WHERE id <= 2
+UNION ALL
+SELECT id, name, value FROM t1 WHERE id >= 2;
+----
+1 Alice 10
+2 Bob 20
+2 Bob 20
+3 Charlie 30
+
+# Test: UNION with literal values
+query ?? rowsort
+SELECT id, name FROM t1
+UNION
+SELECT 100, 'Literal';
+----
+1 Alice
+100 Literal
+2 Bob
+3 Charlie
+
+# Test: UNION with NULL handling
+statement ok
+INSERT INTO t1 VALUES (6, NULL, NULL);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ??? rowsort
+SELECT id, name, value FROM t1 WHERE id >= 3
+UNION
+SELECT id, name, value FROM t2 WHERE id <= 4;
+----
+3 Charlie 30
+4 Diana 40
+6 NULL NULL
+
+# Test: UNION ALL preserves NULLs
+query ??? rowsort
+SELECT id, name, value FROM t1 WHERE id >= 3
+UNION ALL
+SELECT id, name, value FROM t2 WHERE id <= 4;
+----
+3 Charlie 30
+3 Charlie 30
+4 Diana 40
+6 NULL NULL
+
+# Test: UNION with ORDER BY on name (with NULL)
+query ???
+SELECT id, name, value FROM t1
+UNION
+SELECT id, name, value FROM t2
+ORDER BY name NULLS LAST;
+----
+1 Alice 10
+2 Bob 20
+3 Charlie 30
+4 Diana 40
+5 Eve 50
+6 NULL NULL
+
+# Test: UNION with ORDER BY on name (NULL first)
+query ???
+SELECT id, name, value FROM t1
+UNION
+SELECT id, name, value FROM t2
+ORDER BY name NULLS FIRST;
+----
+6 NULL NULL
+1 Alice 10
+2 Bob 20
+3 Charlie 30
+4 Diana 40
+5 Eve 50
+
+# Test: UNION with COUNT aggregation
+query ?
+SELECT COUNT(*) FROM (
+    SELECT id FROM t1
+    UNION
+    SELECT id FROM t2
+) AS combined;
+----
+6
+
+# Test: UNION ALL with COUNT aggregation
+query ?
+SELECT COUNT(*) FROM (
+    SELECT id FROM t1
+    UNION ALL
+    SELECT id FROM t2
+) AS combined;
+----
+7
+
+# Test: UNION with GROUP BY in subqueries
+query ?? rowsort
+SELECT name, SUM(value) AS total FROM t1 GROUP BY name
+UNION
+SELECT name, SUM(value) AS total FROM t2 GROUP BY name;
+----
+Alice 10
+Bob 20
+Charlie 30
+Diana 40
+Eve 50
+NULL NULL
+
+# Cleanup
+statement ok
+DROP TABLE t1;
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;
