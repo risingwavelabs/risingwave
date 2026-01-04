@@ -109,11 +109,7 @@ pub(super) fn test_hummock_version(epoch: HummockEpoch) -> HummockVersion {
 }
 
 pub(super) fn initial_pinned_version() -> PinnedVersion {
-    PinnedVersion::new(
-        test_hummock_version(INITIAL_EPOCH),
-        HashMap::default(),
-        unbounded_channel().0,
-    )
+    PinnedVersion::new(test_hummock_version(INITIAL_EPOCH), unbounded_channel().0)
 }
 
 pub(super) fn dummy_table_key() -> Vec<u8> {

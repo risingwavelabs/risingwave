@@ -268,17 +268,10 @@ impl NotificationServiceImpl {
 
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
 
-        let (hummock_version, table_change_logs) = self
+        let hummock_version = self
             .hummock_manager
-            .on_current_version_and_table_change_log(|version, table_change_logs| {
-                let pb_table_change_logs = table_change_logs
-                    .iter()
-                    .map(|(id, change_log)| (id.as_raw_id(), change_log.to_protobuf()))
-                    .collect();
-                (
-                    FrontendHummockVersion::from_version(version, table_change_logs).to_protobuf(),
-                    pb_table_change_logs,
-                )
+            .on_current_version(|version| {
+                FrontendHummockVersion::from_version(version).to_protobuf()
             })
             .await;
 
@@ -319,24 +312,15 @@ impl NotificationServiceImpl {
             streaming_worker_slot_mappings,
             session_params,
             cluster_resource: Some(cluster_resource),
-            table_change_logs,
             ..Default::default()
         })
     }
 
     async fn hummock_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (tables, catalog_version) = self.get_tables_snapshot().await?;
-        let (hummock_version, table_change_logs) = self
+        let hummock_version = self
             .hummock_manager
-            .on_current_version_and_table_change_log(|version, table_change_log| {
-                (
-                    version.into(),
-                    table_change_log
-                        .iter()
-                        .map(|(id, change_log)| (id.as_raw_id(), change_log.to_protobuf()))
-                        .collect(),
-                )
-            })
+            .on_current_version(|version| version.into())
             .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
@@ -356,7 +340,6 @@ impl NotificationServiceImpl {
                 write_limits: hummock_write_limits,
             }),
             cluster_resource: Some(cluster_resource),
-            table_change_logs,
             ..Default::default()
         })
     }

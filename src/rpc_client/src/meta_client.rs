@@ -69,6 +69,7 @@ use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
+use risingwave_pb::hummock::get_table_change_logs_request::PbTableFilter;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
@@ -1671,8 +1672,25 @@ impl MetaClient {
         Ok(resp.configs)
     }
 
-    pub async fn get_table_change_logs(&self) -> Result<TableChangeLogs> {
-        let req = GetTableChangeLogsRequest {};
+    pub async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        let req = GetTableChangeLogsRequest {
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids: table_ids.map(|iter| PbTableFilter {
+                table_ids: iter.into_iter().map(|t| t.as_raw_id()).collect(),
+            }),
+            exclude_empty,
+            limit,
+        };
         let resp = self.inner.get_table_change_logs(req).await?;
         Ok(resp
             .table_change_logs
@@ -2072,6 +2090,26 @@ impl HummockMetaClient for MetaClient {
             .await?;
 
         Ok((request_sender, Box::pin(stream)))
+    }
+
+    async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        self.get_table_change_logs(
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids,
+            exclude_empty,
+            limit,
+        )
+        .await
     }
 }
 

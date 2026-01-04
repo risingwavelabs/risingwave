@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
@@ -145,10 +144,8 @@ pub(crate) async fn new_hummock_java_binding_iter(
 
         let mut streams = Vec::with_capacity(read_plan.vnode_ids.len());
         let key_range = read_plan.key_range.unwrap();
-        let table_change_logs = HashMap::default();
         let pin_version = PinnedVersion::new(
             HummockVersion::from_rpc_protobuf(&read_plan.version.unwrap()),
-            table_change_logs,
             unbounded_channel().0,
         );
         let table_id = read_plan.table_id.into();

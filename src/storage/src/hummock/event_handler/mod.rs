@@ -19,7 +19,6 @@ use itertools::Itertools;
 use parking_lot::{RwLock, RwLockReadGuard};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::{HummockEpoch, HummockRawObjectId};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
@@ -51,7 +50,7 @@ pub struct BufferWriteRequest {
 #[derive(Debug)]
 pub enum HummockVersionUpdate {
     VersionDeltas(Vec<HummockVersionDelta>),
-    PinnedVersion(Box<HummockVersion>, Box<TableChangeLogs>),
+    PinnedVersion(Box<HummockVersion>),
 }
 
 pub enum HummockEvent {

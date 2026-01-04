@@ -1324,7 +1324,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         unimplemented!()
     }
 
-    async fn get_hummock_table_change_log(&self) -> RpcResult<TableChangeLogs> {
+    async fn get_hummock_table_change_log(
+        &self,
+        _start_epoch_inclusive: Option<u64>,
+        _end_epoch_inclusive: Option<u64>,
+        _table_ids: Option<HashSet<TableId>>,
+        _exclude_empty: bool,
+        _limit: Option<u32>,
+    ) -> RpcResult<TableChangeLogs> {
         Ok(HashMap::default())
     }
 }

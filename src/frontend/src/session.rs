@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 use std::fmt::{Display, Formatter};
 use std::io::{Error, ErrorKind};
+use std::iter;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::atomic::{AtomicI32, Ordering};
 use std::sync::{Arc, Weak};
@@ -1299,17 +1300,43 @@ impl SessionImpl {
         Ok(secret.clone())
     }
 
-    pub fn list_change_log_epochs(
+    pub async fn list_change_log_epochs(
         &self,
         table_id: TableId,
         min_epoch: u64,
         max_count: u32,
     ) -> Result<Vec<u64>> {
-        Ok(self
+        let Some(max_epoch) = self
             .env
             .hummock_snapshot_manager()
             .acquire()
-            .list_change_log_epochs(table_id, min_epoch, max_count))
+            .version()
+            .state_table_info
+            .info()
+            .get(&table_id)
+            .map(|s| s.committed_epoch)
+        else {
+            return Ok(vec![]);
+        };
+        let ret = self
+            .env
+            .meta_client_ref()
+            .get_hummock_table_change_log(
+                Some(min_epoch),
+                Some(max_epoch),
+                Some(iter::once(table_id).collect()),
+                true,
+                Some(max_count),
+            )
+            .await?;
+        let Some(e) = ret.get(&table_id) else {
+            return Ok(vec![]);
+        };
+        Ok(e.iter()
+            .flat_map(|l| l.epochs())
+            .filter(|e| *e >= min_epoch)
+            .take(max_count as usize)
+            .collect())
     }
 
     pub fn clear_cancel_query_flag(&self) {
