@@ -22,7 +22,7 @@ use std::ops::{Deref, DerefMut};
 use std::pin::Pin;
 use std::time::Duration;
 
-use futures::{FutureExt, TryStreamExt};
+use futures::{FutureExt, StreamExt as FuturesStreamExt, TryStreamExt};
 use futures::future::{BoxFuture, select};
 use futures::stream::{BoxStream, StreamFuture};
 use itertools::Itertools;
@@ -78,15 +78,20 @@ pub(crate) struct SyncLogStoreDispatchConfig {
     pub aligned: bool,
 }
 
-pub(crate) enum DispatchMode {
-    Direct,
-    SyncLogStore(SyncLogStoreDispatchConfig)
-}
-
 pub struct DispatchExecutor {
     input: Executor,
     inner: DispatchExecutorInner,
-    mode: DispatchMode
+}
+
+pub struct SyncLogStoreDispatchExecutor {
+    input: Executor,
+    inner: DispatchExecutorInner,
+    log_store_config: SyncLogStoreDispatchConfig,
+}
+
+pub enum AnyDispatchExecutor {
+    Direct(DispatchExecutor),
+    SyncLogStore(SyncLogStoreDispatchExecutor),
 }
 
 struct DispatcherWithMetrics {
@@ -426,7 +431,6 @@ impl DispatchExecutor {
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         dispatchers: Vec<stream_plan::Dispatcher>,
         actor_context: &ActorContextRef,
-        mode: DispatchMode,
     ) -> StreamResult<Self> {
         let mut executor = Self::new_inner(
             input,
@@ -436,7 +440,6 @@ impl DispatchExecutor {
             actor_context.fragment_id,
             actor_context.config.clone(),
             actor_context.streaming_metrics.clone(),
-            mode,
         );
         let inner = &mut executor.inner;
         for dispatcher in dispatchers {
@@ -458,7 +461,6 @@ impl DispatchExecutor {
         fragment_id: FragmentId,
         actor_config: Arc<StreamingConfig>,
         metrics: Arc<StreamingMetrics>,
-        mode: DispatchMode,
     ) -> (
         Self,
         tokio::sync::mpsc::UnboundedSender<(ActorId, NewOutputRequest)>,
@@ -474,7 +476,6 @@ impl DispatchExecutor {
                 fragment_id,
                 actor_config,
                 metrics,
-                mode,
             ),
             tx,
         )
@@ -488,7 +489,6 @@ impl DispatchExecutor {
         fragment_id: FragmentId,
         actor_config: Arc<StreamingConfig>,
         metrics: Arc<StreamingMetrics>,
-        mode: DispatchMode,
     ) -> Self {
         if crate::consistency::insane() {
             // make some trouble before dispatching to avoid generating invalid dist key.
@@ -524,8 +524,42 @@ impl DispatchExecutor {
                 new_output_request_rx,
                 pending_new_output_requests: Default::default(),
             },
-            mode,
         }
+    }
+}
+
+impl SyncLogStoreDispatchExecutor {
+    pub(crate) async fn new(
+        input: Executor,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        dispatchers: Vec<stream_plan::Dispatcher>,
+        actor_context: &ActorContextRef,
+        log_store_config: SyncLogStoreDispatchConfig,
+    ) -> StreamResult<Self> {
+        let mut executor = DispatchExecutor::new_inner(
+            input,
+            new_output_request_rx,
+            vec![],
+            actor_context.id,
+            actor_context.fragment_id,
+            actor_context.config.clone(),
+            actor_context.streaming_metrics.clone(),
+        );
+        let inner = &mut executor.inner;
+        for dispatcher in dispatchers {
+            let outputs = inner
+                .collect_outputs(&dispatcher.downstream_actor_id)
+                .await?;
+            let dispatcher = DispatcherImpl::new(outputs, &dispatcher)?;
+            let dispatcher = inner.metrics.monitor_dispatcher(dispatcher);
+            inner.dispatchers.push(dispatcher);
+        }
+        let DispatchExecutor { input, inner } = executor;
+        Ok(Self {
+            input,
+            inner,
+            log_store_config,
+        })
     }
 }
 
@@ -805,71 +839,104 @@ impl StreamConsumer for DispatchExecutor {
         let max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
         #[try_stream]
         async move {
-            match self.mode {
-                DispatchMode::Direct => {
-                    let mut input = self.input.execute().peekable();
-                    loop {
-                        let Some(message) =
-                            try_batch_barriers(max_barrier_count_per_batch, &mut input).await?
-                        else {
-                            // end_of_stream
-                            break;
-                        };
-                        match message {
-                            chunk @ MessageBatch::Chunk(_) => {
-                                self.inner
-                                    .dispatch(chunk)
-                                    .instrument(tracing::info_span!("dispatch_chunk"))
-                                    .instrument_await("dispatch_chunk")
-                                    .await?;
-                            }
-                            MessageBatch::BarrierBatch(barrier_batch) => {
-                                assert!(!barrier_batch.is_empty());
-                                self.inner
-                                    .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
-                                    .instrument(tracing::info_span!("dispatch_barrier_batch"))
-                                    .instrument_await("dispatch_barrier_batch")
-                                    .await?;
-                                self.inner
-                                    .metrics
-                                    .metrics
-                                    .barrier_batch_size
-                                    .observe(barrier_batch.len() as f64);
-                                for barrier in barrier_batch {
-                                    yield barrier;
-                                }
-                            }
-                            watermark @ MessageBatch::Watermark(_) => {
-                                self.inner
-                                    .dispatch(watermark)
-                                    .instrument(tracing::info_span!("dispatch_watermark"))
-                                    .instrument_await("dispatch_watermark")
-                                .await?;
-                            }
+            let mut input = self.input.execute().peekable();
+            loop {
+                let Some(message) =
+                    try_batch_barriers(max_barrier_count_per_batch, &mut input).await?
+                else {
+                    // end_of_stream
+                    break;
+                };
+                match message {
+                    chunk @ MessageBatch::Chunk(_) => {
+                        self.inner
+                            .dispatch(chunk)
+                            .instrument(tracing::info_span!("dispatch_chunk"))
+                            .instrument_await("dispatch_chunk")
+                            .await?;
+                    }
+                    MessageBatch::BarrierBatch(barrier_batch) => {
+                        assert!(!barrier_batch.is_empty());
+                        self.inner
+                            .dispatch(MessageBatch::BarrierBatch(barrier_batch.clone()))
+                            .instrument(tracing::info_span!("dispatch_barrier_batch"))
+                            .instrument_await("dispatch_barrier_batch")
+                            .await?;
+                        self.inner
+                            .metrics
+                            .metrics
+                            .barrier_batch_size
+                            .observe(barrier_batch.len() as f64);
+                        for barrier in barrier_batch {
+                            yield barrier;
                         }
                     }
+                    watermark @ MessageBatch::Watermark(_) => {
+                        self.inner
+                            .dispatch(watermark)
+                            .instrument(tracing::info_span!("dispatch_watermark"))
+                            .instrument_await("dispatch_watermark")
+                            .await?;
+                    }
                 }
-                DispatchMode::SyncLogStore(log_store_config) => {
-                    // TODO: Add sync log store logistics here.
-                    // Create a synclogstore following log_store_config.
-                    let mut input = self.input.execute();
-                    let first_barrier = expect_first_barrier(&mut input).await?;
-                    let first_write_epoch = first_barrier.epoch;
-                    yield first_barrier;
+            }
+        }
+    }
+}
 
-                    let local_state_store = dispatch_state_store!(log_store_config.state_store.clone(), store, {
-                        store
+impl StreamConsumer for SyncLogStoreDispatchExecutor {
+    type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
+
+    fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+        let max_barrier_count_per_batch =
+            self.inner.actor_config.developer.max_barrier_batch_size;
+        #[try_stream]
+        async move {
+            // TODO: Add sync log store logistics here.
+            // Create a synclogstore following log_store_config.
+            let log_store_config = self.log_store_config;
+            let mut input = self.input.execute();
+            // The first barrier is kept for dispatch, the rest is batched for log store.
+            let first_barrier = expect_first_barrier(&mut input).await?;
+            let _first_write_epoch = first_barrier.epoch;
+            yield first_barrier;
+            let mut batch_input = make_batched_input(max_barrier_count_per_batch, input).await;
+
+            (async {
+                dispatch_state_store!(log_store_config.state_store.clone(), state_store, {
+                    let _local_state_store = state_store
                         .new_local(NewLocalOptions {
                             table_id: log_store_config.table_id,
                             op_consistency_level: OpConsistencyLevel::Inconsistent,
-                            table_option: TableOption { retention_seconds: None },
+                            table_option: TableOption {
+                                retention_seconds: None,
+                            },
                             is_replicated: false,
                             vnodes: log_store_config.serde.vnodes().clone(),
                             upload_on_flush: false,
                         })
-                        .await
-                    });
-                }
+                        .await;
+                    Ok::<(), StreamExecutorError>(())
+                })
+            })
+            .await?;
+
+            while let Some(batch) = batch_input.next().await {
+                let _batch = batch?;
+                // TODO: consume batches from log store stream.
+            }
+        }
+    }
+}
+
+impl StreamConsumer for AnyDispatchExecutor {
+    type BarrierStream = BoxStream<'static, StreamResult<Barrier>>;
+
+    fn execute(self: Box<Self>) -> Self::BarrierStream {
+        match *self {
+            AnyDispatchExecutor::Direct(exec) => FuturesStreamExt::boxed(Box::new(exec).execute()),
+            AnyDispatchExecutor::SyncLogStore(exec) => {
+                FuturesStreamExt::boxed(Box::new(exec).execute())
             }
         }
     }
@@ -1717,7 +1784,6 @@ mod tests {
                 new_output_request_rx,
                 vec![broadcast_dispatcher, simple_dispatcher],
                 &ActorContext::for_test(actor_id),
-                DispatchMode::Direct,
             )
             .await
             .unwrap(),

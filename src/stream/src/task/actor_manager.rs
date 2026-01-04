@@ -45,9 +45,10 @@ use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
-    Actor, ActorContext, ActorContextRef, DispatchExecutor, DispatchMode, Execute, Executor, ExecutorInfo, SnapshotBackfillExecutor, TroublemakerExecutor, WrapperExecutor
+    Actor, ActorContext, ActorContextRef, AnyDispatchExecutor, DispatchExecutor, Execute, Executor,
+    ExecutorInfo, SnapshotBackfillExecutor, SyncLogStoreDispatchConfig,
+    SyncLogStoreDispatchExecutor, TroublemakerExecutor, WrapperExecutor,
 };
-use crate::executor::SyncLogStoreDispatchConfig;
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
     ActorEvalErrorReport, ActorId, AtomicU64Ref, FragmentId, LocalBarrierManager, NewOutputRequest,
@@ -429,7 +430,7 @@ impl StreamActorManager {
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         actor_config: Arc<StreamingConfig>,
-    ) -> StreamResult<Actor<DispatchExecutor>> {
+    ) -> StreamResult<Actor<AnyDispatchExecutor>> {
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
@@ -441,7 +442,7 @@ impl StreamActorManager {
         );
         let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
         let expr_context = actor.expr_context.clone().unwrap();
-        let (node, mode) = match node.get_node_body()? {
+        let (node, sync_log_store_config) = match node.get_node_body()? {
             NodeBody::SyncLogStore(sync) => {
                 let sync = sync.clone();
                 let [input] = node.input.as_slice() else {
@@ -472,19 +473,17 @@ impl StreamActorManager {
 
                 (
                     Arc::new(input),
-                    DispatchMode::SyncLogStore(
-                        SyncLogStoreDispatchConfig {
-                            table_id: table.id,
-                            serde,
-                            state_store: self.env.state_store(),
-                            max_buffer_size,
-                            pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
-                            aligned: sync.aligned,
-                        }
-                    ),
+                    Some(SyncLogStoreDispatchConfig {
+                        table_id: table.id,
+                        serde,
+                        state_store: self.env.state_store(),
+                        max_buffer_size,
+                        pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
+                        aligned: sync.aligned,
+                    }),
                 )
             },
-            _ => (node.clone(), DispatchMode::Direct)
+            _ => (node.clone(), None)
         };
 
         let (executor, subtasks) = self
@@ -498,14 +497,29 @@ impl StreamActorManager {
             )
             .await?;
         
-        let dispatcher = DispatchExecutor::new(
-            executor,
-            new_output_request_rx,
-            actor.dispatchers,
-            &actor_context,
-            mode,
-        )
-        .await?;
+        let dispatcher = match sync_log_store_config {
+            Some(log_store_config) => {
+                let inner = SyncLogStoreDispatchExecutor::new(
+                    executor,
+                    new_output_request_rx,
+                    actor.dispatchers,
+                    &actor_context,
+                    log_store_config,
+                )
+                .await?;
+                AnyDispatchExecutor::SyncLogStore(inner)
+            }
+            None => {
+                let inner = DispatchExecutor::new(
+                    executor,
+                    new_output_request_rx,
+                    actor.dispatchers,
+                    &actor_context,
+                )
+                .await?;
+                AnyDispatchExecutor::Direct(inner)
+            }
+        };
 
         let actor = Actor::new(
             dispatcher,

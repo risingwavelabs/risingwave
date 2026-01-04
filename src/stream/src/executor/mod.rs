@@ -144,9 +144,10 @@ pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use changelog::ChangeLogExecutor;
 pub use dedup::AppendOnlyDedupExecutor;
-pub use dispatch::{DispatchExecutor, DispatcherImpl};
+pub use dispatch::{
+    AnyDispatchExecutor, DispatchExecutor, DispatcherImpl, SyncLogStoreDispatchExecutor,
+};
 pub(crate) use dispatch::SyncLogStoreDispatchConfig;
-pub(crate) use dispatch::DispatchMode;
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;

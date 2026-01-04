@@ -157,7 +157,6 @@ async fn test_merger_sum_aggr() {
                 0.into(),
                 config,
                 metrics,
-                DispatchMode::Direct,
             );
             let actor = Actor::new(
                 dispatcher,
