@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,6 +52,7 @@ use risingwave_connector::source::test_source::{
 };
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::{Metadata, SerializedMetadata};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use risingwave_simulation::cluster::{Cluster, ConfigPath, Configuration};
 use tokio::task::yield_now;
 use tokio::time::sleep;
@@ -325,7 +326,7 @@ impl SinglePhaseCommitCoordinator for TestCoordinator {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        _add_columns: Option<Vec<Field>>,
+        _schema_change: Option<PbSinkSchemaChange>,
     ) -> risingwave_connector::sink::Result<()> {
         if SimulationTestSink::random_err(&self.err_rate) {
             println!("commit with err");
@@ -356,7 +357,7 @@ impl TwoPhaseCommitCoordinator for TestCoordinator {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        _add_columns: Option<Vec<Field>>,
+        _schema_change: Option<PbSinkSchemaChange>,
     ) -> risingwave_connector::sink::Result<Vec<u8>> {
         if SimulationTestSink::random_err(&self.err_rate) {
             println!("pre-commit with err");
@@ -381,6 +382,7 @@ impl TwoPhaseCommitCoordinator for TestCoordinator {
         &mut self,
         epoch: u64,
         commit_metadata: Vec<u8>,
+        _schema_change: Option<PbSinkSchemaChange>,
     ) -> risingwave_connector::sink::Result<()> {
         if commit_metadata.is_empty() {
             return Ok(());

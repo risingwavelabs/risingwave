@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1263,7 +1263,7 @@ mod tests {
             key_indices.to_vec(),
             DispatchOutputMapping::Simple(vec![0, 1, 2]),
             hash_mapping,
-            0,
+            0.into(),
         );
 
         let chunk = StreamChunk::from_pretty(
@@ -1321,7 +1321,7 @@ mod tests {
 
         // actor_id -> untouched, old, new, old_simple, new_simple
 
-        let broadcast_dispatcher_id = 666;
+        let broadcast_dispatcher_id = 666.into();
         let broadcast_dispatcher = PbDispatcher {
             r#type: DispatcherType::Broadcast as _,
             dispatcher_id: broadcast_dispatcher_id,
@@ -1330,7 +1330,7 @@ mod tests {
             ..Default::default()
         };
 
-        let simple_dispatcher_id = 888;
+        let simple_dispatcher_id = 888.into();
         let simple_dispatcher = PbDispatcher {
             r#type: DispatcherType::Simple as _,
             dispatcher_id: simple_dispatcher_id,
@@ -1512,7 +1512,7 @@ mod tests {
             key_indices.to_vec(),
             DispatchOutputMapping::Simple((0..dimension).collect()),
             hash_mapping.clone(),
-            0,
+            0.into(),
         );
 
         let mut ops = Vec::new();

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,7 +54,6 @@ use crate::rpc::metrics::MetaMetrics;
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
 pub type DiscoveredSourceSplits = HashMap<SourceId, Vec<SplitImpl>>;
-pub type ThrottleConfig = HashMap<FragmentId, HashMap<ActorId, Option<u32>>>;
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
 pub type ConnectorPropsChange = HashMap<ObjectId, HashMap<String, String>>;
 

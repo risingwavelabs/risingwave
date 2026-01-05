@@ -1,0 +1,87 @@
+# Demonstrate that multiple MVs created from a shared source with `scan.startup.mode = 'latest'`
+# will use the same start offset resolved at the time when the source is created, no matter when
+# the MV is created.
+
+control substitution on
+
+statement ok
+SET streaming_use_shared_source TO true;
+
+statement ok
+drop source if exists s_latest_shared cascade;
+
+system ok
+rpk topic delete shared_source_latest || true
+
+system ok
+rpk topic create shared_source_latest -p 1
+
+# Create shared source with latest, then produce data before MV creation.
+statement ok
+create source s_latest_shared (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'shared_source_latest',
+  scan.startup.mode = 'latest'
+) FORMAT PLAIN ENCODE JSON;
+
+system ok
+cat << EOF | rpk topic produce shared_source_latest -f "%v\n"
+{"v1": 1, "v2": "before"}
+EOF
+
+
+sleep 3s
+
+statement ok
+flush;
+
+statement ok
+create materialized view mv_late as select * from s_latest_shared;
+
+query I
+select count(*) from mv_late;
+----
+1
+
+system ok
+cat << EOF | rpk topic produce shared_source_latest -f "%v\n"
+{"v1": 3, "v2": "after"}
+{"v1": 4, "v2": "after"}
+EOF
+
+
+sleep 3s
+
+statement ok
+flush;
+
+query IT rowsort
+select * from mv_late;
+----
+1 before
+3 after
+4 after
+
+
+# Now create a new MV from the source.
+# Even though the source is created with `scan.startup.mode` set to `latest`, we still get the same
+# view as the previous MV, because the `latest` is regarded as the high watermark at the time
+# when the **source** was initially created, not the MV.
+statement ok
+create materialized view mv_late_2 as select * from s_latest_shared;
+
+query IT rowsort
+select * from mv_late_2;
+----
+1 before
+3 after
+4 after
+
+statement ok
+drop source s_latest_shared cascade;
+
+system ok
+rpk topic delete shared_source_latest
+
+statement ok
+SET streaming_use_shared_source TO DEFAULT;

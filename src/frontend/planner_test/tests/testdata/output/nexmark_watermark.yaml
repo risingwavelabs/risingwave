@@ -977,28 +977,33 @@
                     └─LogicalFilter { predicate: (event_type = 2:Int32) }
                       └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [$expr11 DESC, date_time ASC], limit: 1, offset: 0, group_key: [$expr1] }
-    └─LogicalJoin { type: Inner, on: ($expr1 = $expr9) AND (date_time >= date_time) AND (date_time <= $expr6), output: all }
-      ├─LogicalProject { exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2, Field(auction, 2:Int32) as $expr3, Field(auction, 3:Int32) as $expr4, Field(auction, 4:Int32) as $expr5, date_time, Field(auction, 6:Int32) as $expr6, Field(auction, 7:Int32) as $expr7, Field(auction, 8:Int32) as $expr8] }
-      │ └─LogicalFilter { predicate: (event_type = 1:Int32) }
-      │   └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
-      └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr9, Field(bid, 1:Int32) as $expr10, Field(bid, 2:Int32) as $expr11, date_time] }
-        └─LogicalFilter { predicate: (event_type = 2:Int32) }
-          └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+    LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6, $expr7, $expr8, $expr9, $expr10, $expr11, date_time] }
+    └─LogicalFilter { predicate: (row_number <= 1:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr1 ORDER BY $expr11 DESC, date_time ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalJoin { type: Inner, on: ($expr1 = $expr9) AND (date_time >= date_time) AND (date_time <= $expr6), output: all }
+          ├─LogicalProject { exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2, Field(auction, 2:Int32) as $expr3, Field(auction, 3:Int32) as $expr4, Field(auction, 4:Int32) as $expr5, date_time, Field(auction, 6:Int32) as $expr6, Field(auction, 7:Int32) as $expr7, Field(auction, 8:Int32) as $expr8] }
+          │ └─LogicalFilter { predicate: (event_type = 1:Int32) }
+          │   └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+          └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr9, Field(bid, 1:Int32) as $expr10, Field(bid, 2:Int32) as $expr11, date_time] }
+            └─LogicalFilter { predicate: (event_type = 2:Int32) }
+              └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [$expr13 DESC, $expr10 ASC], limit: 1, offset: 0, group_key: [$expr2] }
-      └─BatchHashJoin { type: Inner, predicate: $expr2 = $expr11 AND ($expr10 >= $expr1) AND ($expr10 <= $expr7), output: all }
-        ├─BatchExchange { order: [], dist: HashShard($expr2) }
-        │ └─BatchProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, $expr1, Field(auction, 6:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, Field(auction, 8:Int32) as $expr9] }
-        │   └─BatchFilter { predicate: (event_type = 1:Int32) }
-        │     └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
-        │       └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
-        └─BatchExchange { order: [], dist: HashShard($expr11) }
-          └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr11, Field(bid, 1:Int32) as $expr12, Field(bid, 2:Int32) as $expr13, $expr10] }
-            └─BatchFilter { predicate: (event_type = 2:Int32) }
-              └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr10, _row_id] }
-                └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
+    └─BatchProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, $expr8, $expr9, $expr11, $expr12, $expr13, $expr10] }
+      └─BatchFilter { predicate: (row_number <= 1:Int32) }
+        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr13 DESC, $expr10 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchSort { order: [$expr2 ASC, $expr13 DESC, $expr10 ASC] }
+            └─BatchHashJoin { type: Inner, predicate: $expr2 = $expr11 AND ($expr10 >= $expr1) AND ($expr10 <= $expr7), output: all }
+              ├─BatchExchange { order: [], dist: HashShard($expr2) }
+              │ └─BatchProject { exprs: [Field(auction, 0:Int32) as $expr2, Field(auction, 1:Int32) as $expr3, Field(auction, 2:Int32) as $expr4, Field(auction, 3:Int32) as $expr5, Field(auction, 4:Int32) as $expr6, $expr1, Field(auction, 6:Int32) as $expr7, Field(auction, 7:Int32) as $expr8, Field(auction, 8:Int32) as $expr9] }
+              │   └─BatchFilter { predicate: (event_type = 1:Int32) }
+              │     └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
+              │       └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
+              └─BatchExchange { order: [], dist: HashShard($expr11) }
+                └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr11, Field(bid, 1:Int32) as $expr12, Field(bid, 2:Int32) as $expr13, $expr10] }
+                  └─BatchFilter { predicate: (event_type = 2:Int32) }
+                    └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr10, _row_id] }
+                      └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, auction, bidder, price, bid_date_time], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck, watermark_columns: [date_time, bid_date_time] }
     └─StreamProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, $expr8, $expr9, $expr10, $expr11, $expr12, $expr1], output_watermarks: [[$expr1], [$expr1]] }
@@ -1497,12 +1502,15 @@
                   └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [$expr1 DESC], limit: 1, offset: 0, group_key: [$expr3, $expr2] }
-      └─BatchExchange { order: [], dist: HashShard($expr3, $expr2) }
-        └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
-          └─BatchFilter { predicate: (event_type = 2:Int32) }
-            └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
-              └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
+    └─BatchProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7] }
+      └─BatchFilter { predicate: (row_number <= 1:Int32) }
+        └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr3, $expr2 ORDER BY $expr1 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchExchange { order: [$expr3 ASC, $expr2 ASC, $expr1 DESC], dist: HashShard($expr2, $expr3) }
+            └─BatchSort { order: [$expr3 ASC, $expr2 ASC, $expr1 DESC] }
+              └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
+                └─BatchFilter { predicate: (event_type = 2:Int32) }
+                  └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
+                    └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: NoCheck, watermark_columns: [date_time] }
     └─StreamProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7], output_watermarks: [[$expr1]] }
@@ -1569,12 +1577,15 @@
                   └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchGroupTopN { order: [$expr1 DESC], limit: 1, offset: 0, with_ties: true, group_key: [$expr3, $expr2] }
-      └─BatchExchange { order: [], dist: HashShard($expr3, $expr2) }
-        └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
-          └─BatchFilter { predicate: (event_type = 2:Int32) }
-            └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
-              └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
+    └─BatchProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7] }
+      └─BatchFilter { predicate: (rank <= 1:Int32) }
+        └─BatchOverWindow { window_functions: [rank() OVER(PARTITION BY $expr3, $expr2 ORDER BY $expr1 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+          └─BatchExchange { order: [$expr3 ASC, $expr2 ASC, $expr1 DESC], dist: HashShard($expr2, $expr3) }
+            └─BatchSort { order: [$expr3 ASC, $expr2 ASC, $expr1 DESC] }
+              └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
+                └─BatchFilter { predicate: (event_type = 2:Int32) }
+                  └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
+                    └─BatchSource { source: nexmark, columns: [event_type, person, auction, bid, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, _row_id(hidden)], stream_key: [bidder, auction, _row_id], pk_columns: [bidder, auction, _row_id], pk_conflict: NoCheck, watermark_columns: [date_time] }
     └─StreamGroupTopN [append_only] { order: [$expr1 DESC], limit: 1, offset: 0, with_ties: true, group_key: [$expr3, $expr2], output_watermarks: [[$expr1]] }
@@ -1637,10 +1648,10 @@
                   └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─BatchSort { order: [$expr2 ASC, $expr4 DESC] }
-        └─BatchGroupTopN { order: [$expr4 DESC], limit: 10, offset: 0, group_key: [$expr2] }
-          └─BatchExchange { order: [], dist: HashShard($expr2) }
+    └─BatchFilter { predicate: (row_number <= 10:Int32) }
+      └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─BatchExchange { order: [$expr2 ASC, $expr4 DESC], dist: HashShard($expr2) }
+          └─BatchSort { order: [$expr2 ASC, $expr4 DESC] }
             └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
               └─BatchFilter { predicate: (event_type = 2:Int32) }
                 └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }

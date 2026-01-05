@@ -38,6 +38,7 @@ struct FragmentInfo {
     actor_location: HashMap<ActorId, HostAddress>,
 }
 
+#[derive(Debug)]
 pub(super) struct FragmentEdgeBuildResult {
     pub(super) upstreams: HashMap<FragmentId, HashMap<ActorId, ActorUpstreams>>,
     pub(super) dispatchers: FragmentActorDispatchers,
@@ -80,6 +81,21 @@ impl FragmentEdgeBuildResult {
             }
         }
         actors_to_create
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.merge_updates
+            .values()
+            .all(|updates| updates.is_empty())
+            && self.dispatchers.values().all(|dispatchers| {
+                dispatchers
+                    .values()
+                    .all(|dispatchers| dispatchers.is_empty())
+            })
+            && self
+                .merge_updates
+                .values()
+                .all(|updates| updates.is_empty())
     }
 }
 

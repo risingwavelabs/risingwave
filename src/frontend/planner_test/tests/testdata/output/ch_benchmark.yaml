@@ -901,72 +901,68 @@
   sql: "select\t s_nationkey as supp_nation,\n           substr(c_state,1,1) as cust_nation,\n           extract(year from o_entry_d) as l_year,\n           sum(ol_amount) as revenue\nfrom\t supplier, stock, order_line, orders, customer, nation n1, nation n2\nwhere\t ol_supply_w_id = s_w_id\n  and ol_i_id = s_i_id\n  and mod((s_w_id * s_i_id), 10000) = s_suppkey\n  and ol_w_id = o_w_id\n  and ol_d_id = o_d_id\n  and ol_o_id = o_id\n  and c_id = o_c_id\n  and c_w_id = o_w_id\n  and c_d_id = o_d_id\n  and s_nationkey = n1.n_nationkey\n  and ascii(substr(c_state,1,1)) - 65 = n2.n_nationkey\n  and (\n        (n1.n_name = 'JAPAN' and n2.n_name = 'CHINA')\n        or\n        (n1.n_name = 'CHINA' and n2.n_name = 'JAPAN')\n    )\n  and ol_delivery_d between '2007-01-02 00:00:00.000000' and '2032-01-02 00:00:00.000000'\ngroup by s_nationkey, substr(c_state,1,1), extract(year from o_entry_d)\norder by s_nationkey, cust_nation, l_year;\n"
   logical_plan: |-
     LogicalProject { exprs: [supplier.s_nationkey, $expr1, $expr2, sum(order_line.ol_amount)] }
-    └─LogicalProject { exprs: [supplier.s_nationkey, $expr1, $expr2, sum(order_line.ol_amount), supplier.s_nationkey] }
-      └─LogicalAgg { group_key: [supplier.s_nationkey, $expr1, $expr2], aggs: [sum(order_line.ol_amount)] }
-        └─LogicalProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr1, Extract('YEAR':Varchar, orders.o_entry_d) as $expr2, order_line.ol_amount] }
-          └─LogicalFilter { predicate: (order_line.ol_supply_w_id = stock.s_w_id) AND (order_line.ol_i_id = stock.s_i_id) AND (((stock.s_w_id * stock.s_i_id) % 10000:Int32) = supplier.s_suppkey) AND (order_line.ol_w_id = orders.o_w_id) AND (order_line.ol_d_id = orders.o_d_id) AND (order_line.ol_o_id = orders.o_id) AND (customer.c_id = orders.o_c_id) AND (customer.c_w_id = orders.o_w_id) AND (customer.c_d_id = orders.o_d_id) AND (supplier.s_nationkey = nation.n_nationkey) AND ((Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32) = nation.n_nationkey) AND (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))) AND (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
-            └─LogicalJoin { type: Inner, on: true, output: all }
-              ├─LogicalJoin { type: Inner, on: true, output: all }
-              │ ├─LogicalJoin { type: Inner, on: true, output: all }
-              │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-              │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-              │ │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
-              │ │ │ │ │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
-              │ │ │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
-              │ │ │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
-              │ │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-              │ │ └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-              │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
-              └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
+    └─LogicalAgg { group_key: [supplier.s_nationkey, $expr1, $expr2], aggs: [sum(order_line.ol_amount)] }
+      └─LogicalProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr1, Extract('YEAR':Varchar, orders.o_entry_d) as $expr2, order_line.ol_amount] }
+        └─LogicalFilter { predicate: (order_line.ol_supply_w_id = stock.s_w_id) AND (order_line.ol_i_id = stock.s_i_id) AND (((stock.s_w_id * stock.s_i_id) % 10000:Int32) = supplier.s_suppkey) AND (order_line.ol_w_id = orders.o_w_id) AND (order_line.ol_d_id = orders.o_d_id) AND (order_line.ol_o_id = orders.o_id) AND (customer.c_id = orders.o_c_id) AND (customer.c_w_id = orders.o_w_id) AND (customer.c_d_id = orders.o_d_id) AND (supplier.s_nationkey = nation.n_nationkey) AND ((Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32) = nation.n_nationkey) AND (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))) AND (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
+          └─LogicalJoin { type: Inner, on: true, output: all }
+            ├─LogicalJoin { type: Inner, on: true, output: all }
+            │ ├─LogicalJoin { type: Inner, on: true, output: all }
+            │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
+            │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
+            │ │ │ │ ├─LogicalJoin { type: Inner, on: true, output: all }
+            │ │ │ │ │ ├─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_name, supplier.s_address, supplier.s_nationkey, supplier.s_phone, supplier.s_acctbal, supplier.s_comment, supplier._rw_timestamp] }
+            │ │ │ │ │ └─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id, stock.s_quantity, stock.s_dist_01, stock.s_dist_02, stock.s_dist_03, stock.s_dist_04, stock.s_dist_05, stock.s_dist_06, stock.s_dist_07, stock.s_dist_08, stock.s_dist_09, stock.s_dist_10, stock.s_ytd, stock.s_order_cnt, stock.s_remote_cnt, stock.s_data, stock._rw_timestamp] }
+            │ │ │ │ └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+            │ │ │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
+            │ │ └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
+            │ └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
+            └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalProject { exprs: [supplier.s_nationkey, $expr3, $expr4, sum(order_line.ol_amount), supplier.s_nationkey] }
-    └─LogicalAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount)] }
-      └─LogicalProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr3, Extract('YEAR':Varchar, orders.o_entry_d) as $expr4, order_line.ol_amount] }
-        └─LogicalJoin { type: Inner, on: ($expr2 = nation.n_nationkey) AND (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))), output: [supplier.s_nationkey, order_line.ol_amount, orders.o_entry_d, customer.c_state] }
-          ├─LogicalProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr2] }
-          │ └─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name] }
-          │   ├─LogicalJoin { type: Inner, on: ($expr1 = supplier.s_suppkey), output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey] }
-          │   │ ├─LogicalProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1] }
-          │   │ │ └─LogicalJoin { type: Inner, on: (customer.c_id = orders.o_c_id) AND (customer.c_w_id = orders.o_w_id) AND (customer.c_d_id = orders.o_d_id), output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d, customer.c_state] }
-          │   │ │   ├─LogicalJoin { type: Inner, on: (order_line.ol_w_id = orders.o_w_id) AND (order_line.ol_d_id = orders.o_d_id) AND (order_line.ol_o_id = orders.o_id), output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d] }
-          │   │ │   │ ├─LogicalJoin { type: Inner, on: (order_line.ol_supply_w_id = stock.s_w_id) AND (order_line.ol_i_id = stock.s_i_id), output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount] }
-          │   │ │   │ │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id] }
-          │   │ │   │ │ └─LogicalScan { table: order_line, output_columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount], required_columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_delivery_d], predicate: (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
-          │   │ │   │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d] }
-          │   │ │   └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state] }
-          │   │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey] }
-          │   └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name] }
-          └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name] }
+    LogicalAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount)] }
+    └─LogicalProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr3, Extract('YEAR':Varchar, orders.o_entry_d) as $expr4, order_line.ol_amount] }
+      └─LogicalJoin { type: Inner, on: ($expr2 = nation.n_nationkey) AND (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))), output: [supplier.s_nationkey, order_line.ol_amount, orders.o_entry_d, customer.c_state] }
+        ├─LogicalProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr2] }
+        │ └─LogicalJoin { type: Inner, on: (supplier.s_nationkey = nation.n_nationkey), output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name] }
+        │   ├─LogicalJoin { type: Inner, on: ($expr1 = supplier.s_suppkey), output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey] }
+        │   │ ├─LogicalProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1] }
+        │   │ │ └─LogicalJoin { type: Inner, on: (customer.c_id = orders.o_c_id) AND (customer.c_w_id = orders.o_w_id) AND (customer.c_d_id = orders.o_d_id), output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d, customer.c_state] }
+        │   │ │   ├─LogicalJoin { type: Inner, on: (order_line.ol_w_id = orders.o_w_id) AND (order_line.ol_d_id = orders.o_d_id) AND (order_line.ol_o_id = orders.o_id), output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d] }
+        │   │ │   │ ├─LogicalJoin { type: Inner, on: (order_line.ol_supply_w_id = stock.s_w_id) AND (order_line.ol_i_id = stock.s_i_id), output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount] }
+        │   │ │   │ │ ├─LogicalScan { table: stock, columns: [stock.s_i_id, stock.s_w_id] }
+        │   │ │   │ │ └─LogicalScan { table: order_line, output_columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount], required_columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_delivery_d], predicate: (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
+        │   │ │   │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d] }
+        │   │ │   └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state] }
+        │   │ └─LogicalScan { table: supplier, columns: [supplier.s_suppkey, supplier.s_nationkey] }
+        │   └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name] }
+        └─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name] }
   batch_plan: |-
-    BatchProject { exprs: [supplier.s_nationkey, $expr3, $expr4, sum(order_line.ol_amount)] }
-    └─BatchExchange { order: [supplier.s_nationkey ASC, $expr3 ASC, $expr4 ASC], dist: Single }
-      └─BatchProject { exprs: [supplier.s_nationkey, $expr3, $expr4, sum(order_line.ol_amount), supplier.s_nationkey] }
-        └─BatchSort { order: [supplier.s_nationkey ASC, $expr3 ASC, $expr4 ASC] }
-          └─BatchHashAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount)] }
-            └─BatchExchange { order: [], dist: HashShard(supplier.s_nationkey, $expr3, $expr4) }
-              └─BatchProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr3, Extract('YEAR':Varchar, orders.o_entry_d) as $expr4, order_line.ol_amount] }
-                └─BatchLookupJoin { type: Inner, predicate: $expr2 = nation.n_nationkey AND (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))), output: [supplier.s_nationkey, order_line.ol_amount, orders.o_entry_d, customer.c_state], lookup table: nation }
-                  └─BatchExchange { order: [], dist: UpstreamHashShard($expr2) }
-                    └─BatchProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr2] }
-                      └─BatchLookupJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name], lookup table: nation }
-                        └─BatchExchange { order: [], dist: UpstreamHashShard(supplier.s_nationkey) }
-                          └─BatchLookupJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey], lookup table: supplier }
-                            └─BatchExchange { order: [], dist: UpstreamHashShard($expr1) }
-                              └─BatchProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1] }
-                                └─BatchLookupJoin { type: Inner, predicate: orders.o_w_id = customer.c_w_id AND orders.o_d_id = customer.c_d_id AND orders.o_c_id = customer.c_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d, customer.c_state], lookup table: customer }
-                                  └─BatchExchange { order: [], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_c_id) }
-                                    └─BatchLookupJoin { type: Inner, predicate: order_line.ol_w_id = orders.o_w_id AND order_line.ol_d_id = orders.o_d_id AND order_line.ol_o_id = orders.o_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], lookup table: orders }
-                                      └─BatchExchange { order: [], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id) }
-                                        └─BatchHashJoin { type: Inner, predicate: stock.s_w_id = order_line.ol_supply_w_id AND stock.s_i_id = order_line.ol_i_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount] }
-                                          ├─BatchExchange { order: [], dist: HashShard(stock.s_i_id, stock.s_w_id) }
-                                          │ └─BatchScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], distribution: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
-                                          └─BatchExchange { order: [], dist: HashShard(order_line.ol_i_id, order_line.ol_supply_w_id) }
-                                            └─BatchProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount] }
-                                              └─BatchFilter { predicate: (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
-                                                └─BatchScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_delivery_d], distribution: SomeShard }
+    BatchExchange { order: [supplier.s_nationkey ASC, $expr3 ASC, $expr4 ASC], dist: Single }
+    └─BatchSort { order: [supplier.s_nationkey ASC, $expr3 ASC, $expr4 ASC] }
+      └─BatchHashAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount)] }
+        └─BatchExchange { order: [], dist: HashShard(supplier.s_nationkey, $expr3, $expr4) }
+          └─BatchProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr3, Extract('YEAR':Varchar, orders.o_entry_d) as $expr4, order_line.ol_amount] }
+            └─BatchLookupJoin { type: Inner, predicate: $expr2 = nation.n_nationkey AND (((nation.n_name = 'JAPAN':Varchar) AND (nation.n_name = 'CHINA':Varchar)) OR ((nation.n_name = 'CHINA':Varchar) AND (nation.n_name = 'JAPAN':Varchar))), output: [supplier.s_nationkey, order_line.ol_amount, orders.o_entry_d, customer.c_state], lookup table: nation }
+              └─BatchExchange { order: [], dist: UpstreamHashShard($expr2) }
+                └─BatchProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name, (Ascii(Substr(customer.c_state, 1:Int32, 1:Int32)) - 65:Int32)::Int64 as $expr2] }
+                  └─BatchLookupJoin { type: Inner, predicate: supplier.s_nationkey = nation.n_nationkey, output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey, nation.n_name], lookup table: nation }
+                    └─BatchExchange { order: [], dist: UpstreamHashShard(supplier.s_nationkey) }
+                      └─BatchLookupJoin { type: Inner, predicate: $expr1 = supplier.s_suppkey, output: [order_line.ol_amount, orders.o_entry_d, customer.c_state, supplier.s_nationkey], lookup table: supplier }
+                        └─BatchExchange { order: [], dist: UpstreamHashShard($expr1) }
+                          └─BatchProject { exprs: [order_line.ol_amount, orders.o_entry_d, customer.c_state, ((stock.s_w_id * stock.s_i_id) % 10000:Int32)::Int64 as $expr1] }
+                            └─BatchLookupJoin { type: Inner, predicate: orders.o_w_id = customer.c_w_id AND orders.o_d_id = customer.c_d_id AND orders.o_c_id = customer.c_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_entry_d, customer.c_state], lookup table: customer }
+                              └─BatchExchange { order: [], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_c_id) }
+                                └─BatchLookupJoin { type: Inner, predicate: order_line.ol_w_id = orders.o_w_id AND order_line.ol_d_id = orders.o_d_id AND order_line.ol_o_id = orders.o_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_amount, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d], lookup table: orders }
+                                  └─BatchExchange { order: [], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id) }
+                                    └─BatchHashJoin { type: Inner, predicate: stock.s_w_id = order_line.ol_supply_w_id AND stock.s_i_id = order_line.ol_i_id, output: [stock.s_i_id, stock.s_w_id, order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount] }
+                                      ├─BatchExchange { order: [], dist: HashShard(stock.s_i_id, stock.s_w_id) }
+                                      │ └─BatchScan { table: stock, columns: [stock.s_i_id, stock.s_w_id], distribution: UpstreamHashShard(stock.s_w_id, stock.s_i_id) }
+                                      └─BatchExchange { order: [], dist: HashShard(order_line.ol_i_id, order_line.ol_supply_w_id) }
+                                        └─BatchProject { exprs: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount] }
+                                          └─BatchFilter { predicate: (order_line.ol_delivery_d >= '2007-01-02 00:00:00':Timestamp) AND (order_line.ol_delivery_d <= '2032-01-02 00:00:00':Timestamp) }
+                                            └─BatchScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_amount, order_line.ol_delivery_d], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue, supplier.s_nationkey(hidden)], stream_key: [supplier.s_nationkey, cust_nation, l_year], pk_columns: [supplier.s_nationkey, cust_nation, l_year], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [supplier.s_nationkey, $expr3, $expr4, sum(order_line.ol_amount), supplier.s_nationkey] }
+    StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [supp_nation, cust_nation, l_year], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [supplier.s_nationkey, $expr3, $expr4, sum(order_line.ol_amount)] }
       └─StreamHashAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount), count] }
         └─StreamExchange { dist: HashShard(supplier.s_nationkey, $expr3, $expr4) }
           └─StreamProject { exprs: [supplier.s_nationkey, Substr(customer.c_state, 1:Int32, 1:Int32) as $expr3, Extract('YEAR':Varchar, orders.o_entry_d) as $expr4, order_line.ol_amount, stock.s_w_id, stock.s_i_id, order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number, orders.o_c_id, $expr1, $expr2] }
@@ -1002,8 +998,8 @@
                       └─StreamTableScan { table: nation, columns: [nation.n_nationkey, nation.n_name], stream_scan_type: ArrangementBackfill, stream_key: [nation.n_nationkey], pk: [n_nationkey], dist: UpstreamHashShard(nation.n_nationkey) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue, supplier.s_nationkey(hidden)], stream_key: [supplier.s_nationkey, cust_nation, l_year], pk_columns: [supplier.s_nationkey, cust_nation, l_year], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [supplier.s_nationkey, $expr3, $expr4, sum(order_line.ol_amount), supplier.s_nationkey] }
+    StreamMaterialize { columns: [supp_nation, cust_nation, l_year, revenue], stream_key: [supp_nation, cust_nation, l_year], pk_columns: [supp_nation, cust_nation, l_year], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [supplier.s_nationkey, $expr3, $expr4, sum(order_line.ol_amount)] }
         └── StreamHashAgg { group_key: [supplier.s_nationkey, $expr3, $expr4], aggs: [sum(order_line.ol_amount), count] } { tables: [ HashAggState: 0 ] }
             └── StreamExchange Hash([0, 1, 2]) from 1
 
@@ -1145,7 +1141,7 @@
 
     Table 31 { columns: [ vnode, n_nationkey, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ supp_nation, cust_nation, l_year, revenue, supplier.s_nationkey, _rw_timestamp ], primary key: [ $4 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 4, 1, 2 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ supp_nation, cust_nation, l_year, revenue, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
 - id: ch_q8
   before:
@@ -2712,18 +2708,17 @@
   sql: "select\t c_last, c_id o_id, o_entry_d, o_ol_cnt, sum(ol_amount)\nfrom\t customer, orders, order_line\nwhere\t c_id = o_c_id\n  and c_w_id = o_w_id\n  and c_d_id = o_d_id\n  and ol_w_id = o_w_id\n  and ol_d_id = o_d_id\n  and ol_o_id = o_id\ngroup by o_id, o_w_id, o_d_id, c_id, c_last, o_entry_d, o_ol_cnt\nhaving\t sum(ol_amount) > 200\norder by sum(ol_amount) desc, o_entry_d;\n"
   logical_plan: |-
     LogicalProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount)] }
-    └─LogicalProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount), sum(order_line.ol_amount)] }
-      └─LogicalFilter { predicate: (sum(order_line.ol_amount) > 200:Int32::Decimal) }
-        └─LogicalAgg { group_key: [orders.o_id, orders.o_w_id, orders.o_d_id, customer.c_id, customer.c_last, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount)] }
-          └─LogicalProject { exprs: [orders.o_id, orders.o_w_id, orders.o_d_id, customer.c_id, customer.c_last, orders.o_entry_d, orders.o_ol_cnt, order_line.ol_amount] }
-            └─LogicalFilter { predicate: (customer.c_id = orders.o_c_id) AND (customer.c_w_id = orders.o_w_id) AND (customer.c_d_id = orders.o_d_id) AND (order_line.ol_w_id = orders.o_w_id) AND (order_line.ol_d_id = orders.o_d_id) AND (order_line.ol_o_id = orders.o_id) }
-              └─LogicalJoin { type: Inner, on: true, output: all }
-                ├─LogicalJoin { type: Inner, on: true, output: all }
-                │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-                │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-                └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
+    └─LogicalFilter { predicate: (sum(order_line.ol_amount) > 200:Int32::Decimal) }
+      └─LogicalAgg { group_key: [orders.o_id, orders.o_w_id, orders.o_d_id, customer.c_id, customer.c_last, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount)] }
+        └─LogicalProject { exprs: [orders.o_id, orders.o_w_id, orders.o_d_id, customer.c_id, customer.c_last, orders.o_entry_d, orders.o_ol_cnt, order_line.ol_amount] }
+          └─LogicalFilter { predicate: (customer.c_id = orders.o_c_id) AND (customer.c_w_id = orders.o_w_id) AND (customer.c_d_id = orders.o_d_id) AND (order_line.ol_w_id = orders.o_w_id) AND (order_line.ol_d_id = orders.o_d_id) AND (order_line.ol_o_id = orders.o_id) }
+            └─LogicalJoin { type: Inner, on: true, output: all }
+              ├─LogicalJoin { type: Inner, on: true, output: all }
+              │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
+              │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
+              └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_number, order_line.ol_i_id, order_line.ol_supply_w_id, order_line.ol_delivery_d, order_line.ol_quantity, order_line.ol_amount, order_line.ol_dist_info, order_line._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
-    LogicalProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount), sum(order_line.ol_amount)] }
+    LogicalProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount)] }
     └─LogicalFilter { predicate: (sum(order_line.ol_amount) > 200:Int32::Decimal) }
       └─LogicalAgg { group_key: [orders.o_id, orders.o_w_id, orders.o_d_id, customer.c_id, customer.c_last, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount)] }
         └─LogicalJoin { type: Inner, on: (order_line.ol_w_id = orders.o_w_id) AND (order_line.ol_d_id = orders.o_d_id) AND (order_line.ol_o_id = orders.o_id), output: [orders.o_id, orders.o_w_id, orders.o_d_id, customer.c_id, customer.c_last, orders.o_entry_d, orders.o_ol_cnt, order_line.ol_amount] }
@@ -2732,24 +2727,23 @@
           │ └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_ol_cnt] }
           └─LogicalScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount] }
   batch_plan: |-
-    BatchProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount)] }
-    └─BatchExchange { order: [sum(order_line.ol_amount) DESC, orders.o_entry_d ASC], dist: Single }
-      └─BatchProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount), sum(order_line.ol_amount)] }
-        └─BatchSort { order: [sum(order_line.ol_amount) DESC, orders.o_entry_d ASC] }
-          └─BatchFilter { predicate: (sum(order_line.ol_amount) > 200:Decimal) }
-            └─BatchHashAgg { group_key: [orders.o_id, orders.o_w_id, orders.o_d_id, customer.c_id, customer.c_last, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount)] }
-              └─BatchHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id, output: [orders.o_id, orders.o_w_id, orders.o_d_id, customer.c_id, customer.c_last, orders.o_entry_d, orders.o_ol_cnt, order_line.ol_amount] }
-                ├─BatchExchange { order: [], dist: HashShard(orders.o_id, orders.o_d_id, orders.o_w_id) }
-                │ └─BatchHashJoin { type: Inner, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt] }
-                │   ├─BatchExchange { order: [], dist: HashShard(customer.c_d_id, customer.c_w_id, customer.c_id) }
-                │   │ └─BatchScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_last], distribution: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) }
-                │   └─BatchExchange { order: [], dist: HashShard(orders.o_d_id, orders.o_w_id, orders.o_c_id) }
-                │     └─BatchScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_ol_cnt], distribution: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
-                └─BatchExchange { order: [], dist: HashShard(order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id) }
-                  └─BatchScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount], distribution: SomeShard }
+    BatchExchange { order: [sum(order_line.ol_amount) DESC, orders.o_entry_d ASC], dist: Single }
+    └─BatchProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount)] }
+      └─BatchSort { order: [sum(order_line.ol_amount) DESC, orders.o_entry_d ASC] }
+        └─BatchFilter { predicate: (sum(order_line.ol_amount) > 200:Decimal) }
+          └─BatchHashAgg { group_key: [orders.o_id, orders.o_w_id, orders.o_d_id, customer.c_id, customer.c_last, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount)] }
+            └─BatchHashJoin { type: Inner, predicate: orders.o_w_id = order_line.ol_w_id AND orders.o_d_id = order_line.ol_d_id AND orders.o_id = order_line.ol_o_id, output: [orders.o_id, orders.o_w_id, orders.o_d_id, customer.c_id, customer.c_last, orders.o_entry_d, orders.o_ol_cnt, order_line.ol_amount] }
+              ├─BatchExchange { order: [], dist: HashShard(orders.o_id, orders.o_d_id, orders.o_w_id) }
+              │ └─BatchHashJoin { type: Inner, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt] }
+              │   ├─BatchExchange { order: [], dist: HashShard(customer.c_d_id, customer.c_w_id, customer.c_id) }
+              │   │ └─BatchScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_last], distribution: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) }
+              │   └─BatchExchange { order: [], dist: HashShard(orders.o_d_id, orders.o_w_id, orders.o_c_id) }
+              │     └─BatchScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_ol_cnt], distribution: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
+              └─BatchExchange { order: [], dist: HashShard(order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id) }
+                └─BatchScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [c_last, o_id, o_entry_d, o_ol_cnt, sum, sum(order_line.ol_amount)(hidden), orders.o_id(hidden), orders.o_d_id(hidden), orders.o_w_id(hidden)], stream_key: [o_id, c_last, orders.o_id, orders.o_d_id, orders.o_w_id, o_entry_d, o_ol_cnt], pk_columns: [sum(order_line.ol_amount), o_entry_d, o_id, c_last, orders.o_id, orders.o_d_id, orders.o_w_id, o_ol_cnt], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount), sum(order_line.ol_amount), orders.o_id, orders.o_d_id, orders.o_w_id] }
+    StreamMaterialize { columns: [c_last, o_id, o_entry_d, o_ol_cnt, sum, orders.o_id(hidden), orders.o_d_id(hidden), orders.o_w_id(hidden)], stream_key: [o_id, c_last, orders.o_id, orders.o_d_id, orders.o_w_id, o_entry_d, o_ol_cnt], pk_columns: [sum, o_entry_d, o_id, c_last, orders.o_id, orders.o_d_id, orders.o_w_id, o_ol_cnt], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount), orders.o_id, orders.o_d_id, orders.o_w_id] }
       └─StreamFilter { predicate: (sum(order_line.ol_amount) > 200:Decimal) }
         └─StreamProject { exprs: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount)] }
           └─StreamHashAgg { group_key: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount), count] }
@@ -2764,8 +2758,8 @@
                 └─StreamTableScan { table: order_line, columns: [order_line.ol_o_id, order_line.ol_d_id, order_line.ol_w_id, order_line.ol_amount, order_line.ol_number], stream_scan_type: ArrangementBackfill, stream_key: [order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number], pk: [ol_w_id, ol_d_id, ol_o_id, ol_number], dist: UpstreamHashShard(order_line.ol_w_id, order_line.ol_d_id, order_line.ol_o_id, order_line.ol_number) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [c_last, o_id, o_entry_d, o_ol_cnt, sum, sum(order_line.ol_amount)(hidden), orders.o_id(hidden), orders.o_d_id(hidden), orders.o_w_id(hidden)], stream_key: [o_id, c_last, orders.o_id, orders.o_d_id, orders.o_w_id, o_entry_d, o_ol_cnt], pk_columns: [sum(order_line.ol_amount), o_entry_d, o_id, c_last, orders.o_id, orders.o_d_id, orders.o_w_id, o_ol_cnt], pk_conflict: NoCheck }
-    └── StreamProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount), sum(order_line.ol_amount), orders.o_id, orders.o_d_id, orders.o_w_id] }
+    StreamMaterialize { columns: [c_last, o_id, o_entry_d, o_ol_cnt, sum, orders.o_id(hidden), orders.o_d_id(hidden), orders.o_w_id(hidden)], stream_key: [o_id, c_last, orders.o_id, orders.o_d_id, orders.o_w_id, o_entry_d, o_ol_cnt], pk_columns: [sum, o_entry_d, o_id, c_last, orders.o_id, orders.o_d_id, orders.o_w_id, o_ol_cnt], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [customer.c_last, customer.c_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount), orders.o_id, orders.o_d_id, orders.o_w_id] }
         └── StreamFilter { predicate: (sum(order_line.ol_amount) > 200:Decimal) }
             └── StreamProject { exprs: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt, sum(order_line.ol_amount)] }
                 └── StreamHashAgg { group_key: [customer.c_id, customer.c_last, orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_entry_d, orders.o_ol_cnt], aggs: [sum(order_line.ol_amount), count] } { tables: [ HashAggState: 0 ] }
@@ -2819,7 +2813,7 @@
 
     Table 11 { columns: [ vnode, ol_w_id, ol_d_id, ol_o_id, ol_number, backfill_finished, row_count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1, 2, 3, 4, 5, 6 ], distribution key: [ 0 ], read pk prefix len hint: 1, vnode column idx: 0 }
 
-    Table 4294967294 { columns: [ c_last, o_id, o_entry_d, o_ol_cnt, sum, sum(order_line.ol_amount), orders.o_id, orders.o_d_id, orders.o_w_id, _rw_timestamp ], primary key: [ $5 DESC, $2 ASC, $1 ASC, $0 ASC, $6 ASC, $7 ASC, $8 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7, 8 ], distribution key: [ 6, 7, 8 ], read pk prefix len hint: 8 }
+    Table 4294967294 { columns: [ c_last, o_id, o_entry_d, o_ol_cnt, sum, orders.o_id, orders.o_d_id, orders.o_w_id, _rw_timestamp ], primary key: [ $4 DESC, $2 ASC, $1 ASC, $0 ASC, $5 ASC, $6 ASC, $7 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3, 4, 5, 6, 7 ], distribution key: [ 5, 6, 7 ], read pk prefix len hint: 8 }
 
 - id: ch_q19
   before:
@@ -3327,78 +3321,73 @@
   sql: "select\t substr(c_state,1,1) as country,\n           count(*) as numcust,\n           sum(c_balance) as totacctbal\nfrom\t customer\nwhere\t substr(c_phone,1,1) in ('1','2','3','4','5','6','7')\n  and c_balance > (select avg(c_BALANCE)\n                   from \t customer\n                   where  c_balance > 0.00\n                     and substr(c_phone,1,1) in ('1','2','3','4','5','6','7'))\n  and not exists (select *\n                  from\torders\n                  where\to_c_id = c_id\n                    and o_w_id = c_w_id\n                    and o_d_id = c_d_id)\ngroup by substr(c_state,1,1)\norder by substr(c_state,1,1);\n"
   logical_plan: |-
     LogicalProject { exprs: [$expr2, count, sum(customer.c_balance)] }
-    └─LogicalProject { exprs: [$expr2, count, sum(customer.c_balance), $expr2] }
-      └─LogicalAgg { group_key: [$expr2], aggs: [count, sum(customer.c_balance)] }
-        └─LogicalProject { exprs: [Substr(customer.c_state, 1:Int32, 1:Int32) as $expr2, customer.c_balance] }
-          └─LogicalFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) AND (customer.c_balance > $expr1) }
-            └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
-              ├─LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
-              │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-              │ └─LogicalProject { exprs: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local] }
-              │   └─LogicalFilter { predicate: (orders.o_c_id = CorrelatedInputRef { index: 0, correlated_id: 1 }) AND (orders.o_w_id = CorrelatedInputRef { index: 2, correlated_id: 1 }) AND (orders.o_d_id = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
-              │     └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
-              └─LogicalProject { exprs: [(sum(customer.c_balance) / count(customer.c_balance)::Decimal) as $expr1] }
-                └─LogicalAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
-                  └─LogicalProject { exprs: [customer.c_balance] }
-                    └─LogicalFilter { predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
-                      └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
-  optimized_logical_plan_for_batch: |-
-    LogicalProject { exprs: [$expr2, count, sum(customer.c_balance), $expr2] }
     └─LogicalAgg { group_key: [$expr2], aggs: [count, sum(customer.c_balance)] }
       └─LogicalProject { exprs: [Substr(customer.c_state, 1:Int32, 1:Int32) as $expr2, customer.c_balance] }
-        └─LogicalJoin { type: Inner, on: (customer.c_balance > $expr1), output: [customer.c_state, customer.c_balance] }
-          ├─LogicalJoin { type: LeftAnti, on: (orders.o_c_id = customer.c_id) AND (orders.o_w_id = customer.c_w_id) AND (orders.o_d_id = customer.c_d_id), output: [customer.c_state, customer.c_balance] }
-          │ ├─LogicalScan { table: customer, output_columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance], required_columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance, customer.c_phone], predicate: In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
-          │ └─LogicalProject { exprs: [orders.o_c_id, orders.o_w_id, orders.o_d_id] }
-          │   └─LogicalScan { table: orders, columns: [orders.o_d_id, orders.o_w_id, orders.o_c_id] }
-          └─LogicalProject { exprs: [(sum(customer.c_balance) / count(customer.c_balance)::Decimal) as $expr1] }
-            └─LogicalAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
-              └─LogicalScan { table: customer, output_columns: [customer.c_balance], required_columns: [customer.c_balance, customer.c_phone], predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
+        └─LogicalFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) AND (customer.c_balance > $expr1) }
+          └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
+            ├─LogicalApply { type: LeftAnti, on: true, correlated_id: 1 }
+            │ ├─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
+            │ └─LogicalProject { exprs: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local] }
+            │   └─LogicalFilter { predicate: (orders.o_c_id = CorrelatedInputRef { index: 0, correlated_id: 1 }) AND (orders.o_w_id = CorrelatedInputRef { index: 2, correlated_id: 1 }) AND (orders.o_d_id = CorrelatedInputRef { index: 1, correlated_id: 1 }) }
+            │     └─LogicalScan { table: orders, columns: [orders.o_id, orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_entry_d, orders.o_carrier_id, orders.o_ol_cnt, orders.o_all_local, orders._rw_timestamp] }
+            └─LogicalProject { exprs: [(sum(customer.c_balance) / count(customer.c_balance)::Decimal) as $expr1] }
+              └─LogicalAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
+                └─LogicalProject { exprs: [customer.c_balance] }
+                  └─LogicalFilter { predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
+                    └─LogicalScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_first, customer.c_middle, customer.c_last, customer.c_street_1, customer.c_street_2, customer.c_city, customer.c_state, customer.c_zip, customer.c_phone, customer.c_since, customer.c_credit, customer.c_credit_lim, customer.c_discount, customer.c_balance, customer.c_ytd_payment, customer.c_payment_cnt, customer.c_delivery_cnt, customer.c_data, customer._rw_timestamp] }
+  optimized_logical_plan_for_batch: |-
+    LogicalAgg { group_key: [$expr2], aggs: [count, sum(customer.c_balance)] }
+    └─LogicalProject { exprs: [Substr(customer.c_state, 1:Int32, 1:Int32) as $expr2, customer.c_balance] }
+      └─LogicalJoin { type: Inner, on: (customer.c_balance > $expr1), output: [customer.c_state, customer.c_balance] }
+        ├─LogicalJoin { type: LeftAnti, on: (orders.o_c_id = customer.c_id) AND (orders.o_w_id = customer.c_w_id) AND (orders.o_d_id = customer.c_d_id), output: [customer.c_state, customer.c_balance] }
+        │ ├─LogicalScan { table: customer, output_columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance], required_columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance, customer.c_phone], predicate: In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
+        │ └─LogicalProject { exprs: [orders.o_c_id, orders.o_w_id, orders.o_d_id] }
+        │   └─LogicalScan { table: orders, columns: [orders.o_d_id, orders.o_w_id, orders.o_c_id] }
+        └─LogicalProject { exprs: [(sum(customer.c_balance) / count(customer.c_balance)::Decimal) as $expr1] }
+          └─LogicalAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
+            └─LogicalScan { table: customer, output_columns: [customer.c_balance], required_columns: [customer.c_balance, customer.c_phone], predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
   batch_plan: |-
-    BatchProject { exprs: [$expr2, count, sum(customer.c_balance)] }
-    └─BatchExchange { order: [$expr2 ASC], dist: Single }
-      └─BatchProject { exprs: [$expr2, count, sum(customer.c_balance), $expr2] }
-        └─BatchSort { order: [$expr2 ASC] }
-          └─BatchHashAgg { group_key: [$expr2], aggs: [count, sum(customer.c_balance)] }
-            └─BatchExchange { order: [], dist: HashShard($expr2) }
-              └─BatchProject { exprs: [Substr(customer.c_state, 1:Int32, 1:Int32) as $expr2, customer.c_balance] }
-                └─BatchNestedLoopJoin { type: Inner, predicate: (customer.c_balance > $expr1), output: [customer.c_state, customer.c_balance] }
-                  ├─BatchExchange { order: [], dist: Single }
-                  │ └─BatchHashJoin { type: LeftAnti, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_state, customer.c_balance] }
-                  │   ├─BatchExchange { order: [], dist: HashShard(customer.c_id, customer.c_w_id, customer.c_d_id) }
-                  │   │ └─BatchProject { exprs: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance] }
-                  │   │   └─BatchFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
-                  │   │     └─BatchScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance, customer.c_phone], distribution: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) }
-                  │   └─BatchExchange { order: [], dist: HashShard(orders.o_c_id, orders.o_w_id, orders.o_d_id) }
-                  │     └─BatchProject { exprs: [orders.o_c_id, orders.o_w_id, orders.o_d_id] }
-                  │       └─BatchScan { table: orders, columns: [orders.o_d_id, orders.o_w_id, orders.o_c_id], distribution: SomeShard }
-                  └─BatchProject { exprs: [(sum(sum(customer.c_balance)) / sum0(count(customer.c_balance))::Decimal) as $expr1] }
-                    └─BatchSimpleAgg { aggs: [sum(sum(customer.c_balance)), sum0(count(customer.c_balance))] }
-                      └─BatchExchange { order: [], dist: Single }
-                        └─BatchSimpleAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
-                          └─BatchProject { exprs: [customer.c_balance] }
-                            └─BatchFilter { predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
-                              └─BatchScan { table: customer, columns: [customer.c_balance, customer.c_phone], distribution: SomeShard }
+    BatchExchange { order: [$expr2 ASC], dist: Single }
+    └─BatchSort { order: [$expr2 ASC] }
+      └─BatchHashAgg { group_key: [$expr2], aggs: [count, sum(customer.c_balance)] }
+        └─BatchExchange { order: [], dist: HashShard($expr2) }
+          └─BatchProject { exprs: [Substr(customer.c_state, 1:Int32, 1:Int32) as $expr2, customer.c_balance] }
+            └─BatchNestedLoopJoin { type: Inner, predicate: (customer.c_balance > $expr1), output: [customer.c_state, customer.c_balance] }
+              ├─BatchExchange { order: [], dist: Single }
+              │ └─BatchHashJoin { type: LeftAnti, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_state, customer.c_balance] }
+              │   ├─BatchExchange { order: [], dist: HashShard(customer.c_id, customer.c_w_id, customer.c_d_id) }
+              │   │ └─BatchProject { exprs: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance] }
+              │   │   └─BatchFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
+              │   │     └─BatchScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance, customer.c_phone], distribution: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) }
+              │   └─BatchExchange { order: [], dist: HashShard(orders.o_c_id, orders.o_w_id, orders.o_d_id) }
+              │     └─BatchProject { exprs: [orders.o_c_id, orders.o_w_id, orders.o_d_id] }
+              │       └─BatchScan { table: orders, columns: [orders.o_d_id, orders.o_w_id, orders.o_c_id], distribution: SomeShard }
+              └─BatchProject { exprs: [(sum(sum(customer.c_balance)) / sum0(count(customer.c_balance))::Decimal) as $expr1] }
+                └─BatchSimpleAgg { aggs: [sum(sum(customer.c_balance)), sum0(count(customer.c_balance))] }
+                  └─BatchExchange { order: [], dist: Single }
+                    └─BatchSimpleAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
+                      └─BatchProject { exprs: [customer.c_balance] }
+                        └─BatchFilter { predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
+                          └─BatchScan { table: customer, columns: [customer.c_balance, customer.c_phone], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [country, numcust, totacctbal, $expr2(hidden)], stream_key: [$expr2], pk_columns: [$expr2], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [$expr2, count, sum(customer.c_balance), $expr2] }
-      └─StreamHashAgg { group_key: [$expr2], aggs: [count, sum(customer.c_balance)] }
-        └─StreamExchange { dist: HashShard($expr2) }
-          └─StreamProject { exprs: [Substr(customer.c_state, 1:Int32, 1:Int32) as $expr2, customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
-            └─StreamDynamicFilter { predicate: (customer.c_balance > $expr1), output: [customer.c_state, customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
-              ├─StreamHashJoin { type: LeftAnti, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_state, customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
-              │ ├─StreamExchange { dist: HashShard(customer.c_id, customer.c_w_id, customer.c_d_id) }
-              │ │ └─StreamProject { exprs: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance] }
-              │ │   └─StreamFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
-              │ │     └─StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance, customer.c_phone], stream_scan_type: ArrangementBackfill, stream_key: [customer.c_w_id, customer.c_d_id, customer.c_id], pk: [c_w_id, c_d_id, c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) }
-              │ └─StreamExchange { dist: HashShard(orders.o_c_id, orders.o_w_id, orders.o_d_id) }
-              │   └─StreamProject { exprs: [orders.o_c_id, orders.o_w_id, orders.o_d_id, orders.o_id] }
-              │     └─StreamTableScan { table: orders, columns: [orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_id], stream_scan_type: ArrangementBackfill, stream_key: [orders.o_w_id, orders.o_d_id, orders.o_id], pk: [o_w_id, o_d_id, o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
-              └─StreamExchange { dist: Broadcast }
-                └─StreamProject { exprs: [(sum(sum(customer.c_balance)) / sum0(count(customer.c_balance))::Decimal) as $expr1] }
-                  └─StreamSimpleAgg [append_only] { aggs: [sum(sum(customer.c_balance)), sum0(count(customer.c_balance)), count] }
-                    └─StreamExchange { dist: Single }
-                      └─StreamStatelessSimpleAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
-                        └─StreamProject { exprs: [customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
-                          └─StreamFilter { predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
-                            └─StreamTableScan { table: customer, columns: [customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id, customer.c_phone], stream_scan_type: ArrangementBackfill, stream_key: [customer.c_w_id, customer.c_d_id, customer.c_id], pk: [c_w_id, c_d_id, c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) }
+    StreamMaterialize { columns: [country, numcust, totacctbal], stream_key: [country], pk_columns: [country], pk_conflict: NoCheck }
+    └─StreamHashAgg { group_key: [$expr2], aggs: [count, sum(customer.c_balance)] }
+      └─StreamExchange { dist: HashShard($expr2) }
+        └─StreamProject { exprs: [Substr(customer.c_state, 1:Int32, 1:Int32) as $expr2, customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
+          └─StreamDynamicFilter { predicate: (customer.c_balance > $expr1), output: [customer.c_state, customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
+            ├─StreamHashJoin { type: LeftAnti, predicate: customer.c_id = orders.o_c_id AND customer.c_w_id = orders.o_w_id AND customer.c_d_id = orders.o_d_id, output: [customer.c_state, customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
+            │ ├─StreamExchange { dist: HashShard(customer.c_id, customer.c_w_id, customer.c_d_id) }
+            │ │ └─StreamProject { exprs: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance] }
+            │ │   └─StreamFilter { predicate: In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
+            │ │     └─StreamTableScan { table: customer, columns: [customer.c_id, customer.c_d_id, customer.c_w_id, customer.c_state, customer.c_balance, customer.c_phone], stream_scan_type: ArrangementBackfill, stream_key: [customer.c_w_id, customer.c_d_id, customer.c_id], pk: [c_w_id, c_d_id, c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) }
+            │ └─StreamExchange { dist: HashShard(orders.o_c_id, orders.o_w_id, orders.o_d_id) }
+            │   └─StreamProject { exprs: [orders.o_c_id, orders.o_w_id, orders.o_d_id, orders.o_id] }
+            │     └─StreamTableScan { table: orders, columns: [orders.o_d_id, orders.o_w_id, orders.o_c_id, orders.o_id], stream_scan_type: ArrangementBackfill, stream_key: [orders.o_w_id, orders.o_d_id, orders.o_id], pk: [o_w_id, o_d_id, o_id], dist: UpstreamHashShard(orders.o_w_id, orders.o_d_id, orders.o_id) }
+            └─StreamExchange { dist: Broadcast }
+              └─StreamProject { exprs: [(sum(sum(customer.c_balance)) / sum0(count(customer.c_balance))::Decimal) as $expr1] }
+                └─StreamSimpleAgg [append_only] { aggs: [sum(sum(customer.c_balance)), sum0(count(customer.c_balance)), count] }
+                  └─StreamExchange { dist: Single }
+                    └─StreamStatelessSimpleAgg { aggs: [sum(customer.c_balance), count(customer.c_balance)] }
+                      └─StreamProject { exprs: [customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id] }
+                        └─StreamFilter { predicate: (customer.c_balance > 0.00:Decimal) AND In(Substr(customer.c_phone, 1:Int32, 1:Int32), '1':Varchar, '2':Varchar, '3':Varchar, '4':Varchar, '5':Varchar, '6':Varchar, '7':Varchar) }
+                          └─StreamTableScan { table: customer, columns: [customer.c_balance, customer.c_w_id, customer.c_d_id, customer.c_id, customer.c_phone], stream_scan_type: ArrangementBackfill, stream_key: [customer.c_w_id, customer.c_d_id, customer.c_id], pk: [c_w_id, c_d_id, c_id], dist: UpstreamHashShard(customer.c_w_id, customer.c_d_id, customer.c_id) }

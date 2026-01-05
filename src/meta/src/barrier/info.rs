@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -363,6 +363,10 @@ impl BarrierInfo {
     pub(super) fn prev_epoch(&self) -> u64 {
         self.prev_epoch.value().0
     }
+
+    pub(super) fn curr_epoch(&self) -> u64 {
+        self.curr_epoch.value().0
+    }
 }
 
 #[derive(Debug)]
@@ -370,10 +374,6 @@ pub(super) enum CommandFragmentChanges {
     NewFragment {
         job_id: JobId,
         info: InflightFragmentInfo,
-        /// Whether the fragment already exists before added. This is used
-        /// when snapshot backfill is finished and add its fragment info
-        /// back to the database.
-        is_existing: bool,
     },
     AddNodeUpstream(PbUpstreamSinkInfo),
     DropNodeUpstream(Vec<FragmentId>),
@@ -798,7 +798,6 @@ impl InflightDatabaseInfo {
                     CommandFragmentChanges::NewFragment {
                         job_id: job.job_id,
                         info,
-                        is_existing: true,
                     },
                 )
             }));
@@ -839,15 +838,9 @@ impl InflightDatabaseInfo {
             let mut shared_actor_writer = shared_infos.start_writer(self.database_id);
             for (fragment_id, change) in fragment_changes {
                 match change {
-                    CommandFragmentChanges::NewFragment {
-                        job_id,
-                        info,
-                        is_existing,
-                    } => {
+                    CommandFragmentChanges::NewFragment { job_id, info } => {
                         let fragment_infos = self.jobs.get_mut(&job_id).expect("should exist");
-                        if !is_existing {
-                            shared_actor_writer.upsert([(&info, job_id)]);
-                        }
+                        shared_actor_writer.upsert([(&info, job_id)]);
                         fragment_infos
                             .fragment_infos
                             .try_insert(fragment_id, info)
@@ -1010,7 +1003,7 @@ impl InflightDatabaseInfo {
                 | Command::DropStreamingJobs { .. }
                 | Command::RescheduleFragment { .. }
                 | Command::SourceChangeSplit { .. }
-                | Command::Throttle(_)
+                | Command::Throttle { .. }
                 | Command::CreateSubscription { .. }
                 | Command::DropSubscription { .. }
                 | Command::ConnectorPropsChange(_)

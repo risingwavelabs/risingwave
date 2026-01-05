@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam,
     SinkWriterParam,
 };
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_plan::stream_node::StreamKind;
 use thiserror_ext::AsReport;
 use tokio::select;
@@ -207,7 +208,7 @@ fn compact_output_kind(sink_type: SinkType) -> OutputKind {
         SinkType::Upsert => output_kind::UPSERT,
         SinkType::Retract => output_kind::RETRACT,
         // There won't be any `Update` or `Delete` in the chunk, so it doesn't matter.
-        SinkType::AppendOnly | SinkType::ForceAppendOnly => output_kind::RETRACT,
+        SinkType::AppendOnly => output_kind::RETRACT,
     }
 }
 
@@ -332,6 +333,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let processed_input = Self::process_msg(
             input,
             self.sink_param.sink_type,
+            self.sink_param.ignore_delete,
             stream_key,
             self.chunk_size,
             self.input_data_types,
@@ -379,6 +381,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         processed_input,
                         log_writer.monitored(log_writer_metrics),
                         actor_id,
+                        fragment_id,
                         sink_id,
                         rate_limit_tx,
                         rebuild_sink_tx,
@@ -417,6 +420,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: impl MessageStream,
         mut log_writer: W,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         sink_id: SinkId,
         rate_limit_tx: UnboundedSender<RateLimit>,
         rebuild_sink_tx: UnboundedSender<RebuildSinkMessage>,
@@ -446,9 +450,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
                 Message::Barrier(barrier) => {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
-                    let add_columns = barrier.as_sink_add_columns(sink_id);
-                    if let Some(add_columns) = &add_columns {
-                        info!(?add_columns, %sink_id, "sink receive add columns");
+                    let schema_change = barrier.as_sink_schema_change(sink_id);
+                    if let Some(schema_change) = &schema_change {
+                        info!(?schema_change, %sink_id, "sink receive schema change");
                     }
                     let post_flush = log_writer
                         .flush_current_epoch(
@@ -457,7 +461,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 is_checkpoint: barrier.kind.is_checkpoint(),
                                 new_vnode_bitmap: update_vnode_bitmap.clone(),
                                 is_stop: barrier.is_stop(actor_id),
-                                add_columns,
+                                schema_change,
                             },
                         )
                         .await?;
@@ -486,8 +490,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 log_writer.resume()?;
                                 is_paused = false;
                             }
-                            Mutation::Throttle(actor_to_apply) => {
-                                if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
+                            Mutation::Throttle(fragment_to_apply) => {
+                                if let Some(new_rate_limit) = fragment_to_apply.get(&fragment_id) {
                                     tracing::info!(
                                         rate_limit = new_rate_limit,
                                         "received sink rate limit on actor {actor_id}"
@@ -528,6 +532,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     async fn process_msg(
         input: impl MessageStream,
         sink_type: SinkType,
+        ignore_delete: bool,
         stream_key: StreamKey,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
@@ -630,7 +635,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         // Compact the chunk to eliminate any unnecessary updates to external systems.
                         // This should be performed against the downstream pk, not the stream key, to
                         // ensure correct retract/upsert semantics from the downstream's perspective.
-                        if sink_type != SinkType::AppendOnly
+                        // TODO: decide based on input stream kind
+                        if (sink_type != SinkType::AppendOnly || ignore_delete)
                             && let Some(downstream_pk) = &downstream_pk
                         {
                             if skip_compact {
@@ -647,16 +653,13 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 });
                             }
                         }
-                        match sink_type {
-                            SinkType::AppendOnly => yield Message::Chunk(chunk),
-                            SinkType::ForceAppendOnly => {
-                                // Force append-only by dropping UPDATE/DELETE messages. We do this when the
-                                // user forces the sink to be append-only while it is actually not based on
-                                // the frontend derivation result.
-                                yield Message::Chunk(force_append_only(chunk))
-                            }
-                            SinkType::Upsert | SinkType::Retract => yield Message::Chunk(chunk),
+                        if ignore_delete {
+                            // Force append-only by dropping UPDATE/DELETE messages. We do this when the
+                            // user forces the sink to be append-only while it is actually not based on
+                            // the frontend derivation result.
+                            chunk = force_append_only(chunk);
                         }
+                        yield Message::Chunk(chunk);
                     }
                     Message::Barrier(barrier) => {
                         yield Message::Barrier(barrier);
@@ -924,7 +927,8 @@ mod test {
                 .map(|col| col.column_desc.clone())
                 .collect(),
             downstream_pk: Some(stream_key.clone()),
-            sink_type: SinkType::ForceAppendOnly,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: true,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
@@ -1063,6 +1067,7 @@ mod test {
                 .collect(),
             downstream_pk: Some(vec![0]),
             sink_type,
+            ignore_delete: false,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
@@ -1169,7 +1174,8 @@ mod test {
                 .map(|col| col.column_desc.clone())
                 .collect(),
             downstream_pk: Some(stream_key.clone()),
-            sink_type: SinkType::ForceAppendOnly,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: true,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),
@@ -1292,6 +1298,7 @@ mod test {
                 .collect(),
             downstream_pk: Some(vec![0, 1]),
             sink_type: SinkType::Upsert,
+            ignore_delete: false,
             format_desc: None,
             db_name: "test".into(),
             sink_from_name: "test".into(),

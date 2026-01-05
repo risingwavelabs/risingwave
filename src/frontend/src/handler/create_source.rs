@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -699,6 +699,7 @@ pub(super) fn bind_source_watermark(
                 Ok::<_, RwError>(WatermarkDesc {
                     watermark_idx: watermark_idx as u32,
                     expr: Some(expr_proto),
+                    with_ttl: source_watermark.with_ttl,
                 })
             }
         })
@@ -1030,6 +1031,13 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
+    if is_create_source && watermark_descs.iter().any(|d| d.with_ttl) {
+        return Err(ErrorCode::NotSupported(
+            "WITH TTL is not supported in WATERMARK clause for CREATE SOURCE.".to_owned(),
+            "Use `CREATE TABLE ... WATERMARK ... WITH TTL` instead.".to_owned(),
+        )
+        .into());
+    }
 
     let append_only = row_id_index.is_some();
     if is_create_source && !append_only && !watermark_descs.is_empty() {

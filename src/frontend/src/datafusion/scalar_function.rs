@@ -12,27 +12,56 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+//! Integration of RisingWave scalar functions with DataFusion.
+//!
+//! This module provides the bridge between RisingWave's scalar function system and DataFusion's
+//! expression evaluation engine. It enables RisingWave scalar functions to be executed within
+//! DataFusion query plans.
+//!
+//! ## Overview
+//!
+//! The main entry point is [`convert_function_call`], which converts a RisingWave [`FunctionCall`]
+//! into a DataFusion expression ([`DFExpr`]). The module uses rule-like abstractions to determine
+//! whether a RisingWave expression can be directly converted to a native DataFusion expression,
+//! or if it requires wrapping with [`ScalarUDFImpl`].
+//!
+//! If an expression matches one of the conversion rules (unary operations, binary operations,
+//! case expressions, or cast expressions), it is converted directly to the corresponding DataFusion
+//! expression. Otherwise, the expression falls back to being wrapped in [`RwScalarFunction`],
+//! which uses RisingWave's native scalar function execution engine within DataFusion's query plan.
+//!
+//! ## RisingWave Scalar Function Wrapper
+//!
+//! For functions that DataFusion cannot handle directly, [`RwScalarFunction`] implements
+//! [`ScalarUDFImpl`] to wrap RisingWave's expression evaluation logic. This allows seamless
+//! execution of RisingWave functions within DataFusion's query execution engine.
+//!
+//! The wrapper handles:
+//! - Type casting from DataFusion types to RisingWave types
+//! - Data chunk creation and manipulation
+//! - Async expression evaluation using RisingWave's executor
+//! - Result conversion back to DataFusion-compatible types
+
 use std::sync::Arc;
 
-use datafusion::arrow::array::{RecordBatch, RecordBatchOptions};
-use datafusion::arrow::datatypes::{DataType as DFDataType, Field, Fields, Schema};
-use datafusion::logical_expr::binary::BinaryTypeCoercer;
+use datafusion::arrow::datatypes::DataType as DFDataType;
+use datafusion::functions::{math, unicode};
 use datafusion::logical_expr::expr::ScalarFunction;
 use datafusion::logical_expr::{
     BinaryExpr, Case, Cast, ColumnarValue, Operator, ScalarFunctionArgs, ScalarUDF, ScalarUDFImpl,
     Signature, TypeSignature, Volatility,
 };
 use datafusion::prelude::Expr as DFExpr;
-use datafusion_common::{Result as DFResult, ScalarValue};
+use datafusion_common::Result as DFResult;
 use itertools::Itertools;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::types::DataType as RwDataType;
-use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::expr::{BoxedExpression, ValueImpl, build_from_prost};
 
 use crate::datafusion::{
-    CastExecutor, ColumnTrait, convert_expr, convert_scalar_value, to_datafusion_error,
+    CastExecutor, ColumnTrait, convert_expr, convert_scalar_value, create_data_chunk,
+    to_datafusion_error,
 };
 use crate::error::{Result as RwResult, RwError};
 use crate::expr::{Expr, ExprType, FunctionCall};
@@ -55,6 +84,7 @@ pub fn convert_function_call(
         convert_binary_func,
         convert_case_func,
         convert_cast_func,
+        convert_trivial_datafusion_func,
         fallback_rw_expr_builder
     );
 
@@ -150,16 +180,6 @@ fn convert_binary_func(
     }
 
     let op = convert_binary_op(func_call.func_type())?;
-    let lhs_type = func_call.inputs()[0].return_type().to_datafusion_native()?;
-    let rhs_type = func_call.inputs()[1].return_type().to_datafusion_native()?;
-    if BinaryTypeCoercer::new(&lhs_type, &op, &rhs_type)
-        .get_result_type()
-        .is_err()
-    {
-        // Check if DataFusion can handle the binary operation with the given types
-        return None;
-    }
-
     let left = convert_expr(&func_call.inputs()[0], input_columns).ok()?;
     let right = convert_expr(&func_call.inputs()[1], input_columns).ok()?;
     Some(DFExpr::BinaryExpr(BinaryExpr {
@@ -230,7 +250,7 @@ fn can_cast_by_datafusion(from: &RwDataType, to: &RwDataType) -> bool {
 
 #[easy_ext::ext(RwDataTypeDataFusionExt)]
 impl RwDataType {
-    fn is_datafusion_native(&self) -> bool {
+    pub fn is_datafusion_native(&self) -> bool {
         match self {
             RwDataType::Boolean
             | RwDataType::Int32
@@ -243,7 +263,8 @@ impl RwDataType {
             | RwDataType::Timestamptz
             | RwDataType::Varchar
             | RwDataType::Bytea
-            | RwDataType::Serial => true,
+            | RwDataType::Serial
+            | RwDataType::Decimal => true,
             RwDataType::Struct(v) => v.types().all(RwDataTypeDataFusionExt::is_datafusion_native),
             RwDataType::List(list) => list.elem().is_datafusion_native(),
             RwDataType::Map(map) => {
@@ -253,7 +274,7 @@ impl RwDataType {
         }
     }
 
-    fn to_datafusion_native(&self) -> Option<DFDataType> {
+    pub fn to_datafusion_native(&self) -> Option<DFDataType> {
         if !self.is_datafusion_native() {
             return None;
         }
@@ -262,11 +283,72 @@ impl RwDataType {
     }
 }
 
-// TODO: handle children type casting. For example, (DATE - INTERVAL), datafusion will interpret INTERVAL as string, we need to cast it to Interval type before calling risingwave boxed expression.
+fn convert_trivial_datafusion_func(
+    func_call: &FunctionCall,
+    input_columns: &impl ColumnTrait,
+) -> Option<DFExpr> {
+    if !func_call
+        .inputs()
+        .iter()
+        .all(|input| input.return_type().is_datafusion_native())
+    {
+        return None;
+    }
+    if !func_call.return_type().is_datafusion_native() {
+        return None;
+    }
+
+    let udf_impl: Arc<ScalarUDF> = match func_call.func_type() {
+        ExprType::Round => math::round(),
+        ExprType::Abs => math::abs(),
+        ExprType::Ceil => math::ceil(),
+        ExprType::Floor => math::floor(),
+        ExprType::Trunc => math::trunc(),
+        ExprType::Pow => math::power(),
+        ExprType::Exp => math::exp(),
+        ExprType::Sin => math::sin(),
+        ExprType::Cos => math::cos(),
+        ExprType::Tan => math::tan(),
+        ExprType::Cot => math::cot(),
+        ExprType::Asin => math::asin(),
+        ExprType::Acos => math::acos(),
+        ExprType::Atan => math::atan(),
+        ExprType::Atan2 => math::atan2(),
+        ExprType::Sqrt => math::sqrt(),
+        ExprType::Degrees => math::degrees(),
+        ExprType::Radians => math::radians(),
+        ExprType::Sinh => math::sinh(),
+        ExprType::Cosh => math::cosh(),
+        ExprType::Tanh => math::tanh(),
+        ExprType::Asinh => math::asinh(),
+        ExprType::Acosh => math::acosh(),
+        ExprType::Atanh => math::atanh(),
+        ExprType::Ln => math::ln(),
+        ExprType::Log10 => math::log10(),
+        ExprType::Substr => unicode::substr(),
+        _ => return None,
+    };
+    let args = func_call
+        .inputs()
+        .iter()
+        .map(|input| convert_expr(input, input_columns).ok())
+        .collect::<Option<Vec<_>>>()?;
+
+    Some(DFExpr::ScalarFunction(ScalarFunction {
+        func: udf_impl,
+        args,
+    }))
+}
+
 fn fallback_rw_expr_builder(
     func_call: &FunctionCall,
     input_columns: &impl ColumnTrait,
 ) -> Option<DFExpr> {
+    tracing::warn!(
+        "Falling back to RwScalarFunction for function call, it may have performance impact: {:?}",
+        func_call
+    );
+
     let cast = CastExecutor::from_iter(
         (0..input_columns.len()).map(|i| input_columns.df_data_type(i)),
         (0..input_columns.len()).map(|i| input_columns.rw_data_type(i)),
@@ -335,24 +417,14 @@ impl ScalarUDFImpl for RwScalarFunction {
     }
 
     fn invoke_with_args(&self, args: ScalarFunctionArgs) -> DFResult<ColumnarValue> {
-        let opts = RecordBatchOptions::new()
-            .with_match_field_names(false)
-            .with_row_count(Some(args.number_rows));
-        let columns = args
+        let arrays = args
             .args
             .into_iter()
             .map(|cv| cv.into_array(1))
             .collect::<DFResult<Vec<_>>>()?;
-        let input_fields: Fields = columns
-            .iter()
-            .zip_eq_fast(self.column_name.iter())
-            .map(|(array, name)| Field::new(name, array.data_type().clone(), true))
-            .collect();
-        let input_schema = Arc::new(Schema::new(input_fields));
-        let record_batch = RecordBatch::try_new_with_options(input_schema, columns, &opts)?;
-        let chunk = IcebergArrowConvert
-            .chunk_from_record_batch(&record_batch)
-            .map_err(to_datafusion_error)?;
+        let chunk =
+            create_data_chunk(arrays.into_iter(), args.number_rows).map_err(to_datafusion_error)?;
+
         let value = tokio::task::block_in_place(|| {
             tokio::runtime::Handle::current().block_on(async {
                 let chunk = self.cast.execute(chunk).await?;
@@ -361,6 +433,7 @@ impl ScalarUDFImpl for RwScalarFunction {
             })
         })
         .map_err(to_datafusion_error)?;
+
         let res = match value {
             ValueImpl::Array(array_impl) => {
                 let array = IcebergArrowConvert
@@ -369,11 +442,8 @@ impl ScalarUDFImpl for RwScalarFunction {
                 ColumnarValue::Array(array)
             }
             ValueImpl::Scalar { value, .. } => {
-                let value = match value {
-                    Some(v) => convert_scalar_value(&v, self.expr.return_type())
-                        .map_err(to_datafusion_error)?,
-                    None => ScalarValue::Null,
-                };
+                let value = convert_scalar_value(&value, self.expr.return_type())
+                    .map_err(to_datafusion_error)?;
                 ColumnarValue::Scalar(value)
             }
         };

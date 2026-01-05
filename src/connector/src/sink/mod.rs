@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,6 +32,7 @@ pub mod iceberg;
 pub mod kafka;
 pub mod kinesis;
 use risingwave_common::bail;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 pub mod jdbc_jni_client;
 pub mod log_store;
 pub mod mock_coordination_client;
@@ -247,6 +248,8 @@ pub struct SinkParam {
     /// User-defined primary key indices for upsert sink, if any.
     pub downstream_pk: Option<Vec<usize>>,
     pub sink_type: SinkType,
+    /// Whether to drop DELETE and convert UPDATE to INSERT in the sink executor.
+    pub ignore_delete: bool,
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
 
@@ -260,6 +263,7 @@ pub struct SinkParam {
 
 impl SinkParam {
     pub fn from_proto(pb_param: PbSinkParam) -> Self {
+        let ignore_delete = pb_param.ignore_delete();
         let table_schema = pb_param.table_schema.expect("should contain table schema");
         let format_desc = match pb_param.format_desc {
             Some(f) => f.try_into().ok(),
@@ -289,6 +293,7 @@ impl SinkParam {
             sink_type: SinkType::from_proto(
                 PbSinkType::try_from(pb_param.sink_type).expect("should be able to convert"),
             ),
+            ignore_delete,
             format_desc,
             db_name: pb_param.db_name,
             sink_from_name: pb_param.sink_from_name,
@@ -309,6 +314,7 @@ impl SinkParam {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
+            raw_ignore_delete: self.ignore_delete,
         }
     }
 
@@ -358,6 +364,7 @@ impl SinkParam {
             columns,
             downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
+            ignore_delete: sink_catalog.ignore_delete,
             format_desc: format_desc_with_secret,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
@@ -827,7 +834,7 @@ pub trait SinglePhaseCommitCoordinator {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<()>;
 }
 
@@ -841,11 +848,16 @@ pub trait TwoPhaseCommitCoordinator {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<Vec<u8>>;
 
     /// Idempotent implementation is required, because `commit` in the same epoch could be called multiple times.
-    async fn commit(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()>;
+    async fn commit(
+        &mut self,
+        epoch: u64,
+        commit_metadata: Vec<u8>,
+        schema_change: Option<PbSinkSchemaChange>,
+    ) -> Result<()>;
 
     /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>);

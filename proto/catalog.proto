@@ -25,6 +25,8 @@ message WatermarkDesc {
   uint32 watermark_idx = 1;
   // The expression to calculate the watermark value.
   expr.ExprNode expr = 2;
+  // Whether this watermark is used for TTL (`WITH TTL`).
+  bool with_ttl = 3;
 }
 
 enum SchemaRegistryNameStrategy {
@@ -161,7 +163,8 @@ message Source {
 enum SinkType {
   SINK_TYPE_UNSPECIFIED = 0;
   SINK_TYPE_APPEND_ONLY = 1;
-  SINK_TYPE_FORCE_APPEND_ONLY = 2;
+  // Deprecated. Use `append_only` + `ignore_delete` instead.
+  SINK_TYPE_FORCE_APPEND_ONLY = 2 [deprecated = true];
   SINK_TYPE_UPSERT = 3;
   SINK_TYPE_RETRACT = 4;
 }
@@ -228,6 +231,12 @@ message Sink {
   repeated plan_common.ColumnCatalog original_target_columns = 26;
 
   optional uint32 auto_refresh_schema_from_table = 27;
+
+  // Backward-compatible replacement for `SINK_TYPE_FORCE_APPEND_ONLY`.
+  // When set, the sink executor will drop DELETE messages and convert UPDATE messages to INSERT.
+  //
+  // Should not directly access this field. Use method `ignore_delete()` instead.
+  bool raw_ignore_delete = 28;
 }
 
 message Subscription {
@@ -477,10 +486,9 @@ message Table {
   optional uint64 initialized_at_epoch = 28;
   optional uint64 created_at_epoch = 29;
 
-  // This field is introduced in v1.2.0. It is used to indicate whether the
-  // table should use watermark_cache to avoid state cleaning as a performance
-  // optimization. In older versions we can just initialize without it.
-  bool cleaned_by_watermark = 30;
+  // Deprecated: reserved for compatibility with older streaming plans.
+  // Dynamic filter used to set this, but now carries this flag in its plan node body instead.
+  bool cleaned_by_watermark = 30 [deprecated = true];
 
   // Used to filter created / creating tables in meta.
   StreamJobStatus stream_job_status = 31;

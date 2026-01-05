@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -764,12 +764,6 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         );
         self.encode_into(&mut buf);
         buf
-    }
-
-    // Encode in to a buffer.
-    pub fn encode_into_without_table_id(&self, buf: &mut impl BufMut) {
-        self.user_key.encode_table_key_into(buf);
-        buf.put_u64(self.epoch_with_gap.as_u64());
     }
 
     pub fn encode_reverse_epoch(&self) -> Vec<u8> {

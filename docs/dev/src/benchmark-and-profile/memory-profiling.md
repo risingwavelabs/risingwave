@@ -14,12 +14,14 @@ Luckily, jemalloc provides built-in profiling support ([official wiki](https://g
 
 For RisingWave, [feat: support heap profiling from risedev by fuyufjh · Pull Request #4871](https://github.com/risingwavelabs/risingwave/pull/4871) added all things needed. Please just follow the below steps.
 
-## Step 1 - Collect Memory Profiling Dump
+## Step 1 - Collect Heap Dump
 
-Depends on the deployment, click the corresponding section to read the instructions.
+Depends on the deployment, check the corresponding section to read the instructions.
+
+### Manually profile RisingWave
 
 <details>
-<summary>1.1. Profile RisingWave (locally) with risedev</summary>
+<summary>1. Profile RisingWave (locally) with risedev</summary>
 
 Run a local cluster in EC2 instance with an additional environment variable `RISEDEV_ENABLE_HEAP_PROFILE`.
 
@@ -47,9 +49,8 @@ compute-node.266187.119.i119.heap
 
 </details>
 
-
 <details>
-<summary>1.2. Profile RisingWave in testing pipelines</summary>
+<summary>2. Profile RisingWave in testing pipelines</summary>
 
 Currently, some testing pipelines such as longevity tests have enabled memory profiling by default, but some are not, such as performance benchmarks.
 
@@ -66,7 +67,7 @@ Note that this is only for compute nodes. If you need to run profiling on other 
 </details>
 
 <details>
-<summary>1.3. Profile RisingWave in Kubernetes/EKS</summary>
+<summary>3. Profile RisingWave in Kubernetes/EKS</summary>
 
 If you run into an OOM issue in Kukernetes, now you will need to enable memory profiling first and reproduce the problem.
 
@@ -89,39 +90,56 @@ env:
 
 The suggested values of `lg_prof_interval` are different for different nodes. See `risedev` code: [compactor_service](https://github.com/risingwavelabs/risingwave/blob/8f1e6d8101344385c529d5ae2277b28160615e2c/src/risedevtool/src/task/compactor_service.rs#L99), [compute_node_service.rs](https://github.com/risingwavelabs/risingwave/blob/8f1e6d8101344385c529d5ae2277b28160615e2c/src/risedevtool/src/task/compute_node_service.rs#L107), [meta_node_service.rs](https://github.com/risingwavelabs/risingwave/blob/8f1e6d8101344385c529d5ae2277b28160615e2c/src/risedevtool/src/task/meta_node_service.rs#L190).
 
-
 Afterwards, the memory dump should be outputted to the specified folder. Use `kubectl cp` to download it to local.
-
 
 </details>
 
 <details>
-<summary>1.4. Dump memory profile with risectl</summary>
+<summary>4. Dump memory profile with risectl</summary>
 
-You can manually dump a heap profiling with risectl for a compute node with Jemalloc profiling enabled (`MALLOC_CONF=prof:true`).
+You can dump a heap profile with risectl for any worker node that has Jemalloc profiling enabled (`MALLOC_CONF=prof:true`).
 
 ```shell
-./risedev ctl profile heap --dir [dumped_file_dir]
+./risedev ctl profile heap --dir [dumped_file_dir] \
+  --worker-type frontend \
+  --worker-type compute-node \
+  --worker-type compactor
 ```
+
+`--worker-type` is repeatable. If omitted, it defaults to all worker types that support heap profiling, i.e. `frontend`, `compute-node`, and `compactor`.
 
 The dumped files will be saved in the directory you specified.
 
-Note: To profile compute nodes remotely, please make sure all remote nodes have a public IP address accessible from your local machine (where you are running `risedev`).
+Note: To profile nodes remotely via risectl, make sure all remote nodes have a public IP address accessible from your local machine (where you are running `risedev`).
 
 </details>
 
+### Dump memory profile with dashboard on Cloud
 
+For Cloud deployments, the necessary configuration is already done, and you can directly dump heap profiles from the **Heap Profiling** page:
 
-## Step 2 - Analyze with `jeprof`
+- Open the dashboard (e.g. `http://<meta-host>:5691/` if served by meta node, or `http://localhost:3000/` in dev mode).
+- Go to the **Heap Profiling** page.
+- Select a worker node and click **Dump**.
+
+The dumped files will be saved on the target node.
+
+Besides manual dumps, RisingWave deployments on Cloud will also **auto dump** heap profiles when the process memory usage crosses a configured threshold. See `[server.heap_profiling]` section in the configuration file.
+
+## Step 2 - Analyze Heap Dump
+
+After you have the heap dump files, you can analyze them with `jeprof` to generate a `collapsed` file for visualization.
 
 Note that each of the `.heap` files are full snapshots instead of increments. Hence, simply pick the latest file (or any historical snapshot).
 
+### Manually use jeprof to analyze heap dump
+
 **jeprof** is a utility provided by jemalloc to analyze heap dump files. It reads both the executable binary and the heap dump to get a full heap profiling.
 
-Note that the heap profiler dump file must be analyzed along with exactly the same binary that it generated from. If the memory dump is collected from Kubernetes, please refer to 2.2.
+Note that the heap profiler dump file must be analyzed along with exactly the same binary that it generated from. If the memory dump is collected from Kubernetes, please refer to [2. Use jeprof in Docker images](#2-use-jeprof-in-docker-images).
 
 <details>
-<summary>2.1. Use jeprof locally</summary>
+<summary>1. Use jeprof locally</summary>
 
 `jeprof` is already compiled in jemallocator and should be compiled by cargo, use it as follows:
 
@@ -144,12 +162,10 @@ cargo b --examples -r
 cp ./target/release/examples/addr2line <your-path>
 ```
 
-
 </details>
 
-
 <details>
-<summary>2.2. Use jeprof in Docker images</summary>
+<summary>2. Use jeprof in Docker images</summary>
 
 `jeprof` is included in RisingWave image `v1.0.0` or later. For earlier versions, please copy an `jeprof` manually into the container.
 
@@ -161,7 +177,7 @@ docker run -it --rm --entrypoint /bin/bash -v $(pwd):/dumps  ghcr.io/risingwavel
 
 </details>
 
-Generate `collapsed` file.
+After you have `jeprof` ready, you can use it to generate `collapsed` file.
 
 ```shell
 jeprof --collapsed binary_file heap_file > heap_file.collapsed
@@ -172,6 +188,15 @@ For example:
 ```shell
 jeprof --collapsed /risingwave/bin/risingwave jeprof.198272.123.i123.heap > jeprof.198272.123.i123.heap.collapsed
 ```
+
+### Analyze with dashboard on Cloud
+
+For Cloud deployments, the necessary toolchain is already set up for you. Simply analyze heap dump files from the **Heap Profiling** page in the dashboard:
+
+- Open the dashboard (e.g. `http://<meta-host>:5691/` if served by meta node, or `http://localhost:3000/` in dev mode).
+- Go to the **Heap Profiling** page.
+- Select a worker node, choose the dump source (**Auto** or **Manually**) and a dump file.
+- Click **Analyze** to download the generated `.collapsed` file.
 
 ## Step 3 - Visualize Flame Graph
 

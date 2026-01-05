@@ -1,5 +1,5 @@
 /*
- * Copyright 2025 RisingWave Labs
+ * Copyright 2024 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
+
 import { WorkerNode } from "../../proto/gen/common"
 import api from "./api"
 
@@ -34,6 +34,22 @@ export async function getClusterInfoComputeNode() {
     WorkerNode.fromJSON
   )
   return res
+}
+
+export async function getClusterInfoCompactor() {
+  const res: WorkerNode[] = (await api.get("/clusters/4")).map(
+    WorkerNode.fromJSON
+  )
+  return res
+}
+
+export async function getClusterInfoProfileWorkers() {
+  const [computes, frontends, compactors] = await Promise.all([
+    getClusterInfoComputeNode(),
+    getClusterInfoFrontend(),
+    getClusterInfoCompactor(),
+  ])
+  return [...computes, ...frontends, ...compactors]
 }
 
 export async function getClusterVersion() {
