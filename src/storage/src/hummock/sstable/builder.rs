@@ -932,8 +932,16 @@ pub(super) mod tests {
         b.finish().await.unwrap();
     }
 
-    fn encode_full_key(table_key: &[u8]) -> Vec<u8> {
-        FullKey::for_test(TableId::default(), table_key.to_vec(), 0).encode()
+    fn encode_full_key(vnode: VirtualNode, table_key_suffix: &[u8]) -> Vec<u8> {
+        let mut table_key = vnode.to_be_bytes().to_vec();
+        table_key.extend_from_slice(table_key_suffix);
+        FullKey::for_test(TableId::default(), table_key, 0).encode()
+    }
+
+    fn table_key_of(vnode: VirtualNode, suffix: &[u8]) -> Vec<u8> {
+        let mut key = vnode.to_be_bytes().to_vec();
+        key.extend_from_slice(suffix);
+        key
     }
 
     #[test]
@@ -944,10 +952,10 @@ pub(super) mod tests {
         let vnode_1 = VirtualNode::from_index(1);
         let vnode_2 = VirtualNode::from_index(2);
 
-        let k1 = encode_full_key(b"k1");
-        let k2 = encode_full_key(b"k2");
-        let k3 = encode_full_key(b"k3");
-        let k4 = encode_full_key(b"k4");
+        let k1 = encode_full_key(vnode_1, b"k1");
+        let k2 = encode_full_key(vnode_1, b"k2");
+        let k3 = encode_full_key(vnode_2, b"k3");
+        let k4 = encode_full_key(vnode_2, b"k4");
 
         collector.observe_key(vnode_1, &k1, &[]);
         collector.observe_key(vnode_1, &k2, &k1);
@@ -959,13 +967,25 @@ pub(super) mod tests {
 
         // Verify vnode_1: left = first key, right = last key before switch
         let (range1_left, range1_right) = info.get_vnode_key_range(vnode_1).unwrap();
-        assert_eq!(range1_left.user_key.table_key.as_ref(), b"k1");
-        assert_eq!(range1_right.user_key.table_key.as_ref(), b"k2");
+        assert_eq!(
+            range1_left.user_key.table_key.as_ref(),
+            table_key_of(vnode_1, b"k1")
+        );
+        assert_eq!(
+            range1_right.user_key.table_key.as_ref(),
+            table_key_of(vnode_1, b"k2")
+        );
 
         // Verify vnode_2: left = first key, right = SST's last key
         let (range2_left, range2_right) = info.get_vnode_key_range(vnode_2).unwrap();
-        assert_eq!(range2_left.user_key.table_key.as_ref(), b"k3");
-        assert_eq!(range2_right.user_key.table_key.as_ref(), b"k4");
+        assert_eq!(
+            range2_left.user_key.table_key.as_ref(),
+            table_key_of(vnode_2, b"k3")
+        );
+        assert_eq!(
+            range2_right.user_key.table_key.as_ref(),
+            table_key_of(vnode_2, b"k4")
+        );
     }
 
     #[test]
@@ -984,13 +1004,13 @@ pub(super) mod tests {
         let vnode_3 = VirtualNode::from_index(3);
         let vnode_4 = VirtualNode::from_index(4);
 
-        let k1 = encode_full_key(b"k1");
-        let k2 = encode_full_key(b"k2");
-        let k3 = encode_full_key(b"k3");
-        let k4 = encode_full_key(b"k4");
-        let k5 = encode_full_key(b"k5");
-        let k6 = encode_full_key(b"k6");
-        let k7 = encode_full_key(b"k7");
+        let k1 = encode_full_key(vnode_1, b"k1");
+        let k2 = encode_full_key(vnode_1, b"k2");
+        let k3 = encode_full_key(vnode_2, b"k3");
+        let k4 = encode_full_key(vnode_2, b"k4");
+        let k5 = encode_full_key(vnode_3, b"k5");
+        let k6 = encode_full_key(vnode_3, b"k6");
+        let k7 = encode_full_key(vnode_4, b"k7");
 
         let range_size = mem::size_of::<VirtualNode>() + k1.len() + k2.len();
         let estimated_next_size = mem::size_of::<VirtualNode>() + k3.len();
@@ -1014,12 +1034,24 @@ pub(super) mod tests {
 
         // Verify collected vnodes have correct boundaries
         let (range1_left, range1_right) = info.get_vnode_key_range(vnode_1).unwrap();
-        assert_eq!(range1_left.user_key.table_key.as_ref(), b"k1");
-        assert_eq!(range1_right.user_key.table_key.as_ref(), b"k2");
+        assert_eq!(
+            range1_left.user_key.table_key.as_ref(),
+            table_key_of(vnode_1, b"k1")
+        );
+        assert_eq!(
+            range1_right.user_key.table_key.as_ref(),
+            table_key_of(vnode_1, b"k2")
+        );
 
         let (range2_left, range2_right) = info.get_vnode_key_range(vnode_2).unwrap();
-        assert_eq!(range2_left.user_key.table_key.as_ref(), b"k3");
-        assert_eq!(range2_right.user_key.table_key.as_ref(), b"k4");
+        assert_eq!(
+            range2_left.user_key.table_key.as_ref(),
+            table_key_of(vnode_2, b"k3")
+        );
+        assert_eq!(
+            range2_right.user_key.table_key.as_ref(),
+            table_key_of(vnode_2, b"k4")
+        );
 
         // Verify stopped vnodes are not collected
         assert!(info.get_vnode_key_range(vnode_3).is_none());
@@ -1036,13 +1068,13 @@ pub(super) mod tests {
         let vnode_100 = VirtualNode::from_index(100);
 
         let keys = vec![
-            (vnode_5, encode_full_key(b"key_005_001")),
-            (vnode_5, encode_full_key(b"key_005_002")),
-            (vnode_5, encode_full_key(b"key_005_999")),
-            (vnode_10, encode_full_key(b"key_010_001")),
-            (vnode_10, encode_full_key(b"key_010_100")),
-            (vnode_100, encode_full_key(b"key_100_001")),
-            (vnode_100, encode_full_key(b"key_100_999")),
+            (vnode_5, encode_full_key(vnode_5, b"key_005_001")),
+            (vnode_5, encode_full_key(vnode_5, b"key_005_002")),
+            (vnode_5, encode_full_key(vnode_5, b"key_005_999")),
+            (vnode_10, encode_full_key(vnode_10, b"key_010_001")),
+            (vnode_10, encode_full_key(vnode_10, b"key_010_100")),
+            (vnode_100, encode_full_key(vnode_100, b"key_100_001")),
+            (vnode_100, encode_full_key(vnode_100, b"key_100_999")),
         ];
 
         let mut prev_key = Vec::new();
@@ -1056,16 +1088,34 @@ pub(super) mod tests {
 
         // Verify each collected vnode has correct boundaries
         let (range5_left, range5_right) = info.get_vnode_key_range(vnode_5).unwrap();
-        assert_eq!(range5_left.user_key.table_key.as_ref(), b"key_005_001");
-        assert_eq!(range5_right.user_key.table_key.as_ref(), b"key_005_999");
+        assert_eq!(
+            range5_left.user_key.table_key.as_ref(),
+            table_key_of(vnode_5, b"key_005_001")
+        );
+        assert_eq!(
+            range5_right.user_key.table_key.as_ref(),
+            table_key_of(vnode_5, b"key_005_999")
+        );
 
         let (range10_left, range10_right) = info.get_vnode_key_range(vnode_10).unwrap();
-        assert_eq!(range10_left.user_key.table_key.as_ref(), b"key_010_001");
-        assert_eq!(range10_right.user_key.table_key.as_ref(), b"key_010_100");
+        assert_eq!(
+            range10_left.user_key.table_key.as_ref(),
+            table_key_of(vnode_10, b"key_010_001")
+        );
+        assert_eq!(
+            range10_right.user_key.table_key.as_ref(),
+            table_key_of(vnode_10, b"key_010_100")
+        );
 
         let (range100_left, range100_right) = info.get_vnode_key_range(vnode_100).unwrap();
-        assert_eq!(range100_left.user_key.table_key.as_ref(), b"key_100_001");
-        assert_eq!(range100_right.user_key.table_key.as_ref(), b"key_100_999");
+        assert_eq!(
+            range100_left.user_key.table_key.as_ref(),
+            table_key_of(vnode_100, b"key_100_001")
+        );
+        assert_eq!(
+            range100_right.user_key.table_key.as_ref(),
+            table_key_of(vnode_100, b"key_100_999")
+        );
 
         // Verify gaps are not filled (no data for vnodes 0, 7, 50)
         assert!(
@@ -1090,14 +1140,18 @@ pub(super) mod tests {
 
         // Test 2: Empty collector (no keys) should return None
         let collector = VnodeKeyRangeCollector::with_limit(Some(1024)).unwrap();
-        assert!(collector.finish(&encode_full_key(b"any")).is_none());
+        assert!(
+            collector
+                .finish(&encode_full_key(VirtualNode::ZERO, b"any"))
+                .is_none()
+        );
 
         // Test 3: Single vnode (optimization: don't emit hints for single-vnode SSTs)
         let vnode = VirtualNode::from_index(5);
         let mut collector = VnodeKeyRangeCollector::with_limit(Some(1024)).unwrap();
-        let a = encode_full_key(b"a");
-        let b = encode_full_key(b"b");
-        let c = encode_full_key(b"c");
+        let a = encode_full_key(vnode, b"a");
+        let b = encode_full_key(vnode, b"b");
+        let c = encode_full_key(vnode, b"c");
         collector.observe_key(vnode, &a, &[]);
         collector.observe_key(vnode, &b, &a);
         collector.observe_key(vnode, &c, &b);
@@ -1107,15 +1161,15 @@ pub(super) mod tests {
         );
 
         // Test 4: Extreme limit (1 byte) - first vnode exceeds, becomes single-vnode
-        // Range size = sizeof(VirtualNode=2) + 4 + 4 = 10 bytes
-        // With 1-byte limit: vnode_1 range (10 bytes) exceeds but allowed (over-limit write)
-        // vnode_2 check: 10 + 10 > 1, stop. Result: only vnode_1, returns None (single-vnode)
+        // Range size = sizeof(VirtualNode=2) + encoded_key_len * 2
+        // With 1-byte limit: vnode_1 range exceeds but allowed (over-limit write)
+        // vnode_2 check: current_size >= max_bytes, stop. Result: only vnode_1, returns None (single-vnode)
         let mut collector = VnodeKeyRangeCollector::with_limit(Some(1)).unwrap();
         let vnode_1 = VirtualNode::from_index(1);
         let vnode_2 = VirtualNode::from_index(2);
-        let key1 = encode_full_key(b"key1");
-        let key2 = encode_full_key(b"key2");
-        let key3 = encode_full_key(b"key3");
+        let key1 = encode_full_key(vnode_1, b"key1");
+        let key2 = encode_full_key(vnode_1, b"key2");
+        let key3 = encode_full_key(vnode_2, b"key3");
         collector.observe_key(vnode_1, &key1, &[]);
         collector.observe_key(vnode_1, &key2, &key1);
         collector.observe_key(vnode_2, &key3, &key2); // Seals vnode_1, stops before vnode_2
