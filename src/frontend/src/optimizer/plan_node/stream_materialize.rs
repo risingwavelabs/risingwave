@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -158,6 +158,7 @@ impl StreamMaterialize {
             conflict_behavior,
             vec![],
             None,
+            vec![],
             None,
             table_type,
             None,
@@ -190,6 +191,7 @@ impl StreamMaterialize {
         conflict_behavior: ConflictBehavior,
         version_column_indices: Vec<usize>,
         pk_column_indices: Vec<usize>,
+        ttl_watermark_indices: Vec<usize>,
         row_id_index: Option<usize>,
         version: TableVersion,
         retention_seconds: Option<NonZeroU32>,
@@ -211,6 +213,7 @@ impl StreamMaterialize {
             conflict_behavior,
             version_column_indices,
             Some(pk_column_indices),
+            ttl_watermark_indices,
             row_id_index,
             TableType::Table,
             Some(version),
@@ -312,6 +315,7 @@ impl StreamMaterialize {
         conflict_behavior: ConflictBehavior,
         version_column_indices: Vec<usize>,
         pk_column_indices: Option<Vec<usize>>, // Is some when create table
+        ttl_watermark_indices: Vec<usize>,
         row_id_index: Option<usize>,
         table_type: TableType,
         version: Option<TableVersion>,
@@ -331,7 +335,7 @@ impl StreamMaterialize {
         // We will record the watermark group information in `TableCatalog` in the future. For now, let's flatten the watermark columns.
         let watermark_columns = input.watermark_columns().indices().collect();
 
-        let (table_pk, stream_key) = if let Some(pk_column_indices) = pk_column_indices {
+        let (table_pk, mut stream_key) = if let Some(pk_column_indices) = pk_column_indices {
             let table_pk = pk_column_indices
                 .iter()
                 .map(|idx| ColumnOrder::new(*idx, OrderType::ascending()))
@@ -341,7 +345,16 @@ impl StreamMaterialize {
         } else {
             derive_pk(input, user_distributed_by, user_order_by, &columns)
         };
-        // assert: `stream_key` is a subset of `table_pk`
+
+        // Add TTL watermark column to stream key.
+        // When a row comes in to a TTL-ed table and we cannot find it in the table, we still cannot tell
+        // whether it is a new row or an update to an expired row. Adding the TTL watermark column to the stream key
+        // can ensure there's no double-insert from the view of the downstream jobs. See RFC for more details.
+        for idx in ttl_watermark_indices.iter().copied() {
+            if !stream_key.contains(&idx) {
+                stream_key.push(idx);
+            }
+        }
 
         let read_prefix_len_hint = table_pk.len();
         Ok(TableCatalog {
@@ -372,7 +385,7 @@ impl StreamMaterialize {
             cardinality,
             created_at_epoch: None,
             initialized_at_epoch: None,
-            cleaned_by_watermark: false,
+            cleaned_by_watermark: !ttl_watermark_indices.is_empty(),
             create_type,
             stream_job_status: StreamJobStatus::Creating,
             description: None,
@@ -394,7 +407,7 @@ impl StreamMaterialize {
                 }
             },
             clean_watermark_index_in_pk: None, // TODO: fill this field
-            clean_watermark_indices: vec![],   // TODO: fill this field
+            clean_watermark_indices: ttl_watermark_indices,
             refreshable,
             vector_index_info: None,
             cdc_table_type: None,

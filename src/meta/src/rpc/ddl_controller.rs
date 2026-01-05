@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,6 +75,7 @@ use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter, bail_unavailable};
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
     NotificationVersion, StreamingJob, StreamingJobType,
@@ -265,6 +266,7 @@ pub struct DdlController {
     pub(crate) stream_manager: GlobalStreamManagerRef,
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
+    sink_manager: SinkCoordinatorManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -342,6 +344,7 @@ impl DdlController {
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
+        sink_manager: SinkCoordinatorManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -350,6 +353,7 @@ impl DdlController {
             stream_manager,
             source_manager,
             barrier_manager,
+            sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -926,6 +930,7 @@ impl DdlController {
                 fragment_graph.max_parallelism as _,
                 dependencies,
                 specific_resource_group.clone(),
+                &fragment_graph.backfill_parallelism,
             )
             .await;
         if let Err(meta_err) = check_ret {
@@ -1201,6 +1206,11 @@ impl DdlController {
             .await;
 
         // clean up iceberg table sinks
+        let iceberg_sink_ids: Vec<SinkId> = removed_iceberg_table_sinks
+            .iter()
+            .map(|sink| sink.id)
+            .collect();
+
         for sink in removed_iceberg_table_sinks {
             let sink_param = SinkParam::try_from_sink_catalog(sink.into())
                 .expect("Iceberg sink should be valid");
@@ -1224,6 +1234,13 @@ impl DdlController {
                         );
                     });
             }
+        }
+
+        // stop sink coordinators for iceberg table sinks
+        if !iceberg_sink_ids.is_empty() {
+            self.sink_manager
+                .stop_sink_coordinator(iceberg_sink_ids)
+                .await;
         }
 
         // remove secrets.
@@ -1654,6 +1671,7 @@ impl DdlController {
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
+        let specified_backfill_parallelism = fragment_graph.specified_backfill_parallelism();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
         // 1. Fragment Level ordering graph
@@ -1743,8 +1761,9 @@ impl DdlController {
         // 3. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
+        let initial_parallelism = specified_backfill_parallelism.or(specified_parallelism);
         let parallelism = self.resolve_stream_parallelism(
-            specified_parallelism,
+            initial_parallelism,
             max_parallelism,
             &cluster_info,
             resource_group.clone(),

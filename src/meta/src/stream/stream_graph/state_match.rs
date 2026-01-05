@@ -460,7 +460,7 @@ pub(crate) fn match_graph(g1: &Graph, g2: &Graph) -> Result<MatchResult> {
 
         let mut last_error = None;
 
-        for &v in &u_cands {
+        'cand_v: for &v in &u_cands {
             // Skip if v is already used.
             if matches.target_matched(v) {
                 continue;
@@ -473,7 +473,7 @@ pub(crate) fn match_graph(g1: &Graph, g2: &Graph) -> Result<MatchResult> {
                     && !g2.upstreams(v).contains(&v_upstream)
                 {
                     // Not a valid match.
-                    continue;
+                    continue 'cand_v;
                 }
             }
             // Same for downstream of u.
@@ -483,7 +483,7 @@ pub(crate) fn match_graph(g1: &Graph, g2: &Graph) -> Result<MatchResult> {
                     && !g2.downstreams(v).contains(&v_downstream)
                 {
                     // Not a valid match.
-                    continue;
+                    continue 'cand_v;
                 }
             }
 

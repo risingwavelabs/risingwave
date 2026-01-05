@@ -76,6 +76,7 @@ user streaming_join_encoding
 user streaming_max_parallelism
 user streaming_over_window_cache_policy
 user streaming_parallelism
+user streaming_parallelism_for_backfill
 user streaming_parallelism_for_index
 user streaming_parallelism_for_materialized_view
 user streaming_parallelism_for_sink

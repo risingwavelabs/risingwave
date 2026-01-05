@@ -570,6 +570,18 @@
     select * from t1 where a = 1 and b = 2 order by c desc limit 10;
   expected_outputs:
     - batch_plan
+- name: Use primary table instead of indexes if possible
+  sql: |
+    CREATE TABLE t1(id INT, t2_id INT, PRIMARY KEY(id));
+    CREATE TABLE t2(id INT, t3_id INT, PRIMARY KEY(id));
+    CREATE TABLE t3(id INT, PRIMARY KEY(id));
+    CREATE INDEX idx_t2_m2m ON t2(id, t3_id);
+    SELECT t1.id as toto, t2.id as tata, t3.id as titi
+    FROM t1
+    INNER JOIN t2 ON t2.id=t1.t2_id
+    INNER JOIN t3 ON t3.id=t2.t3_id;
+  expected_outputs:
+    - stream_plan
 - name: topn index selection for scan with output column idx
   sql: |
     create table t (c int, b int, a int);

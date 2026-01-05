@@ -15,7 +15,7 @@
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
 
-use crate::{Epoch, SinkId};
+use crate::{Epoch, SinkId, SinkSchemachange};
 
 #[derive(Clone, Debug, PartialEq, Eq, EnumIter, DeriveActiveEnum, Serialize, Deserialize)]
 #[sea_orm(rs_type = "String", db_type = "string(None)")]
@@ -37,6 +37,7 @@ pub struct Model {
     pub epoch: Epoch,
     pub sink_state: SinkState,
     pub metadata: Vec<u8>,
+    pub schema_change: Option<SinkSchemachange>,
 }
 
 impl ActiveModelBehavior for ActiveModel {}

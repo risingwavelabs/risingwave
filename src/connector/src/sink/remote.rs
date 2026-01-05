@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use phf::phf_set;
 use prost::Message;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field};
+use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::types::DataType;
@@ -46,6 +46,7 @@ use risingwave_pb::connector_service::{
     ValidateSinkResponse, sink_coordinator_stream_request, sink_coordinator_stream_response,
     sink_writer_stream_response,
 };
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use risingwave_rpc_client::error::RpcError;
 use risingwave_rpc_client::{
     BidiStreamReceiver, BidiStreamSender, DEFAULT_BUFFER_SIZE, SinkCoordinatorStreamHandle,
@@ -697,12 +698,12 @@ impl SinglePhaseCommitCoordinator for RemoteCoordinator {
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     ) -> Result<()> {
-        if let Some(add_columns) = add_columns {
+        if let Some(schema_change) = schema_change {
             return Err(anyhow!(
-                "remote coordinator not support add columns, but got: {:?}",
-                add_columns
+                "remote coordinator not support schema change, but got: {:?}",
+                schema_change
             )
             .into());
         }

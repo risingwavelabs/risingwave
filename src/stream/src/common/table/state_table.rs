@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -115,10 +115,14 @@ where
 
     value_indices: Option<Vec<usize>>,
 
+    /// The index of the watermark column used for state cleaning in all columns.
+    pub clean_watermark_index: Option<usize>,
     /// Pending watermark for state cleaning. Old states below this watermark will be cleaned when committing.
     pending_watermark: Option<ScalarImpl>,
     /// Last committed watermark for state cleaning. Will be restored on state table recovery.
     committed_watermark: Option<ScalarImpl>,
+    /// Serializer and serde type for the watermark column.
+    watermark_serde: Option<(OrderedRowSerde, WatermarkSerdeType)>,
 
     /// Data Types
     /// We will need to use to build data chunks from state table rows.
@@ -138,8 +142,6 @@ where
     pub output_indices: Vec<usize>,
 
     op_consistency_level: StateTableOpConsistencyLevel,
-
-    clean_watermark_index_in_pk: Option<i32>,
 
     /// Flag to indicate whether the state table has called `commit`, but has not called
     /// `post_yield_barrier` on the `StateTablePostCommit` callback yet.
@@ -698,25 +700,43 @@ where
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
-        // Get clean watermark PK index using the helper method
-        let clean_watermark_index_in_pk: Option<i32> = table_catalog
-            .get_clean_watermark_index_in_pk_compat()
-            .map(|idx| idx as i32);
+        let clean_watermark_indices = table_catalog.get_clean_watermark_column_indices();
+        if clean_watermark_indices.len() > 1 {
+            unimplemented!("multiple clean watermark columns are not supported yet")
+        }
+        let clean_watermark_index = clean_watermark_indices.first().map(|&i| i as usize);
+
+        let watermark_serde = clean_watermark_index.map(|idx| {
+            let pk_idx = pk_indices.iter().position(|&i| i == idx);
+            let (watermark_serde, watermark_serde_type) = match pk_idx {
+                Some(0) => (pk_serde.index(0).into_owned(), WatermarkSerdeType::PkPrefix),
+                Some(pk_idx) => (
+                    pk_serde.index(pk_idx).into_owned(),
+                    WatermarkSerdeType::NonPkPrefix,
+                ),
+                None => (
+                    OrderedRowSerde::new(
+                        vec![data_types[idx].clone()],
+                        vec![OrderType::ascending()],
+                    ),
+                    // TODO(ttl): may introduce a new type for watermark not in pk.
+                    WatermarkSerdeType::NonPkPrefix,
+                ),
+            };
+            (watermark_serde, watermark_serde_type)
+        });
 
         // Restore persisted table watermark.
-        let watermark_serde = if pk_indices.is_empty() {
-            None
-        } else {
-            // Use the watermark PK index from clean_watermark_index_in_pk
-            let pk_idx = clean_watermark_index_in_pk.unwrap_or(0) as usize;
-            Some(pk_serde.index(pk_idx))
-        };
+        //
+        // Note: currently the underlying local state store only exposes persisted watermarks for
+        // `PkPrefix` type (i.e., the first PK column), so we only restore in that case.
         let max_watermark_of_vnodes = distribution
             .vnodes()
             .iter_vnodes()
             .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
             .max();
-        let committed_watermark = if let Some(deser) = watermark_serde
+        let committed_watermark = if let Some((deser, WatermarkSerdeType::PkPrefix)) =
+            watermark_serde.as_ref()
             && let Some(max_watermark) = max_watermark_of_vnodes
         {
             let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
@@ -754,11 +774,12 @@ where
             value_indices,
             pending_watermark: None,
             committed_watermark,
+            watermark_serde,
             data_types,
             output_indices,
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
-            clean_watermark_index_in_pk,
+            clean_watermark_index,
             on_post_commit: false,
         }
     }
@@ -1213,6 +1234,11 @@ where
         self.committed_watermark.as_ref()
     }
 
+    /// Whether the state table is cleaned by watermark.
+    pub fn cleaned_by_watermark(&self) -> bool {
+        self.clean_watermark_index.is_some()
+    }
+
     pub async fn commit(
         &mut self,
         new_epoch: EpochPair,
@@ -1298,18 +1324,13 @@ where
             !self.pk_indices().is_empty(),
             "see pending watermark on empty pk"
         );
-        // Get the watermark PK index
-        let watermark_pk_idx = self.clean_watermark_index_in_pk.unwrap_or(0) as usize;
-
-        let watermark_serializer = self.pk_serde.index(watermark_pk_idx);
-
-        let watermark_type = match watermark_pk_idx {
-            0 => WatermarkSerdeType::PkPrefix,
-            _ => WatermarkSerdeType::NonPkPrefix,
-        };
+        let (watermark_serializer, watermark_type) = self
+            .watermark_serde
+            .as_ref()
+            .expect("watermark serde should be initialized to commit watermark");
 
         let watermark_suffix =
-            serialize_pk(row::once(Some(watermark.clone())), &watermark_serializer);
+            serialize_pk(row::once(Some(watermark.clone())), watermark_serializer);
         let vnode_watermark = VnodeWatermark::new(
             self.vnodes().clone(),
             Bytes::copy_from_slice(watermark_suffix.as_ref()),
@@ -1325,7 +1346,7 @@ where
         };
 
         self.committed_watermark = Some(watermark);
-        Some((direction, vec![vnode_watermark], watermark_type))
+        Some((direction, vec![vnode_watermark], *watermark_type))
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {

@@ -18,8 +18,8 @@ use std::sync::Arc;
 use datafusion::arrow::datatypes::{Field as ArrowField, Schema as ArrowSchema};
 use datafusion::datasource::provider_as_source;
 use datafusion::logical_expr::{
-    Expr as DFExpr, ExprSchemable, Join, JoinConstraint, LogicalPlan as DFLogicalPlan, LogicalPlan,
-    TableScan, Values, build_join_schema,
+    Aggregate, Expr as DFExpr, ExprSchemable, Join, JoinConstraint, LogicalPlan as DFLogicalPlan,
+    LogicalPlan, TableScan, Values, build_join_schema,
 };
 use datafusion::prelude::lit;
 use datafusion_common::{Column, DFSchema, NullEquality, ScalarValue};
@@ -28,10 +28,11 @@ use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::bail_not_implemented;
 
 use crate::datafusion::{
-    ColumnTrait, ConcatColumns, IcebergTableProvider, InputColumns, convert_expr, convert_join_type,
+    ColumnTrait, ConcatColumns, IcebergTableProvider, InputColumns, convert_agg_call,
+    convert_column_order, convert_expr, convert_join_type, convert_window_expr,
 };
 use crate::error::{ErrorCode, Result as RwResult};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit};
 use crate::optimizer::plan_node::{PlanTreeNodeBinary, PlanTreeNodeUnary};
 use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor};
 use crate::optimizer::{LogicalPlanRef, PlanVisitor};
@@ -45,6 +46,36 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
 
     fn default_behavior() -> Self::DefaultBehavior {
         DefaultValueBehavior
+    }
+
+    fn visit_logical_agg(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalAgg,
+    ) -> Self::Result {
+        // TODO: support grouping sets, rollup, cube
+        // Risingwave will convert it to logical expand first, then aggregate
+        // But datafusion doesn't have logical expand node, so we need to use other way to implement it
+        let rw_input = plan.input();
+        let df_input = self.visit(plan.input())?;
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let group_expr = plan
+            .group_key()
+            .indices()
+            .map(|index| DFExpr::Column(input_columns.column(index)))
+            .collect_vec();
+        let aggr_expr = plan
+            .agg_calls()
+            .iter()
+            .map(|agg_call| {
+                Ok(DFExpr::AggregateFunction(convert_agg_call(
+                    agg_call,
+                    &input_columns,
+                )?))
+            })
+            .collect::<RwResult<Vec<DFExpr>>>()?;
+
+        let aggregate = Aggregate::try_new(df_input, group_expr, aggr_expr)?;
+        Ok(Arc::new(LogicalPlan::Aggregate(aggregate)))
     }
 
     fn visit_logical_filter(
@@ -238,6 +269,70 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
             input: input_plan,
         };
         Ok(Arc::new(LogicalPlan::Limit(limit)))
+    }
+
+    fn visit_logical_top_n(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalTopN,
+    ) -> Self::Result {
+        let rw_input = plan.input();
+        let df_input = self.visit(rw_input.clone())?;
+
+        let TopNLimit::Simple(limit) = plan.limit_attr() else {
+            bail_not_implemented!(
+                "DataFusionPlanConverter: LogicalTopN with_ties is not supported"
+            );
+        };
+        if !plan.group_key().is_empty() {
+            bail_not_implemented!(
+                "DataFusionPlanConverter: LogicalTopN with a non-empty group key is not supported. This may arise from DISTINCT ON or correlated joins."
+            );
+        }
+        let offset = plan.offset();
+
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let sort_expr = plan
+            .topn_order()
+            .column_orders
+            .iter()
+            .map(|order| convert_column_order(order, &input_columns))
+            .collect_vec();
+        let fetch = offset.saturating_add(limit).min(usize::MAX as _) as usize;
+        let sort = datafusion::logical_expr::Sort {
+            expr: sort_expr,
+            input: df_input,
+            fetch: Some(fetch),
+        };
+        let mut result = Arc::new(LogicalPlan::Sort(sort));
+
+        if offset > 0 {
+            let limit = datafusion::logical_expr::Limit {
+                skip: Some(Box::new(lit(offset))),
+                fetch: Some(Box::new(lit(limit))),
+                input: result,
+            };
+            result = Arc::new(LogicalPlan::Limit(limit));
+        }
+
+        Ok(result)
+    }
+
+    fn visit_logical_over_window(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalOverWindow,
+    ) -> Self::Result {
+        let rw_input = plan.input();
+        let df_input = self.visit(rw_input.clone())?;
+
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let df_exprs = plan
+            .window_functions()
+            .iter()
+            .map(|wf| convert_window_expr(wf, &input_columns))
+            .collect::<RwResult<Vec<_>>>()?;
+
+        let window_plan = datafusion::logical_expr::Window::try_new(df_exprs, df_input)?;
+        Ok(Arc::new(LogicalPlan::Window(window_plan)))
     }
 
     fn visit_logical_iceberg_scan(

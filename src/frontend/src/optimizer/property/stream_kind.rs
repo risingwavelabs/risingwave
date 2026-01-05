@@ -69,6 +69,11 @@ impl StreamKind {
         matches!(self, Self::AppendOnly)
     }
 
+    /// Returns `true` if it's [`StreamKind::Upsert`].
+    pub fn is_upsert(self) -> bool {
+        matches!(self, Self::Upsert)
+    }
+
     /// Returns the stream kind representing the merge (union) of the two.
     ///
     /// Note that there should be no conflict on the stream key between the two streams,

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -515,6 +515,7 @@ fn build_watermark_col_serde(
     match clean_watermark_index_in_pk {
         None => {
             // non watermark table or watermark column is the first column (pk_prefix_watermark)
+            // TODO(ttl): if the watermark column is in the value, we may also get a `None` here, support it.
             None
         }
 

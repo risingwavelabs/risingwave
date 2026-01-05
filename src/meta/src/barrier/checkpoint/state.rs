@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,14 +20,17 @@ use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier_mutation::PbMutation;
+use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{
-    PbDropSubscriptionsMutation, PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo,
+    PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation,
 };
 use tracing::warn;
 
 use crate::MetaResult;
 use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
 };
@@ -35,7 +38,7 @@ use crate::barrier::rpc::ControlStreamManager;
 use crate::barrier::utils::NodeToCollect;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
-use crate::stream::fill_snapshot_backfill_epoch;
+use crate::stream::{GlobalActorIdGen, fill_snapshot_backfill_epoch};
 
 /// The latest state of `GlobalBarrierWorker` after injecting the latest barrier.
 pub(in crate::barrier) struct BarrierWorkerState {
@@ -159,13 +162,14 @@ impl DatabaseCheckpointControl {
                 }
                 CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
                     assert!(!self.state.is_paused());
+                    let snapshot_epoch = barrier_info.prev_epoch();
                     // set snapshot epoch of upstream table for snapshot backfill
                     for snapshot_backfill_epoch in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
                         .values_mut()
                     {
                         assert_eq!(
-                            snapshot_backfill_epoch.replace(barrier_info.prev_epoch()),
+                            snapshot_backfill_epoch.replace(snapshot_epoch),
                             None,
                             "must not set previously"
                         );
@@ -187,7 +191,7 @@ impl DatabaseCheckpointControl {
                     let job = CreatingStreamingJobControl::new(
                         info,
                         snapshot_backfill_upstream_tables,
-                        barrier_info.prev_epoch(),
+                        snapshot_epoch,
                         hummock_version_stats,
                         control_stream_manager,
                         edges.as_mut().expect("should exist"),
@@ -249,10 +253,10 @@ impl DatabaseCheckpointControl {
         };
 
         let mut table_ids_to_commit: HashSet<_> = self.database_info.existing_table_ids().collect();
-        let actors_to_create = command.as_ref().and_then(|command| {
+        let mut actors_to_create = command.as_ref().and_then(|command| {
             command.actors_to_create(&self.database_info, &mut edges, control_stream_manager)
         });
-        let node_actors =
+        let mut node_actors =
             InflightFragmentInfo::actor_ids_to_collect(self.database_info.fragment_infos());
 
         if let Some(post_apply_changes) = post_apply_changes {
@@ -282,44 +286,208 @@ impl DatabaseCheckpointControl {
         let mutation = match mutation {
             Some(mutation) => Some(mutation),
             None => {
-                let mut subscription_info_to_drop = vec![];
+                let mut finished_snapshot_backfill_job_info = HashMap::new();
                 if barrier_info.kind.is_checkpoint() {
                     for (&job_id, creating_job) in &mut self.creating_streaming_job_controls {
-                        if let Some(upstream_table_ids) = creating_job.should_merge_to_upstream() {
-                            subscription_info_to_drop.extend(upstream_table_ids.iter().map(
+                        if creating_job.should_merge_to_upstream() {
+                            let info = creating_job
+                                .start_consume_upstream(control_stream_manager, barrier_info)?;
+                            finished_snapshot_backfill_job_info
+                                .try_insert(job_id, info)
+                                .expect("non-duplicated");
+                        }
+                    }
+                }
+
+                if !finished_snapshot_backfill_job_info.is_empty() {
+                    let actors_to_create = actors_to_create.get_or_insert_default();
+                    let mut subscriptions_to_drop = vec![];
+                    let mut dispatcher_update = vec![];
+                    let mut actor_splits = HashMap::new();
+                    for (job_id, info) in finished_snapshot_backfill_job_info {
+                        finished_snapshot_backfill_jobs.insert(job_id);
+                        subscriptions_to_drop.extend(
+                            info.snapshot_backfill_upstream_tables.iter().map(
                                 |upstream_table_id| PbSubscriptionUpstreamInfo {
                                     subscriber_id: job_id.as_subscriber_id(),
                                     upstream_mv_table_id: *upstream_table_id,
                                 },
-                            ));
-                            for upstream_mv_table_id in upstream_table_ids {
-                                assert_matches!(
-                                    self.database_info.unregister_subscriber(
-                                        upstream_mv_table_id.as_job_id(),
-                                        job_id.as_subscriber_id()
-                                    ),
-                                    Some(SubscriberType::SnapshotBackfill)
-                                );
-                            }
-                            let job_fragments = creating_job
-                                .start_consume_upstream(control_stream_manager, barrier_info)?;
-                            finished_snapshot_backfill_jobs.insert(job_id);
-                            table_ids_to_commit.extend(InflightFragmentInfo::existing_table_ids(
-                                job_fragments.values(),
-                            ));
-                            self.database_info.add_existing(InflightStreamingJobInfo {
-                                job_id,
-                                fragment_infos: job_fragments,
-                                subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
-                                status: CreateStreamingJobStatus::Created,
-                                cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
-                            });
+                            ),
+                        );
+                        for upstream_mv_table_id in &info.snapshot_backfill_upstream_tables {
+                            assert_matches!(
+                                self.database_info.unregister_subscriber(
+                                    upstream_mv_table_id.as_job_id(),
+                                    job_id.as_subscriber_id()
+                                ),
+                                Some(SubscriberType::SnapshotBackfill)
+                            );
                         }
+
+                        table_ids_to_commit.extend(
+                            info.fragment_infos
+                                .values()
+                                .flat_map(|fragment| fragment.state_table_ids.iter())
+                                .copied(),
+                        );
+
+                        let actor_len = info
+                            .fragment_infos
+                            .values()
+                            .map(|fragment| fragment.actors.len() as u64)
+                            .sum();
+                        let id_gen = GlobalActorIdGen::new(
+                            control_stream_manager.env.actor_id_generator(),
+                            actor_len,
+                        );
+                        let mut next_local_actor_id = 0;
+                        // mapping from old_actor_id to new_actor_id
+                        let actor_mapping: HashMap<_, _> = info
+                            .fragment_infos
+                            .values()
+                            .flat_map(|fragment| fragment.actors.keys())
+                            .map(|old_actor_id| {
+                                let new_actor_id = id_gen.to_global_id(next_local_actor_id);
+                                next_local_actor_id += 1;
+                                (*old_actor_id, new_actor_id.as_global_id())
+                            })
+                            .collect();
+                        let actor_mapping = &actor_mapping;
+                        let new_stream_actors: HashMap<_, _> = info
+                            .stream_actors
+                            .into_iter()
+                            .map(|(old_actor_id, mut actor)| {
+                                let new_actor_id = actor_mapping[&old_actor_id];
+                                actor.actor_id = new_actor_id;
+                                (new_actor_id, actor)
+                            })
+                            .collect();
+                        let new_fragment_info: HashMap<_, _> = info
+                            .fragment_infos
+                            .into_iter()
+                            .map(|(fragment_id, mut fragment)| {
+                                let actors = take(&mut fragment.actors);
+                                fragment.actors = actors
+                                    .into_iter()
+                                    .map(|(old_actor_id, actor)| {
+                                        let new_actor_id = actor_mapping[&old_actor_id];
+                                        (new_actor_id, actor)
+                                    })
+                                    .collect();
+                                (fragment_id, fragment)
+                            })
+                            .collect();
+                        actor_splits.extend(
+                            new_fragment_info
+                                .values()
+                                .flat_map(|fragment| &fragment.actors)
+                                .map(|(actor_id, actor)| {
+                                    (
+                                        *actor_id,
+                                        ConnectorSplits {
+                                            splits: actor
+                                                .splits
+                                                .iter()
+                                                .map(ConnectorSplit::from)
+                                                .collect(),
+                                        },
+                                    )
+                                }),
+                        );
+                        let mut edge_builder = FragmentEdgeBuilder::new(
+                            info.upstream_fragment_downstreams
+                                .keys()
+                                .map(|upstream_fragment_id| {
+                                    self.database_info.fragment(*upstream_fragment_id)
+                                })
+                                .chain(new_fragment_info.values()),
+                            control_stream_manager,
+                        );
+                        edge_builder.add_relations(&info.upstream_fragment_downstreams);
+                        edge_builder.add_relations(&info.downstreams);
+                        let mut edges = edge_builder.build();
+                        let new_actors_to_create = edges.collect_actors_to_create(
+                            new_fragment_info.values().map(|fragment| {
+                                (
+                                    fragment.fragment_id,
+                                    &fragment.nodes,
+                                    fragment.actors.iter().map(|(actor_id, actor)| {
+                                        (&new_stream_actors[actor_id], actor.worker_id)
+                                    }),
+                                    [], // no initial subscriber for backfilling job
+                                )
+                            }),
+                        );
+                        dispatcher_update.extend(
+                            info.upstream_fragment_downstreams.keys().flat_map(
+                                |upstream_fragment_id| {
+                                    let new_actor_dispatchers = edges
+                                        .dispatchers
+                                        .remove(upstream_fragment_id)
+                                        .expect("should exist");
+                                    new_actor_dispatchers.into_iter().flat_map(
+                                        |(upstream_actor_id, dispatchers)| {
+                                            dispatchers.into_iter().map(move |dispatcher| {
+                                                PbDispatcherUpdate {
+                                                    actor_id: upstream_actor_id,
+                                                    dispatcher_id: dispatcher.dispatcher_id,
+                                                    hash_mapping: dispatcher.hash_mapping,
+                                                    removed_downstream_actor_id: dispatcher
+                                                        .downstream_actor_id
+                                                        .iter()
+                                                        .map(|new_downstream_actor_id| {
+                                                            actor_mapping
+                                                            .iter()
+                                                            .find_map(
+                                                                |(old_actor_id, new_actor_id)| {
+                                                                    (new_downstream_actor_id
+                                                                        == new_actor_id)
+                                                                        .then_some(*old_actor_id)
+                                                                },
+                                                            )
+                                                            .expect("should exist")
+                                                        })
+                                                        .collect(),
+                                                    added_downstream_actor_id: dispatcher
+                                                        .downstream_actor_id,
+                                                }
+                                            })
+                                        },
+                                    )
+                                },
+                            ),
+                        );
+                        assert!(edges.is_empty(), "remaining edges: {:?}", edges);
+                        for (worker_id, worker_actors) in new_actors_to_create {
+                            node_actors.entry(worker_id).or_default().extend(
+                                worker_actors.values().flat_map(|(_, actors, _)| {
+                                    actors.iter().map(|(actor, _, _)| actor.actor_id)
+                                }),
+                            );
+                            actors_to_create
+                                .entry(worker_id)
+                                .or_default()
+                                .extend(worker_actors);
+                        }
+                        self.database_info.add_existing(InflightStreamingJobInfo {
+                            job_id,
+                            fragment_infos: new_fragment_info,
+                            subscribers: Default::default(), // no initial subscribers for newly created snapshot backfill
+                            status: CreateStreamingJobStatus::Created,
+                            cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
+                        });
                     }
-                }
-                if !finished_snapshot_backfill_jobs.is_empty() {
-                    Some(PbMutation::DropSubscriptions(PbDropSubscriptionsMutation {
-                        info: subscription_info_to_drop,
+
+                    Some(PbMutation::Update(PbUpdateMutation {
+                        dispatcher_update,
+                        merge_update: vec![], // no upstream update on existing actors
+                        actor_vnode_bitmap_update: Default::default(), /* no in place update vnode bitmap happened */
+                        dropped_actors: vec![], /* no actors to drop in the partial graph of database */
+                        actor_splits,
+                        actor_new_dispatchers: Default::default(), // no new dispatcher
+                        actor_cdc_table_snapshot_splits: None, /* no cdc table backfill in snapshot backfill */
+                        sink_schema_change: Default::default(), /* no sink auto schema change happened here */
+                        subscriptions_to_drop,
                     }))
                 } else {
                     let fragment_ids = self.database_info.take_pending_backfill_nodes();
