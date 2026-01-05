@@ -1,0 +1,9 @@
+- id: watermark ttl basic
+  sql: |
+    explain create table t (
+      id int primary key,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    );
+  expected_outputs:
+    - explain_output

@@ -753,11 +753,17 @@ impl fmt::Display for AlterFragmentOperation {
 pub struct SourceWatermark {
     pub column: Ident,
     pub expr: Expr,
+    /// Whether `WITH TTL` is specified.
+    pub with_ttl: bool,
 }
 
 impl fmt::Display for SourceWatermark {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "WATERMARK FOR {} AS {}", self.column, self.expr,)
+        write!(f, "WATERMARK FOR {} AS {}", self.column, self.expr,)?;
+        if self.with_ttl {
+            write!(f, " WITH TTL")?;
+        }
+        Ok(())
     }
 }
 

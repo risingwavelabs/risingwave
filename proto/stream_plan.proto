@@ -54,15 +54,11 @@ message StopMutation {
   repeated uint32 dropped_sink_fragments = 2;
 }
 
-message SinkAddColumns {
-  repeated plan_common.Field fields = 1;
-}
-
 message UpdateMutation {
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
     uint32 actor_id = 1;
-    uint64 dispatcher_id = 2;
+    uint32 dispatcher_id = 2;
     // The hash mapping for consistent hash.
     // For dispatcher types other than HASH, this is ignored.
     ActorMapping hash_mapping = 3;
@@ -101,7 +97,8 @@ message UpdateMutation {
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
   // CDC table snapshot splits
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
-  map<uint32, SinkAddColumns> sink_add_columns = 8;
+  map<uint32, SinkSchemaChange> sink_schema_change = 8;
+  repeated SubscriptionUpstreamInfo subscriptions_to_drop = 9;
 }
 
 message SourceChangeSplitMutation {
@@ -118,7 +115,7 @@ message ThrottleMutation {
     optional uint32 rate_limit = 1;
   }
 
-  map<uint32, RateLimit> actor_throttle = 1;
+  map<uint32, RateLimit> fragment_throttle = 1;
 }
 
 message SubscriptionUpstreamInfo {
@@ -1185,7 +1182,7 @@ message Dispatcher {
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
   // This is exactly the same as its downstream fragment id.
-  uint64 dispatcher_id = 4;
+  uint32 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }
@@ -1270,6 +1267,8 @@ message StreamFragmentGraph {
   StreamContext ctx = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
+  // Parallelism to use during backfill. Falls back to `parallelism` if unset.
+  Parallelism backfill_parallelism = 9;
 
   // Specified max parallelism, i.e., expected vnode count for the graph.
   //
@@ -1284,4 +1283,36 @@ message StreamFragmentGraph {
 
   // The backfill order strategy for the fragments.
   BackfillOrder backfill_order = 8;
+}
+
+// Schema change operation for sink
+message SinkSchemaChange {
+  // Original schema before this change.
+  // Used for validation and conflict detection.
+  repeated plan_common.Field original_schema = 1;
+
+  // Schema change operation (mutually exclusive)
+  oneof op {
+    // Add new columns to the schema
+    SinkAddColumnsOp add_columns = 2;
+
+    // Drop columns from the schema
+    SinkDropColumnsOp drop_columns = 3;
+
+    // Future operations can be added here...
+    // RenameColumnsOp rename_columns = 4;
+    // AlterColumnTypeOp alter_column_type = 5;
+  }
+}
+
+// Add columns operation
+message SinkAddColumnsOp {
+  // Columns to add
+  repeated plan_common.Field fields = 1;
+}
+
+// Drop columns operation
+message SinkDropColumnsOp {
+  // Column names to drop
+  repeated string column_names = 1;
 }

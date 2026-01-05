@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -2315,7 +2315,7 @@ pub(crate) mod tests {
             (&mut local_2, true),
             &mut epoch,
             val.clone(),
-            200,
+            120,
             millisec_interval_epoch,
             key_prefix.clone(),
             hummock_meta_client.clone(),

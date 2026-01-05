@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -173,14 +173,14 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 })
                 .unwrap_or(LogStoreVnodeProgress::None),
         );
-        let has_schema_change = options.add_columns.is_some();
+        let has_schema_change = options.schema_change.is_some();
         // Barrier's new_vnode_bitmap field does not need to be passed to log-reader, because when sink is decoupled, we
         // always rebuild sink when update vnode bitmap.
         self.tx.barrier(
             epoch,
             options.is_checkpoint,
             next_epoch,
-            options.add_columns,
+            options.schema_change,
             options.is_stop,
         );
         if has_schema_change {
