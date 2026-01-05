@@ -1446,6 +1446,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     ) -> RpcResult<TableChangeLogs> {
         Ok(HashMap::default())
     }
+
+    async fn update_compaction_config(
+        &self,
+        _compaction_group_ids: Vec<u64>,
+        _configs: Vec<risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]

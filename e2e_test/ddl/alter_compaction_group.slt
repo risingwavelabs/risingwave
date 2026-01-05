@@ -1,0 +1,69 @@
+# ALTER COMPACTION GROUP tests
+
+# Test basic ALTER COMPACTION GROUP with single config and verify it was applied
+statement ok
+ALTER COMPACTION GROUP 2 SET max_bytes_for_level_base = 1073741824;
+
+# Verify the config was updated
+query I
+SELECT (compaction_config::jsonb)->>'maxBytesForLevelBase' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+1073741824
+
+# Test ALTER COMPACTION GROUP with multiple configs
+statement ok
+ALTER COMPACTION GROUP 2 SET max_bytes_for_level_base = 536870912, target_file_size_base = 67108864;
+
+# Verify both configs were updated
+query TT
+SELECT (compaction_config::jsonb)->>'maxBytesForLevelBase', (compaction_config::jsonb)->>'targetFileSizeBase' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+536870912 67108864
+
+# Test ALTER COMPACTION GROUP with boolean config
+statement ok
+ALTER COMPACTION GROUP 2 SET enable_emergency_picker = true;
+
+# Verify boolean config was updated
+query T
+SELECT (compaction_config::jsonb)->>'enableEmergencyPicker' FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+true
+
+# Test ALTER COMPACTION GROUP with compression_algorithm (format: 'level:algorithm')
+# This sets the compression algorithm for a specific LSM-tree level (0-6)
+statement ok
+ALTER COMPACTION GROUP 2 SET compression_algorithm = '6:lz4';
+
+# Verify compression algorithm was updated for level 6
+query T
+SELECT (compaction_config::jsonb)->'compressionAlgorithm'->>6 FROM rw_hummock_compaction_group_configs WHERE id = 2;
+----
+Lz4
+
+# Test ALTER COMPACTION GROUP with multiple groups
+statement ok
+ALTER COMPACTION GROUP 2, 3 SET max_bytes_for_level_base = 268435456;
+
+# Verify both groups were updated
+query II
+SELECT id, (compaction_config::jsonb)->>'maxBytesForLevelBase' FROM rw_hummock_compaction_group_configs WHERE id IN (2, 3) ORDER BY id;
+----
+2 268435456
+3 268435456
+
+# Test invalid config name
+statement error unknown compaction config parameter
+ALTER COMPACTION GROUP 2 SET invalid_config_name = 123;
+
+# Test empty config
+statement error
+ALTER COMPACTION GROUP 2 SET;
+
+# Test missing SET keyword
+statement error
+ALTER COMPACTION GROUP 2 max_bytes_for_level_base = 1073741824;
+
+# Test missing GROUP keyword
+statement error
+ALTER COMPACTION 2 SET max_bytes_for_level_base = 1073741824;
