@@ -163,7 +163,8 @@ message Source {
 enum SinkType {
   SINK_TYPE_UNSPECIFIED = 0;
   SINK_TYPE_APPEND_ONLY = 1;
-  SINK_TYPE_FORCE_APPEND_ONLY = 2;
+  // Deprecated. Use `append_only` + `ignore_delete` instead.
+  SINK_TYPE_FORCE_APPEND_ONLY = 2 [deprecated = true];
   SINK_TYPE_UPSERT = 3;
   SINK_TYPE_RETRACT = 4;
 }
@@ -230,6 +231,12 @@ message Sink {
   repeated plan_common.ColumnCatalog original_target_columns = 26;
 
   optional uint32 auto_refresh_schema_from_table = 27;
+
+  // Backward-compatible replacement for `SINK_TYPE_FORCE_APPEND_ONLY`.
+  // When set, the sink executor will drop DELETE messages and convert UPDATE messages to INSERT.
+  //
+  // Should not directly access this field. Use method `ignore_delete()` instead.
+  bool raw_ignore_delete = 28;
 }
 
 message Subscription {
