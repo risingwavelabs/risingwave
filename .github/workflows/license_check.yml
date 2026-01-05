@@ -23,11 +23,12 @@ jobs:
       with:
         tool: hawkeye@6.3
     - name: Check License Header
-      run: hawkeye check
-    - name: Hint to fix license headers
-      if: failure()
       run: |
-        echo "::error::License header check failed."
-        echo "Hint: rebase latest main, then auto-fix:"
-        echo "  git fetch origin main && git rebase origin/main"
-        echo "  ./risedev fix-license-header"
+        hawkeye check || {
+          echo "::error::License header check failed."
+          echo "Note: the copyright year is now required to match the file's creation date."
+          echo "Hint: rebase latest main, then auto-fix:"
+          echo "  git fetch origin main && git rebase origin/main"
+          echo "  ./risedev fix-license-header"
+          exit 1
+        }
