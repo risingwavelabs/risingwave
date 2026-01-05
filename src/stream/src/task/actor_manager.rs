@@ -47,6 +47,7 @@ use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, AnyDispatchExecutor, DispatchExecutor, Execute, Executor,
     ExecutorInfo, SnapshotBackfillExecutor, StreamExecutorError, SyncLogStoreDispatchConfig,
+    SyncedKvLogStoreMetrics,
     SyncLogStoreDispatchExecutor, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
@@ -443,6 +444,13 @@ impl StreamActorManager {
         let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
         let expr_context = actor.expr_context.clone().unwrap();
         let chunk_size = actor_context.config.developer.chunk_size;
+        let log_store_metrics = SyncedKvLogStoreMetrics::new(
+            &actor_context.streaming_metrics,
+            actor_context.id,
+            fragment_id,
+            "sync_log_store_dispatch",
+            "sync_log_store_dispatch",
+        );
         let (node, sync_log_store_args) = match node.get_node_body()? {
             NodeBody::SyncLogStore(sync) => {
                 let sync = sync.clone();
@@ -510,6 +518,7 @@ impl StreamActorManager {
                             pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
                             aligned,
                             chunk_size,
+                            metrics: log_store_metrics,
                         };
                         let inner = SyncLogStoreDispatchExecutor::new(
                             executor,
@@ -532,6 +541,7 @@ impl StreamActorManager {
                                 pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
                                 aligned,
                                 chunk_size,
+                                metrics: log_store_metrics,
                             };
                             let inner = SyncLogStoreDispatchExecutor::new(
                                 executor,
@@ -559,6 +569,7 @@ impl StreamActorManager {
                                 pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
                                 aligned,
                                 chunk_size,
+                                metrics: log_store_metrics,
                             };
                             let inner = SyncLogStoreDispatchExecutor::new(
                                 executor,

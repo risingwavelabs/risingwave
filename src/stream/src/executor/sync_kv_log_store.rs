@@ -994,7 +994,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
 
 // Write methods
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
-    async fn write_barrier<'a>(
+    pub(crate) async fn write_barrier<'a>(
         actor_id: ActorId,
         write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
