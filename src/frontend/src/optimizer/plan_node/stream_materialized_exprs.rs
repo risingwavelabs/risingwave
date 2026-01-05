@@ -205,13 +205,11 @@ impl StreamMaterializedExprs {
 
         if let Some(idx) = clean_wtmk_in_pk {
             catalog.clean_watermark_index_in_pk = Some(idx);
-            catalog.cleaned_by_watermark = true;
         }
 
         // Also populate the new clean_watermark_indices field
         if let Some(col_idx) = self.state_clean_col_idx {
             catalog.clean_watermark_indices = vec![col_idx];
-            catalog.cleaned_by_watermark = true;
         }
 
         catalog

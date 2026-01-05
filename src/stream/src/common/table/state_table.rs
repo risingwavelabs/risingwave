@@ -1234,11 +1234,6 @@ where
         self.committed_watermark.as_ref()
     }
 
-    /// Whether the state table is cleaned by watermark.
-    pub fn cleaned_by_watermark(&self) -> bool {
-        self.clean_watermark_index.is_some()
-    }
-
     pub async fn commit(
         &mut self,
         new_epoch: EpochPair,
