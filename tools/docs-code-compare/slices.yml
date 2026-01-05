@@ -1,0 +1,219 @@
+# Parallel slice manifest: RisingWave code vs risingwave-docs
+#
+# Assumptions (override in your runner script if needed):
+# - docs_repo_branch: main
+# - product_version: latest (e.g., v2.7.0)
+#
+# Each slice is designed to be runnable independently (one LLM job per slice).
+
+schema_version: 1
+
+defaults:
+  code_repo_root: /home/k11/risingwave
+  docs_repo_root: /path/to/risingwave-docs
+  docs_repo_branch: main
+  product_version: latest
+  output:
+    report_filename: slice_report.md
+    required_sections:
+      - Docs claims
+      - Code evidence
+      - Match matrix
+      - Gaps & fixes
+      - Pending actions
+      - Open questions
+
+slices:
+  - id: S0
+    name: Entrypoints / Deployment / Run & Operate (local & prod)
+    docs_scopes:
+      - get-started/
+      - deploy/
+      - operate/
+      - cloud/
+      - risingwave-console/
+    code_scopes:
+      - docker/
+      - ci/
+      - risedev
+      - risedev.yml
+      - risedev-components.user.env
+      - src/cmd/
+      - src/cmd_all/
+      - src/config/
+      - src/risedevtool/
+      - standalone/
+    test_signals:
+      - e2e_test/commands/
+      - e2e_test/misc/
+    key_questions:
+      - "What is the documented 'supported deployment topology' vs what the code/scripts actually provide?"
+      - "Default ports, config keys, and feature flags: are they consistent?"
+
+  - id: S1
+    name: SQL syntax surface (parser) & statement-level behavior
+    docs_scopes:
+      - sql/
+      - reference/
+    code_scopes:
+      - src/sqlparser/
+      - src/frontend/
+    test_signals:
+      - e2e_test/ddl/
+      - e2e_test/dml/
+      - src/tests/regress/
+    key_questions:
+      - "Which SQL statements are documented as supported/unsupported, and does the parser+frontend enforce that?"
+      - "Any syntax differences vs Postgres documented in docs: are they reflected in parser rules?"
+
+  - id: S2
+    name: Planner / Optimizer / SQL-to-plan mapping (streaming & batch)
+    docs_scopes:
+      - sql/
+      - processing/
+      - reference/
+    code_scopes:
+      - src/frontend/
+      - src/expr/
+      - src/dml/
+      - src/rpc_client/
+      - src/utils/pgwire/
+    test_signals:
+      - src/frontend/planner_test/
+      - e2e_test/over_window/
+      - e2e_test/vector_search/
+    key_questions:
+      - "Does docs describe plan semantics (e.g., MV refresh/consistency) consistent with the planner implementation?"
+      - "Any documented functions/operators/types missing from code (or vice versa)?"
+
+  - id: S3
+    name: Streaming engine (operators, state, windows, watermarks, backfill)
+    docs_scopes:
+      - processing/
+      - performance/
+      - troubleshoot/
+    code_scopes:
+      - src/stream/
+      - src/compute/
+      - src/common/
+    test_signals:
+      - e2e_test/streaming/
+      - e2e_test/backfill/
+      - e2e_test/ttl/
+      - e2e_test/time_travel/
+      - e2e_test/nexmark/
+    key_questions:
+      - "Watermark/window/late data semantics: docs vs executor behavior?"
+      - "Backfill and barrier/checkpoint semantics: are guarantees aligned with docs?"
+
+  - id: S4
+    name: Batch engine (executors, query over MVs)
+    docs_scopes:
+      - processing/
+      - performance/
+      - reference/
+    code_scopes:
+      - src/batch/
+      - src/batch/executors/
+    test_signals:
+      - e2e_test/batch/
+      - e2e_test/tpch/
+      - e2e_test/tpch/README.md
+    key_questions:
+      - "Documented query support and performance knobs: do they map to batch executors/config?"
+
+  - id: S5
+    name: Storage / Hummock / Object store / Backup & Restore
+    docs_scopes:
+      - operate/
+      - deploy/
+      - performance/
+      - troubleshoot/
+      - store/
+    code_scopes:
+      - src/storage/
+      - src/storage/backup/
+      - src/storage/compactor/
+      - src/object_store/
+      - src/common/secret/
+    test_signals:
+      - e2e_test/backup_restore/
+      - e2e_test/s3/
+      - e2e_test/backwards-compat-tests/
+    key_questions:
+      - "Durability/consistency claims (checkpointing, recovery time): do they match code paths?"
+      - "Supported object stores and config keys: docs vs opendal/services enabled in code?"
+
+  - id: S6
+    name: Ingestion / Sources (including CDC, formats/codecs)
+    docs_scopes:
+      - ingestion/
+      - integrations/
+      - reference/
+    code_scopes:
+      - src/connector/
+      - src/connector/codec/
+      - src/connector/with_options/
+    test_signals:
+      - e2e_test/source_inline/
+      - e2e_test/source_legacy/
+      - e2e_test/subscription/
+      - integration_tests/
+    key_questions:
+      - "Which sources are documented as supported, and are they feature-gated in code?"
+      - "Connector options: docs list vs with_options parsing/defaults in code?"
+
+  - id: S7
+    name: Delivery / Sinks (connectors, semantics, guarantees)
+    docs_scopes:
+      - delivery/
+      - integrations/
+      - reference/
+    code_scopes:
+      - src/connector/
+      - java/connector-node/
+    test_signals:
+      - e2e_test/sink/
+      - integration_tests/*-sink/
+      - integration_tests/http-sink/
+    key_questions:
+      - "Delivery guarantees and failure semantics: docs vs sink implementations?"
+      - "Feature gates for sinks (Cargo features) vs docs claiming availability?"
+
+  - id: S8
+    name: Control plane / Meta service (catalog, DDL, scheduling, recovery)
+    docs_scopes:
+      - operate/
+      - deploy/
+      - reference/
+    code_scopes:
+      - src/meta/
+      - src/prost/
+      - proto/
+    test_signals:
+      - e2e_test/background_ddl/
+      - e2e_test/ddl/
+      - e2e_test/visibility_mode/
+    key_questions:
+      - "DDL lifecycle and catalog semantics: docs vs meta procedure code?"
+      - "Multi-node/distributed behavior described in docs: does meta expose required APIs?"
+
+  - id: S9
+    name: Observability / Troubleshooting / Console UI
+    docs_scopes:
+      - operate/
+      - troubleshoot/
+      - performance/
+      - risingwave-console/
+    code_scopes:
+      - dashboard/
+      - grafana/
+      - docker/prometheus.yaml
+      - src/common/metrics/
+      - src/common/telemetry_event/
+    test_signals:
+      - e2e_test/monitoring/
+      - e2e_test/error_ui/
+    key_questions:
+      - "Metrics/tracing names & dashboards: docs vs shipped configs?"
+      - "Console features documented: do corresponding endpoints/UI exist in dashboard/ meta?"
