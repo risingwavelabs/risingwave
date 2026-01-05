@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::id::{ConnectionId, SchemaId, SinkId, UserId};
+use risingwave_common::catalog::CreateType;
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_frontend_macro::system_catalog;
@@ -38,6 +39,7 @@ struct RwSink {
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
+    background_ddl: bool,
 
     // connector properties in json format
     connector_props: JsonbVal,
@@ -101,6 +103,7 @@ fn read_rw_sinks_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSink>> {
                     created_at_cluster_version: sink.created_at_cluster_version.clone(),
                     connector_props,
                     format_encode_options,
+                    background_ddl: sink.create_type == CreateType::Background,
                 }
             })
         })
