@@ -124,6 +124,121 @@ South Mouse 30 1530 3
 West Laptop 1250 1250 1
 West Monitor 400 1650 2
 
+# Test: Window frame with ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as running_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1200
+2 25 1225
+3 75 1300
+
+# Test: Window frame with ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as total_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1300
+2 25 1300
+3 75 1300
+
+# Test: Window frame with ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) as remaining_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1300
+2 25 100
+3 75 75
+
+# Test: Window frame with ROWS BETWEEN <expr> PRECEDING AND CURRENT ROW
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) as sliding_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1200
+2 25 1225
+3 75 100
+
+# Test: Window frame with ROWS BETWEEN CURRENT ROW AND <expr> FOLLOWING
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) as forward_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1225
+2 25 100
+3 75 75
+
+# Test: Window frame with ROWS BETWEEN <expr> PRECEDING AND <expr> FOLLOWING
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) as centered_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1225
+2 25 1300
+3 75 100
+
+# Test: Window frame with ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING (look-back only)
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING) as prev_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 NULL
+2 25 1200
+3 75 1225
+
+# Test: Window frame with ROWS BETWEEN 1 FOLLOWING AND 2 FOLLOWING (look-ahead only)
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 FOLLOWING AND 2 FOLLOWING) as next_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 100
+2 25 75
+3 75 NULL
+
+# Test: Window frame with partitioning and various bounds
+query ????
+SELECT region, id, amount,
+       AVG(amount) OVER (PARTITION BY region ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as running_avg
+FROM sales
+WHERE year = 2023
+ORDER BY region, id;
+----
+East 7 80 80
+East 8 1100 590
+North 1 1200 1200
+North 2 25 612.5
+North 3 75 433.3333333333333
+South 4 1150 1150
+South 5 350 750
+South 6 30 510
+West 9 400 400
+West 10 1250 825
+
 statement ok
 DROP TABLE sales;
 
