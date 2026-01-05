@@ -34,6 +34,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
 use risingwave_pb::id::TableId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use sea_orm::{EntityTrait, TransactionTrait};
 
 use super::GroupStateValidator;
 use crate::MetaResult;
@@ -45,7 +46,7 @@ use crate::hummock::manager::context::ContextInfo;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::model::ext::to_table_change_log;
+use crate::hummock::model::ext::{to_table_change_log, to_table_change_log_meta_store_model};
 use crate::model::VarTransaction;
 
 #[derive(Default)]
@@ -295,16 +296,57 @@ impl HummockManager {
         Ok(())
     }
 
-    #[expect(deprecated)]
+    pub async fn may_fill_backward_table_change_logs(&self) -> Result<bool> {
+        let mut versioning = self.versioning.write().await;
+        let version = &mut versioning.current_version;
+        // Remove table change log from version.
+        #[expect(deprecated)]
+        let table_change_logs = {
+            let table_change_logs = std::mem::take(&mut version.table_change_log);
+            if table_change_logs.values().all(|t| t.0.is_empty()) {
+                return Ok(false);
+            }
+            table_change_logs
+                .into_iter()
+                .flat_map(|(table_id, change_logs)| {
+                    change_logs
+                        .0
+                        .into_iter()
+                        .map(move |change_log| (table_id, change_log))
+                })
+        };
+
+        // Store table change log in meta store.
+        // TODO(ZW): configurable
+        let insert_batch_size = 100;
+        use futures::stream::{self, StreamExt};
+        let mut stream = stream::iter(table_change_logs).chunks(insert_batch_size);
+        let txn = self.env.meta_store_ref().conn.begin().await?;
+        while let Some(change_log_batch) = stream.next().await {
+            if change_log_batch.is_empty() {
+                break;
+            }
+            let insert_many = change_log_batch
+                .into_iter()
+                .map(|(table_id, change_log)| {
+                    to_table_change_log_meta_store_model(table_id, &change_log)
+                })
+                .collect::<Vec<_>>();
+            risingwave_meta_model::hummock_table_change_log::Entity::insert_many(insert_many)
+                .on_conflict_do_nothing()
+                .exec(&txn)
+                .await?;
+        }
+        txn.commit().await?;
+        Ok(true)
+    }
+
     pub async fn load_table_change_log(&self) -> Result<()> {
         use sea_orm::EntityTrait;
 
         use crate::model::MetadataModelError;
         let mut versioning = self.versioning.write().await;
-        // 1. Initialize from HummockVersion::table_change_log for backward-compatibility.
-        versioning.table_change_log = versioning.current_version.table_change_log.clone();
-        // 2. Merge table change log from meta store.
-        versioning.table_change_log.extend(
+        versioning.table_change_log =
             risingwave_meta_model::hummock_table_change_log::Entity::find()
                 .all(&self.env.meta_store_ref().conn)
                 .await
@@ -322,8 +364,8 @@ impl HummockManager {
                                 .sorted_by_key(|l| l.checkpoint_epoch),
                         ),
                     )
-                }),
-        );
+                })
+                .collect();
         Ok(())
     }
 }
