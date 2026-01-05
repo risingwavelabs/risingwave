@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -253,6 +253,7 @@ impl From<ObjectModel<table::Model>> for PbTable {
             created_at_epoch: Some(
                 Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
+            #[expect(deprecated)]
             cleaned_by_watermark: value.0.cleaned_by_watermark,
             stream_job_status: PbStreamJobStatus::Created as _,
             create_type: PbCreateType::Foreground as _,

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,6 +75,7 @@ pub struct BuildFragmentGraphState {
     has_source_backfill: bool,
     has_snapshot_backfill: bool,
     has_cross_db_snapshot_backfill: bool,
+    has_any_backfill: bool,
     tables: HashMap<TableId, Table>,
 }
 
@@ -204,10 +205,24 @@ pub fn build_graph_with_strategy(
     // Set parallelism and vnode count.
     {
         let config = ctx.session_ctx().config();
-        fragment_graph.parallelism = derive_parallelism(
+        let streaming_parallelism = config.streaming_parallelism();
+        let normal_parallelism = derive_parallelism(
             job_type.map(|t| t.to_parallelism(config.deref())),
-            config.streaming_parallelism(),
+            streaming_parallelism,
         );
+        let backfill_parallelism = if state.has_any_backfill {
+            match config.streaming_parallelism_for_backfill() {
+                ConfigParallelism::Default => None,
+                override_parallelism => {
+                    derive_parallelism(Some(override_parallelism), streaming_parallelism)
+                        .or(normal_parallelism)
+                }
+            }
+        } else {
+            None
+        };
+        fragment_graph.parallelism = normal_parallelism;
+        fragment_graph.backfill_parallelism = backfill_parallelism;
         fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
     }
 
@@ -412,19 +427,22 @@ fn build_fragment(
                             .fragment_type_mask
                             .add(FragmentTypeFlag::SnapshotBackfillStreamScan);
                         state.has_snapshot_backfill = true;
+                        state.has_any_backfill = true;
+                    }
+                    StreamScanType::Backfill | StreamScanType::ArrangementBackfill => {
+                        state.has_any_backfill = true;
                     }
                     StreamScanType::CrossDbSnapshotBackfill => {
                         current_fragment
                             .fragment_type_mask
                             .add(FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan);
                         state.has_cross_db_snapshot_backfill = true;
+                        state.has_any_backfill = true;
                     }
                     StreamScanType::Unspecified
                     | StreamScanType::Chain
                     | StreamScanType::Rearrange
-                    | StreamScanType::Backfill
-                    | StreamScanType::UpstreamOnly
-                    | StreamScanType::ArrangementBackfill => {}
+                    | StreamScanType::UpstreamOnly => {}
                 }
                 // memorize table id for later use
                 // The table id could be a upstream CDC source
@@ -453,6 +471,7 @@ fn build_fragment(
                     current_fragment.requires_singleton = true;
                 }
                 state.has_source_backfill = true;
+                state.has_any_backfill = true;
             }
 
             NodeBody::CdcFilter(node) => {
@@ -474,6 +493,7 @@ fn build_fragment(
                     .dependent_table_ids
                     .insert(source_id.as_cdc_table_id());
                 state.has_source_backfill = true;
+                state.has_any_backfill = true;
             }
 
             NodeBody::Now(_) => {

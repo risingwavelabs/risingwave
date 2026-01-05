@@ -228,7 +228,7 @@ message CoordinateRequest {
   message CommitRequest {
     uint64 epoch = 1;
     SinkMetadata metadata = 2;
-    stream_plan.SinkAddColumns add_columns = 3;
+    stream_plan.SinkSchemaChange schema_change = 3;
   }
 
   message UpdateVnodeBitmapRequest {

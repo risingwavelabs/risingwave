@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ use risingwave_pb::catalog::CreateType;
 use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
+use risingwave_pb::plan_common::PbField;
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
 };
@@ -40,14 +41,15 @@ use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
+use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
-    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumns, PbUpstreamSinkInfo,
-    ResumeMutation, SourceChangeSplitMutation, StopMutation, SubscriptionUpstreamInfo,
-    ThrottleMutation, UpdateMutation,
+    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkSchemaChange,
+    PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation, StopMutation,
+    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -71,7 +73,7 @@ use crate::model::{
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, FragmentBackfillOrder, SplitAssignment,
-    SplitState, ThrottleConfig, UpstreamSinkInfo, build_actor_connector_splits,
+    SplitState, UpstreamSinkInfo, build_actor_connector_splits,
 };
 
 /// [`Reschedule`] is for the [`Command::RescheduleFragment`], which is used for rescheduling actors
@@ -356,7 +358,10 @@ pub enum Command {
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
-    Throttle(ThrottleConfig),
+    Throttle {
+        jobs: HashSet<JobId>,
+        config: HashMap<FragmentId, Option<u32>>,
+    },
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
     /// materialize executor to start storing old value for subscription.
@@ -416,7 +421,7 @@ impl std::fmt::Display for Command {
                 write!(f, "ReplaceStreamJob: {}", plan.streaming_job)
             }
             Command::SourceChangeSplit { .. } => write!(f, "SourceChangeSplit"),
-            Command::Throttle(_) => write!(f, "Throttle"),
+            Command::Throttle { .. } => write!(f, "Throttle"),
             Command::CreateSubscription {
                 subscription_id, ..
             } => write!(f, "CreateSubscription: {subscription_id}"),
@@ -605,7 +610,7 @@ impl Command {
                     })
                     .collect(),
             )),
-            Command::Throttle(_) => None,
+            Command::Throttle { .. } => None,
             Command::CreateSubscription { .. } => None,
             Command::DropSubscription { .. } => None,
             Command::ConnectorPropsChange(_) => None,
@@ -884,18 +889,14 @@ impl Command {
                 }))
             }
 
-            Command::Throttle(config) => {
-                let mut actor_to_apply = HashMap::new();
-                for per_fragment in config.values() {
-                    actor_to_apply.extend(
-                        per_fragment
-                            .iter()
-                            .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit })),
-                    );
+            Command::Throttle { config, .. } => {
+                let mut fragment_to_apply = HashMap::new();
+                for (fragment_id, limit) in config {
+                    fragment_to_apply.insert(*fragment_id, RateLimit { rate_limit: *limit });
                 }
 
                 Some(Mutation::Throttle(ThrottleMutation {
-                    actor_throttle: actor_to_apply,
+                    fragment_throttle: fragment_to_apply,
                 }))
             }
 
@@ -1226,7 +1227,7 @@ impl Command {
                     actor_cdc_table_snapshot_splits: Some(PbCdcTableSnapshotSplitsWithGeneration {
                         splits: actor_cdc_table_snapshot_splits,
                     }),
-                    sink_add_columns: Default::default(),
+                    sink_schema_change: Default::default(),
                     subscriptions_to_drop: vec![],
                 });
                 tracing::debug!("update mutation: {mutation:?}");
@@ -1438,19 +1439,38 @@ impl Command {
             dropped_actors,
             actor_splits,
             actor_cdc_table_snapshot_splits: cdc_table_snapshot_split_assignment,
-            sink_add_columns: auto_refresh_schema_sinks
+            sink_schema_change: auto_refresh_schema_sinks
                 .as_ref()
                 .into_iter()
                 .flat_map(|sinks| {
                     sinks.iter().map(|sink| {
                         (
-                            sink.original_sink.id,
-                            PbSinkAddColumns {
-                                fields: sink
-                                    .newly_add_fields
+                            sink.original_sink.id.as_raw_id(),
+                            PbSinkSchemaChange {
+                                original_schema: sink
+                                    .original_sink
+                                    .columns
                                     .iter()
-                                    .map(|field| field.to_prost())
+                                    .map(|col| PbField {
+                                        data_type: Some(
+                                            col.column_desc
+                                                .as_ref()
+                                                .unwrap()
+                                                .column_type
+                                                .as_ref()
+                                                .unwrap()
+                                                .clone(),
+                                        ),
+                                        name: col.column_desc.as_ref().unwrap().name.clone(),
+                                    })
                                     .collect(),
+                                op: Some(PbSinkSchemaChangeOp::AddColumns(PbSinkAddColumnsOp {
+                                    fields: sink
+                                        .newly_add_fields
+                                        .iter()
+                                        .map(|field| field.to_prost())
+                                        .collect(),
+                                })),
                             },
                         )
                     })

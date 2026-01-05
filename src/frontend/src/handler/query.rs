@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -329,10 +329,10 @@ fn gen_batch_query_plan(
 
     #[cfg(feature = "datafusion")]
     {
-        use crate::optimizer::LogicalIcebergScanExt;
+        use crate::optimizer::DatafusionExecuteCheckerExt;
 
         if session.config().enable_datafusion_engine()
-            && optimized_logical.plan.contains_iceberg_scan()
+            && optimized_logical.plan.able_to_run_by_datafusion()
         {
             let plan = optimized_logical.gen_datafusion_logical_plan()?;
             return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {

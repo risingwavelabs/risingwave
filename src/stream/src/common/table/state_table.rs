@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1232,11 +1232,6 @@ where
     /// table through `update_watermark` method.
     pub fn get_committed_watermark(&self) -> Option<&ScalarImpl> {
         self.committed_watermark.as_ref()
-    }
-
-    /// Whether the state table is cleaned by watermark.
-    pub fn cleaned_by_watermark(&self) -> bool {
-        self.clean_watermark_index.is_some()
     }
 
     pub async fn commit(

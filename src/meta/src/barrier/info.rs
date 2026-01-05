@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1003,7 +1003,7 @@ impl InflightDatabaseInfo {
                 | Command::DropStreamingJobs { .. }
                 | Command::RescheduleFragment { .. }
                 | Command::SourceChangeSplit { .. }
-                | Command::Throttle(_)
+                | Command::Throttle { .. }
                 | Command::CreateSubscription { .. }
                 | Command::DropSubscription { .. }
                 | Command::ConnectorPropsChange(_)

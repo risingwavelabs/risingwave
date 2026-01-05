@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -69,7 +69,7 @@ use sea_orm::{
 use thiserror_ext::AsReport;
 
 use super::rename::IndexItemRewriter;
-use crate::barrier::{Command, SharedFragmentInfo};
+use crate::barrier::Command;
 use crate::controller::ObjectModel;
 use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
 use crate::controller::fragment::FragmentTypeMaskExt;
@@ -102,6 +102,7 @@ struct DependentSourceFragmentUpdate {
 }
 
 impl CatalogController {
+    #[allow(clippy::too_many_arguments)]
     pub async fn create_streaming_job_obj(
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
@@ -113,6 +114,7 @@ impl CatalogController {
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
         specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
+        backfill_parallelism: Option<StreamingParallelism>,
     ) -> MetaResult<JobId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
@@ -123,6 +125,7 @@ impl CatalogController {
             timezone: Set(ctx.timezone),
             config_override: Set(Some(ctx.config_override.to_string())),
             parallelism: Set(streaming_parallelism),
+            backfill_parallelism: Set(backfill_parallelism),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
         };
@@ -145,6 +148,7 @@ impl CatalogController {
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
         specific_resource_group: Option<String>,
+        backfill_parallelism: &Option<Parallelism>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -155,6 +159,9 @@ impl CatalogController {
             (None, DefaultParallelism::Default(n)) => StreamingParallelism::Fixed(n.get()),
             (Some(n), _) => StreamingParallelism::Fixed(n.parallelism as _),
         };
+        let backfill_parallelism = backfill_parallelism
+            .as_ref()
+            .map(|p| StreamingParallelism::Fixed(p.parallelism as _));
 
         ensure_user_id(streaming_job.owner() as _, &txn).await?;
         ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
@@ -212,6 +219,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 table.id = job_id.as_mv_table_id();
@@ -241,6 +249,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 sink.id = job_id.as_sink_id();
@@ -259,6 +268,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 table.id = job_id.as_mv_table_id();
@@ -318,6 +328,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 // to be compatible with old implementation.
@@ -350,6 +361,7 @@ impl CatalogController {
                     streaming_parallelism,
                     max_parallelism,
                     specific_resource_group,
+                    backfill_parallelism.clone(),
                 )
                 .await?;
                 src.id = job_id.as_shared_source_id();
@@ -983,6 +995,7 @@ impl CatalogController {
             parallelism,
             original_max_parallelism as _,
             None,
+            None,
         )
         .await?;
 
@@ -1604,7 +1617,7 @@ impl CatalogController {
         &self,
         source_id: SourceId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<(HashSet<JobId>, HashSet<FragmentId>)> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1649,10 +1662,11 @@ impl CatalogController {
             )));
         }
 
-        let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
+        let fragments: Vec<(FragmentId, JobId, i32, StreamNode)> = Fragment::find()
             .select_only()
             .columns([
                 fragment::Column::FragmentId,
+                fragment::Column::JobId,
                 fragment::Column::FragmentTypeMask,
                 fragment::Column::StreamNode,
             ])
@@ -1662,16 +1676,17 @@ impl CatalogController {
             .await?;
         let mut fragments = fragments
             .into_iter()
-            .map(|(id, mask, stream_node)| {
+            .map(|(id, job_id, mask, stream_node)| {
                 (
                     id,
+                    job_id,
                     FragmentTypeMask::from(mask as u32),
                     stream_node.to_protobuf(),
                 )
             })
             .collect_vec();
 
-        fragments.retain_mut(|(_, fragment_type_mask, stream_node)| {
+        fragments.retain_mut(|(_, _, fragment_type_mask, stream_node)| {
             let mut found = false;
             if fragment_type_mask.contains(FragmentTypeFlag::Source) {
                 visit_stream_node_mut(stream_node, |node| {
@@ -1706,11 +1721,15 @@ impl CatalogController {
             !fragments.is_empty(),
             "source id should be used by at least one fragment"
         );
-        let fragment_ids = fragments.iter().map(|(id, _, _)| *id).collect_vec();
 
-        for (id, fragment_type_mask, stream_node) in fragments {
+        let (fragment_ids, job_ids) = fragments
+            .iter()
+            .map(|(framgnet_id, job_id, _, _)| (framgnet_id, job_id))
+            .unzip();
+
+        for (fragment_id, _, fragment_type_mask, stream_node) in fragments {
             fragment::ActiveModel {
-                fragment_id: Set(id),
+                fragment_id: Set(fragment_id),
                 fragment_type_mask: Set(fragment_type_mask.into()),
                 stream_node: Set(StreamNode::from(&stream_node)),
                 ..Default::default()
@@ -1720,8 +1739,6 @@ impl CatalogController {
         }
 
         txn.commit().await?;
-
-        let fragment_actors = self.get_fragment_actors_from_running_info(fragment_ids.into_iter());
 
         let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap()).into());
         let _version = self
@@ -1735,26 +1752,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok(fragment_actors)
-    }
-
-    fn get_fragment_actors_from_running_info(
-        &self,
-        fragment_ids: impl Iterator<Item = FragmentId>,
-    ) -> HashMap<FragmentId, Vec<ActorId>> {
-        let mut fragment_actors: HashMap<FragmentId, Vec<ActorId>> = HashMap::new();
-
-        let info = self.env.shared_actor_infos().read_guard();
-
-        for fragment_id in fragment_ids {
-            let SharedFragmentInfo { actors, .. } = info.get_fragment(fragment_id).unwrap();
-            fragment_actors
-                .entry(fragment_id as _)
-                .or_default()
-                .extend(actors.keys().copied());
-        }
-
-        fragment_actors
+        Ok((job_ids, fragment_ids))
     }
 
     // edit the content of fragments in given `table_id`
@@ -1766,7 +1764,7 @@ impl CatalogController {
         mut fragments_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> MetaResult<bool>,
         // error message when no relevant fragments is found
         err_msg: &'static str,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<HashSet<FragmentId>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1819,10 +1817,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let fragment_actors =
-            self.get_fragment_actors_from_running_info(fragment_ids.iter().copied());
-
-        Ok(fragment_actors)
+        Ok(fragment_ids)
     }
 
     async fn mutate_fragment_by_fragment_id(
@@ -1830,7 +1825,7 @@ impl CatalogController {
         fragment_id: FragmentId,
         mut fragment_mutation_fn: impl FnMut(FragmentTypeMask, &mut PbStreamNode) -> bool,
         err_msg: &'static str,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<()> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -1863,12 +1858,9 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
-        let fragment_actors =
-            self.get_fragment_actors_from_running_info(std::iter::once(fragment_id));
-
         txn.commit().await?;
 
-        Ok(fragment_actors)
+        Ok(())
     }
 
     // edit the `rate_limit` of the `Chain` node in given `table_id`'s fragments
@@ -1877,7 +1869,7 @@ impl CatalogController {
         &self,
         job_id: JobId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<HashSet<FragmentId>> {
         let update_backfill_rate_limit =
             |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = false;
@@ -1921,7 +1913,7 @@ impl CatalogController {
         &self,
         sink_id: SinkId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<HashSet<FragmentId>> {
         let update_sink_rate_limit =
             |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = Ok(false);
@@ -1954,7 +1946,7 @@ impl CatalogController {
         &self,
         job_id: JobId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<HashSet<FragmentId>> {
         let update_dml_rate_limit =
             |fragment_type_mask: FragmentTypeMask, stream_node: &mut PbStreamNode| {
                 let mut found = false;
@@ -2822,7 +2814,7 @@ impl CatalogController {
         &self,
         fragment_id: FragmentId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<HashMap<FragmentId, Vec<ActorId>>> {
+    ) -> MetaResult<()> {
         let update_rate_limit = |fragment_type_mask: FragmentTypeMask,
                                  stream_node: &mut PbStreamNode| {
             let mut found = false;

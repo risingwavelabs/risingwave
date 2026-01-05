@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -486,7 +486,7 @@ impl DatabaseCheckpointControl {
                         actor_splits,
                         actor_new_dispatchers: Default::default(), // no new dispatcher
                         actor_cdc_table_snapshot_splits: None, /* no cdc table backfill in snapshot backfill */
-                        sink_add_columns: Default::default(), /* no sink auto schema change happened here */
+                        sink_schema_change: Default::default(), /* no sink auto schema change happened here */
                         subscriptions_to_drop,
                     }))
                 } else {

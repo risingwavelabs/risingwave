@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -183,8 +183,7 @@ impl StreamNode for StreamDynamicFilter {
             .map(|x| x.to_expr_proto());
         let left_index = self.core.left_index();
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)
-            .with_id(state.gen_table_id_wrapped())
-            .with_cleaned_by_watermark(cleaned_by_watermark);
+            .with_id(state.gen_table_id_wrapped());
         let right = self.right();
         let right_table = infer_right_internal_table_catalog(right.plan_base())
             .with_id(state.gen_table_id_wrapped());
@@ -195,6 +194,7 @@ impl StreamNode for StreamDynamicFilter {
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
             condition_always_relax: false, // deprecated
+            cleaned_by_watermark,
         }))
     }
 }

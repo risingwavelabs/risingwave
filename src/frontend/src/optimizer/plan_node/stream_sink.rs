@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -538,29 +538,17 @@ impl StreamSink {
                 .into());
             }
 
-            let is_exactly_once = match sink_desc.is_exactly_once {
-                Some(v) => v,
-                None => {
-                    if let Some(connector) = sink_desc.properties.get(CONNECTOR_TYPE_KEY) {
-                        let connector_type = connector.to_lowercase();
-                        if connector_type == ICEBERG_SINK {
-                            // iceberg sink defaults to exactly once
-                            // However, when sink_decouple is disabled, we enforce it to false.
-                            sink_desc
-                                .properties
-                                .insert("is_exactly_once".to_owned(), "false".to_owned());
-                        }
-                    }
-                    false
+            if sink_desc.is_exactly_once.is_none()
+                && let Some(connector) = sink_desc.properties.get(CONNECTOR_TYPE_KEY)
+            {
+                let connector_type = connector.to_lowercase();
+                if connector_type == ICEBERG_SINK {
+                    // iceberg sink defaults to exactly once
+                    // However, when sink_decouple is disabled, we enforce it to false.
+                    sink_desc
+                        .properties
+                        .insert("is_exactly_once".to_owned(), "false".to_owned());
                 }
-            };
-
-            if is_exactly_once {
-                return Err(ErrorCode::NotSupported(
-                    "Exactly once sink can only be created with sink_decouple enabled.".to_owned(),
-                    hint_string(true),
-                )
-                .into());
             }
         }
         let log_store_type = if sink_decouple {

@@ -50,7 +50,7 @@
   expected_outputs:
     - logical_plan
     - stream_error
-    - batch_error
+    - batch_plan
 - id: lead with offset argument and empty over clause
   sql: |
     create table t(x int);
@@ -58,7 +58,7 @@
   expected_outputs:
     - logical_plan
     - stream_error
-    - batch_error
+    - batch_plan
 - id: lead with non-const offset argument and empty over clause
   sql: |
     create table t(x int);
