@@ -869,7 +869,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
 type PersistedStream<S> = Peekable<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>;
 
-enum ReadFuture<S: StateStoreRead> {
+pub(crate) enum ReadFuture<S: StateStoreRead> {
     ReadingPersistedStream(PersistedStream<S>),
     ReadingFlushedChunk {
         future: ReadFlushedChunkFuture,
@@ -880,7 +880,7 @@ enum ReadFuture<S: StateStoreRead> {
 
 // Read methods
 impl<S: StateStoreRead> ReadFuture<S> {
-    async fn next_chunk(
+    pub async fn next_chunk(
         &mut self,
         progress: &mut LogStoreVnodeProgress,
         read_state: &LogStoreReadState<S>,
@@ -1059,7 +1059,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     }
 }
 
-struct SyncedLogStoreBuffer {
+pub(crate) struct SyncedLogStoreBuffer {
     buffer: VecDeque<(u64, LogStoreBufferItem)>,
     current_size: usize,
     max_size: usize,
