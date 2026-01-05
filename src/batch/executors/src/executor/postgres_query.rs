@@ -20,27 +20,30 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_connector::connector_common::{SslMode, create_pg_client};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use thiserror_ext::AsReport;
 use tokio_postgres;
 
 use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
-use risingwave_connector::connector_common::{create_pg_client, SslMode};
 
 /// `PostgresQuery` executor. Runs a query against a Postgres database.
 pub struct PostgresQueryExecutor {
     schema: Schema,
-    host: String,
-    port: String,
-    username: String,
-    password: String,
-    database: String,
+    params: PostgresConnectionParams,
     query: String,
-    ssl_mode: SslMode,
-    ssl_root_cert: Option<String>,
     identity: String,
     chunk_size: usize,
+}
+
+pub struct PostgresConnectionParams {
+    pub host: String,
+    pub port: String,
+    pub username: String,
+    pub password: String,
+    pub database: String,
+    pub ssl_mode: SslMode,
+    pub ssl_root_cert: Option<String>,
 }
 
 impl Executor for PostgresQueryExecutor {
@@ -112,27 +115,15 @@ fn postgres_cell_to_scalar_impl(
 impl PostgresQueryExecutor {
     pub fn new(
         schema: Schema,
-        host: String,
-        port: String,
-        username: String,
-        password: String,
-        database: String,
+        params: PostgresConnectionParams,
         query: String,
-        ssl_mode: SslMode,
-        ssl_root_cert: Option<String>,
         identity: String,
         chunk_size: usize,
     ) -> Self {
         Self {
             schema,
-            host,
-            port,
-            username,
-            password,
-            database,
+            params,
             query,
-            ssl_mode,
-            ssl_root_cert,
             identity,
             chunk_size,
         }
@@ -142,15 +133,14 @@ impl PostgresQueryExecutor {
     async fn do_execute(self: Box<Self>) {
         tracing::debug!("postgres_query_executor: started");
 
-
         let client = create_pg_client(
-            &self.username,
-            &self.password,
-            &self.host,
-            &self.port,
-            &self.database,
-            &self.ssl_mode,
-            &self.ssl_root_cert,
+            &self.params.username,
+            &self.params.password,
+            &self.params.host,
+            &self.params.port,
+            &self.params.database,
+            &self.params.ssl_mode,
+            &self.params.ssl_root_cert,
         )
         .await?;
 
@@ -193,29 +183,31 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
 
         Ok(Box::new(PostgresQueryExecutor::new(
             Schema::from_iter(postgres_query_node.columns.iter().map(Field::from)),
-            postgres_query_node.hostname.clone(),
-            postgres_query_node.port.clone(),
-            postgres_query_node.username.clone(),
-            postgres_query_node.password.clone(),
-            postgres_query_node.database.clone(),
+            PostgresConnectionParams {
+                host: postgres_query_node.hostname.clone(),
+                port: postgres_query_node.port.clone(),
+                username: postgres_query_node.username.clone(),
+                password: postgres_query_node.password.clone(),
+                database: postgres_query_node.database.clone(),
+                ssl_mode: if postgres_query_node.ssl_mode.is_empty() {
+                    SslMode::Preferred
+                } else {
+                    match postgres_query_node.ssl_mode.as_str() {
+                        "disable" => SslMode::Disabled,
+                        "prefer" => SslMode::Preferred,
+                        "require" => SslMode::Required,
+                        "verify-ca" => SslMode::VerifyCa,
+                        "verify-full" => SslMode::VerifyFull,
+                        _ => SslMode::Preferred,
+                    }
+                },
+                ssl_root_cert: if postgres_query_node.ssl_root_cert.is_empty() {
+                    None
+                } else {
+                    Some(postgres_query_node.ssl_root_cert.clone())
+                },
+            },
             postgres_query_node.query.clone(),
-            if postgres_query_node.ssl_mode.is_empty() {
-                SslMode::Preferred
-            } else {
-                match postgres_query_node.ssl_mode.as_str() {
-                    "disable" => SslMode::Disabled,
-                    "prefer" => SslMode::Preferred,
-                    "require" => SslMode::Required,
-                    "verify-ca" => SslMode::VerifyCa,
-                    "verify-full" => SslMode::VerifyFull,
-                    _ => SslMode::Preferred,
-                }
-            },
-            if postgres_query_node.ssl_root_cert.is_empty() {
-                None
-            } else {
-                Some(postgres_query_node.ssl_root_cert.clone())
-            },
             source.plan_node().get_identity().clone(),
             source.context().get_config().developer.chunk_size,
         )))

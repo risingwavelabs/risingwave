@@ -21,17 +21,16 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
+use risingwave_connector::connector_common::{SslMode, create_pg_client};
 use risingwave_connector::source::iceberg::{
     FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
     new_azblob_operator, new_gcs_operator, new_s3_operator,
 };
-use risingwave_connector::connector_common::{create_pg_client, SslMode};
 use risingwave_pb::expr::PbTableFunction;
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
-use thiserror_ext::AsReport;
 use tokio_postgres::types::Type as TokioPgType;
 
-use super::{ErrorCode, Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
+use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::catalog::root_catalog::SchemaPath;
@@ -408,11 +407,7 @@ impl TableFunction {
 
                     let ssl_root_cert = if evaled_args.len() > 7 {
                         let s = &evaled_args[7];
-                        if s.is_empty() {
-                            None
-                        } else {
-                            Some(s.clone())
-                        }
+                        if s.is_empty() { None } else { Some(s.clone()) }
                     } else {
                         None
                     };
@@ -429,8 +424,8 @@ impl TableFunction {
                     .await?;
 
                     // Connection is spawned in create_pg_client, so we don't need to spawn it here.
-                    // But create_pg_client in the connector code spawns it. 
-                    // Wait, create_pg_client implementation I saw in `connector_common/postgres.rs` spawns it. 
+                    // But create_pg_client in the connector code spawns it.
+                    // Wait, create_pg_client implementation I saw in `connector_common/postgres.rs` spawns it.
                     // So we just take the client.
                     // However, we need to check if `create_pg_client` definition I saw earlier matches what I thought.
                     // The one in `src/connector/src/connector_common/postgres.rs` is:
