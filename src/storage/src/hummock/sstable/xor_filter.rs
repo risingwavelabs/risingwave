@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -374,7 +374,10 @@ impl XorFilterReader {
             XorFilter::BlockXor16(reader) => reader
                 .filters
                 .iter()
-                .map(|filter| filter.1.fingerprints.len() * std::mem::size_of::<u16>())
+                .map(|filter| {
+                    filter.0.len() + // smallest_key size
+                    filter.1.fingerprints.len() * std::mem::size_of::<u16>()
+                })
                 .sum(),
         }
     }

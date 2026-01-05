@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -596,7 +596,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     let (mut columns, pk_column_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
-    let watermark_descs: Vec<WatermarkDesc> = bind_source_watermark(
+    let watermark_descs = bind_source_watermark(
         context.session_ctx(),
         table_name.real_value(),
         source_watermarks,
@@ -775,7 +775,9 @@ fn gen_table_plan_inner(
         vec![],
     );
 
-    if !append_only && !watermark_descs.is_empty() {
+    let has_non_ttl_watermark = watermark_descs.iter().any(|d| !d.with_ttl);
+
+    if !append_only && has_non_ttl_watermark {
         return Err(ErrorCode::NotSupported(
             "Defining watermarks on table requires the table to be append only.".to_owned(),
             "Use the key words `APPEND ONLY`".to_owned(),

@@ -177,6 +177,7 @@ impl IcebergCompactionPlanRunner {
     pub fn to_meta(&self) -> IcebergTaskMeta {
         IcebergTaskMeta {
             task_id: self.task_id,
+            plan_index: self.plan_index,
             required_parallelism: self.required_parallelism(),
         }
     }

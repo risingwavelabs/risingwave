@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,9 +47,11 @@ pub use distributed_dml_visitor::*;
 pub use locality_provider_counter::*;
 pub use rw_timestamp_validator::*;
 pub use sole_sys_table_visitor::*;
-mod iceberg_scan_detector;
-pub use iceberg_scan_detector::*;
 
+#[cfg(feature = "datafusion")]
+mod datafusion_execute_checker;
+#[cfg(feature = "datafusion")]
+pub use datafusion_execute_checker::*;
 #[cfg(feature = "datafusion")]
 mod datafusion_plan_converter;
 #[cfg(feature = "datafusion")]

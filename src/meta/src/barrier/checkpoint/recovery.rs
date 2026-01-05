@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -448,6 +448,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 job_infos,
                 &mut state_table_committed_epochs,
                 &mut state_table_log_epochs,
+                &fragment_relations,
                 &mut edges,
                 &stream_actors,
                 &mut source_splits,

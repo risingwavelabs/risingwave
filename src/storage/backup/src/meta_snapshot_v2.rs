@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,7 +71,8 @@ macro_rules! for_all_metadata_models_v2 {
             {fragment_splits, risingwave_meta_model::fragment_splits},
             {pending_sink_state, risingwave_meta_model::pending_sink_state},
             {refresh_jobs, risingwave_meta_model::refresh_job},
-            {hummock_table_change_logs, risingwave_meta_model::hummock_table_change_log}
+            {hummock_table_change_logs, risingwave_meta_model::hummock_table_change_log},
+            {cdc_table_snapshot_splits, risingwave_meta_model::cdc_table_snapshot_split}
         }
     };
 }

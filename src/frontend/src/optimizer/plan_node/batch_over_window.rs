@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -75,13 +75,15 @@ impl_plan_tree_node_for_unary! { Batch, BatchOverWindow }
 
 impl ToDistributedBatch for BatchOverWindow {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed_with_required(
-            &self.expected_input_order(),
-            &RequiredDist::shard_by_key(
-                self.input().schema().len(),
-                &self.core.partition_key_indices(),
-            ),
-        )?;
+        let partition_key_indices = self.core.partition_key_indices();
+        let required_dist = if partition_key_indices.is_empty() {
+            RequiredDist::single()
+        } else {
+            RequiredDist::shard_by_key(self.input().schema().len(), &partition_key_indices)
+        };
+        let new_input = self
+            .input()
+            .to_distributed_with_required(&self.expected_input_order(), &required_dist)?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
