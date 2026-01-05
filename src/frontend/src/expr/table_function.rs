@@ -25,6 +25,7 @@ use risingwave_connector::source::iceberg::{
     FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
     new_azblob_operator, new_gcs_operator, new_s3_operator,
 };
+use risingwave_connector::connector_common::{create_pg_client, SslMode};
 use risingwave_pb::expr::PbTableFunction;
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use thiserror_ext::AsReport;
@@ -329,7 +330,7 @@ impl TableFunction {
                 let secret_resolved =
                     LocalSecretManager::global().fill_secrets(props, secret_refs)?;
 
-                vec![
+                let mut args_vec = vec![
                     ExprImpl::literal_varchar(secret_resolved["hostname"].clone()),
                     ExprImpl::literal_varchar(secret_resolved["port"].clone()),
                     ExprImpl::literal_varchar(secret_resolved["username"].clone()),
@@ -339,7 +340,21 @@ impl TableFunction {
                         .unwrap()
                         .clone()
                         .cast_implicit(&DataType::Varchar)?,
-                ]
+                ];
+
+                if expect_connector_name.eq_ignore_ascii_case("postgres-cdc") {
+                    args_vec.push(ExprImpl::literal_varchar(
+                        secret_resolved.get("ssl.mode").cloned().unwrap_or_default(),
+                    ));
+                    args_vec.push(ExprImpl::literal_varchar(
+                        secret_resolved
+                            .get("database.ssl.root.cert")
+                            .cloned()
+                            .unwrap_or_default(),
+                    ));
+                }
+
+                args_vec
             }
             _ => {
                 return Err(BindError("postgres_query function and mysql_query function accept either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)".to_owned()).into());
@@ -379,29 +394,49 @@ impl TableFunction {
         {
             let schema = tokio::task::block_in_place(|| {
                 FRONTEND_RUNTIME.block_on(async {
-                    let mut conf = tokio_postgres::Config::new();
-                    let (client, connection) = conf
-                        .host(&evaled_args[0])
-                        .port(evaled_args[1].parse().map_err(|_| {
-                            ErrorCode::InvalidParameterValue(format!(
-                                "port number: {}",
-                                evaled_args[1]
-                            ))
-                        })?)
-                        .user(&evaled_args[2])
-                        .password(evaled_args[3].clone())
-                        .dbname(&evaled_args[4])
-                        .connect(tokio_postgres::NoTls)
-                        .await?;
-
-                    tokio::spawn(async move {
-                        if let Err(e) = connection.await {
-                            tracing::error!(
-                                "mysql_query_executor: connection error: {:?}",
-                                e.as_report()
-                            );
+                    let ssl_mode = if evaled_args.len() > 6 {
+                        let s = &evaled_args[6];
+                        if s.is_empty() {
+                            SslMode::Preferred
+                        } else {
+                            serde_json::from_str::<SslMode>(&format!("\"{}\"", s))
+                                .unwrap_or(SslMode::Preferred)
                         }
-                    });
+                    } else {
+                        SslMode::Preferred
+                    };
+
+                    let ssl_root_cert = if evaled_args.len() > 7 {
+                        let s = &evaled_args[7];
+                        if s.is_empty() {
+                            None
+                        } else {
+                            Some(s.clone())
+                        }
+                    } else {
+                        None
+                    };
+
+                    let client = create_pg_client(
+                        &evaled_args[2],
+                        &evaled_args[3],
+                        &evaled_args[0],
+                        &evaled_args[1],
+                        &evaled_args[4],
+                        &ssl_mode,
+                        &ssl_root_cert,
+                    )
+                    .await?;
+
+                    // Connection is spawned in create_pg_client, so we don't need to spawn it here.
+                    // But create_pg_client in the connector code spawns it. 
+                    // Wait, create_pg_client implementation I saw in `connector_common/postgres.rs` spawns it. 
+                    // So we just take the client.
+                    // However, we need to check if `create_pg_client` definition I saw earlier matches what I thought.
+                    // The one in `src/connector/src/connector_common/postgres.rs` is:
+                    // pub async fn create_pg_client(...) -> anyhow::Result<PgClient>
+                    // And it does `tokio::spawn`.
+                    // So I can remove the tokio::spawn block here.
 
                     let statement = client.prepare(evaled_args[5].as_str()).await?;
 

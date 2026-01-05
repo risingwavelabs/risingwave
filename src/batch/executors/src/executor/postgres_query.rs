@@ -26,6 +26,7 @@ use tokio_postgres;
 
 use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+use risingwave_connector::connector_common::{create_pg_client, SslMode};
 
 /// `PostgresQuery` executor. Runs a query against a Postgres database.
 pub struct PostgresQueryExecutor {
@@ -36,6 +37,8 @@ pub struct PostgresQueryExecutor {
     password: String,
     database: String,
     query: String,
+    ssl_mode: SslMode,
+    ssl_root_cert: Option<String>,
     identity: String,
     chunk_size: usize,
 }
@@ -115,6 +118,8 @@ impl PostgresQueryExecutor {
         password: String,
         database: String,
         query: String,
+        ssl_mode: SslMode,
+        ssl_root_cert: Option<String>,
         identity: String,
         chunk_size: usize,
     ) -> Self {
@@ -126,6 +131,8 @@ impl PostgresQueryExecutor {
             password,
             database,
             query,
+            ssl_mode,
+            ssl_root_cert,
             identity,
             chunk_size,
         }
@@ -134,31 +141,20 @@ impl PostgresQueryExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         tracing::debug!("postgres_query_executor: started");
-        let mut conf = tokio_postgres::Config::new();
-        let port = self
-            .port
-            .parse()
-            .map_err(|_| risingwave_expr::ExprError::InvalidParam {
-                name: "port",
-                reason: self.port.clone().into(),
-            })?;
-        let (client, conn) = conf
-            .host(&self.host)
-            .port(port)
-            .user(&self.username)
-            .password(self.password)
-            .dbname(&self.database)
-            .connect(tokio_postgres::NoTls)
-            .await?;
 
-        tokio::spawn(async move {
-            if let Err(e) = conn.await {
-                tracing::error!(
-                    "postgres_query_executor: connection error: {:?}",
-                    e.as_report()
-                );
-            }
-        });
+
+        let client = create_pg_client(
+            &self.username,
+            &self.password,
+            &self.host,
+            &self.port,
+            &self.database,
+            &self.ssl_mode,
+            &self.ssl_root_cert,
+        )
+        .await?;
+
+        // Connection is spawned in create_pg_client
 
         let params: &[&str] = &[];
         let row_stream = client
@@ -203,6 +199,23 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
             postgres_query_node.password.clone(),
             postgres_query_node.database.clone(),
             postgres_query_node.query.clone(),
+            if postgres_query_node.ssl_mode.is_empty() {
+                SslMode::Preferred
+            } else {
+                match postgres_query_node.ssl_mode.as_str() {
+                    "disable" => SslMode::Disabled,
+                    "prefer" => SslMode::Preferred,
+                    "require" => SslMode::Required,
+                    "verify-ca" => SslMode::VerifyCa,
+                    "verify-full" => SslMode::VerifyFull,
+                    _ => SslMode::Preferred,
+                }
+            },
+            if postgres_query_node.ssl_root_cert.is_empty() {
+                None
+            } else {
+                Some(postgres_query_node.ssl_root_cert.clone())
+            },
             source.plan_node().get_identity().clone(),
             source.context().get_config().developer.chunk_size,
         )))
