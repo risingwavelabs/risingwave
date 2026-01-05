@@ -35,6 +35,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::source::{PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation};
@@ -63,7 +64,7 @@ use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
-use crate::barrier::edge_builder::FragmentEdgeBuildResult;
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
     SubscriberType,
@@ -82,16 +83,18 @@ use crate::stream::cdc::{
 use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
 use crate::{MetaError, MetaResult};
 
-fn to_partial_graph_id(job_id: Option<JobId>) -> u32 {
+pub(super) fn to_partial_graph_id(job_id: Option<JobId>) -> PartialGraphId {
     job_id
         .map(|job_id| {
             assert_ne!(job_id, u32::MAX);
             job_id.as_raw_id()
         })
         .unwrap_or(u32::MAX)
+        .into()
 }
 
-pub(super) fn from_partial_graph_id(partial_graph_id: u32) -> Option<JobId> {
+pub(super) fn from_partial_graph_id(partial_graph_id: PartialGraphId) -> Option<JobId> {
+    let partial_graph_id = partial_graph_id.as_raw_id();
     if partial_graph_id == u32::MAX {
         None
     } else {
@@ -604,7 +607,6 @@ impl ControlStreamManager {
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
         state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         fragment_relations: &FragmentDownstreamRelation,
-        edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
         background_jobs: &mut HashMap<JobId, String>,
@@ -858,6 +860,26 @@ impl ControlStreamManager {
                 })
                 .try_collect::<_, _, MetaError>()
         }?;
+
+        let mut builder = FragmentEdgeBuilder::new(
+            database_jobs
+                .values()
+                .flat_map(|job| {
+                    job.fragment_infos()
+                        .map(|info| (info, to_partial_graph_id(None)))
+                })
+                .chain(ongoing_snapshot_backfill_jobs.iter().flat_map(
+                    |(job_id, (fragments, ..))| {
+                        let partial_graph_id = to_partial_graph_id(Some(*job_id));
+                        fragments
+                            .values()
+                            .map(move |fragment| (fragment, partial_graph_id))
+                    },
+                )),
+            self,
+        );
+        builder.add_relations(fragment_relations);
+        let mut edges = builder.build();
 
         let node_to_collect = {
             let new_actors =

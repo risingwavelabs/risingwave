@@ -34,7 +34,7 @@ use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
 };
-use crate::barrier::rpc::ControlStreamManager;
+use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::utils::NodeToCollect;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -394,13 +394,16 @@ impl DatabaseCheckpointControl {
                                     )
                                 }),
                         );
+                        // new actors belong to the database partial graph
+                        let partial_graph_id = to_partial_graph_id(None);
                         let mut edge_builder = FragmentEdgeBuilder::new(
                             info.upstream_fragment_downstreams
                                 .keys()
                                 .map(|upstream_fragment_id| {
                                     self.database_info.fragment(*upstream_fragment_id)
                                 })
-                                .chain(new_fragment_info.values()),
+                                .chain(new_fragment_info.values())
+                                .map(|info| (info, partial_graph_id)),
                             control_stream_manager,
                         );
                         edge_builder.add_relations(&info.upstream_fragment_downstreams);

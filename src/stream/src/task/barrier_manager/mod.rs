@@ -19,7 +19,7 @@ pub use progress::CreateMviewProgressReporter;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_pb::id::FragmentId;
+use risingwave_pb::id::{FragmentId, PartialGraphId};
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 
@@ -69,6 +69,7 @@ pub(super) enum LocalBarrierEvent {
     RegisterLocalUpstreamOutput {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
+        upstream_partial_graph_id: PartialGraphId,
         tx: permit::Sender,
     },
     ReportCdcTableBackfillProgress {
@@ -160,11 +161,13 @@ impl LocalBarrierManager {
         &self,
         actor_id: ActorId,
         upstream_actor_id: ActorId,
+        upstream_partial_graph_id: PartialGraphId,
     ) -> permit::Receiver {
         let (tx, rx) = channel_from_config(self.env.global_config());
         self.send_event(LocalBarrierEvent::RegisterLocalUpstreamOutput {
             actor_id,
             upstream_actor_id,
+            upstream_partial_graph_id,
             tx,
         });
         rx

@@ -638,7 +638,7 @@ impl DatabaseCheckpointControl {
         tracing::trace!(
             %worker_id,
             prev_epoch,
-            partial_graph_id = resp.partial_graph_id,
+            partial_graph_id = %resp.partial_graph_id,
             "barrier collected"
         );
         let creating_job_id = from_partial_graph_id(resp.partial_graph_id);
