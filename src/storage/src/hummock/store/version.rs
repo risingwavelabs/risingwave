@@ -38,7 +38,6 @@ use risingwave_hummock_sdk::table_watermark::{
 use risingwave_hummock_sdk::vector_index::VectorIndexImpl;
 use risingwave_hummock_sdk::{EpochWithGap, HummockEpoch, LocalSstableInfo};
 use risingwave_pb::hummock::LevelType;
-use risingwave_rpc_client::HummockMetaClient;
 use sync_point::sync_point;
 use tracing::warn;
 
@@ -51,9 +50,10 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::{SstableIteratorReadOptions, SstableIteratorType};
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::table_change_log_manager::TableChangeLogManager;
 use crate::hummock::utils::{
-    fetch_table_change_logs, filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts,
-    range_overlap, search_sst_idx,
+    filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts, range_overlap,
+    search_sst_idx,
 };
 use crate::hummock::vector::file::{FileVectorStore, FileVectorStoreCtx};
 use crate::hummock::vector::monitor::{VectorStoreCacheStats, report_hnsw_stat};
@@ -1119,12 +1119,12 @@ impl HummockVersionReader {
         epoch_range: (u64, u64),
         key_range: TableKeyRange,
         options: ReadLogOptions,
-        hummock_meta_client: Arc<dyn HummockMetaClient>,
+        table_change_log_manager: Arc<TableChangeLogManager>,
     ) -> HummockResult<ChangeLogIterator> {
         let change_log = {
-            let table_change_logs =
-                fetch_table_change_logs(hummock_meta_client, options.table_id, epoch_range, false)
-                    .await?;
+            let table_change_logs = table_change_log_manager
+                .fetch_table_change_logs(options.table_id, epoch_range, false)
+                .await?;
             if let Some(change_log) = table_change_logs.get(&options.table_id) {
                 change_log.filter_epoch(epoch_range).cloned().collect_vec()
             } else {

@@ -57,8 +57,9 @@ use crate::hummock::local_version::pinned_version::{PinnedVersion, start_pinned_
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::observer_manager::HummockObserverNode;
 use crate::hummock::store::vector_writer::HummockVectorWriter;
+use crate::hummock::table_change_log_manager::TableChangeLogManager;
 use crate::hummock::time_travel_version_cache::SimpleTimeTravelVersionCache;
-use crate::hummock::utils::{fetch_table_change_logs, wait_for_epoch, wait_for_update};
+use crate::hummock::utils::{wait_for_epoch, wait_for_update};
 use crate::hummock::write_limiter::{WriteLimiter, WriteLimiterRef};
 use crate::hummock::{
     HummockEpoch, HummockError, HummockResult, HummockStorageIterator, HummockStorageRevIterator,
@@ -120,6 +121,8 @@ pub struct HummockStorage {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
     simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
+
+    table_change_log_manager: Arc<TableChangeLogManager>,
 }
 
 pub type ReadVersionTuple = (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion);
@@ -220,7 +223,9 @@ impl HummockStorage {
         );
 
         let event_tx = hummock_event_handler.event_sender();
-
+        // TODO(ZW): configurable
+        let table_change_log_manager =
+            Arc::new(TableChangeLogManager::new(10, hummock_meta_client.clone()));
         let instance = Self {
             context: compactor_context,
             compaction_catalog_manager_ref: compaction_catalog_manager_ref.clone(),
@@ -246,6 +251,7 @@ impl HummockStorage {
             simple_time_travel_version_cache: Arc::new(SimpleTimeTravelVersionCache::new(
                 options.time_travel_version_cache_capacity,
             )),
+            table_change_log_manager,
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -764,13 +770,10 @@ impl StateStoreReadLog for HummockStorage {
                 .get(&options.table_id)
                 .map(|i| i.committed_epoch)
                 .unwrap_or(u64::MAX);
-            let table_change_log = fetch_table_change_logs(
-                self.hummock_meta_client.clone(),
-                options.table_id,
-                (epoch, max_epoch),
-                true,
-            )
-            .await?;
+            let table_change_log = self
+                .table_change_log_manager
+                .fetch_table_change_logs(options.table_id, (epoch, max_epoch), true)
+                .await?;
             if let Some(next_epoch) = next_epoch(&table_change_log, epoch, options.table_id)? {
                 return Ok(next_epoch);
             }
@@ -778,6 +781,7 @@ impl StateStoreReadLog for HummockStorage {
         let next_epoch_ret = ArcSwap::new(Arc::new(None));
         let inspect_fn = |version: &PinnedVersion| {
             let next_epoch_ret_clone = ArcSwap::new(Arc::new(None));
+            let table_change_log_manager = self.table_change_log_manager.clone();
             let max_epoch = version
                 .state_table_info
                 .info()
@@ -785,13 +789,9 @@ impl StateStoreReadLog for HummockStorage {
                 .map(|i| i.committed_epoch)
                 .unwrap_or(u64::MAX);
             async move {
-                let table_change_log = fetch_table_change_logs(
-                    self.hummock_meta_client.clone(),
-                    options.table_id,
-                    (epoch, max_epoch),
-                    true,
-                )
-                .await?;
+                let table_change_log = table_change_log_manager
+                    .fetch_table_change_logs(options.table_id, (epoch, max_epoch), true)
+                    .await?;
                 if let Some(next_epoch) = next_epoch(&table_change_log, epoch, options.table_id)? {
                     next_epoch_ret_clone.store(Arc::new(Some(next_epoch)));
                     Ok(true)
@@ -822,7 +822,7 @@ impl StateStoreReadLog for HummockStorage {
                 epoch_range,
                 key_range,
                 options,
-                self.hummock_meta_client.clone(),
+                self.table_change_log_manager.clone(),
             )
             .await?;
         Ok(iter)

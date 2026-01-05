@@ -16,7 +16,6 @@ use std::backtrace::Backtrace;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
-use std::iter;
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
 use std::sync::Arc;
@@ -31,13 +30,11 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::config::StorageMemoryConfig;
 use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
-use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
     EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_rpc_client::HummockMetaClient;
 use tokio::sync::oneshot::{Receiver, Sender, channel};
 
 use super::{HummockError, HummockResult, SstableStoreRef};
@@ -695,26 +692,6 @@ pub(crate) async fn wait_for_update<T: Future<Output = HummockResult<bool>> + Se
             }
         }
     }
-}
-
-/// `epoch_range` start and end are both inclusive.
-pub(crate) async fn fetch_table_change_logs(
-    hummock_meta_client: Arc<dyn HummockMetaClient>,
-    table_id: TableId,
-    epoch_range: (u64, u64),
-    include_epoch_only: bool,
-) -> HummockResult<TableChangeLogs> {
-    hummock_meta_client
-        .get_table_change_logs(
-            include_epoch_only,
-            Some(epoch_range.0),
-            Some(epoch_range.1),
-            Some(iter::once(table_id).collect()),
-            false,
-            None,
-        )
-        .await
-        .map_err(HummockError::meta_error)
 }
 
 pub struct HummockMemoryCollector {
