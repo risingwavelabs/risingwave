@@ -10958,7 +10958,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "itertools 0.14.0",
- "parking_lot 0.12.5",
+ "madsim-tokio",
  "prost 0.13.4",
  "risingwave_common",
  "risingwave_hummock_sdk",
