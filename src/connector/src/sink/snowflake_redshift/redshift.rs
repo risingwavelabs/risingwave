@@ -919,6 +919,8 @@ fn build_copy_into_sql(
         FROM '{manifest_path}'
         CREDENTIALS '{credentials}'
         FORMAT AS JSON 'auto'
+        DATEFORMAT 'auto'
+        TIMEFORMAT 'auto'
         MANIFEST;
         "#,
         table_name = table_name,

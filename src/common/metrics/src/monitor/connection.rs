@@ -38,7 +38,7 @@ use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::{Channel, Endpoint};
 use tower_service::Service;
-use tracing::{debug, info, warn};
+use tracing::{trace, warn};
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
 use crate::{LabelGuardedIntCounterVec, register_guarded_int_counter_vec_with_registry};
@@ -498,7 +498,7 @@ pub fn monitor_connector<C>(
     connection_type: impl Into<String>,
 ) -> MonitoredConnection<C, MonitorNewConnectionImpl> {
     let connection_type = connection_type.into();
-    info!(
+    trace!(
         "monitoring connector {} with type {}",
         type_name::<C>(),
         connection_type
@@ -548,7 +548,7 @@ impl Future for MonitoredGaiFuture {
         Pin::new(&mut self.inner).poll(cx).map(|res| match res {
             Ok(addrs) => {
                 let addrs: MonitoredGaiAddrs = addrs.into();
-                debug!("resolve {} => {:?}", self.name, addrs.inner);
+                trace!("resolve {} => {:?}", self.name, addrs.inner);
                 Ok(addrs)
             }
             Err(err) => Err(err),
