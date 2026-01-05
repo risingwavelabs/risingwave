@@ -69,7 +69,6 @@ user statement_timeout
 user streaming_allow_jsonb_in_stream_key
 user streaming_enable_bushy_join
 user streaming_enable_delta_join
-user streaming_enable_materialized_expressions
 user streaming_enable_unaligned_join
 user streaming_force_filter_inside_join
 user streaming_join_encoding

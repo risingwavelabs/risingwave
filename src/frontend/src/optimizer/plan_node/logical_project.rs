@@ -18,7 +18,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
 
-use super::generic::GenericPlanNode;
 use super::utils::{Distill, childless_record};
 use super::{
     BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
@@ -259,12 +258,7 @@ impl ToStream for LogicalProject {
             .input()
             .to_stream_with_dist_required(&input_required, ctx)?;
 
-        let enable_materialized_exprs = self
-            .core
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_enable_materialized_expressions();
+        let enable_materialized_exprs = true;
 
         let should_materialize_expr = match new_input.stream_kind() {
             StreamKind::AppendOnly => None,

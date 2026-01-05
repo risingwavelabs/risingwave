@@ -222,10 +222,6 @@ pub struct SessionConfig {
     #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
 
-    /// Enable materialized expressions for impure functions (typically UDF).
-    #[parameter(default = true)]
-    streaming_enable_materialized_expressions: bool,
-
     /// Separate consecutive `StreamHashJoin` by no-shuffle `StreamExchange`
     #[parameter(default = false)]
     streaming_separate_consecutive_join: bool,
