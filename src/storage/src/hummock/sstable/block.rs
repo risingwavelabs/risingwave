@@ -21,7 +21,7 @@ use std::ops::Range;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::KeyComparator;
-use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key::{FullKey, TABLE_PREFIX_LEN};
 use serde::{Deserialize, Serialize};
 
 use super::utils::{CompressionAlgorithm, bytes_diff_below_max_key_length, xxhash64_verify};
@@ -531,6 +531,7 @@ impl BlockBuilder {
         self.add_encoded_impl(encoded_key_without_table_id, value);
     }
 
+    #[cfg(any(test, feature = "test"))]
     pub fn add_for_test(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
         let input_table_id = full_key.user_key.table_id;
         match self.table_id {
@@ -541,10 +542,13 @@ impl BlockBuilder {
         self.debug_valid();
 
         let mut key: BytesMut = Default::default();
-        full_key.encode_into_without_table_id(&mut key);
+        full_key.encode_into(&mut key);
+
+        // Slice off the table_id prefix to get the key without table_id
+        let encoded_key_without_table_id = &key[TABLE_PREFIX_LEN..];
 
         // Call the core implementation with encoded key
-        self.add_encoded_impl(&key, value);
+        self.add_encoded_impl(encoded_key_without_table_id, value);
     }
 
     /// Core implementation that accepts pre-encoded key.
