@@ -318,11 +318,10 @@ impl HummockManager {
         if object_ids.is_empty() {
             return Ok(0);
         }
-        // It's crucial to get pinned_by_metadata_backup only after object_ids.
-        let pinned_by_metadata_backup = backup_manager
-            .as_ref()
-            .map(|b| b.list_pinned_object_ids())
-            .unwrap_or_default();
+        let pinned_by_metadata_backup = match backup_manager.as_ref() {
+            Some(b) => b.list_pinned_object_ids().await,
+            None => HashSet::default(),
+        };
         // It's crucial to collect_min_uncommitted_object_id (i.e. `min_object_id`) only after LIST object store (i.e. `object_ids`).
         // Because after getting `min_object_id`, new compute nodes may join and generate new uncommitted objects that are not covered by `min_sst_id`.
         // By getting `min_object_id` after `object_ids`, it's ensured `object_ids` won't include any objects from those new compute nodes.
@@ -516,7 +515,7 @@ impl HummockManager {
             return Ok(());
         };
         // Objects pinned by either meta backup or time travel should be filtered out.
-        let backup_pinned: HashSet<_> = backup_manager.list_pinned_object_ids();
+        let backup_pinned: HashSet<_> = backup_manager.list_pinned_object_ids().await;
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
         let version_pinned = {
             let versioning = self.versioning.read().await;
