@@ -14,6 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashSet;
+use std::ops::Range;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, atomic};
 use std::time::Instant;
@@ -32,7 +33,7 @@ use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult};
+use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 const PROGRESS_KEY_INTERVAL: usize = 100;
@@ -42,15 +43,16 @@ const PROGRESS_KEY_INTERVAL: usize = 100;
 ///  Note that a `block_meta` does not necessarily correspond to the entire sstable, but rather to a subset, which is documented via the `block_idx`.
 pub struct SstableStreamIterator {
     sstable_store: SstableStoreRef,
-    /// The block metas subset of the SST.
-    block_metas: Vec<BlockMeta>,
+    sstable: TableHolder,
+    /// The range of block metas to iterate over
+    block_metas_range: Range<usize>,
     /// The downloading stream.
     block_stream: Option<BlockDataStream>,
 
     /// Iterates over the KV-pairs of the current block.
     block_iter: Option<BlockIterator>,
 
-    /// Index of the current block.
+    /// Index of the current block within the range.
     block_idx: usize,
 
     /// Counts the time used for IO.
@@ -87,7 +89,8 @@ impl SstableStreamIterator {
     /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockDataStream`].
     /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
-        block_metas: Vec<BlockMeta>,
+        sstable: TableHolder,
+        block_metas_range: Range<usize>,
         sstable_info: SstableInfo,
         stats: &StoreLocalStatistic,
         task_progress: Arc<TaskProgress>,
@@ -96,12 +99,19 @@ impl SstableStreamIterator {
     ) -> Self {
         let sstable_table_ids = HashSet::from_iter(sstable_info.table_ids.iter().cloned());
 
-        // filter the block meta with key range
-        let block_metas = filter_block_metas(
-            &block_metas,
-            &sstable_table_ids,
-            sstable_info.key_range.clone(),
-        );
+        // Further filter the block_metas_range with sstable_info.key_range
+        // This is necessary when the SST is split into multiple SstableInfo with different key ranges
+        let block_metas_range = {
+            let block_metas = &sstable.meta.block_metas[block_metas_range.clone()];
+            let inner_range = filter_block_metas(
+                block_metas,
+                &sstable_table_ids,
+                sstable_info.key_range.clone(),
+            );
+            // Adjust the range to be relative to the original block_metas
+            (block_metas_range.start + inner_range.start)
+                ..(block_metas_range.start + inner_range.end)
+        };
 
         let key_range_left = FullKey::decode(&sstable_info.key_range.left).to_vec();
         let key_range_right = FullKey::decode(&sstable_info.key_range.right).to_vec();
@@ -110,7 +120,8 @@ impl SstableStreamIterator {
         Self {
             block_stream: None,
             block_iter: None,
-            block_metas,
+            sstable,
+            block_metas_range,
             block_idx: 0,
             stats_ptr: stats.remote_io_time.clone(),
             sstable_table_ids,
@@ -125,12 +136,24 @@ impl SstableStreamIterator {
         }
     }
 
+    /// Returns the block metas slice for this iterator.
+    #[inline]
+    fn block_metas(&self) -> &[BlockMeta] {
+        &self.sstable.meta.block_metas[self.block_metas_range.clone()]
+    }
+
+    /// Returns the number of blocks in this iterator.
+    #[inline]
+    fn block_count(&self) -> usize {
+        self.block_metas_range.len()
+    }
+
     async fn create_stream(&mut self) -> HummockResult<()> {
         let block_stream = self
             .sstable_store
             .get_stream_for_blocks(
                 self.sstable_info.object_id,
-                &self.block_metas[self.block_idx..],
+                &self.block_metas()[self.block_idx..],
             )
             .instrument_await("stream_iter_get_stream".verbose())
             .await?;
@@ -195,7 +218,7 @@ impl SstableStreamIterator {
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
         });
-        if self.block_idx < self.block_metas.len() {
+        if self.block_idx < self.block_count() {
             loop {
                 let ret = match &mut self.block_stream {
                     Some(block_stream) => block_stream.next_block().await,
@@ -231,7 +254,7 @@ impl SstableStreamIterator {
                 }
             }
         }
-        self.block_idx = self.block_metas.len();
+        self.block_idx = self.block_count();
         self.block_iter = None;
 
         Ok(())
@@ -456,18 +479,19 @@ impl ConcatSstableIterator {
                 None => self.key_range.clone(),
             };
 
-            let block_metas = filter_block_metas(
+            let block_metas_range = filter_block_metas(
                 &sstable.meta.block_metas,
                 &self.existing_table_ids,
                 filter_key_range,
             );
 
-            if block_metas.is_empty() {
+            if block_metas_range.is_empty() {
                 found = false;
             } else {
                 self.task_progress.inc_num_pending_read_io();
                 let mut sstable_iter = SstableStreamIterator::new(
-                    block_metas,
+                    sstable,
+                    block_metas_range,
                     table_info.clone(),
                     &self.stats,
                     self.task_progress.clone(),
@@ -482,6 +506,7 @@ impl ConcatSstableIterator {
                     found = false;
                 }
             }
+
             if found {
                 return Ok(());
             } else {
@@ -559,9 +584,11 @@ impl HummockIterator for ConcatSstableIterator {
         // sstable_iter's block_idx must have advanced at least one.
         // See SstableStreamIterator::next_block.
         assert!(iter.block_idx >= 1);
+        // block_idx is relative to block_metas_range.start, so we need to add it back
+        let absolute_block_idx = iter.block_metas_range.start + iter.block_idx - 1;
         ValueMeta {
             object_id: Some(iter.sstable_info.object_id),
-            block_id: Some(iter.block_idx as u64 - 1),
+            block_id: Some(absolute_block_idx as u64),
         }
     }
 }
@@ -632,12 +659,12 @@ impl<I: HummockIterator<Direction = Forward>> HummockIterator for MonitoredCompa
 }
 
 pub(crate) fn filter_block_metas(
-    block_metas: &Vec<BlockMeta>,
+    block_metas: &[BlockMeta],
     existing_table_ids: &HashSet<TableId>,
     key_range: KeyRange,
-) -> Vec<BlockMeta> {
+) -> Range<usize> {
     if block_metas.is_empty() {
-        return vec![];
+        return 0..0;
     }
 
     let mut start_index = if key_range.left.is_empty() {
@@ -662,7 +689,7 @@ pub(crate) fn filter_block_metas(
 
         if ret == 0 {
             // not found
-            return vec![];
+            return 0..0;
         }
 
         ret
@@ -710,10 +737,10 @@ pub(crate) fn filter_block_metas(
     }
 
     if start_index > end_index {
-        return vec![];
+        return 0..0;
     }
 
-    block_metas[start_index..=end_index].to_vec()
+    start_index..(end_index + 1)
 }
 
 #[cfg(test)]
@@ -977,6 +1004,7 @@ mod tests {
                 &HashSet::from_iter(vec![1_u32.into(), 2.into(), 3.into()].into_iter()),
                 KeyRange::default(),
             );
+            let ret = &block_metas[ret];
 
             assert_eq!(3, ret.len());
             assert_eq!(
@@ -1016,6 +1044,7 @@ mod tests {
                 &HashSet::from_iter(vec![2_u32.into(), 3.into()].into_iter()),
                 KeyRange::default(),
             );
+            let ret = &block_metas[ret];
 
             assert_eq!(2, ret.len());
             assert_eq!(
@@ -1055,6 +1084,7 @@ mod tests {
                 &HashSet::from_iter(vec![1_u32.into(), 2_u32.into()].into_iter()),
                 KeyRange::default(),
             );
+            let ret = &block_metas[ret];
 
             assert_eq!(2, ret.len());
             assert_eq!(
@@ -1093,6 +1123,7 @@ mod tests {
                 &HashSet::from_iter(vec![2_u32.into()].into_iter()),
                 KeyRange::default(),
             );
+            let ret = &block_metas[ret];
 
             assert_eq!(1, ret.len());
             assert_eq!(
@@ -1132,6 +1163,7 @@ mod tests {
                 &HashSet::from_iter(vec![2_u32.into()].into_iter()),
                 KeyRange::default(),
             );
+            let ret = &block_metas[ret];
 
             assert_eq!(1, ret.len());
             assert_eq!(
@@ -1172,6 +1204,7 @@ mod tests {
                 &HashSet::from_iter(vec![2_u32.into()].into_iter()),
                 KeyRange::default(),
             );
+            let ret = &block_metas[ret];
 
             assert_eq!(1, ret.len());
             assert_eq!(

@@ -31,9 +31,10 @@ mod plan_rewriter;
 
 mod plan_visitor;
 
+#[cfg(feature = "datafusion")]
+pub use plan_visitor::DatafusionExecuteCheckerExt;
 pub use plan_visitor::{
-    ExecutionModeDecider, LogicalIcebergScanExt, PlanVisitor, RelationCollectorVisitor,
-    SysTableVisitor,
+    ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
 use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 

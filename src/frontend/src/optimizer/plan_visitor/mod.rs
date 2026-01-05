@@ -47,9 +47,11 @@ pub use distributed_dml_visitor::*;
 pub use locality_provider_counter::*;
 pub use rw_timestamp_validator::*;
 pub use sole_sys_table_visitor::*;
-mod iceberg_scan_detector;
-pub use iceberg_scan_detector::*;
 
+#[cfg(feature = "datafusion")]
+mod datafusion_execute_checker;
+#[cfg(feature = "datafusion")]
+pub use datafusion_execute_checker::*;
 #[cfg(feature = "datafusion")]
 mod datafusion_plan_converter;
 #[cfg(feature = "datafusion")]
