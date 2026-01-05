@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ use thiserror_ext::AsReport;
 use crate::cmd_impl::hummock::{
     build_compaction_config_vec, list_pinned_versions, migrate_legacy_object,
 };
+use crate::cmd_impl::profile::ProfileWorkerType;
 use crate::cmd_impl::scale::set_cdc_table_backfill_parallelism;
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
@@ -75,8 +76,7 @@ enum Commands {
     #[clap(subcommand)]
     #[clap(visible_alias("trace"))]
     AwaitTree(AwaitTreeCommands),
-    // TODO(yuhao): profile other nodes
-    /// Commands for profilng the compute nodes
+    /// Commands for profiling nodes
     #[clap(subcommand)]
     Profile(ProfileCommands),
     #[clap(subcommand)]
@@ -523,12 +523,18 @@ pub enum ProfileCommands {
         /// The time to active profiling for (in seconds)
         #[clap(short, long = "sleep")]
         sleep: u64,
+        /// Target worker types. Repeatable. Defaults to frontend, compute-node, and compactor.
+        #[clap(long = "worker-type", value_name = "TYPE")]
+        worker_types: Vec<ProfileWorkerType>,
     },
     /// Heap profile
     Heap {
         /// The output directory of the dumped file
         #[clap(long = "dir")]
         dir: Option<String>,
+        /// Target worker types. Repeatable. Defaults to frontend, compute-node, and compactor.
+        #[clap(long = "worker-type", value_name = "TYPE")]
+        worker_types: Vec<ProfileWorkerType>,
     },
 }
 
@@ -905,11 +911,12 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::AwaitTree(AwaitTreeCommands::Transcribe { path }) => {
             rw_diagnose_tools::await_tree::transcribe(path)?
         }
-        Commands::Profile(ProfileCommands::Cpu { sleep }) => {
-            cmd_impl::profile::cpu_profile(context, sleep).await?
-        }
-        Commands::Profile(ProfileCommands::Heap { dir }) => {
-            cmd_impl::profile::heap_profile(context, dir).await?
+        Commands::Profile(ProfileCommands::Cpu {
+            sleep,
+            worker_types,
+        }) => cmd_impl::profile::cpu_profile(context, sleep, worker_types).await?,
+        Commands::Profile(ProfileCommands::Heap { dir, worker_types }) => {
+            cmd_impl::profile::heap_profile(context, dir, worker_types).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)

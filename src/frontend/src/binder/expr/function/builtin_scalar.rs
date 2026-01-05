@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -333,6 +333,7 @@ impl Binder {
                 ("cardinality", raw_call(ExprType::Cardinality)),
                 ("array_remove", raw_call(ExprType::ArrayRemove)),
                 ("array_replace", raw_call(ExprType::ArrayReplace)),
+                ("array_reverse", raw_call(ExprType::ArrayReverse)),
                 ("array_max", raw_call(ExprType::ArrayMax)),
                 ("array_sum", raw_call(ExprType::ArraySum)),
                 ("array_position", raw_call(ExprType::ArrayPosition)),
