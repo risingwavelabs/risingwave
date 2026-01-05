@@ -308,6 +308,13 @@ fn is_datafusion_native_agg_type(agg_type: &AggType) -> bool {
     false
 }
 
+/// Convert an `AggType` to a DataFusion `AggregateUDF`.
+///
+/// This function is used for window functions that use aggregate functions.
+pub fn convert_agg_type_to_udaf(agg_type: &AggType) -> RwResult<Arc<AggregateUDF>> {
+    convert_datafusion_native_agg_func(agg_type)
+}
+
 fn convert_datafusion_native_agg_func(agg_type: &AggType) -> RwResult<Arc<AggregateUDF>> {
     let AggType::Builtin(kind) = agg_type else {
         bail_not_implemented!("only builtin agg types are supported");

@@ -29,7 +29,7 @@ use risingwave_common::bail_not_implemented;
 
 use crate::datafusion::{
     ColumnTrait, ConcatColumns, IcebergTableProvider, InputColumns, convert_agg_call,
-    convert_column_order, convert_expr, convert_join_type,
+    convert_column_order, convert_expr, convert_join_type, convert_window_expr,
 };
 use crate::error::{ErrorCode, Result as RwResult};
 use crate::optimizer::plan_node::generic::{GenericPlanRef, TopNLimit};
@@ -315,6 +315,24 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         }
 
         Ok(result)
+    }
+
+    fn visit_logical_over_window(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalOverWindow,
+    ) -> Self::Result {
+        let rw_input = plan.input();
+        let df_input = self.visit(rw_input.clone())?;
+
+        let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());
+        let df_exprs = plan
+            .window_functions()
+            .iter()
+            .map(|wf| convert_window_expr(wf, &input_columns))
+            .collect::<RwResult<Vec<_>>>()?;
+
+        let window_plan = datafusion::logical_expr::Window::try_new(df_exprs, df_input)?;
+        Ok(Arc::new(LogicalPlan::Window(window_plan)))
     }
 
     fn visit_logical_iceberg_scan(
