@@ -18,6 +18,7 @@ stream_refresh_scheduler_interval_sec = 1
 share_buffers_sync_parallelism = 4
 imm_merge_threshold = 2
 max_cached_recent_versions_number = 200
+shorten_block_meta_key_threshold = 4096
 
 [storage.object_store.retry]
 streaming_upload_attempt_timeout_ms = 10000
