@@ -610,6 +610,12 @@ enum WriteFuture<S: LocalStateStore> {
         future: Pin<Box<LogStoreStateWriteChunkFuture<S>>>,
         stream: BoxedMessageBatchStream,
     },
+    Paused {
+        sleep_future: Option<Pin<Box<Sleep>>>,
+        barrier: MessageBatch,
+        stream: BoxedMessageBatchStream,
+        write_state: LogStoreWriteState<S>,
+    },
     EndOfStream,
     Empty,
 }
@@ -660,6 +666,20 @@ impl<S: LocalStateStore> WriteFuture<S> {
         }
     }
 
+    fn paused(
+        pause_duration: Duration,
+        barrier: MessageBatch,
+        stream: BoxedMessageBatchStream,
+        write_state: LogStoreWriteState<S>,
+    ) -> Self {
+        Self::Paused {
+            sleep_future: Some(Box::pin(sleep_until(Instant::now() + pause_duration))),
+            barrier,
+            stream,
+            write_state,
+        }
+    }
+
     // TODO: add metrics
     async fn next_event(
         &mut self,
@@ -698,6 +718,20 @@ impl<S: LocalStateStore> WriteFuture<S> {
                     })
                 });
                 result.map_err(Into::into)
+            }
+            WriteFuture::Paused { sleep_future, .. } => {
+                if let Some(fut) = sleep_future.as_mut() {
+                    fut.await;
+                }
+                must_match!(
+                    replace(self, WriteFuture::Empty),
+                    WriteFuture::Paused {
+                        barrier,
+                        stream,
+                        write_state,
+                        ..
+                    } => Ok((stream, write_state, WriteFutureEvent::UpstreamMessageReceived(barrier)))
+                )
             }
             WriteFuture::EndOfStream => {
                 pending().await
@@ -972,7 +1006,10 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
 
             let mut initial_write_epoch = first_write_epoch;
 
-            let mut seq_id = FIRST_SEQ_ID;
+            // Todo(yingzhu): add aligned mode here
+
+            'recreate_consume_stream: loop {
+                let mut seq_id = FIRST_SEQ_ID;
                 let mut buffer = SyncedLogStoreBuffer {
                     buffer: VecDeque::new(),
                     current_size: 0,
@@ -984,16 +1021,17 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 };
 
                 let log_store_stream = read_state
-                .read_persisted_log_store(
-                    log_store_config.metrics.persistent_log_read_metrics.clone(),
-                    initial_write_epoch.curr, 
-                    LogStoreReadStateStreamRangeStart::Unbounded,
-                )
-            .await?;
+                    .read_persisted_log_store(
+                        log_store_config.metrics.persistent_log_read_metrics.clone(),
+                        initial_write_epoch.curr, 
+                        LogStoreReadStateStreamRangeStart::Unbounded,
+                    )
+                    .await?;
             
                 let mut log_store_stream = tokio_stream::StreamExt::peekable(log_store_stream);
                 let mut clean_state = log_store_stream.peek().await.is_none();
                 tracing::trace!(?clean_state);
+                let mut pause_stream = false;
 
                 let mut progress = LogStoreVnodeProgress::None;
                 let mut consumer_future_state = ConsumerFuture::ReadingChunk { 
@@ -1007,28 +1045,51 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 let mut write_future_state = 
                     WriteFuture::receive_from_upstream(batch_input, initial_write_state);
             
-            let mut barriers = VecDeque::<MessageBatch>::new();
-            loop {
-                let select_result = {
-                    let consumer_future =
-                        consumer_future_state.next_event(self.inner, &mut barriers);
-                    futures::pin_mut!(consumer_future);
-                    let write_future = write_future_state.next_event(&log_store_config.metrics);
-                    futures::pin_mut!(write_future);
-                    let output = select(write_future, consumer_future).await;
-                    drop_either_future(output)
-                };
+                let mut barriers = VecDeque::<MessageBatch>::new();
+                loop {
+                    let select_result = {
+                        let consumer_future = async {
+                            if pause_stream
+                                && barriers.is_empty()
+                                && matches!(consumer_future_state, ConsumerFuture::ReadingChunk { .. })
+                            {
+                                pending().await
+                            } else {
+                                consumer_future_state.next_event(self.inner, &mut barriers).await
+                            }
+                        };
+                        futures::pin_mut!(consumer_future);
+                        let write_future = write_future_state.next_event(&log_store_config.metrics);
+                        futures::pin_mut!(write_future);
+                        let output = select(write_future, consumer_future).await;
+                        drop_either_future(output)
+                    };
 
-                match select_result {
-                    Either::Left(_write_result) => {
-                        // TODO: handle write future result and update write_future_state / buffer / barriers.
-                        drop(write_future_state);
-                        let (stream, mut write_state, either) = _write_result?;
-                        
+                    match select_result {
+                        Either::Left(_write_result) => {
+                            // TODO: handle write future result and update write_future_state / buffer / barriers.
+                            drop(write_future_state);
+                            let (stream, mut write_state, either) = _write_result?;
+                            match either {
+                                WriteFutureEvent::UpstreamMessageReceived(msg) => {
+                                    match msg {
+                                        chunk @ MessageBatch::Chunk(_) => {
 
-                    }
-                    Either::Right(_consumer_result) => {
-                        // TODO: handle consumer future result and update consumer_future_state / inner / barriers.
+                                        }
+                                        MessageBatch::BarrierBatch(barrier_batch) => {
+
+                                        }
+                                        watermark @ MessageBatch::Watermark(_) => {
+                                            
+                                        }
+                                    }
+                                }
+                            }
+
+                        }
+                        Either::Right(_consumer_result) => {
+                            // TODO: handle consumer future result and update consumer_future_state / inner / barriers.
+                        }
                     }
                 }
             }
