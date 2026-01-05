@@ -21,7 +21,7 @@ use std::ops::Range;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::KeyComparator;
-use risingwave_hummock_sdk::key::{FullKey, TABLE_PREFIX_LEN};
+use risingwave_hummock_sdk::key::{FullKey, TABLE_PREFIX_LEN, TableKey};
 use serde::{Deserialize, Serialize};
 
 use super::utils::{CompressionAlgorithm, bytes_diff_below_max_key_length, xxhash64_verify};
@@ -828,6 +828,70 @@ impl BlockBuilder {
     }
 }
 
+/// Attempts to shorten `block_smallest` key while preserving block boundary correctness.
+///
+/// Returns a shortened key if `prev_block_last < shortened <= block_smallest` can be satisfied
+/// with fewer bytes. This reduces block metadata size by exploiting common prefixes between
+/// adjacent blocks.
+///
+/// Returns `None` if the key cannot be shortened (e.g., keys differ only in the last byte).
+pub fn try_shorten_block_smallest_key(
+    prev_block_last: &FullKey<&[u8]>,
+    block_smallest: &FullKey<&[u8]>,
+) -> Option<FullKey<Vec<u8>>> {
+    /// Returns the length of the longest common prefix between two byte slices.
+    fn lcp_len(a: &[u8], b: &[u8]) -> usize {
+        let min_len = a.len().min(b.len());
+        for i in 0..min_len {
+            if a[i] != b[i] {
+                return i;
+            }
+        }
+        min_len
+    }
+
+    let prev_table_key = prev_block_last.user_key.table_key.as_ref();
+    let next_table_key = block_smallest.user_key.table_key.as_ref();
+    assert_eq!(
+        prev_block_last.user_key.table_id, block_smallest.user_key.table_id,
+        "table ids must match for shortening block smallest key"
+    );
+
+    let lcp = lcp_len(prev_table_key, next_table_key);
+
+    // Shortened key = LCP prefix + first differing byte.
+    // Only shorten if the result is strictly shorter than next_table_key.
+    let shortened_len = lcp + 1;
+    if shortened_len >= next_table_key.len() {
+        return None;
+    }
+
+    // Build candidate key: take LCP + 1 bytes from block_smallest
+    let cand = FullKey::new_with_gap_epoch(
+        block_smallest.user_key.table_id,
+        TableKey(&next_table_key[..shortened_len]),
+        block_smallest.epoch_with_gap,
+    );
+
+    // Invariant: prev_block_last < cand <= block_smallest
+    // This must hold by construction. If violated, it indicates a bug in the shortening logic.
+    // Use assert! (not debug_assert!) to fail fast and prevent writing incorrect keys to storage.
+    assert!(
+        prev_block_last.cmp(&cand).is_lt(),
+        "Invariant violated: prev_block_last >= cand. prev={:?}, cand={:?}",
+        prev_block_last,
+        cand
+    );
+    assert!(
+        cand.cmp(block_smallest).is_le(),
+        "Invariant violated: cand > block_smallest. cand={:?}, block_smallest={:?}",
+        cand,
+        block_smallest
+    );
+
+    Some(cand.copy_into())
+}
+
 #[cfg(test)]
 mod tests {
 
@@ -1070,5 +1134,121 @@ mod tests {
         assert_eq!(block.data_len, blk.data_len);
         assert_eq!(block.table_id, blk.table_id,);
         assert_eq!(block.restart_points, blk.restart_points);
+    }
+
+    #[test]
+    fn test_try_shorten_block_smallest_key() {
+        use risingwave_hummock_sdk::EpochWithGap;
+
+        fn make_full_key(table_id: u32, table_key: &[u8], epoch: u64) -> FullKey<&[u8]> {
+            FullKey::new_with_gap_epoch(
+                TableId::new(table_id),
+                TableKey(table_key),
+                EpochWithGap::new_from_epoch(test_epoch(epoch)),
+            )
+        }
+
+        /// Verifies the invariant: prev < shortened <= next using `FullKey::cmp`
+        fn assert_invariant(
+            prev: &FullKey<&[u8]>,
+            shortened: &FullKey<Vec<u8>>,
+            next: &FullKey<&[u8]>,
+        ) {
+            assert!(
+                prev.cmp(&shortened.to_ref()).is_lt(),
+                "Invariant violated: prev >= shortened. prev={:?}, shortened={:?}",
+                prev,
+                shortened
+            );
+            assert!(
+                shortened.to_ref().cmp(next).is_le(),
+                "Invariant violated: shortened > next. shortened={:?}, next={:?}",
+                shortened,
+                next
+            );
+        }
+
+        // Case 1: Basic shortening - prev="abc", next="abdef" -> cand="abd"
+        {
+            let prev = make_full_key(1, b"abc", 100);
+            let next = make_full_key(1, b"abdef", 100);
+            let result = try_shorten_block_smallest_key(&prev, &next);
+            assert!(result.is_some());
+            let shortened = result.unwrap();
+            assert_eq!(shortened.user_key.table_key.as_ref(), b"abd");
+            assert_invariant(&prev, &shortened, &next);
+        }
+
+        // Case 2: Prefix case - prev="ab", next="abcd" -> cand="abc"
+        {
+            let prev = make_full_key(1, b"ab", 100);
+            let next = make_full_key(1, b"abcd", 100);
+            let result = try_shorten_block_smallest_key(&prev, &next);
+            assert!(result.is_some());
+            let shortened = result.unwrap();
+            assert_eq!(shortened.user_key.table_key.as_ref(), b"abc");
+            assert_invariant(&prev, &shortened, &next);
+        }
+
+        // Case 3: Cannot shorten - only 1 char difference at end
+        {
+            let prev = make_full_key(1, b"abc", 100);
+            let next = make_full_key(1, b"abd", 100);
+            assert!(try_shorten_block_smallest_key(&prev, &next).is_none());
+        }
+
+        // Case 4: Cannot shorten - next is only 1 char longer than LCP
+        {
+            let prev = make_full_key(1, b"abc", 100);
+            let next = make_full_key(1, b"abcd", 100);
+            assert!(try_shorten_block_smallest_key(&prev, &next).is_none());
+        }
+
+        // Case 5: Same table_key, different epoch - cannot shorten
+        {
+            let prev = make_full_key(1, b"abc", 200);
+            let next = make_full_key(1, b"abc", 100);
+            assert!(try_shorten_block_smallest_key(&prev, &next).is_none());
+        }
+
+        // Case 7: Single char keys - cannot shorten
+        {
+            let prev = make_full_key(1, b"a", 100);
+            let next = make_full_key(1, b"b", 100);
+            assert!(try_shorten_block_smallest_key(&prev, &next).is_none());
+        }
+
+        // Case 8: Long common prefix with divergence
+        {
+            let prev = make_full_key(1, b"hello_world_abc", 100);
+            let next = make_full_key(1, b"hello_world_xyz123", 100);
+            let result = try_shorten_block_smallest_key(&prev, &next);
+            assert!(result.is_some());
+            let shortened = result.unwrap();
+            assert_eq!(shortened.user_key.table_key.as_ref(), b"hello_world_x");
+            assert_invariant(&prev, &shortened, &next);
+        }
+
+        // Case 9: Empty common prefix (completely different keys)
+        {
+            let prev = make_full_key(1, b"aaa", 100);
+            let next = make_full_key(1, b"bbbccc", 100);
+            let result = try_shorten_block_smallest_key(&prev, &next);
+            assert!(result.is_some());
+            let shortened = result.unwrap();
+            assert_eq!(shortened.user_key.table_key.as_ref(), b"b");
+            assert_invariant(&prev, &shortened, &next);
+        }
+
+        // Case 10: Minimal shortening - next is exactly 2 chars longer than LCP
+        {
+            let prev = make_full_key(1, b"abc", 100);
+            let next = make_full_key(1, b"abcde", 100);
+            let result = try_shorten_block_smallest_key(&prev, &next);
+            assert!(result.is_some());
+            let shortened = result.unwrap();
+            assert_eq!(shortened.user_key.table_key.as_ref(), b"abcd");
+            assert_invariant(&prev, &shortened, &next);
+        }
     }
 }
