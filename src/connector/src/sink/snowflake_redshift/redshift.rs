@@ -574,12 +574,7 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
         Ok(())
     }
 
-    async fn commit(
-        &mut self,
-        _epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<()> {
+    async fn commit_data(&mut self, _epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         let paths = metadata
             .into_iter()
             .filter(|m| {
@@ -646,26 +641,68 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
             // run copy into
             self.client.execute_sql_sync(vec![copy_into_sql]).await?;
         }
+        Ok(())
+    }
 
-        if let Some(schema_change) = schema_change {
-            use risingwave_pb::stream_plan::sink_schema_change::PbOp as SinkSchemaChangeOp;
-            let schema_change_op = schema_change.op.ok_or_else(|| {
-                SinkError::Coordinator(anyhow!("Invalid schema change operation"))
-            })?;
-            let SinkSchemaChangeOp::AddColumns(add_columns) = schema_change_op else {
-                return Err(SinkError::Coordinator(anyhow!(
-                    "Only AddColumns schema change is supported for Redshift sink"
-                )));
-            };
-            if let Some(shutdown_sender) = &self.shutdown_sender {
-                // Send shutdown signal to the periodic task before altering the table
-                shutdown_sender
-                    .send(())
-                    .map_err(|e| SinkError::Config(anyhow!(e)))?;
+    async fn commit_schema_change(
+        &mut self,
+        _epoch: u64,
+        schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        use risingwave_pb::stream_plan::sink_schema_change::PbOp as SinkSchemaChangeOp;
+        let schema_change_op = schema_change
+            .op
+            .ok_or_else(|| SinkError::Coordinator(anyhow!("Invalid schema change operation")))?;
+        let SinkSchemaChangeOp::AddColumns(add_columns) = schema_change_op else {
+            return Err(SinkError::Coordinator(anyhow!(
+                "Only AddColumns schema change is supported for Redshift sink"
+            )));
+        };
+        if let Some(shutdown_sender) = &self.shutdown_sender {
+            // Send shutdown signal to the periodic task before altering the table
+            shutdown_sender
+                .send(())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        }
+        let sql = build_alter_add_column_sql(
+            self.config.schema.as_deref(),
+            &self.config.table,
+            &add_columns
+                .fields
+                .iter()
+                .map(|f| {
+                    (
+                        f.name.clone(),
+                        DataType::from(f.data_type.as_ref().unwrap()).to_string(),
+                    )
+                })
+                .collect_vec(),
+        );
+        let check_column_exists = |e: anyhow::Error| {
+            let err_str = e.to_report_string();
+            if regex::Regex::new(".+ of relation .+ already exists")
+                .unwrap()
+                .find(&err_str)
+                .is_none()
+            {
+                return Err(e);
             }
+            warn!("redshift sink columns already exists. skipped");
+            Ok(())
+        };
+        self.client
+            .execute_sql_sync(vec![sql.clone()])
+            .await
+            .or_else(check_column_exists)?;
+        if !self.is_append_only {
+            let cdc_table_name = self.config.cdc_table.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "intermediate.table.name is required for non-append-only sink"
+                ))
+            })?;
             let sql = build_alter_add_column_sql(
                 self.config.schema.as_deref(),
-                &self.config.table,
+                cdc_table_name,
                 &add_columns
                     .fields
                     .iter()
@@ -675,83 +712,47 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                             DataType::from(f.data_type.as_ref().unwrap()).to_string(),
                         )
                     })
-                    .collect_vec(),
+                    .collect::<Vec<_>>(),
             );
-            let check_column_exists = |e: anyhow::Error| {
-                let err_str = e.to_report_string();
-                if regex::Regex::new(".+ of relation .+ already exists")
-                    .unwrap()
-                    .find(&err_str)
-                    .is_none()
-                {
-                    return Err(e);
-                }
-                warn!("redshift sink columns already exists. skipped");
-                Ok(())
-            };
             self.client
                 .execute_sql_sync(vec![sql.clone()])
                 .await
                 .or_else(check_column_exists)?;
-            if !self.is_append_only {
-                let cdc_table_name = self.config.cdc_table.as_ref().ok_or_else(|| {
-                    SinkError::Config(anyhow!(
-                        "intermediate.table.name is required for non-append-only sink"
-                    ))
-                })?;
-                let sql = build_alter_add_column_sql(
-                    self.config.schema.as_deref(),
-                    cdc_table_name,
-                    &add_columns
-                        .fields
-                        .iter()
-                        .map(|f| {
-                            (
-                                f.name.clone(),
-                                DataType::from(f.data_type.as_ref().unwrap()).to_string(),
-                            )
-                        })
-                        .collect::<Vec<_>>(),
-                );
-                self.client
-                    .execute_sql_sync(vec![sql.clone()])
-                    .await
-                    .or_else(check_column_exists)?;
-                self.all_column_names
-                    .extend(add_columns.fields.iter().map(|f| f.name.clone()));
+            self.all_column_names
+                .extend(add_columns.fields.iter().map(|f| f.name.clone()));
 
-                if let Some(shutdown_sender) = self.shutdown_sender.take() {
-                    let _ = shutdown_sender.send(());
-                }
-                if let Some(periodic_task_handle) = self.periodic_task_handle.take() {
-                    let _ = periodic_task_handle.await;
-                }
-
-                let (shutdown_sender, shutdown_receiver) = unbounded_channel();
-                let client = self.client.clone();
-                let schema_name = self.config.schema.clone();
-                let cdc_table_name = self.config.cdc_table.clone().unwrap();
-                let target_table_name = self.config.table.clone();
-                let pk_column_names = self.pk_column_names.clone();
-                let all_column_names = self.all_column_names.clone();
-                let schedule_seconds = self.schedule_seconds;
-                let periodic_task_handle = tokio::spawn(async move {
-                    Self::run_periodic_query_task(
-                        client,
-                        schema_name.as_deref(),
-                        &cdc_table_name,
-                        &target_table_name,
-                        pk_column_names,
-                        all_column_names,
-                        schedule_seconds,
-                        shutdown_receiver,
-                    )
-                    .await;
-                });
-                self.shutdown_sender = Some(shutdown_sender);
-                self.periodic_task_handle = Some(periodic_task_handle);
+            if let Some(shutdown_sender) = self.shutdown_sender.take() {
+                let _ = shutdown_sender.send(());
             }
+            if let Some(periodic_task_handle) = self.periodic_task_handle.take() {
+                let _ = periodic_task_handle.await;
+            }
+
+            let (shutdown_sender, shutdown_receiver) = unbounded_channel();
+            let client = self.client.clone();
+            let schema_name = self.config.schema.clone();
+            let cdc_table_name = self.config.cdc_table.clone().unwrap();
+            let target_table_name = self.config.table.clone();
+            let pk_column_names = self.pk_column_names.clone();
+            let all_column_names = self.all_column_names.clone();
+            let schedule_seconds = self.schedule_seconds;
+            let periodic_task_handle = tokio::spawn(async move {
+                Self::run_periodic_query_task(
+                    client,
+                    schema_name.as_deref(),
+                    &cdc_table_name,
+                    &target_table_name,
+                    pk_column_names,
+                    all_column_names,
+                    schedule_seconds,
+                    shutdown_receiver,
+                )
+                .await;
+            });
+            self.shutdown_sender = Some(shutdown_sender);
+            self.periodic_task_handle = Some(periodic_task_handle);
         }
+
         Ok(())
     }
 }
