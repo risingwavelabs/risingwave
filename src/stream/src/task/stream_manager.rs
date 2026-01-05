@@ -19,6 +19,7 @@ use std::time::Instant;
 use futures::FutureExt;
 use futures::stream::BoxStream;
 use risingwave_common::catalog::DatabaseId;
+use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
     StreamingControlStreamRequest, StreamingControlStreamResponse,
@@ -32,7 +33,7 @@ use crate::executor::ActorContextRef;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::barrier_worker::{
-    ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker,
+    ControlStreamHandle, EventSender, LocalActorOperation, LocalBarrierWorker, TakeReceiverRequest,
 };
 use crate::task::{StreamEnvironment, UpDownActorIds};
 
@@ -141,15 +142,17 @@ impl LocalStreamManager {
     pub async fn take_receiver(
         &self,
         database_id: DatabaseId,
+        partial_graph_id: PartialGraphId,
         term_id: String,
         ids: UpDownActorIds,
     ) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
                 database_id,
+                partial_graph_id,
                 term_id,
                 ids,
-                result_sender,
+                request: TakeReceiverRequest::Remote(result_sender),
             })
             .await?
     }
@@ -182,6 +185,7 @@ pub mod test_utils {
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
+    use crate::task::TEST_PARTIAL_GRAPH_ID;
 
     pub fn helper_make_local_actor(actor_id: ActorId) -> ActorInfo {
         ActorInfo {
@@ -190,6 +194,7 @@ pub mod test_utils {
                 host: LOCAL_TEST_ADDR.host.clone(),
                 port: LOCAL_TEST_ADDR.port as i32,
             }),
+            partial_graph_id: TEST_PARTIAL_GRAPH_ID,
         }
     }
 }
