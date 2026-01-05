@@ -25,6 +25,7 @@ use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 use user_defined_function::UserDefinedFunctionDisplay;
 
 use crate::error::{ErrorCode, Result as RwResult};
+use crate::session::current;
 
 mod agg_call;
 mod correlated_input_ref;
@@ -88,6 +89,34 @@ pub trait Expr: Into<ExprImpl> {
     fn to_expr_proto(&self) -> ExprNode {
         self.try_to_expr_proto()
             .expect("failed to serialize expression to protobuf")
+    }
+
+    /// Serialize the expression. Returns an error if this will result in an impure expression on a
+    /// non-append-only stream, which may lead to inconsistent results.
+    fn to_expr_proto_checked_pure(
+        &self,
+        append_only: bool,
+        context: &str,
+    ) -> crate::error::Result<ExprNode>
+    where
+        Self: Clone,
+    {
+        if append_only || current::config().is_some_and(|_c| false) {
+            Ok(self.to_expr_proto())
+        } else if let Some(impure_expr_desc) = impure_expr_desc(&self.clone().into()) {
+            Err(ErrorCode::NotSupported(
+                format!(
+                    "using an impure expression ({impure_expr_desc}) in {context} \
+                     on a non-append-only stream may lead to inconsistent results"
+                ),
+                "rewrite the query to extract the impure expression into the select list, \
+                 or setting .. to allow the bahavior at your own risk"
+                    .into(),
+            )
+            .into())
+        } else {
+            Ok(self.to_expr_proto())
+        }
     }
 }
 

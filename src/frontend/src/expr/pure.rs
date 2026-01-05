@@ -20,20 +20,38 @@ use crate::expr::FunctionCall;
 
 #[derive(Default)]
 pub(crate) struct ImpureAnalyzer {
-    pub(crate) impure: bool,
+    impure: Option<&'static str>,
+}
+
+impl ImpureAnalyzer {
+    /// Returns `true` if the expression is impure.
+    ///
+    /// Only call this method after visiting the expression.
+    pub fn is_impure(&self) -> bool {
+        self.impure.is_some()
+    }
+
+    /// Returns the description of the impure expression if it is impure, for error reporting.
+    /// `None` if the expression is pure.
+    ///
+    /// Only call this method after visiting the expression.
+    pub fn impure_expr_desc(&self) -> Option<&'static str> {
+        self.impure
+    }
 }
 
 impl ExprVisitor for ImpureAnalyzer {
     fn visit_user_defined_function(&mut self, _func_call: &super::UserDefinedFunction) {
-        self.impure = true;
+        self.impure = Some("user-defined function");
     }
 
     fn visit_now(&mut self, _: &super::Now) {
-        self.impure = true;
+        self.impure = Some("NOW or PROCTIME");
     }
 
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) {
-        match func_call.func_type() {
+        let func_type = func_call.func_type();
+        match func_type {
             Type::Unspecified => unreachable!(),
             Type::Add
             | Type::Subtract
@@ -326,7 +344,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding
             | Type::HasDatabasePrivilege
-            | Type::Random => self.impure = true,
+            | Type::Random => self.impure = Some(func_type.as_str_name()),
         }
     }
 }
@@ -338,13 +356,21 @@ pub fn is_pure(expr: &ExprImpl) -> bool {
 pub fn is_impure(expr: &ExprImpl) -> bool {
     let mut a = ImpureAnalyzer::default();
     a.visit_expr(expr);
-    a.impure
+    a.is_impure()
 }
 
 pub fn is_impure_func_call(func_call: &FunctionCall) -> bool {
     let mut a = ImpureAnalyzer::default();
     a.visit_function_call(func_call);
-    a.impure
+    a.is_impure()
+}
+
+/// Returns the description of the impure expression if it is impure, for error reporting.
+/// `None` if the expression is pure.
+pub fn impure_expr_desc(expr: &ExprImpl) -> Option<&'static str> {
+    let mut a = ImpureAnalyzer::default();
+    a.visit_expr(expr);
+    a.impure_expr_desc()
 }
 
 #[cfg(test)]
