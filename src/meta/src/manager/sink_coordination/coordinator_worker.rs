@@ -866,29 +866,29 @@ impl CoordinatorWorker {
             .map(|(epoch, _, metadata, schema_change)| (epoch, metadata, schema_change))
             .collect_vec();
 
-        if let SinkCommitCoordinator::TwoPhase(coordinator) = coordinator {
-            let mut aborted_epochs = vec![];
+        let mut aborted_epochs = vec![];
 
-            for (epoch, state, metadata, _) in metadata_iter {
-                match state {
-                    SinkState::Aborted => {
-                        if let Some(metadata) = metadata {
-                            coordinator.abort(epoch, metadata).await;
-                        }
-                        aborted_epochs.push(epoch);
+        for (epoch, state, metadata, _) in metadata_iter {
+            match state {
+                SinkState::Aborted => {
+                    if let Some(metadata) = metadata
+                        && let SinkCommitCoordinator::TwoPhase(coordinator) = coordinator
+                    {
+                        coordinator.abort(epoch, metadata).await;
                     }
-                    other => {
-                        unreachable!(
-                            "unexpected state {:?} after pending items at epoch {}",
-                            other, epoch
-                        );
-                    }
+                    aborted_epochs.push(epoch);
+                }
+                other => {
+                    unreachable!(
+                        "unexpected state {:?} after pending items at epoch {}",
+                        other, epoch
+                    );
                 }
             }
-
-            // Records for all aborted epochs and previously committed epochs are no longer needed.
-            clean_aborted_records(db, sink_id, aborted_epochs).await?;
         }
+
+        // Records for all aborted epochs and previously committed epochs are no longer needed.
+        clean_aborted_records(db, sink_id, aborted_epochs).await?;
 
         let (initial_hummock_committed_epoch, job_committed_epoch_rx) = subscriber(sink_id).await?;
         let mut two_phase_handler = TwoPhaseCommitHandler::new(

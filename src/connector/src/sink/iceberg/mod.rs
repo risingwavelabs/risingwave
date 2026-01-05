@@ -1905,7 +1905,11 @@ impl SinglePhaseCommitCoordinator for IcebergSinkCommitter {
         epoch: u64,
         schema_change: PbSinkSchemaChange,
     ) -> Result<()> {
-        tracing::info!("Committing schema change in epoch {}", epoch);
+        tracing::info!(
+            "Committing schema change {:?} in epoch {}",
+            schema_change,
+            epoch
+        );
         self.commit_schema_change_impl(schema_change).await?;
         tracing::info!("Successfully committed schema change in epoch {}", epoch);
 
@@ -2013,9 +2017,13 @@ impl TwoPhaseCommitCoordinator for IcebergSinkCommitter {
             return Ok(());
         }
 
-        tracing::info!("Committing schema change in epoch {}", epoch);
+        tracing::info!(
+            "Committing schema change {:?} in epoch {}",
+            schema_change,
+            epoch
+        );
         self.commit_schema_change_impl(schema_change).await?;
-        tracing::info!("Successfully committed schema change in epoch {}", epoch);
+        tracing::info!("Successfully committed schema change in epoch {epoch}");
 
         Ok(())
     }
