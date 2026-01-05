@@ -96,6 +96,14 @@ impl From<&PbVnodeStatistics> for VnodeStatistics {
                 .map(|(&vnode, range)| {
                     let min_key = FullKey::decode(&range.min_key).copy_into();
                     let max_key = FullKey::decode(&range.max_key).copy_into();
+
+                    // assert shared same vnode and table-id
+                    assert_eq!(min_key.user_key.table_id, max_key.user_key.table_id);
+                    assert_eq!(
+                        min_key.user_key.get_vnode_id(),
+                        max_key.user_key.get_vnode_id()
+                    );
+
                     (VirtualNode::from_index(vnode as usize), (min_key, max_key))
                 })
                 .collect(),

@@ -733,6 +733,8 @@ impl VnodeKeyRangeCollector {
         max_bytes.filter(|&n| n > 0).map(Self::new)
     }
 
+    /// Track vnode boundaries. On vnode switch, seals previous range with `prev_key` as right bound.
+    /// Range: `[first_key_of_vnode, last_key_of_vnode]` (inclusive).
     fn observe_key(&mut self, vnode: VirtualNode, key: &[u8], prev_key: &[u8]) {
         if self.current_size >= self.max_bytes {
             return;
@@ -763,24 +765,68 @@ impl VnodeKeyRangeCollector {
         self.range_start_key = key.to_vec();
     }
 
+    /// Seal current range. Asserts `vnode/table_id` consistency between left and right keys.
     fn seal_range(&mut self, right_key: &[u8]) {
         let left = Bytes::from(mem::take(&mut self.range_start_key));
         let right = Bytes::copy_from_slice(right_key);
         self.current_size += mem::size_of::<VirtualNode>() + left.len() + right.len();
+
+        let left_full_key = FullKey::decode(&left);
+        let right_full_key = FullKey::decode(&right);
+
+        // Sanity checks for data correctness:
+        // 1. left and right keys have same `vnode`
+        // 2. vnode matches `current_vnode` being tracked
+        // 3. left and right keys have same `table_id`
+        assert_eq!(
+            left_full_key.user_key.get_vnode_id(),
+            right_full_key.user_key.get_vnode_id(),
+            "vnode changed within range: left {:?}, right {:?}",
+            left_full_key,
+            right_full_key
+        );
+        assert_eq!(
+            left_full_key.user_key.get_vnode_id(),
+            self.current_vnode.to_index(),
+            "vnode mismatch: left {:?}, right {:?}, expected vnode {}",
+            left_full_key,
+            right_full_key,
+            self.current_vnode.to_index()
+        );
+        assert_eq!(
+            left_full_key.user_key.table_id, right_full_key.user_key.table_id,
+            "table_id changed within range: left {:?}, right {:?}",
+            left_full_key, right_full_key
+        );
+
         self.ranges.insert(
             self.current_vnode,
-            (
-                FullKey::decode(&left).copy_into(),
-                FullKey::decode(&right).copy_into(),
-            ),
+            (left_full_key.copy_into(), right_full_key.copy_into()),
         );
     }
 
+    /// Returns `Some` if >1 vnodes collected, `None` otherwise (single-vnode needs no hints).
     fn finish(mut self, last_key: &[u8]) -> Option<VnodeStatistics> {
         if !self.range_start_key.is_empty() {
             self.seal_range(last_key);
         }
+
         if self.ranges.len() > 1 {
+            // Validate all ranges belong to the same table_id before building VnodeStatistics
+            let mut table_ids = self
+                .ranges
+                .values()
+                .flat_map(|(left, right)| [left.user_key.table_id, right.user_key.table_id]);
+            if let Some(first_table_id) = table_ids.next() {
+                for table_id in table_ids {
+                    assert_eq!(
+                        table_id, first_table_id,
+                        "all vnode ranges must belong to the same table_id, found {:?} and {:?}",
+                        table_id, first_table_id
+                    );
+                }
+            }
+
             Some(VnodeStatistics::from_map(self.ranges))
         } else {
             None
