@@ -28,7 +28,8 @@ use datafusion::physical_plan::{
     DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
 };
 use datafusion::prelude::Expr;
-use datafusion_common::{DataFusionError, exec_err, internal_err, not_impl_err};
+use datafusion_common::stats::Precision;
+use datafusion_common::{DataFusionError, Statistics, exec_err, internal_err, not_impl_err};
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iceberg::scan::FileScanTask;
@@ -58,6 +59,8 @@ struct IcebergScanInner {
     table: Table,
     snapshot_id: Option<i64>,
     tasks: Vec<Vec<FileScanTask>>,
+    statistics: Vec<Statistics>,
+    total_statistics: Statistics,
     iceberg_scan_type: IcebergScanType,
     arrow_schema: SchemaRef,
     scan_column_names: Vec<String>,
@@ -131,6 +134,21 @@ impl ExecutionPlan for IcebergScan {
             stream,
         )))
     }
+
+    fn statistics(&self) -> DFResult<Statistics> {
+        self.partition_statistics(None)
+    }
+
+    fn partition_statistics(&self, partition: Option<usize>) -> DFResult<Statistics> {
+        if let Some(partition) = partition {
+            if partition >= self.inner.statistics.len() {
+                return exec_err!("IcebergScan: partition out of bounds");
+            }
+            Ok(self.inner.statistics[partition].clone())
+        } else {
+            Ok(self.inner.total_statistics.clone())
+        }
+    }
 }
 
 impl IcebergScan {
@@ -188,6 +206,8 @@ impl IcebergScan {
             table,
             snapshot_id: provider.snapshot_id,
             tasks: vec![],
+            statistics: vec![],
+            total_statistics: Statistics::default(),
             iceberg_scan_type: provider.iceberg_scan_type,
             arrow_schema,
             scan_column_names,
@@ -205,6 +225,13 @@ impl IcebergScan {
         } else {
             inner.tasks = IcebergSplitEnumerator::split_n_vecs(scan_tasks, batch_parallelism);
         }
+        inner.statistics = inner
+            .tasks
+            .iter()
+            .map(|tasks| calculate_statistics(tasks.iter(), &inner.arrow_schema))
+            .collect();
+        inner.total_statistics =
+            calculate_statistics(inner.tasks.iter().flatten(), &inner.arrow_schema);
         inner.plan_properties.partitioning = Partitioning::UnknownPartitioning(inner.tasks.len());
 
         Ok(Self {
@@ -378,4 +405,21 @@ fn cast_batch(
         &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
     )?;
     Ok(res)
+}
+
+fn calculate_statistics<'a>(
+    tasks: impl Iterator<Item = &'a FileScanTask>,
+    schema: &Schema,
+) -> Statistics {
+    let mut total_rows: usize = 0;
+    let mut total_bytes: usize = 0;
+    for task in tasks {
+        total_rows += task.record_count.unwrap() as usize;
+        total_bytes += task.file_size_in_bytes as usize;
+    }
+    Statistics {
+        num_rows: Precision::Exact(total_rows),
+        total_byte_size: Precision::Exact(total_bytes),
+        column_statistics: Statistics::unknown_column(schema),
+    }
 }
