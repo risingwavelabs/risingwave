@@ -2257,6 +2257,8 @@ impl Parser<'_> {
 
         let append_only = self.parse_keywords(&[Keyword::APPEND, Keyword::ONLY]);
         let params = self.parse_create_function_body()?;
+        let with_options = self.parse_options_with_preceding_keyword(Keyword::WITH)?;
+        let with_options = with_options.try_into()?;
 
         Ok(Statement::CreateAggregate {
             or_replace,
@@ -2266,6 +2268,7 @@ impl Parser<'_> {
             returns,
             append_only,
             params,
+            with_options
         })
     }
 
@@ -5800,16 +5803,6 @@ impl Parser<'_> {
         Ok(Assignment { id, value })
     }
 
-    fn parse_function_arg_expr(&mut self) -> ModalResult<FunctionArgExpr> {
-        // Check if this is a secret reference
-        if self.parse_keyword(Keyword::SECRET) {
-            let secret_ref = self.parse_secret_ref()?;
-            return Ok(FunctionArgExpr::SecretRef(secret_ref));
-        }
-
-        Ok(self.parse_wildcard_or_expr()?.into())
-    }
-
     /// Parse a `[VARIADIC] name => expr`.
     fn parse_function_args(&mut self) -> ModalResult<(bool, FunctionArg)> {
         let variadic = self.parse_keyword(Keyword::VARIADIC);
@@ -5817,10 +5810,11 @@ impl Parser<'_> {
             let name = self.parse_identifier()?;
 
             self.expect_token(&Token::RArrow)?;
-            let arg = self.parse_function_arg_expr()?;
+            let arg = self.parse_wildcard_or_expr()?.into();
+
             FunctionArg::Named { name, arg }
         } else {
-            FunctionArg::Unnamed(self.parse_function_arg_expr()?)
+            FunctionArg::Unnamed(self.parse_wildcard_or_expr()?.into())
         };
         Ok((variadic, arg))
     }

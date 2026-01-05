@@ -927,7 +927,6 @@ impl DdlController {
                 &mut streaming_job,
                 &ctx,
                 &fragment_graph.parallelism,
-                &fragment_graph,
                 fragment_graph.max_parallelism as _,
                 dependencies,
                 specific_resource_group.clone(),

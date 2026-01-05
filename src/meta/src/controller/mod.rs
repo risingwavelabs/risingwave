@@ -466,6 +466,10 @@ impl From<ObjectModel<connection::Model>> for PbConnection {
 
 impl From<ObjectModel<function::Model>> for PbFunction {
     fn from(value: ObjectModel<function::Model>) -> Self {
+        let mut secret_ref_map = BTreeMap::new();
+        if let Some(secret_ref) = value.0.secret_ref {
+            secret_ref_map = secret_ref.to_protobuf();
+        }
         Self {
             id: value.0.function_id as _,
             schema_id: value.1.schema_id.unwrap(),
@@ -497,6 +501,7 @@ impl From<ObjectModel<function::Model>> for PbFunction {
                 Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
             ),
             created_at_cluster_version: value.1.created_at_cluster_version,
+            secret_refs: secret_ref_map,
         }
     }
 }

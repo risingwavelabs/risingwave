@@ -21,6 +21,7 @@ use risingwave_pb::catalog::function::{AggregateFunction, Kind};
 use risingwave_sqlparser::ast::DataType as AstDataType;
 
 use super::*;
+use crate::utils::resolve_secret_refs_in_create_function_with_options;
 use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_aggregate(
@@ -31,6 +32,7 @@ pub async fn handle_create_aggregate(
     args: Vec<OperateFunctionArg>,
     returns: AstDataType,
     params: CreateFunctionBody,
+    with_options: CreateFunctionWithOptions,
 ) -> Result<RwPgResponse> {
     if or_replace {
         bail_not_implemented!("CREATE OR REPLACE AGGREGATE");
@@ -114,12 +116,21 @@ pub async fn handle_create_aggregate(
         _ => None,
     };
 
+    let resolved_secret_refs =
+        resolve_secret_refs_in_create_function_with_options(&with_options, session)?;
+    let mut arg_names_with_secrets = arg_names.clone();
+    let mut arg_types_with_secrets = arg_types.clone();
+    for secret_name in resolved_secret_refs.keys() {
+        arg_names_with_secrets.push(secret_name.clone());
+        arg_types_with_secrets.push(risingwave_common::types::DataType::Varchar);
+    }
+
     let create_fn = risingwave_expr::sig::find_udf_impl(&language, None, link)?.create_fn;
     let output = create_fn(CreateOptions {
         kind: UdfKind::Aggregate,
         name: &function_name,
-        arg_names: &arg_names,
-        arg_types: &arg_types,
+        arg_names: &arg_names_with_secrets,
+        arg_types: &arg_types_with_secrets,
         return_type: &return_type,
         as_: params.as_.as_ref().map(|s| s.as_str()),
         using_link: link,
@@ -147,6 +158,7 @@ pub async fn handle_create_aggregate(
         is_batched: None,
         created_at_epoch: None,
         created_at_cluster_version: None,
+        secret_refs: resolved_secret_refs,
     };
 
     let catalog_writer = session.catalog_writer()?;

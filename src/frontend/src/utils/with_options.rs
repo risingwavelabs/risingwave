@@ -34,9 +34,7 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::telemetry::{PbTelemetryEventStage, TelemetryDatabaseObject};
 use risingwave_sqlparser::ast::{
-    BackfillOrderStrategy, ConnectionRefValue, CreateConnectionStatement, CreateSinkStatement,
-    CreateSourceStatement, CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption,
-    SqlOptionValue, Statement, Value,
+    BackfillOrderStrategy, ConnectionRefValue, CreateConnectionStatement, CreateFunctionWithOptions, CreateSinkStatement, CreateSourceStatement, CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption, SqlOptionValue, Statement, Value
 };
 use thiserror_ext::AsReport;
 
@@ -382,6 +380,15 @@ pub(crate) fn resolve_secret_ref_in_with_options(
     let (options, secret_refs, _) = with_options.into_parts();
     let resolved_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
     Ok(WithOptionsSecResolved::new(options, resolved_secret_refs))
+}
+
+pub(crate) fn resolve_secret_refs_in_create_function_with_options(
+    with_options: &CreateFunctionWithOptions,
+    session: &SessionImpl,
+) -> RwResult<BTreeMap<String, PbSecretRef>> {
+    let secret_refs = with_options.secret_refs.clone();
+    let resolved_secret_refs = resolve_secret_refs_inner(secret_refs, session)?;
+    Ok(resolved_secret_refs)
 }
 
 fn resolve_secret_refs_inner(

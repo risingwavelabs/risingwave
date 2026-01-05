@@ -976,7 +976,7 @@ impl ExprImpl {
             }
             RexNode::Now(_) => Self::Now(Box::new(Now {})),
             RexNode::Secret(secret_ref) => {
-                Self::SecretRefExpr(Box::new(SecretRefExpr::from_expr_proto(secret_ref)?))
+                Self::SecretRefExpr(Box::new(SecretRefExpr::from_expr_proto(secret_ref)))
             }
         })
     }

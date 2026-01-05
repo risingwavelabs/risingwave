@@ -20,6 +20,7 @@ use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 
 use super::*;
 use crate::expr::{Expr, Literal};
+use crate::utils::resolve_secret_refs_in_create_function_with_options;
 use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_sql_function(
@@ -31,6 +32,7 @@ pub async fn handle_create_sql_function(
     args: Option<Vec<OperateFunctionArg>>,
     returns: Option<CreateFunctionReturns>,
     params: CreateFunctionBody,
+    with_options: CreateFunctionWithOptions,
 ) -> Result<RwPgResponse> {
     if or_replace {
         bail_not_implemented!("CREATE OR REPLACE FUNCTION");
@@ -137,12 +139,21 @@ pub async fn handle_create_sql_function(
     // e.g., The provided function body contains invalid syntax, return type mismatch, ..., etc.
     {
         let mut binder = Binder::new_for_system(session);
-        let args = arg_types
+
+        
+        
+        let mut dummy_args: Vec<_> = arg_types
             .iter()
             .map(|ty| Literal::new(None, ty.clone()).into() /* NULL */)
             .collect();
+        let mut arg_names_with_secrets = arg_names.clone();
+        
+        for secret_name in with_options.secret_refs.keys() {
+            arg_names_with_secrets.push(secret_name.clone());
+            dummy_args.push(Literal::new(None, risingwave_common::types::DataType::Varchar).into());
+        }
 
-        let expr = binder.bind_sql_udf_inner(&body, &arg_names, args)?;
+        let expr = binder.bind_sql_udf_inner(&body, &arg_names_with_secrets, dummy_args)?;
 
         // Check if the return type mismatches
         if expr.return_type() != return_type {
@@ -154,6 +165,8 @@ pub async fn handle_create_sql_function(
             .into());
         }
     }
+
+    let resolved_secret_refs = resolve_secret_refs_in_create_function_with_options(&with_options, session)?;
 
     // Create the actual function, will be stored in function catalog
     let function = PbFunction {
@@ -177,6 +190,7 @@ pub async fn handle_create_sql_function(
         is_batched: None,
         created_at_epoch: None,
         created_at_cluster_version: None,
+        secret_refs: resolved_secret_refs,
     };
 
     let catalog_writer = session.catalog_writer()?;

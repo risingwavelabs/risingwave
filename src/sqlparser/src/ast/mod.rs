@@ -1409,6 +1409,7 @@ pub enum Statement {
         /// Optional parameters.
         append_only: bool,
         params: CreateFunctionBody,
+        with_options: CreateFunctionWithOptions,
     },
 
     /// DECLARE CURSOR
@@ -1990,6 +1991,7 @@ impl Statement {
                 returns,
                 append_only,
                 params,
+                with_options,
             } => {
                 write!(
                     f,
@@ -2003,6 +2005,7 @@ impl Statement {
                     write!(f, " APPEND ONLY")?;
                 }
                 write!(f, "{params}")?;
+                write!(f, "{with_options}")?;
                 Ok(())
             }
             Statement::CreateView {
@@ -2967,8 +2970,6 @@ pub enum FunctionArgExpr {
     QualifiedWildcard(ObjectName, Option<Vec<Expr>>),
     /// An unqualified `*` or `* except (columns)`
     Wildcard(Option<Vec<Expr>>),
-    /// A secret reference, e.g. `secret my_secret` or `secret my_secret AS FILE`
-    SecretRef(SecretRefValue),
 }
 
 impl fmt::Display for FunctionArgExpr {
@@ -3013,7 +3014,6 @@ impl fmt::Display for FunctionArgExpr {
                 ),
                 None => f.write_str("*"),
             },
-            FunctionArgExpr::SecretRef(secret_ref) => write!(f, "secret {}", secret_ref),
         }
     }
 }
@@ -3694,6 +3694,8 @@ pub struct CreateFunctionWithOptions {
     pub r#async: Option<bool>,
     /// Call in batch mode (only available for JS UDF)
     pub batch: Option<bool>,
+    /// Secret references that will be implicitly provided to the function body.
+    pub secret_refs: std::collections::BTreeMap<String, SecretRefValue>,
 }
 
 /// TODO(kwannoel): Generate from the struct definition instead.
@@ -3703,7 +3705,8 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
     fn try_from(with_options: Vec<SqlOption>) -> Result<Self, Self::Error> {
         let mut options = Self::default();
         for option in with_options {
-            match option.name.to_string().to_lowercase().as_str() {
+            let key = option.name.real_value();
+            match key.as_str() {
                 "always_retry_on_network_error" => {
                     options.always_retry_on_network_error = Some(matches!(
                         option.value,
@@ -3721,6 +3724,14 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
                         option.value,
                         SqlOptionValue::Value(Value::Boolean(true))
                     ))
+                }
+                _ if matches!(option.value, SqlOptionValue::SecretRef(_)) => {
+                    let SqlOptionValue::SecretRef(secret_ref) = option.value else {
+                        unreachable!();
+                    };
+                    if options.secret_refs.insert(key.clone(), secret_ref).is_some() {
+                        return Err(StrError(format!("duplicate option: {}", key)));
+                    }
                 }
                 _ => {
                     return Err(StrError(format!("unknown option: {}", option.name)));
@@ -3745,6 +3756,13 @@ impl Display for CreateFunctionWithOptions {
         }
         if let Some(v) = self.batch {
             options.push(format!("batch = {}", v));
+        }
+        for (k, v) in &self.secret_refs {
+            let ref_as = match v.ref_as {
+                SecretRefAsType::Text => "",
+                SecretRefAsType::File => " AS FILE",
+            };
+            options.push(format!("{} = secret {}{}", k, v.secret_name, ref_as));
         }
         write!(f, " WITH ( {} )", display_comma_separated(&options))
     }
@@ -4083,6 +4101,7 @@ mod tests {
                 always_retry_on_network_error: None,
                 r#async: None,
                 batch: None,
+                secret_refs: std::collections::BTreeMap::new(),
             },
         };
         assert_eq!(
@@ -4108,11 +4127,25 @@ mod tests {
                 always_retry_on_network_error: Some(true),
                 r#async: None,
                 batch: None,
+                secret_refs: std::collections::BTreeMap::new(),
             },
         };
         assert_eq!(
             "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( always_retry_on_network_error = true )",
             format!("{}", create_function)
+        );
+
+        let mut secret_opts = CreateFunctionWithOptions::default();
+        secret_opts.secret_refs.insert(
+            "foo".to_owned(),
+            SecretRefValue {
+                secret_name: ObjectName(vec![Ident::new_unchecked("secret_name")]),
+                ref_as: SecretRefAsType::File,
+            },
+        );
+        assert_eq!(
+            " WITH ( foo = secret secret_name AS FILE )",
+            format!("{}", secret_opts)
         );
     }
 }

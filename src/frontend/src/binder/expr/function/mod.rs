@@ -26,14 +26,13 @@ use risingwave_expr::aggregate::AggType;
 use risingwave_expr::window_function::WindowFuncKind;
 use risingwave_sqlparser::ast::{
     self, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident,
-    OrderByExpr, SecretRefValue, Statement, Window,
+    OrderByExpr, Statement, Window,
 };
 use risingwave_sqlparser::parser::Parser;
 
 use crate::binder::Binder;
 use crate::binder::bind_context::Clause;
 use crate::catalog::function_catalog::FunctionCatalog;
-use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
     Expr, ExprImpl, ExprType, FunctionCallWithLambda, InputRef, SecretRefExpr, TableFunction,
@@ -189,6 +188,11 @@ impl Binder {
                     .into());
                 }
 
+                reject_syntax!(
+                    !func.secret_refs.is_empty(),
+                    "`SECRET` is not allowed in AGGREGATE:function call"
+                );
+
                 if func.language == "sql" {
                     self.bind_sql_udf(func.clone(), array_args)?
                 } else {
@@ -230,6 +234,11 @@ impl Binder {
                 ObjectCheckItem::new(func.owner, AclMode::Execute, func.name.clone(), func.id),
                 self.database_id,
             )?;
+
+            // extend args with the implicit secret arguments
+            for secret_ref in func.secret_refs.values() {
+                args.push(SecretRefExpr::from_expr_proto(secret_ref).into());
+            }
             Some(func.clone())
         } else {
             None
@@ -748,7 +757,16 @@ impl Binder {
             );
         };
 
-        self.bind_sql_udf_inner(body, &func.arg_names, args)
+        // Add the implicit secret arguments to arg_names before binding
+        // args are extended in bind_function already
+        let mut arg_names = func.arg_names.clone();
+        for secret_name in func.secret_refs.keys() {
+            arg_names.push(secret_name.clone());
+        }
+
+        debug_assert_eq!(arg_names.len(), args.len());
+
+        self.bind_sql_udf_inner(body, &arg_names, args)
     }
 
     pub(in crate::binder) fn bind_function_expr_arg(
@@ -764,7 +782,6 @@ impl Binder {
             .into()),
             FunctionArgExpr::Wildcard(None) => Ok(vec![]),
             FunctionArgExpr::Wildcard(Some(_)) => unreachable!(),
-            FunctionArgExpr::SecretRef(secret_ref) => Ok(vec![self.bind_secret_ref(secret_ref)?]),
         }
     }
 
@@ -776,29 +793,5 @@ impl Binder {
             FunctionArg::Unnamed(expr) => self.bind_function_expr_arg(expr),
             FunctionArg::Named { .. } => todo!(),
         }
-    }
-
-    pub(in crate::binder) fn bind_secret_ref(
-        &mut self,
-        secret_ref: &SecretRefValue,
-    ) -> Result<ExprImpl> {
-        // Resolve secret name to secret ID using catalog
-        let db_name: &str = &self.db_name;
-        let (schema, name) =
-            Binder::resolve_schema_qualified_name(db_name, &secret_ref.secret_name)?;
-        let reader = &self.catalog;
-        let (secret_catalog, _) = reader
-            .get_secret_by_name(
-                db_name,
-                SchemaPath::new(
-                    schema.as_deref(),
-                    &self.search_path,
-                    &self.auth_context.user_name,
-                ),
-                &name,
-            )
-            .map_err(|e| crate::error::ErrorCode::BindError(e.to_string()))?;
-        // Return resolved SecretRefExpr with secret_id set
-        Ok(SecretRefExpr::new(secret_ref.ref_as.clone(), secret_catalog.id).into())
     }
 }

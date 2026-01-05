@@ -18,7 +18,6 @@ use risingwave_sqlparser::ast::SecretRefAsType;
 
 use super::{Expr, ExprImpl};
 use crate::catalog::SecretId;
-use crate::error::Result as RwResult;
 use crate::expr::ExprRewriter;
 
 /// Represents a secret reference that will be resolved to its actual value during planning.
@@ -41,23 +40,29 @@ impl SecretRefExpr {
         }
     }
 
-    pub fn from_expr_proto(secret_ref: &risingwave_pb::secret::PbSecretRef) -> RwResult<Self> {
+    pub fn from_expr_proto(secret_ref: &risingwave_pb::secret::PbSecretRef) -> Self {
         let ref_as = match secret_ref.ref_as() {
             PbRefAsType::Text => SecretRefAsType::Text,
             PbRefAsType::File => SecretRefAsType::File,
-            PbRefAsType::Unspecified => {
-                return Err(crate::error::RwError::from(
-                    crate::error::ErrorCode::InternalError(
-                        "Invalid SecretRefAsType in PbSecretRef".to_string(),
-                    ),
-                ));
-            }
+            PbRefAsType::Unspecified => unreachable!("Unspecified is not a valid RefAsType"),
         };
 
-        Ok(Self {
+        Self {
             secret_ref_type: ref_as,
             secret_id: secret_ref.secret_id,
-        })
+        }
+    }
+
+    pub fn to_pb_secret_ref(&self) -> risingwave_pb::secret::PbSecretRef {
+        let ref_as = match self.secret_ref_type {
+            SecretRefAsType::Text => PbRefAsType::Text,
+            SecretRefAsType::File => PbRefAsType::File,
+        };
+
+        risingwave_pb::secret::PbSecretRef {
+            secret_id: self.secret_id.into(),
+            ref_as: ref_as.into(),
+        }
     }
 }
 
@@ -68,15 +73,7 @@ impl Expr for SecretRefExpr {
     }
 
     fn try_to_expr_proto(&self) -> std::result::Result<risingwave_pb::expr::ExprNode, String> {
-        let ref_as = match self.secret_ref_type {
-            SecretRefAsType::Text => PbRefAsType::Text,
-            SecretRefAsType::File => PbRefAsType::File,
-        };
-
-        let pb_secret_ref = risingwave_pb::secret::PbSecretRef {
-            secret_id: self.secret_id.into(),
-            ref_as: ref_as.into(),
-        };
+        let pb_secret_ref = self.to_pb_secret_ref();
 
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;

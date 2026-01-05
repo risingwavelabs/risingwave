@@ -21,6 +21,7 @@ use risingwave_pb::catalog::PbFunction;
 use risingwave_pb::catalog::function::{Kind, ScalarFunction, TableFunction};
 
 use super::*;
+use crate::utils::resolve_secret_refs_in_create_function_with_options;
 use crate::{Binder, bind_data_type};
 
 pub async fn handle_create_function(
@@ -149,6 +150,14 @@ pub async fn handle_create_function(
         _ => None,
     };
 
+    let resolved_secret_refs = resolve_secret_refs_in_create_function_with_options(&with_options, session)?;
+    let mut arg_names_with_secrets = arg_names.clone();
+    let mut arg_types_with_secrets = arg_types.clone();
+    for secret_name in resolved_secret_refs.keys() {
+        arg_names_with_secrets.push(secret_name.clone());
+        arg_types_with_secrets.push(risingwave_common::types::DataType::Varchar);
+    }
+
     let create_fn =
         risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
     let output = create_fn(CreateOptions {
@@ -158,8 +167,8 @@ pub async fn handle_create_function(
             Kind::Aggregate(_) => unreachable!(),
         },
         name: &function_name,
-        arg_names: &arg_names,
-        arg_types: &arg_types,
+        arg_names: &arg_names_with_secrets,
+        arg_types: &arg_types_with_secrets,
         return_type: &return_type,
         as_: params.as_.as_ref().map(|s| s.as_str()),
         using_link: link,
@@ -189,6 +198,7 @@ pub async fn handle_create_function(
         is_batched: with_options.batch,
         created_at_epoch: None,
         created_at_cluster_version: None,
+        secret_refs: resolved_secret_refs,
     };
 
     let catalog_writer = session.catalog_writer()?;

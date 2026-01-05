@@ -279,8 +279,6 @@ impl QueryRewriter<'_> {
                         self.visit_expr(expr);
                     }
                 }
-                // No need to visit secret
-                FunctionArgExpr::SecretRef(_) => {}
             },
         }
     }

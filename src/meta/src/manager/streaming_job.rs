@@ -17,13 +17,11 @@ use std::collections::HashSet;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::TableVersionId;
 use risingwave_common::id::{ConnectionId, DatabaseId, JobId, SchemaId, SecretId};
-use risingwave_common::util::stream_graph_visitor::collect_secret_ids_from_stream_graph;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{SourceModel, TableModel};
 use risingwave_meta_model::{TableVersion, source, table};
 use risingwave_pb::catalog::{CreateType, Index, PbSource, Sink, Table};
 use risingwave_pb::ddl_service::TableJobType;
-use risingwave_pb::stream_plan::StreamFragmentGraph as StreamFragmentGraphProto;
 use sea_orm::entity::prelude::*;
 use sea_orm::{DatabaseTransaction, QuerySelect};
 use strum::{EnumIs, EnumTryAs};
@@ -258,26 +256,19 @@ impl StreamingJob {
     }
 
     // Get the secret ids that are referenced by this job.
-    pub fn dependent_secret_ids(
-        &self,
-        fragment_graph: &StreamFragmentGraphProto,
-    ) -> MetaResult<HashSet<SecretId>> {
-        let mut secret_ids = match self {
-            StreamingJob::Sink(sink) => get_referred_secret_ids_from_sink(sink),
+    pub fn dependent_secret_ids(&self) -> MetaResult<HashSet<SecretId>> {
+        match self {
+            StreamingJob::Sink(sink) => Ok(get_referred_secret_ids_from_sink(sink)),
             StreamingJob::Table(source, _, _) => {
                 if let Some(source) = source {
-                    get_referred_secret_ids_from_source(source)?
+                    get_referred_secret_ids_from_source(source)
                 } else {
-                    HashSet::new()
+                    Ok(HashSet::new())
                 }
             }
-            StreamingJob::Source(source) => get_referred_secret_ids_from_source(source)?,
-            StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => HashSet::new(),
-        };
-
-        secret_ids.extend(collect_secret_ids_from_stream_graph(fragment_graph));
-
-        Ok(secret_ids)
+            StreamingJob::Source(source) => get_referred_secret_ids_from_source(source),
+            StreamingJob::MaterializedView(_) | StreamingJob::Index(_, _) => Ok(HashSet::new()),
+        }
     }
 
     /// Verify the new version is the next version of the original version.

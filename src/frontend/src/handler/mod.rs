@@ -349,6 +349,7 @@ pub async fn handle(
                     args,
                     returns,
                     params,
+                    with_options,
                 )
                 .await
             }
@@ -360,6 +361,7 @@ pub async fn handle(
             args,
             returns,
             params,
+            with_options,
             ..
         } => {
             create_aggregate::handle_create_aggregate(
@@ -370,6 +372,7 @@ pub async fn handle(
                 args,
                 returns,
                 params,
+                with_options
             )
             .await
         }
