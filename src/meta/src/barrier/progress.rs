@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::mem::take;
 
 use risingwave_common::catalog::TableId;
@@ -579,6 +579,7 @@ impl CreateMviewProgressTracker {
 
         #[cfg(debug_assertions)]
         {
+            use std::collections::HashSet;
             let old_actor_ids: HashSet<_> = progress.states.keys().copied().collect();
             let new_actor_ids: HashSet<_> = new_tracking_actors
                 .iter()
@@ -811,6 +812,8 @@ fn calculate_total_key_count(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashSet;
+
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::id::WorkerId;
     use risingwave_meta_model::fragment::DistributionType;
