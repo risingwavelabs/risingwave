@@ -261,10 +261,17 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let subscriber_ids = actor_context.initial_subscriber_ids.clone();
         let op_consistency_level =
             get_op_consistency_level(conflict_behavior, may_have_downstream, &subscriber_ids);
+        let state_table_metrics = metrics.new_state_table_metrics(
+            table_catalog.id,
+            actor_context.id,
+            actor_context.fragment_id,
+        );
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
         let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(op_consistency_level)
             .enable_preload_all_rows_by_config(&actor_context.config)
+            .enable_vnode_key_pruning(true)
+            .with_metrics(state_table_metrics)
             .build()
             .await;
 
