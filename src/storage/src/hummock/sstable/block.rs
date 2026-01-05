@@ -835,6 +835,10 @@ pub fn try_shorten_block_smallest_key(
 
     let prev_table_key = prev_block_last.user_key.table_key.as_ref();
     let next_table_key = block_smallest.user_key.table_key.as_ref();
+    assert_eq!(
+        prev_block_last.user_key.table_id, block_smallest.user_key.table_id,
+        "table ids must match for shortening block smallest key"
+    );
 
     let lcp = lcp_len(prev_table_key, next_table_key);
 
@@ -852,10 +856,21 @@ pub fn try_shorten_block_smallest_key(
         block_smallest.epoch_with_gap,
     );
 
-    // Verify invariant: prev_block_last < cand <= block_smallest
-    if prev_block_last.cmp(&cand).is_ge() || cand.cmp(block_smallest).is_gt() {
-        return None;
-    }
+    // Invariant: prev_block_last < cand <= block_smallest
+    // This must hold by construction. If violated, it indicates a bug in the shortening logic.
+    // Use assert! (not debug_assert!) to fail fast and prevent writing incorrect keys to storage.
+    assert!(
+        prev_block_last.cmp(&cand).is_lt(),
+        "Invariant violated: prev_block_last >= cand. prev={:?}, cand={:?}",
+        prev_block_last,
+        cand
+    );
+    assert!(
+        cand.cmp(block_smallest).is_le(),
+        "Invariant violated: cand > block_smallest. cand={:?}, block_smallest={:?}",
+        cand,
+        block_smallest
+    );
 
     Some(cand.copy_into())
 }
@@ -1172,18 +1187,7 @@ mod tests {
             assert!(try_shorten_block_smallest_key(&prev, &next).is_none());
         }
 
-        // Case 5: Different table_id - LCP=0, take first char
-        {
-            let prev = make_full_key(1, b"zzz", 100);
-            let next = make_full_key(2, b"abcdef", 100);
-            let result = try_shorten_block_smallest_key(&prev, &next);
-            assert!(result.is_some());
-            let shortened = result.unwrap();
-            assert_eq!(shortened.user_key.table_key.as_ref(), b"a");
-            assert_invariant(&prev, &shortened, &next);
-        }
-
-        // Case 6: Same table_key, different epoch - cannot shorten
+        // Case 5: Same table_key, different epoch - cannot shorten
         {
             let prev = make_full_key(1, b"abc", 200);
             let next = make_full_key(1, b"abc", 100);
