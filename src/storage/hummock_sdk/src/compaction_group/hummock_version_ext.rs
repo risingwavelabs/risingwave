@@ -719,20 +719,6 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
                 self.table_watermarks.remove(&table_id);
             }
         }
-
-        #[expect(deprecated)]
-        // apply to table change log
-        // Set clean_up_only=true because self.table_change_log is deprecated.
-        // Use apply_change_log_delta specifically to clean up existing change logs.
-        Self::apply_change_log_delta(
-            &mut self.table_change_log,
-            &version_delta.change_log_delta,
-            &version_delta.removed_table_ids,
-            &version_delta.state_table_info_delta,
-            &changed_table_info,
-            true,
-        );
-
         // apply to vector index
         apply_vector_index_delta(
             &mut self.vector_indexes,
@@ -749,21 +735,18 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         removed_table_ids: &HashSet<TableId>,
         state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
         changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
-        clean_up_only: bool,
     ) {
-        if !clean_up_only {
-            for (table_id, change_log_delta) in change_log_delta {
-                let new_change_log = &change_log_delta.new_log;
-                match table_change_log.entry(*table_id) {
-                    Entry::Occupied(entry) => {
-                        let change_log = entry.into_mut();
-                        change_log.add_change_log(new_change_log.clone());
-                    }
-                    Entry::Vacant(entry) => {
-                        entry.insert(TableChangeLogCommon::new(once(new_change_log.clone())));
-                    }
-                };
-            }
+        for (table_id, change_log_delta) in change_log_delta {
+            let new_change_log = &change_log_delta.new_log;
+            match table_change_log.entry(*table_id) {
+                Entry::Occupied(entry) => {
+                    let change_log = entry.into_mut();
+                    change_log.add_change_log(new_change_log.clone());
+                }
+                Entry::Vacant(entry) => {
+                    entry.insert(TableChangeLogCommon::new(once(new_change_log.clone())));
+                }
+            };
         }
 
         // If a table has no new change log entry (even an empty one), it means we have stopped maintained
