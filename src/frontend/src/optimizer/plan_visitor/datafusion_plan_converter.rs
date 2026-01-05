@@ -383,8 +383,25 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         &mut self,
         plan: &crate::optimizer::plan_node::LogicalIcebergScan,
     ) -> Self::Result {
-        // DataFusion requires unique table names for each scan, so we can't use actual table name here.
-        let table_name = format!("iceberg_scan#{}", plan.base.id().0);
+        let mut raw_table_name = plan
+            .core
+            .catalog
+            .as_ref()
+            .ok_or_else(|| {
+                ErrorCode::InternalError(
+                    "DataFusionPlanConverter: Iceberg table scan cannot find catalog info"
+                        .to_owned(),
+                )
+            })?
+            .name
+            .as_str();
+        // remove prefix __iceberg_source_
+        if raw_table_name.starts_with("__iceberg_source_") {
+            raw_table_name = &raw_table_name["__iceberg_source_".len()..];
+        }
+
+        // DataFusion requires unique table names for each scan, so we append the plan id to the table name.
+        let table_name = format!("{}#{}", raw_table_name, plan.base.id().0);
         let table_source =
             provider_as_source(Arc::new(IcebergTableProvider::from_logical_plan(plan)?));
         let table_scan = TableScan::try_new(table_name, table_source, None, vec![], None)?;
