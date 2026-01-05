@@ -329,7 +329,7 @@ fn gen_batch_query_plan(
 
     #[cfg(feature = "datafusion")]
     {
-        use crate::optimizer::DatafusionExecuteCheckerExt;
+        use crate::optimizer::DataFusionExecuteCheckerExt;
 
         if session.config().enable_datafusion_engine()
             && optimized_logical.plan.able_to_run_by_datafusion()
