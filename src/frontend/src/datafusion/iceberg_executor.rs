@@ -411,14 +411,23 @@ fn calculate_statistics<'a>(
     tasks: impl Iterator<Item = &'a FileScanTask>,
     schema: &Schema,
 ) -> Statistics {
-    let mut total_rows: usize = 0;
+    let mut total_rows: Option<usize> = Some(0);
     let mut total_bytes: usize = 0;
     for task in tasks {
-        total_rows += task.record_count.unwrap() as usize;
+        match (task.record_count, total_rows) {
+            (Some(count), Some(ref mut total_rows)) => *total_rows += count as usize,
+            (None, _) => total_rows = None,
+            _ => {}
+        };
         total_bytes += task.file_size_in_bytes as usize;
     }
+
+    let num_rows = match total_rows {
+        Some(rows) => Precision::Exact(rows),
+        None => Precision::Absent,
+    };
     Statistics {
-        num_rows: Precision::Exact(total_rows),
+        num_rows,
         total_byte_size: Precision::Exact(total_bytes),
         column_statistics: Statistics::unknown_column(schema),
     }
