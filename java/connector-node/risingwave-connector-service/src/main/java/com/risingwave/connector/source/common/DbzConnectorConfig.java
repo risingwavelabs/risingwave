@@ -37,6 +37,10 @@ public class DbzConnectorConfig {
     private static final String WAIT_FOR_STREAMING_START_TIMEOUT_SECS =
             "cdc.source.wait.streaming.start.timeout";
 
+    private static final String QUEUE_MAX_MEMORY_RATIO = "queue.memory.ratio";
+    public static final double MIN_QUEUE_MAX_MEMORY_RATIO = 0.01;
+    public static final double MAX_QUEUE_MAX_MEMORY_RATIO = 0.8;
+
     /* Common configs */
     public static final String HOST = "hostname";
     public static final String PORT = "port";
@@ -334,7 +338,19 @@ public class DbzConnectorConfig {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
 
+        // Calculate max.queue.size.in.bytes based on JVM heap size and ratio
+        calculateAndSetMaxQueueSizeInBytes(dbzProps);
+
         LOG.info("Final Debezium properties: {}", dbzProps);
+        LOG.info(
+                "Debezium max.queue.size.in.bytes: {} bytes ({} MB)",
+                dbzProps.getProperty("max.queue.size.in.bytes", "not set"),
+                dbzProps.getProperty("max.queue.size.in.bytes") != null
+                        ? Long.parseLong(dbzProps.getProperty("max.queue.size.in.bytes"))
+                                / 1024
+                                / 1024
+                        : 0);
+
         this.sourceId = sourceId;
         this.sourceType = source;
         this.resolvedDbzProps = dbzProps;
@@ -354,5 +370,62 @@ public class DbzConnectorConfig {
             throw new RuntimeException("failed to load config file " + fileName, e);
         }
         return dbProps;
+    }
+
+    /**
+     * Calculate and set max.queue.size.in.bytes based on JVM heap size and memory ratio.
+     *
+     * <p>If user does not specify queue.memory.ratio, this method does nothing. Debezium will use
+     * whatever is configured in debezium.properties (max.queue.size = 8192 by default).
+     *
+     * <p>If user specifies a valid ratio (0.01-0.8), calculate and set max.queue.size.in.bytes
+     * accordingly.
+     *
+     * <p>JVM heap size is obtained from Runtime.getRuntime().maxMemory(), which reflects the -Xmx
+     * value set by Rust code during JVM initialization. See: src/jni_core/src/jvm_runtime.rs:85-103
+     *
+     * <p>The Rust code sets -Xmx based on: 1. JVM_HEAP_SIZE env var if set 2. Otherwise:
+     * system_memory_available_bytes() * 0.07
+     *
+     * @param dbzProps The Debezium properties to update
+     */
+    private void calculateAndSetMaxQueueSizeInBytes(Properties dbzProps) {
+        // Check if user specified a custom ratio
+        String ratioStr = dbzProps.getProperty(QUEUE_MAX_MEMORY_RATIO);
+        if (ratioStr == null) {
+            // User did not specify ratio, do nothing
+            // Debezium will use its default max.queue.size from debezium.properties
+            LOG.info(
+                    "Debezium {} not specified, skipping calculating and setting max.queue.size.in.bytes calculation",
+                    QUEUE_MAX_MEMORY_RATIO);
+            return;
+        }
+
+        // Validation is already done in SourceValidateHandler during CREATE/ALTER SOURCE
+        // At this point, ratioStr is guaranteed to be valid (0.01-0.8)
+        double queueMemoryRatio = Double.parseDouble(ratioStr);
+
+        // Get JVM max heap size from Runtime
+        // This reflects the -Xmx value set by Rust during JVM initialization
+        // No need to read JVM_HEAP_SIZE env var again - it's already baked into the JVM
+        Runtime runtime = Runtime.getRuntime();
+        long jvmHeapSize = runtime.maxMemory();
+
+        LOG.info(
+                "JVM max heap size (from Runtime): {} bytes ({} MB)",
+                jvmHeapSize,
+                jvmHeapSize / 1024 / 1024);
+        LOG.info("Debezium {}: {}", QUEUE_MAX_MEMORY_RATIO, queueMemoryRatio);
+
+        // Calculate max queue size in bytes
+        long maxQueueSizeInBytes = (long) (jvmHeapSize * queueMemoryRatio);
+
+        // Set the calculated value
+        dbzProps.setProperty("max.queue.size.in.bytes", String.valueOf(maxQueueSizeInBytes));
+
+        LOG.info(
+                "Calculated debezium max.queue.size.in.bytes: {} bytes ({} MB)",
+                maxQueueSizeInBytes,
+                maxQueueSizeInBytes / 1024 / 1024);
     }
 }
