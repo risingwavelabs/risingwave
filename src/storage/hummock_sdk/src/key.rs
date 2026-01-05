@@ -766,12 +766,6 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         buf
     }
 
-    // Encode in to a buffer.
-    pub fn encode_into_without_table_id(&self, buf: &mut impl BufMut) {
-        self.user_key.encode_table_key_into(buf);
-        buf.put_u64(self.epoch_with_gap.as_u64());
-    }
-
     pub fn encode_reverse_epoch(&self) -> Vec<u8> {
         let mut buf = Vec::with_capacity(
             TABLE_PREFIX_LEN + self.user_key.table_key.as_ref().len() + EPOCH_LEN,
