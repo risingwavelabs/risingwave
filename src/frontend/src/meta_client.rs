@@ -214,6 +214,12 @@ pub trait FrontendMetaClient: Send + Sync {
     fn cluster_id(&self) -> &str;
 
     async fn list_unmigrated_tables(&self) -> Result<HashMap<TableId, String>>;
+
+    async fn update_compaction_config(
+        &self,
+        compaction_group_ids: Vec<u64>,
+        configs: Vec<risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig>,
+    ) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -535,5 +541,15 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>> {
         self.0.list_refresh_table_states().await
+    }
+
+    async fn update_compaction_config(
+        &self,
+        compaction_group_ids: Vec<u64>,
+        configs: Vec<risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig>,
+    ) -> Result<()> {
+        self.0
+            .risectl_update_compaction_config(&compaction_group_ids, &configs)
+            .await
     }
 }

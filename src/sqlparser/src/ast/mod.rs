@@ -30,10 +30,10 @@ use winnow::ModalResult;
 
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
-    AlterColumnOperation, AlterConnectionOperation, AlterDatabaseOperation, AlterFragmentOperation,
-    AlterFunctionOperation, AlterSchemaOperation, AlterSecretOperation, AlterTableOperation,
-    ColumnDef, ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
-    WebhookSourceInfo,
+    AlterColumnOperation, AlterCompactionGroupOperation, AlterConnectionOperation,
+    AlterDatabaseOperation, AlterFragmentOperation, AlterFunctionOperation, AlterSchemaOperation,
+    AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
+    ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
 };
 pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
@@ -1491,6 +1491,11 @@ pub enum Statement {
         fragment_ids: Vec<u32>,
         operation: AlterFragmentOperation,
     },
+    /// ALTER COMPACTION GROUP
+    AlterCompactionGroup {
+        group_ids: Vec<u64>,
+        operation: AlterCompactionGroupOperation,
+    },
     /// DESCRIBE relation
     /// ALTER DEFAULT PRIVILEGES
     AlterDefaultPrivileges {
@@ -2482,6 +2487,17 @@ impl Statement {
                     f,
                     "ALTER FRAGMENT {} {}",
                     display_comma_separated(fragment_ids),
+                    operation
+                )
+            }
+            Statement::AlterCompactionGroup {
+                group_ids,
+                operation,
+            } => {
+                write!(
+                    f,
+                    "ALTER COMPACTION GROUP {} {}",
+                    display_comma_separated(group_ids),
                     operation
                 )
             }

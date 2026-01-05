@@ -321,6 +321,11 @@ pub enum AlterFragmentOperation {
     SetParallelism { parallelism: SetVariableValue },
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AlterCompactionGroupOperation {
+    Set { configs: Vec<SqlOption> },
+}
+
 impl fmt::Display for AlterDatabaseOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -774,6 +779,16 @@ impl fmt::Display for AlterFragmentOperation {
             }
             AlterFragmentOperation::SetParallelism { parallelism } => {
                 write!(f, "SET PARALLELISM TO {}", parallelism)
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterCompactionGroupOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterCompactionGroupOperation::Set { configs } => {
+                write!(f, "SET {}", display_comma_separated(configs))
             }
         }
     }

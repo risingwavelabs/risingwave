@@ -42,6 +42,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_compaction_group;
 mod alter_connection_props;
 mod alter_database_param;
 mod alter_mv;
@@ -1445,6 +1446,17 @@ pub async fn handle(
         },
         Statement::AlterDefaultPrivileges { .. } => {
             handle_privilege::handle_alter_default_privileges(handler_args, stmt).await
+        }
+        Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        } => {
+            alter_compaction_group::handle_alter_compaction_group(
+                handler_args,
+                group_ids,
+                operation,
+            )
+            .await
         }
         Statement::StartTransaction { modes } => {
             transaction::handle_begin(handler_args, START_TRANSACTION, modes).await
