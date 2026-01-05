@@ -136,7 +136,7 @@ CREATE SINK s1 from t WITH (
     primary_key = 'id',
     force_append_only='true',
     auto.schema.change = 'true',
-    is_exactly_once = 'false',
+    is_exactly_once = 'true',
 );"
 
 
