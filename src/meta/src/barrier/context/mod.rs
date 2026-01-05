@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,8 +38,9 @@ use crate::barrier::{
     DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
-use crate::stream::{ScaleControllerRef, SourceManagerRef};
+use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn commit_epoch(
@@ -118,6 +119,10 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     /// Barrier scheduler for scheduling load finish commands
     barrier_scheduler: BarrierScheduler,
+
+    pub(super) refresh_manager: GlobalRefreshManagerRef,
+
+    sink_manager: SinkCoordinatorManager,
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -130,6 +135,8 @@ impl GlobalBarrierWorkerContextImpl {
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
+        refresh_manager: GlobalRefreshManagerRef,
+        sink_manager: SinkCoordinatorManager,
     ) -> Self {
         Self {
             scheduled_barriers,
@@ -140,6 +147,8 @@ impl GlobalBarrierWorkerContextImpl {
             _scale_controller: scale_controller,
             env,
             barrier_scheduler,
+            refresh_manager,
+            sink_manager,
         }
     }
 

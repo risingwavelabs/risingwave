@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::collections::BTreeMap;
 
-pub use risingwave_common::id::{ActorId, DatabaseId, FragmentId, SchemaId, TableId};
+pub use risingwave_common::id::*;
 use risingwave_pb::catalog::{PbCreateType, PbStreamJobStatus};
 use risingwave_pb::meta::table_fragments::PbState as PbStreamJobState;
 use risingwave_pb::secret::PbSecretRef;
@@ -53,6 +53,8 @@ pub mod iceberg_tables;
 pub mod index;
 pub mod object;
 pub mod object_dependency;
+pub mod pending_sink_state;
+pub mod refresh_job;
 pub mod schema;
 pub mod secret;
 pub mod serde_seaql_migration;
@@ -70,20 +72,8 @@ pub mod view;
 pub mod worker;
 pub mod worker_property;
 
-pub type WorkerId = i32;
-
 pub type TransactionId = i32;
 
-type RawObjectId = i32;
-pub type ObjectId = RawObjectId;
-pub type SourceId = RawObjectId;
-pub type SinkId = RawObjectId;
-pub type SubscriptionId = RawObjectId;
-pub type IndexId = RawObjectId;
-pub type ViewId = RawObjectId;
-pub type FunctionId = RawObjectId;
-pub type ConnectionId = RawObjectId;
-pub type SecretId = RawObjectId;
 pub type UserId = i32;
 pub type PrivilegeId = i32;
 pub type DefaultPrivilegeId = i32;
@@ -412,6 +402,11 @@ derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 derive_from_blob!(
     SourceRefreshMode,
     risingwave_pb::plan_common::PbSourceRefreshMode
+);
+
+derive_from_blob!(
+    SinkSchemachange,
+    risingwave_pb::stream_plan::PbSinkSchemaChange
 );
 
 derive_array_from_blob!(

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::plan_common::SourceRefreshMode;
 use risingwave_pb::plan_common::source_refresh_mode::{
-    RefreshMode, SourceRefreshModeFullRecompute, SourceRefreshModeStreaming,
+    RefreshMode, SourceRefreshModeFullReload, SourceRefreshModeStreaming,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
@@ -38,6 +38,7 @@ use risingwave_sqlparser::ast::{
     CreateSourceStatement, CreateSubscriptionStatement, SecretRefAsType, SecretRefValue, SqlOption,
     SqlOptionValue, Statement, Value,
 };
+use thiserror_ext::AsReport;
 
 use super::OverwriteOptions;
 use crate::Binder;
@@ -51,6 +52,7 @@ pub mod options {
 }
 
 pub const SOURCE_REFRESH_MODE_KEY: &str = "refresh_mode";
+pub const SOURCE_REFRESH_INTERVAL_SEC_KEY: &str = "refresh_interval_sec";
 
 /// Options or properties extracted from the `WITH` clause of DDLs.
 #[derive(Default, Clone, Debug, PartialEq, Eq, Hash)]
@@ -247,7 +249,11 @@ pub(crate) fn resolve_connection_ref_and_secret_ref(
     with_options: WithOptions,
     session: &SessionImpl,
     object: Option<TelemetryDatabaseObject>,
-) -> RwResult<(WithOptionsSecResolved, PbConnectionType, Option<u32>)> {
+) -> RwResult<(
+    WithOptionsSecResolved,
+    PbConnectionType,
+    Option<ConnectionId>,
+)> {
     let connector_name = with_options.get_connector();
     let db_name: &str = &session.database();
     let (mut options, secret_refs, connection_refs) = with_options.into_parts();
@@ -393,7 +399,7 @@ fn resolve_secret_refs_inner(
             SecretRefAsType::File => PbRefAsType::File,
         };
         let pb_secret_ref = PbSecretRef {
-            secret_id: secret_catalog.id.secret_id(),
+            secret_id: secret_catalog.id,
             ref_as: ref_as.into(),
         };
         resolved_secret_refs.insert(key.clone(), pb_secret_ref);
@@ -404,29 +410,76 @@ fn resolve_secret_refs_inner(
 pub(crate) fn resolve_source_refresh_mode_in_with_option(
     with_options: &mut WithOptions,
 ) -> RwResult<Option<SourceRefreshMode>> {
-    let source_refresh_mode = if let Some(source_refresh_mode_str) =
-        with_options.remove(SOURCE_REFRESH_MODE_KEY)
-    {
-        match source_refresh_mode_str.to_uppercase().as_str() {
-            "STREAMING" => SourceRefreshMode {
-                refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
-            },
-            "FULL_RECOMPUTE" => SourceRefreshMode {
-                refresh_mode: Some(RefreshMode::FullRecompute(
-                    SourceRefreshModeFullRecompute {},
-                )),
-            },
+    let source_refresh_interval_sec =
+        {
+            if let Some(maybe_int) = with_options.remove(SOURCE_REFRESH_INTERVAL_SEC_KEY) {
+                let some_int = maybe_int.parse::<i64>().map_err(|e| {
+                RwError::from(ErrorCode::InvalidParameterValue(format!(
+                    "`{}` must be a positive integer and larger than 0, but got: {} (error: {})",
+                    SOURCE_REFRESH_INTERVAL_SEC_KEY, maybe_int, e.as_report()
+                )))
+            })?;
+                if some_int <= 0 {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` must be larger than 0, but got: {}",
+                        SOURCE_REFRESH_INTERVAL_SEC_KEY, some_int
+                    ))));
+                }
+                Some(some_int)
+            } else {
+                None
+            }
+        };
+
+    let mut is_full_reload = false;
+    let source_refresh_mode_str = with_options.remove(SOURCE_REFRESH_MODE_KEY);
+    let source_refresh_mode = if let Some(source_refresh_mode_str) = &source_refresh_mode_str {
+        Some(match source_refresh_mode_str.to_uppercase().as_str() {
+            "STREAMING" => {
+                if source_refresh_interval_sec.is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` is not allowed when `{}` is 'STREAMING'",
+                        SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+                    ))));
+                }
+                SourceRefreshMode {
+                    refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+                }
+            }
+            "FULL_RELOAD" => {
+                is_full_reload = true;
+                SourceRefreshMode {
+                    refresh_mode: Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
+                        refresh_interval_sec: source_refresh_interval_sec,
+                    })),
+                }
+            }
             _ => {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RECOMPUTE'",
+                    "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RELOAD'",
                     SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
                 ))));
             }
-        }
+        })
     } else {
-        return Ok(None);
+        // also check the `refresh_interval_sec` is not provided when `refresh_mode` is not provided
+        if source_refresh_interval_sec.is_some() {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "`{}` is not allowed when `{}` is not 'FULL_RELOAD'",
+                SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+            ))));
+        }
+        None
     };
-    Ok(Some(source_refresh_mode))
+
+    // Batch connectors require FULL_RELOAD mode.
+    if with_options.is_batch_connector() && !is_full_reload {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+            "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
+            with_options.get_connector().unwrap(),
+        ))));
+    }
+    Ok(source_refresh_mode)
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -71,7 +71,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbIndex> for ActiveModel {
     fn from(pb_index: PbIndex) -> Self {
         Self {
-            index_id: Set(pb_index.id as _),
+            index_id: Set(pb_index.id),
             name: Set(pb_index.name),
             index_table_id: Set(pb_index.index_table_id),
             primary_table_id: Set(pb_index.primary_table_id),

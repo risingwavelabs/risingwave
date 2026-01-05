@@ -122,7 +122,7 @@ alter materialized view rl_mv2 set source_rate_limit = 1000;
 db error: ERROR: Failed to run the query
 
 Caused by:
-  sql parser error: expected SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT after SET, found: source_rate_limit
+  sql parser error: expected SCHEMA/PARALLELISM/BACKFILL_RATE_LIMIT/CONFIG after SET, found: source_rate_limit
 LINE 1: alter materialized view rl_mv2 set source_rate_limit = 1000;
                                            ^
 

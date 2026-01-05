@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::session::SessionImpl;
 
 pub async fn handle_alter_streaming_rate_limit(
@@ -58,7 +59,7 @@ pub async fn handle_alter_streaming_rate_limit(
             let (source, schema_name) =
                 reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
             session.check_privilege_for_drop_alter(schema_name, &**source)?;
-            (StatementType::ALTER_SOURCE, source.id)
+            (StatementType::ALTER_SOURCE, source.id.as_raw_id())
         }
         PbThrottleTarget::TableWithSource => {
             let reader = session.env().catalog_reader().read_guard();
@@ -98,17 +99,23 @@ pub async fn handle_alter_streaming_rate_limit(
         }
         PbThrottleTarget::Sink => {
             let reader = session.env().catalog_reader().read_guard();
-            let (table, schema_name) =
+            let (sink, schema_name) =
                 reader.get_any_sink_by_name(db_name, schema_path, &real_table_name)?;
-            if table.target_table.is_some() {
+            if sink.target_table.is_some() {
                 bail!("ALTER SINK_RATE_LIMIT is not for sink into table")
             }
-            session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            (StatementType::ALTER_SINK, table.id.sink_id)
+            session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+            (StatementType::ALTER_SINK, sink.id.as_raw_id())
         }
         _ => bail!("Unsupported throttle target: {:?}", kind),
     };
-    handle_alter_streaming_rate_limit_by_id(&session, kind, id, rate_limit, stmt_type).await
+    execute_with_long_running_notification(
+        handle_alter_streaming_rate_limit_by_id(&session, kind, id, rate_limit, stmt_type),
+        &session,
+        "ALTER STREAMING RATE LIMIT",
+        LongRunningNotificationAction::SuggestRecover,
+    )
+    .await
 }
 
 pub async fn handle_alter_streaming_rate_limit_by_id(

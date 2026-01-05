@@ -173,8 +173,7 @@ impl Rule<Logical> for UnifyFirstLastValueRule {
 
             let field_types = mergeable_calls
                 .iter()
-                .map(|(_, call)| call.return_type.clone())
-                .collect::<Vec<_>>();
+                .map(|(_, call)| call.return_type.clone());
             let row_data_type = DataType::Struct(StructType::unnamed(field_types));
 
             let row_expr = FunctionCall::new_unchecked(ExprType::Row, row_inputs, row_data_type);

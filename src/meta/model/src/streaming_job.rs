@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,10 @@ pub struct Model {
     pub job_status: JobStatus,
     pub create_type: CreateType,
     pub timezone: Option<String>,
+    // Here `NULL` is equivalent to an empty config override string.
+    pub config_override: Option<String>,
     pub parallelism: StreamingParallelism,
+    pub backfill_parallelism: Option<StreamingParallelism>,
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,
 }

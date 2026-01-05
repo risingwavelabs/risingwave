@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -643,7 +643,9 @@ impl JsonParseOptions {
 
                 match self.bytea_handling {
                     ByteaHandling::Standard => {
-                        str_to_bytea(value_str).map_err(|_| create_error())?.into()
+                        let mut buf = Vec::new();
+                        str_to_bytea(value_str, &mut buf).map_err(|_| create_error())?;
+                        buf.into()
                     }
                     ByteaHandling::Base64 => base64::engine::general_purpose::STANDARD
                         .decode(value_str)

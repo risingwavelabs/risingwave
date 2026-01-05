@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -118,9 +118,12 @@ impl ValuesExecutor {
             }
         }
 
+        let mut finish_reported = !emit;
+
         while let Some(barrier) = barrier_receiver.recv().await {
-            if emit {
+            if !finish_reported {
                 progress.finish(barrier.epoch, 0);
+                finish_reported = true;
             }
             yield Message::Barrier(barrier);
         }

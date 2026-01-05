@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,8 +34,8 @@ async fn read_rw_depend(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDepend>> 
     Ok(dependencies
         .into_iter()
         .map(|depend| RwDepend {
-            objid: depend.object_id as i32,
-            refobjid: depend.referenced_object_id as i32,
+            objid: depend.object_id.as_i32_id(),
+            refobjid: depend.referenced_object_id.as_i32_id(),
         })
         .collect())
 }

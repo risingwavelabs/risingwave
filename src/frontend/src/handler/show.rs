@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,6 +30,7 @@ use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
 use risingwave_expr::scalar::like::{i_like_default, like_default};
 use risingwave_pb::catalog::connection;
 use risingwave_pb::frontend_service::GetRunningSqlsRequest;
+use risingwave_pb::id::WorkerId;
 use risingwave_rpc_client::FrontendClientPoolRef;
 use risingwave_sqlparser::ast::{
     Ident, ObjectName, ShowCreateType, ShowObject, ShowStatementFilter, display_comma_separated,
@@ -61,7 +62,7 @@ pub fn get_columns_from_table(
         Relation::BaseTable(t) => t.table_catalog.columns.clone(),
         Relation::SystemTable(t) => t.sys_table_catalog.columns.clone(),
         _ => {
-            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+            return Err(CatalogError::not_found("table or source", table_name.to_string()).into());
         }
     };
 
@@ -105,7 +106,7 @@ pub fn get_indexes_from_table(
     let indexes = match relation {
         Relation::BaseTable(t) => t.table_indexes,
         _ => {
-            return Err(CatalogError::NotFound("table or source", table_name.to_string()).into());
+            return Err(CatalogError::not_found("table or source", table_name.to_string()).into());
         }
     };
 
@@ -613,7 +614,7 @@ pub async fn handle_show_object(
                 .or(get_columns_from_sink(&session, table.clone()))
                 .or(get_columns_from_view(&session, table.clone()))
             else {
-                return Err(CatalogError::NotFound(
+                return Err(CatalogError::not_found(
                     "table, source, sink or view",
                     table.to_string(),
                 )
@@ -649,13 +650,13 @@ pub async fn handle_show_object(
                         .get_source_ids_by_connection(c.id)
                         .unwrap_or_default()
                         .into_iter()
-                        .filter_map(|sid| schema.get_source_by_id(&sid).map(|catalog| catalog.name.as_str()))
+                        .filter_map(|sid| schema.get_source_by_id(sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let sink_names = schema
                         .get_sink_ids_by_connection(c.id)
                         .unwrap_or_default()
                         .into_iter()
-                        .filter_map(|sid| schema.get_sink_by_id(&sid).map(|catalog| catalog.name.as_str()))
+                        .filter_map(|sid| schema.get_sink_by_id(sid).map(|catalog| catalog.name.as_str()))
                         .collect_vec();
                     let properties = match &c.info {
                         connection::Info::PrivateLinkService(i) => {
@@ -709,7 +710,7 @@ pub async fn handle_show_object(
                 let addr: HostAddr = worker.host.as_ref().unwrap().into();
                 let property = worker.property.as_ref();
                 ShowClusterRow {
-                    id: worker.id as _,
+                    id: worker.id.as_i32_id(),
                     addr: addr.to_string(),
                     r#type: worker.get_type().unwrap().as_str_name().into(),
                     state: worker.get_state().unwrap().as_str_name().to_owned(),
@@ -861,19 +862,18 @@ pub fn handle_show_create_object(
                             .get_schema_by_name(&database, schema_name)?
                             .get_created_table_by_name(&object_name)
                             .filter(|t| {
-                                t.is_mview()
-                                    && has_access_to_object(current_user, t.id.as_raw_id(), t.owner)
+                                t.is_mview() && has_access_to_object(current_user, t.id, t.owner)
                             }),
                     )
                 })?
-                .ok_or_else(|| CatalogError::NotFound("materialized view", name.to_string()))?;
+                .ok_or_else(|| CatalogError::not_found("materialized view", name.to_string()))?;
             (mv.create_sql(), schema)
         }
         ShowCreateType::View => {
             let (view, schema) =
                 catalog_reader.get_view_by_name(&database, schema_path, &object_name)?;
             if !view.is_system_view() && !has_access_to_object(current_user, view.id, view.owner) {
-                return Err(CatalogError::NotFound("view", name.to_string()).into());
+                return Err(CatalogError::not_found("view", name.to_string()).into());
             }
             (view.create_sql(schema.to_owned()), schema)
         }
@@ -886,19 +886,19 @@ pub fn handle_show_create_object(
                             .get_created_table_by_name(&object_name)
                             .filter(|t| {
                                 t.is_user_table()
-                                    && has_access_to_object(current_user, t.id.as_raw_id(), t.owner)
+                                    && has_access_to_object(current_user, t.id, t.owner)
                             }),
                     )
                 })?
-                .ok_or_else(|| CatalogError::NotFound("table", name.to_string()))?;
+                .ok_or_else(|| CatalogError::not_found("table", name.to_string()))?;
 
             (table.create_sql_purified(), schema)
         }
         ShowCreateType::Sink => {
             let (sink, schema) =
                 catalog_reader.get_any_sink_by_name(&database, schema_path, &object_name)?;
-            if !has_access_to_object(current_user, sink.id.sink_id, sink.owner.user_id) {
-                return Err(CatalogError::NotFound("sink", name.to_string()).into());
+            if !has_access_to_object(current_user, sink.id, sink.owner.user_id) {
+                return Err(CatalogError::not_found("sink", name.to_string()).into());
             }
             (sink.create_sql(), schema)
         }
@@ -915,7 +915,7 @@ pub fn handle_show_create_object(
                             }),
                     )
                 })?
-                .ok_or_else(|| CatalogError::NotFound("source", name.to_string()))?;
+                .ok_or_else(|| CatalogError::not_found("source", name.to_string()))?;
             (source.create_sql_purified(), schema)
         }
         ShowCreateType::Index => {
@@ -926,12 +926,11 @@ pub fn handle_show_create_object(
                             .get_schema_by_name(&database, schema_name)?
                             .get_created_table_by_name(&object_name)
                             .filter(|t| {
-                                t.is_index()
-                                    && has_access_to_object(current_user, t.id.as_raw_id(), t.owner)
+                                t.is_index() && has_access_to_object(current_user, t.id, t.owner)
                             }),
                     )
                 })?
-                .ok_or_else(|| CatalogError::NotFound("index", name.to_string()))?;
+                .ok_or_else(|| CatalogError::not_found("index", name.to_string()))?;
             (index.create_sql(), schema)
         }
         ShowCreateType::Function => {
@@ -940,12 +939,8 @@ pub fn handle_show_create_object(
         ShowCreateType::Subscription => {
             let (subscription, schema) =
                 catalog_reader.get_subscription_by_name(&database, schema_path, &object_name)?;
-            if !has_access_to_object(
-                current_user,
-                subscription.id.subscription_id,
-                subscription.owner.user_id,
-            ) {
-                return Err(CatalogError::NotFound("subscription", name.to_string()).into());
+            if !has_access_to_object(current_user, subscription.id, subscription.owner.user_id) {
+                return Err(CatalogError::not_found("subscription", name.to_string()).into());
             }
             (subscription.create_sql(), schema)
         }
@@ -965,7 +960,7 @@ async fn show_process_list_impl(
     worker_node_manager: WorkerNodeManagerRef,
 ) -> Vec<ShowProcessListRow> {
     // Create a placeholder row for the worker in case of any errors while fetching its running SQLs.
-    fn on_error(worker_id: u32, err_msg: String) -> Vec<ShowProcessListRow> {
+    fn on_error(worker_id: WorkerId, err_msg: String) -> Vec<ShowProcessListRow> {
         vec![ShowProcessListRow {
             worker_id: format!("{}", worker_id),
             id: "".to_owned(),

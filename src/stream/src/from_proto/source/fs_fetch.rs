@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use risingwave_common::catalog::TableId;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::filesystem::opendal_source::{
@@ -26,12 +25,12 @@ use risingwave_storage::StateStore;
 
 use crate::error::StreamResult;
 use crate::executor::source::{
-    BatchIcebergFetchExecutor, BatchPosixFsFetchExecutor, FsFetchExecutor, IcebergFetchExecutor,
-    SourceStateTableHandler, StreamSourceCore,
+    BatchAdbcSnowflakeFetchExecutor, BatchIcebergFetchExecutor, BatchPosixFsFetchExecutor,
+    FsFetchExecutor, IcebergFetchExecutor, SourceStateTableHandler, StreamSourceCore,
 };
 use crate::executor::{Execute, Executor};
 use crate::from_proto::ExecutorBuilder;
-use crate::from_proto::source::is_full_recompute_refresh;
+use crate::from_proto::source::is_full_reload_refresh;
 use crate::task::ExecutorParams;
 
 pub struct FsFetchExecutorBuilder;
@@ -47,9 +46,9 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
         let [upstream]: [_; 1] = params.input.try_into().unwrap();
 
         let source = node.node_inner.as_ref().unwrap();
-        let is_full_recompute_refresh = is_full_recompute_refresh(&source.refresh_mode);
+        let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
 
-        let source_id = TableId::new(source.source_id);
+        let source_id = source.source_id;
         let source_name = source.source_name.clone();
         let source_info = source.get_info()?;
         let source_options_with_secret =
@@ -110,14 +109,14 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                 .boxed()
             }
             risingwave_connector::source::ConnectorProperties::Iceberg(_) => {
-                if is_full_recompute_refresh {
+                if is_full_reload_refresh {
                     BatchIcebergFetchExecutor::new(
                         params.actor_context.clone(),
                         stream_source_core,
                         upstream,
                         params.local_barrier_manager.clone(),
                         params.config.clone(),
-                        source.associated_table_id.map(TableId::new),
+                        source.associated_table_id,
                     )
                     .boxed()
                 } else {
@@ -156,9 +155,23 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                     upstream,
                     source.rate_limit,
                     params.local_barrier_manager.clone(),
-                    source.associated_table_id.map(TableId::new),
+                    source.associated_table_id,
                 )
                 .boxed()
+            }
+            risingwave_connector::source::ConnectorProperties::AdbcSnowflake(_) => {
+                if is_full_reload_refresh {
+                    BatchAdbcSnowflakeFetchExecutor::new(
+                        params.actor_context.clone(),
+                        stream_source_core,
+                        upstream,
+                        params.local_barrier_manager.clone(),
+                        source.associated_table_id,
+                    )
+                    .boxed()
+                } else {
+                    unreachable!("AdbcSnowflake connector only supports FULL_RELOAD refresh mode")
+                }
             }
             _ => unreachable!(),
         };

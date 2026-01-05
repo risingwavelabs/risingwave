@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -220,7 +220,7 @@ impl Condition {
     /// For [`EqJoinPredicate`], separate equality conditions which connect left columns and right
     /// columns from other conditions.
     ///
-    /// The equality conditions are transformed into `(left_col_id, right_col_id)` pairs.
+    /// The equality conditions are transformed into `(left_col_id, right_col_id, null_eq_null)` tuples.
     ///
     /// [`EqJoinPredicate`]: crate::optimizer::plan_node::EqJoinPredicate
     pub fn split_eq_keys(

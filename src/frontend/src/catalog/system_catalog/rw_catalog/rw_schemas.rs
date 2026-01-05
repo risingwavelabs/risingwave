@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ fn read_rw_schema_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSchema>> {
 
     Ok(schemas
         .map(|schema| RwSchema {
-            id: schema.id().as_raw_id() as i32,
+            id: schema.id().as_i32_id(),
             name: schema.name(),
             owner: schema.owner() as i32,
             acl: get_acl_items(schema.id(), false, &users, username_map),

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,7 +43,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
 
     Binder::validate_cross_db_reference(&session.database(), &object_name)?;
     let not_found_err =
-        CatalogError::NotFound("table, source, sink or view", object_name.to_string());
+        CatalogError::not_found("table, source, sink or view", object_name.to_string());
 
     // Vec<ColumnCatalog>, Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>, String, Option<String>
     let (columns, pk_columns, dist_columns, indices, relname, description) =
@@ -259,13 +259,13 @@ pub async fn handle_describe_fragments(
         let mut binder = Binder::new_for_system(&session);
 
         Binder::validate_cross_db_reference(&session.database(), &object_name)?;
-        let not_found_err = CatalogError::NotFound("stream job", object_name.to_string());
+        let not_found_err = CatalogError::not_found("stream job", object_name.to_string());
 
         if let Ok(relation) = binder.bind_catalog_relation_by_object_name(&object_name, true) {
             match relation {
                 Relation::Source(s) => {
                     if s.is_shared() {
-                        s.catalog.id.into()
+                        s.catalog.id.as_share_source_job_id()
                     } else {
                         bail!(ErrorCode::NotSupported(
                             "non shared source has no fragments to describe".to_owned(),
@@ -292,7 +292,7 @@ pub async fn handle_describe_fragments(
                 }
             }
         } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
-            sink.sink_catalog.id.sink_id.into()
+            sink.sink_catalog.id.as_job_id()
         } else {
             return Err(not_found_err.into());
         }
@@ -379,7 +379,7 @@ pub async fn handle_describe_fragment(
     let distribution = &meta_client
         .get_fragment_by_id(fragment_id)
         .await?
-        .ok_or_else(|| CatalogError::NotFound("fragment", fragment_id.to_string()))?;
+        .ok_or_else(|| CatalogError::not_found("fragment", fragment_id.to_string()))?;
     let res: PgResponse<super::PgResponseStream> = generate_enhanced_fragment_string(distribution)?;
     Ok(res)
 }

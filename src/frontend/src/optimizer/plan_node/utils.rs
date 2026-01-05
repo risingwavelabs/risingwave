@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -216,6 +216,7 @@ impl TableCatalogBuilder {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None, // TODO: fill this field
+            clean_watermark_indices: vec![],   // TODO: fill this field
             refreshable: false,                // Internal tables are not refreshable
             vector_index_info: None,
             cdc_table_type: None,

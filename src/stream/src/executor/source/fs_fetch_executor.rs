@@ -19,8 +19,9 @@ use either::Either;
 use futures::TryStreamExt;
 use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::id::SourceId;
 use risingwave_common::metrics::GLOBAL_ERROR_METRICS;
 use risingwave_common::types::ScalarRef;
 use risingwave_connector::source::filesystem::OpendalFsSplit;
@@ -195,7 +196,7 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
     fn build_source_ctx(
         &self,
         source_desc: &SourceDesc,
-        source_id: TableId,
+        source_id: SourceId,
         source_name: &str,
     ) -> SourceContext {
         SourceContext::new(
@@ -291,9 +292,9 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
-                                            Mutation::Throttle(actor_to_apply) => {
-                                                if let Some(new_rate_limit) =
-                                                    actor_to_apply.get(&self.actor_ctx.id)
+                                            Mutation::Throttle(fragment_to_apply) => {
+                                                if let Some(new_rate_limit) = fragment_to_apply
+                                                    .get(&self.actor_ctx.fragment_id)
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     tracing::info!(

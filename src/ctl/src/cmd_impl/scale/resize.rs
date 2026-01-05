@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,6 +59,7 @@ pub async fn update_schedulability(
         let worker_id = worker
             .parse::<u32>()
             .ok()
+            .map(Into::into)
             .or_else(|| worker_index_by_host.get(&worker).cloned());
 
         if let Some(worker_id) = worker_id

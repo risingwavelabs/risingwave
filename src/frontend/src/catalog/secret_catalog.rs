@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,7 @@ pub struct SecretCatalog {
 impl From<&PbSecret> for SecretCatalog {
     fn from(value: &PbSecret) -> Self {
         Self {
-            id: SecretId::new(value.id),
+            id: value.id,
             database_id: value.database_id,
             owner: value.owner,
             name: value.name.clone(),

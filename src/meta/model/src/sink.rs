@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -121,7 +121,7 @@ impl From<PbSink> for ActiveModel {
         let sink_type = pb_sink.sink_type();
 
         Self {
-            sink_id: Set(pb_sink.id as _),
+            sink_id: Set(pb_sink.id),
             name: Set(pb_sink.name),
             columns: Set(pb_sink.columns.into()),
             plan_pk: Set(pb_sink.plan_pk.into()),
@@ -130,7 +130,7 @@ impl From<PbSink> for ActiveModel {
             sink_type: Set(sink_type.into()),
             properties: Set(pb_sink.properties.into()),
             definition: Set(pb_sink.definition),
-            connection_id: Set(pb_sink.connection_id.map(|x| x as _)),
+            connection_id: Set(pb_sink.connection_id),
             db_name: Set(pb_sink.db_name),
             sink_from_name: Set(pb_sink.sink_from_name),
             sink_format_desc: Set(pb_sink.format_desc.as_ref().map(|x| x.into())),

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1428,19 +1428,14 @@ impl ToStream for LogicalAgg {
         // Use Dedup operator, if possible.
         if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()
         {
-            let input = if self.group_key().len() != self.input().schema().len() {
-                let cols = &self.group_key().to_vec();
-                LogicalProject::with_mapping(
-                    self.input(),
-                    ColIndexMapping::with_remaining_columns(cols, self.input().schema().len()),
-                )
-                .into()
-            } else {
-                self.input()
-            };
+            let group_key = self.group_key().to_vec();
             let input_schema_len = input.schema().len();
-            let logical_dedup = LogicalDedup::new(input, (0..input_schema_len).collect());
-            return logical_dedup.to_stream(ctx);
+            let dedup: PlanRef = LogicalDedup::new(input, group_key.clone()).into();
+            let project = LogicalProject::with_mapping(
+                dedup,
+                ColIndexMapping::with_remaining_columns(&group_key, input_schema_len),
+            );
+            return project.to_stream(ctx);
         }
 
         if self.agg_calls().iter().any(|call| {

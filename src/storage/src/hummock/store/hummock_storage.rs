@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -901,6 +901,7 @@ impl StateStore for HummockStorage {
             self.context.sstable_store.clone(),
             self.object_id_manager.clone(),
             self.hummock_event_sender.clone(),
+            self.hummock_version_reader.stats().clone(),
             self.context.storage_opts.clone(),
         )
     }

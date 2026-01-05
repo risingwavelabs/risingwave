@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,10 +21,10 @@ use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use moka::future::Cache as MokaCache;
+use prost_011::Message as _;
 use pulsar::consumer::{InitialPosition, Message};
 use pulsar::message::proto::MessageIdData;
 use pulsar::{Consumer, ConsumerBuilder, ConsumerOptions, Pulsar, SubType, TokioExecutor};
-use pulsar_prost::Message as PulsarProstMessage;
 use risingwave_common::{bail, ensure};
 use thiserror_ext::AsReport;
 
@@ -183,42 +183,31 @@ impl SplitReader for PulsarBrokerReader {
                 source_ctx.actor_id
             ));
 
-        if let Some(delay) = props.subscription_unacked_resend_delay {
-            builder = builder.with_unacked_message_resend_delay(Some(delay));
-        }
-
         let mut already_read_offset = None;
 
-        let builder = match split.start_offset.clone() {
+        let mut consumer_options = match split.start_offset.clone() {
             PulsarEnumeratorOffset::Earliest => {
-                if topic.starts_with("non-persistent://") {
+                let initial_position = if topic.starts_with("non-persistent://") {
                     tracing::warn!(
                         "Earliest offset is not supported for non-persistent topic, use Latest instead"
                     );
-                    builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
-                    )
+                    InitialPosition::Latest
                 } else {
-                    builder.with_options(
-                        ConsumerOptions::default()
-                            .with_initial_position(InitialPosition::Earliest)
-                            .durable(false),
-                    )
-                }
-            }
-            PulsarEnumeratorOffset::Latest => builder.with_options(
+                    InitialPosition::Earliest
+                };
                 ConsumerOptions::default()
-                    .with_initial_position(InitialPosition::Latest)
-                    .durable(false),
-            ),
+                    .with_initial_position(initial_position)
+                    .durable(false)
+            }
+            PulsarEnumeratorOffset::Latest => ConsumerOptions::default()
+                .with_initial_position(InitialPosition::Latest)
+                .durable(false),
             PulsarEnumeratorOffset::MessageId(m) => {
                 if topic.starts_with("non-persistent://") {
                     tracing::warn!(
                         "MessageId offset is not supported for non-persistent topic, use Latest instead"
                     );
-                    builder.with_options(
-                        ConsumerOptions::default().with_initial_position(InitialPosition::Latest),
-                    )
+                    ConsumerOptions::default().with_initial_position(InitialPosition::Latest)
                 } else {
                     let start_message_id = parse_message_id(m.as_str())?;
                     already_read_offset = Some(PulsarFilterOffset {
@@ -226,16 +215,24 @@ impl SplitReader for PulsarBrokerReader {
                         entry_id: start_message_id.entry_id,
                         batch_index: start_message_id.batch_index,
                     });
-                    builder.with_options(pulsar::ConsumerOptions {
+                    ConsumerOptions {
                         durable: Some(false),
                         start_message_id: Some(start_message_id),
                         ..Default::default()
-                    })
+                    }
                 }
             }
-
-            PulsarEnumeratorOffset::Timestamp(_) => builder,
+            PulsarEnumeratorOffset::Timestamp(_) => ConsumerOptions::default(),
         };
+
+        // Apply read_compacted option to all consumer options
+        consumer_options.read_compacted = props.consumer_options.read_compacted;
+
+        builder = builder.with_options(consumer_options);
+
+        if let Some(delay) = props.subscription_unacked_resend_delay {
+            builder = builder.with_unacked_message_resend_delay(Some(delay));
+        }
 
         let consumer: Consumer<Vec<u8>, _> = builder.build().await?;
         if let PulsarEnumeratorOffset::Timestamp(_ts) = split.start_offset {
@@ -315,7 +312,7 @@ impl PulsarBrokerReader {
 
     async fn into_stream(self) -> PulsarConsumeStream {
         let (ack_tx, ack_rx) = tokio::sync::mpsc::unbounded_channel();
-        let channel_entry = build_pulsar_ack_channel_id(&self.source_ctx.source_id, &self.split_id);
+        let channel_entry = build_pulsar_ack_channel_id(self.source_ctx.source_id, &self.split_id);
         PULSAR_ACK_CHANNEL
             .entry(channel_entry)
             .and_upsert_with(|_| std::future::ready(ack_tx))
@@ -354,7 +351,7 @@ impl PulsarConsumeStream {
         tracing::debug!(
             "ack message id: {:?} from channel {}",
             message_id,
-            build_pulsar_ack_channel_id(&self.source_ctx.source_id, &self.split_id)
+            build_pulsar_ack_channel_id(self.source_ctx.source_id, &self.split_id)
         );
         #[cfg(not(madsim))]
         {
@@ -376,7 +373,7 @@ impl PulsarConsumeStream {
 }
 
 impl futures::Stream for PulsarConsumeStream {
-    type Item = Result<pulsar::consumer::Message<Vec<u8>>, pulsar::error::Error>;
+    type Item = Result<Message<Vec<u8>>, pulsar::error::Error>;
 
     fn poll_next(
         mut self: std::pin::Pin<&mut Self>,

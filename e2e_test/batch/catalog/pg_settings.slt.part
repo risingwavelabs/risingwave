@@ -38,6 +38,7 @@ user create_compaction_group_for_mv
 user datestyle
 user disable_purify_definition
 user dml_rate_limit
+user enable_datafusion_engine
 user enable_index_selection
 user enable_join_ordering
 user enable_locality_backfill
@@ -75,6 +76,7 @@ user streaming_join_encoding
 user streaming_max_parallelism
 user streaming_over_window_cache_policy
 user streaming_parallelism
+user streaming_parallelism_for_backfill
 user streaming_parallelism_for_index
 user streaming_parallelism_for_materialized_view
 user streaming_parallelism_for_sink
@@ -91,6 +93,7 @@ user synchronize_seqscans
 user timezone
 user transaction_isolation
 user unsafe_enable_storage_retention_for_non_append_only_tables
+user upsert_dml
 user visibility_mode
 
 query TT

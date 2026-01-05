@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use core::fmt::Debug;
 use std::collections::BTreeMap;
 use std::sync::Arc;
@@ -280,7 +281,7 @@ impl MqttSinkWriter {
 
         let (client, mut eventloop) = config
             .common
-            .build_client(actor_id, sink_id.sink_id)
+            .build_client(actor_id, sink_id.as_raw_id())
             .map_err(|e| SinkError::Mqtt(anyhow!(e)))?;
 
         let stopped = Arc::new(AtomicBool::new(false));

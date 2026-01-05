@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,18 +38,13 @@ pub(crate) mod dummy {
 
     use anyhow::anyhow;
     use phf::{Set, phf_set};
-    use risingwave_common::catalog::Field;
-    use risingwave_pb::connector_service::SinkMetadata;
-    use sea_orm::DatabaseConnection;
     use tokio::sync::mpsc::UnboundedSender;
 
     use crate::connector_common::IcebergSinkCompactionUpdate;
     use crate::enforce_secret::EnforceSecret;
     use crate::error::ConnectorResult;
     use crate::sink::prelude::*;
-    use crate::sink::{
-        LogSinker, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkLogReader,
-    };
+    use crate::sink::{LogSinker, SinkCommitCoordinator, SinkLogReader};
 
     #[allow(dead_code)]
     pub fn err_feature_not_enabled(sink_name: &'static str) -> SinkError {
@@ -65,24 +60,7 @@ pub(crate) mod dummy {
         const SINK_NAME: &'static str;
     }
 
-    #[allow(dead_code)]
-    pub struct FeatureNotEnabledCoordinator<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
-    #[async_trait::async_trait]
-    impl<S: FeatureNotEnabledSinkMarker> SinkCommitCoordinator for FeatureNotEnabledCoordinator<S> {
-        async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-            Err(err_feature_not_enabled(S::SINK_NAME))
-        }
-
-        async fn commit(
-            &mut self,
-            _epoch: u64,
-            _metadata: Vec<SinkMetadata>,
-            _add_columns: Option<Vec<Field>>,
-        ) -> Result<()> {
-            Err(err_feature_not_enabled(S::SINK_NAME))
-        }
-    }
-
+    /// A dummy coordinator that always returns an error.
     #[allow(dead_code)]
     pub struct FeatureNotEnabledLogSinker<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
     #[async_trait::async_trait]
@@ -92,6 +70,7 @@ pub(crate) mod dummy {
         }
     }
 
+    /// A dummy sink that always returns an error.
     #[allow(dead_code)]
     pub struct FeatureNotEnabledSink<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
 
@@ -124,7 +103,6 @@ pub(crate) mod dummy {
     }
 
     impl<S: FeatureNotEnabledSinkMarker> Sink for FeatureNotEnabledSink<S> {
-        type Coordinator = FeatureNotEnabledCoordinator<S>;
         type LogSinker = FeatureNotEnabledLogSinker<S>;
 
         const SINK_NAME: &'static str = S::SINK_NAME;
@@ -147,10 +125,39 @@ pub(crate) mod dummy {
 
         async fn new_coordinator(
             &self,
-            _db: DatabaseConnection,
             _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-        ) -> Result<Self::Coordinator> {
+        ) -> Result<SinkCommitCoordinator> {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }
     }
 }
+
+/// Define a sink module that is gated by a feature.
+///
+/// This is to allow some heavy or unpopular sink implementations (and their dependencies) to be disabled
+/// at compile time, in order to decrease compilation time and binary size.
+macro_rules! feature_gated_sink_mod {
+    ($mod_name:ident, $sink_name:literal) => {
+        crate::sink::utils::feature_gated_sink_mod!($mod_name, $mod_name, $sink_name);
+    };
+    ($mod_name:ident, $struct_prefix:ident, $sink_name:literal) => {
+        paste::paste! {
+        #[cfg(feature = "sink-" $sink_name)]
+        pub mod $mod_name;
+        #[cfg(not(feature = "sink-" $sink_name))]
+        pub mod $mod_name {
+            use crate::sink::utils::dummy::{FeatureNotEnabledSinkMarker, FeatureNotEnabledSink};
+            pub struct [<$struct_prefix:camel NotEnabled>];
+            pub const [<$sink_name:upper _SINK>]: &'static str = $sink_name;
+            impl FeatureNotEnabledSinkMarker for [<$struct_prefix:camel NotEnabled>] {
+                const SINK_NAME: &'static str = [<$sink_name:upper _SINK>];
+            }
+            #[doc = "A dummy sink that always returns an error, as the feature `sink-" $sink_name "` is currently not enabled."]
+            pub type [<$struct_prefix:camel Sink>] = FeatureNotEnabledSink<[<$struct_prefix:camel NotEnabled>]>;
+            #[doc = "A dummy sink config that is empty, as the feature `sink-" $sink_name "` is currently not enabled."]
+            pub struct [<$struct_prefix:camel Config>];
+        }
+        }
+    };
+}
+pub(super) use feature_gated_sink_mod;

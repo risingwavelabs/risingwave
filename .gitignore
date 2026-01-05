@@ -26,6 +26,7 @@ venv/
 go/bin/
 
 ## Rust - Compilation Artifacts
+.cargo/
 src/**/target
 src/**/target_tarpaulin
 target/
@@ -91,3 +92,6 @@ e2e_test/iceberg/metastore_db
 # Development Tools
 .direnv/
 book/
+
+# Build caches
+.m2/

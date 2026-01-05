@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -198,7 +198,7 @@ impl Schema {
         }
 
         for (a, b) in self.fields.iter().zip_eq_fast(other.fields.iter()) {
-            if a.data_type != b.data_type {
+            if !a.data_type.equals_datatype(&b.data_type) {
                 return false;
             }
         }

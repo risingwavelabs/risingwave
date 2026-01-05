@@ -15,15 +15,7 @@
 /// on this module, as it will change without notice.
 // Integration tests (i.e. everything under `tests/`) import this
 // via `tests/test_utils/executor`.
-
-#[cfg(not(feature = "std"))]
-use alloc::{
-    boxed::Box,
-    string::{String, ToString},
-    vec,
-    vec::Vec,
-};
-use core::fmt::Debug;
+use std::fmt::Debug;
 
 use crate::ast::*;
 use crate::parser::{Parser, ParserError};

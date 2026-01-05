@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -88,8 +88,8 @@ pub(crate) fn derive_pk(
     // Add distribution key columns to stream key
     let mut stream_key = match user_distributed_by {
         RequiredDist::PhysicalDist(distribution) => distribution.dist_column_indices().to_vec(),
-        RequiredDist::ShardByKey(_) => {
-            unreachable!("Right now, it is not possible to have ShardByKey here")
+        RequiredDist::ShardByKey(_) | RequiredDist::ShardByExactKey(_) => {
+            unreachable!("Right now, it is not possible to have ShardByKey/ShardByExactKey here")
         }
         RequiredDist::AnyShard | RequiredDist::Any => vec![],
     };

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,17 +18,16 @@ use std::collections::{HashMap, HashSet};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, Schema,
-    StreamJobStatus, TableDesc, TableId, TableVersionId,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, ICEBERG_SINK_PREFIX,
+    ICEBERG_SOURCE_PREFIX, Schema, StreamJobStatus, TableDesc, TableId, TableVersionId,
 };
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_pb::catalog::table::{
-    CdcTableType as PbCdcTableType, OptionalAssociatedSourceId, PbEngine, PbTableType,
-    PbTableVersion,
+    CdcTableType as PbCdcTableType, PbEngine, PbTableType, PbTableVersion,
 };
 use risingwave_pb::catalog::{
     PbCreateType, PbStreamJobStatus, PbTable, PbVectorIndexInfo, PbWebhookSourceInfo,
@@ -88,7 +87,7 @@ pub struct TableCatalog {
 
     pub database_id: DatabaseId,
 
-    pub associated_source_id: Option<TableId>, // TODO: use SourceId
+    pub associated_source_id: Option<SourceId>, // TODO: use SourceId
 
     pub name: String,
 
@@ -203,6 +202,11 @@ pub struct TableCatalog {
 
     pub clean_watermark_index_in_pk: Option<usize>,
 
+    /// Indices of watermark columns in all columns that should be used for state cleaning.
+    /// This replaces `clean_watermark_index_in_pk` but is kept for backward compatibility.
+    /// When set, this takes precedence over `clean_watermark_index_in_pk`.
+    pub clean_watermark_indices: Vec<usize>,
+
     /// Whether the table supports manual refresh operations
     pub refreshable: bool,
 
@@ -210,9 +214,6 @@ pub struct TableCatalog {
 
     pub cdc_table_type: Option<ExternalCdcTableType>,
 }
-
-pub const ICEBERG_SOURCE_PREFIX: &str = "__iceberg_source_";
-pub const ICEBERG_SINK_PREFIX: &str = "__iceberg_sink_";
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]
@@ -408,7 +409,7 @@ impl TableCatalog {
 
     /// Get the table catalog's associated source id.
     #[must_use]
-    pub fn associated_source_id(&self) -> Option<TableId> {
+    pub fn associated_source_id(&self) -> Option<SourceId> {
         self.associated_source_id
     }
 
@@ -578,9 +579,7 @@ impl TableCatalog {
                 .collect(),
             pk: self.pk.iter().map(|o| o.to_protobuf()).collect(),
             stream_key: self.stream_key().iter().map(|x| *x as _).collect(),
-            optional_associated_source_id: self.associated_source_id.map(|source_id| {
-                OptionalAssociatedSourceId::AssociatedSourceId(source_id.as_raw_id())
-            }),
+            optional_associated_source_id: self.associated_source_id.map(Into::into),
             table_type: self.table_type.to_prost() as i32,
             distribution_key: self
                 .distribution_key
@@ -622,14 +621,19 @@ impl TableCatalog {
             webhook_info: self.webhook_info.clone(),
             job_id: self.job_id,
             engine: Some(self.engine.to_protobuf().into()),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
+            clean_watermark_indices: self
+                .clean_watermark_indices
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
             refreshable: self.refreshable,
             vector_index_info: self.vector_index_info,
             cdc_table_type: self
                 .cdc_table_type
                 .clone()
                 .map(|t| PbCdcTableType::from(t) as i32),
-            refresh_state: Some(risingwave_pb::catalog::RefreshState::Idle as i32),
         }
     }
 
@@ -763,9 +767,7 @@ impl From<PbTable> for TableCatalog {
             .get_stream_job_status()
             .unwrap_or(PbStreamJobStatus::Created);
         let create_type = tb.get_create_type().unwrap_or(PbCreateType::Foreground);
-        let associated_source_id = tb.optional_associated_source_id.map(|id| match id {
-            OptionalAssociatedSourceId::AssociatedSourceId(id) => id,
-        });
+        let associated_source_id = tb.optional_associated_source_id.map(Into::into);
         let name = tb.name.clone();
 
         let vnode_count = tb.vnode_count_inner();
@@ -811,7 +813,7 @@ impl From<PbTable> for TableCatalog {
             id,
             schema_id: tb.schema_id,
             database_id: tb.database_id,
-            associated_source_id: associated_source_id.map(Into::into),
+            associated_source_id,
             name,
             pk,
             columns,
@@ -854,7 +856,13 @@ impl From<PbTable> for TableCatalog {
             webhook_info: tb.webhook_info,
             job_id: tb.job_id,
             engine,
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
+            clean_watermark_indices: tb
+                .clean_watermark_indices
+                .iter()
+                .map(|&x| x as usize)
+                .collect(),
 
             refreshable: tb.refreshable,
             vector_index_info: tb.vector_index_info,
@@ -917,8 +925,7 @@ mod tests {
             pk: vec![ColumnOrder::new(0, OrderType::ascending()).to_protobuf()],
             stream_key: vec![0],
             distribution_key: vec![0],
-            optional_associated_source_id: OptionalAssociatedSourceId::AssociatedSourceId(233)
-                .into(),
+            optional_associated_source_id: Some(SourceId::new(233).into()),
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
             retention_seconds: Some(300),
@@ -953,12 +960,13 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
 
             refreshable: false,
             vector_index_info: None,
             cdc_table_type: None,
-            refresh_state: Some(risingwave_pb::catalog::RefreshState::Idle as i32),
         }
         .into();
 
@@ -968,7 +976,7 @@ mod tests {
                 id: TableId::new(0),
                 schema_id: 0.into(),
                 database_id: 0.into(),
-                associated_source_id: Some(TableId::new(233)),
+                associated_source_id: Some(SourceId::new(233)),
                 name: "test".to_owned(),
                 table_type: TableType::Table,
                 columns: vec![
@@ -1026,6 +1034,7 @@ mod tests {
                 job_id: None,
                 engine: Engine::Hummock,
                 clean_watermark_index_in_pk: None,
+                clean_watermark_indices: vec![],
 
                 refreshable: false,
                 vector_index_info: None,

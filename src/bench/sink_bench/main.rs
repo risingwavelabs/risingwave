@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
@@ -63,7 +64,6 @@ use risingwave_connector::source::{
 };
 use risingwave_stream::executor::test_utils::prelude::ColumnDesc;
 use risingwave_stream::executor::{Barrier, Message, MessageStreamItem, StreamExecutorError};
-use sea_orm::DatabaseConnection;
 use serde::{Deserialize, Deserializer};
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
@@ -110,7 +110,7 @@ impl LogReader for MockRangeLogReader {
                                 is_checkpoint: true,
                                 new_vnode_bitmap: None,
                                 is_stop: false,
-                                add_columns: None,
+                                schema_change: None,
                             },
                         ))
                     }
@@ -380,17 +380,10 @@ async fn consume_log_stream<S: Sink>(
     sink: S,
     mut log_reader: MockRangeLogReader,
     mut sink_writer_param: SinkWriterParam,
-) -> Result<(), String>
-where
-    <S as risingwave_connector::sink::Sink>::Coordinator: std::marker::Send,
-    <S as risingwave_connector::sink::Sink>::Coordinator: 'static,
-{
-    if let Ok(coordinator) = sink
-        .new_coordinator(DatabaseConnection::Disconnected, None)
-        .await
-    {
+) -> Result<(), String> {
+    if let Ok(coordinator) = sink.new_coordinator(None).await {
         sink_writer_param.meta_client = Some(SinkMetaClient::MockMetaClient(MockMetaClient::new(
-            Box::new(coordinator),
+            coordinator,
         )));
         sink_writer_param.vnode_bitmap = Some(Bitmap::ones(1));
     }

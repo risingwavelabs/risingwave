@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,29 +20,39 @@ use crate::error::Result;
 use crate::optimizer::plan_node::{LogicalDelete, LogicalProject, generic};
 use crate::optimizer::property::{Order, RequiredDist};
 use crate::optimizer::{LogicalPlanRef as PlanRef, LogicalPlanRoot, PlanRoot};
+use crate::utils::ColIndexMapping;
 
 impl Planner {
     pub(super) fn plan_delete(&mut self, delete: BoundDelete) -> Result<LogicalPlanRoot> {
+        let table_catalog = &delete.table.table_catalog;
+        let dml_output_indices: Vec<usize> = table_catalog
+            .columns()
+            .iter()
+            .enumerate()
+            .filter_map(|(i, c)| c.can_dml().then_some(i))
+            .collect();
+        let table_to_dml = ColIndexMapping::with_remaining_columns(
+            &dml_output_indices,
+            table_catalog.columns().len(),
+        );
+        let pk_indices: Vec<usize> = table_catalog
+            .pk()
+            .iter()
+            .map(|order| {
+                table_to_dml
+                    .try_map(order.column_index)
+                    .expect("pk column should be part of dml input schema")
+            })
+            .collect();
+
         let scan = self.plan_base_table(&delete.table)?;
         let input = if let Some(expr) = delete.selection {
             self.plan_where(scan, expr)?
         } else {
             scan
         };
-        let input = if delete.table.table_catalog.has_generated_column()
-            || delete.table.table_catalog.has_rw_timestamp_column()
-        {
-            LogicalProject::with_out_col_idx(
-                input,
-                delete
-                    .table
-                    .table_catalog
-                    .columns()
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, c)| (c.can_dml()).then_some(i)),
-            )
-            .into()
+        let input = if dml_output_indices.len() != table_catalog.columns().len() {
+            LogicalProject::with_out_col_idx(input, dml_output_indices.iter().copied()).into()
         } else {
             input
         };
@@ -52,6 +62,7 @@ impl Planner {
             delete.table_name.clone(),
             delete.table_id,
             delete.table_version_id,
+            pk_indices,
             returning,
         ))
         .into();

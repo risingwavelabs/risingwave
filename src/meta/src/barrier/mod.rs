@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,7 +50,6 @@ mod worker;
 
 pub use backfill_order_control::{BackfillNode, BackfillOrderState};
 use risingwave_common::id::JobId;
-use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -60,7 +59,9 @@ pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
+use crate::barrier::cdc_progress::CdcProgress;
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::stream::cdc::CdcTableSnapshotSplits;
 
 /// The reason why the cluster is recovering.
 enum RecoveryReason {
@@ -105,6 +106,7 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
 
 pub(crate) enum BarrierManagerRequest {
     GetDdlProgress(Sender<HashMap<JobId, DdlProgress>>),
+    GetCdcProgress(Sender<HashMap<JobId, CdcProgress>>),
     AdhocRecovery(Sender<()>),
     UpdateDatabaseBarrier {
         database_id: DatabaseId,
@@ -129,7 +131,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     background_jobs: HashMap<JobId, String>,
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+    cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {
@@ -229,7 +231,7 @@ struct DatabaseRuntimeInfoSnapshot {
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     background_jobs: HashMap<JobId, String>,
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+    cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
 }
 
 impl DatabaseRuntimeInfoSnapshot {

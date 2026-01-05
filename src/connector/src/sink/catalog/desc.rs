@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -128,7 +128,7 @@ impl SinkDesc {
 
     pub fn to_proto(&self) -> PbSinkDesc {
         PbSinkDesc {
-            id: self.id.sink_id,
+            id: self.id,
             name: self.name.clone(),
             definition: self.definition.clone(),
             column_catalogs: self

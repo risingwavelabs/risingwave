@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -313,6 +313,12 @@ impl<C: ConventionMarker> Layer for PlanRef<C> {
 
 #[derive(Clone, Debug, Copy, Serialize, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct PlanNodeId(pub i32);
+
+impl PlanNodeId {
+    pub fn to_stream_node_operator_id(self) -> StreamNodeLocalOperatorId {
+        StreamNodeLocalOperatorId::new(self.0 as _)
+    }
+}
 
 /// A more sophisticated `Endo` taking into account of the DAG structure of `PlanRef`.
 /// In addition to `Endo`, one have to specify the `cached` function
@@ -892,7 +898,7 @@ impl dyn StreamPlanNode {
                 input,
                 identity: self.explain_myself_to_string(),
                 node_body: node,
-                operator_id: self.id().0 as _,
+                operator_id: self.id().to_stream_node_operator_id(),
                 stream_key: self
                     .stream_key()
                     .unwrap_or_default()
@@ -1087,10 +1093,12 @@ mod logical_postgres_query;
 mod batch_vector_search;
 mod logical_mysql_query;
 mod logical_vector_search;
+mod logical_vector_search_lookup_join;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
 mod stream_upstream_sink_union;
+mod stream_vector_index_lookup_join;
 mod stream_vector_index_write;
 pub mod utils;
 
@@ -1169,6 +1177,8 @@ pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use logical_vector_search::LogicalVectorSearch;
+pub use logical_vector_search_lookup_join::LogicalVectorSearchLookupJoin;
+use risingwave_pb::id::StreamNodeLocalOperatorId;
 pub use stream_asof_join::StreamAsOfJoin;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_changelog::StreamChangeLog;
@@ -1213,6 +1223,7 @@ pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 pub use stream_upstream_sink_union::StreamUpstreamSinkUnion;
 pub use stream_values::StreamValues;
+pub use stream_vector_index_lookup_join::StreamVectorIndexLookupJoin;
 pub use stream_vector_index_write::StreamVectorIndexWrite;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
@@ -1281,6 +1292,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, VectorSearch }
             , { Logical, GetChannelDeltaStats }
             , { Logical, LocalityProvider }
+            , { Logical, VectorSearchLookupJoin }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1357,6 +1369,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, SyncLogStore }
             , { Stream, MaterializedExprs }
             , { Stream, VectorIndexWrite }
+            , { Stream, VectorIndexLookupJoin }
             , { Stream, UpstreamSinkUnion }
             , { Stream, LocalityProvider }
             , { Stream, EowcGapFill }

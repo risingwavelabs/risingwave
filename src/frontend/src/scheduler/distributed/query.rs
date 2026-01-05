@@ -1,6 +1,6 @@
-// Copyright 2025 RisingWave Labs
-// Licensed under the Apache License, Version 2.0 (the "License");
+// Copyright 2022 RisingWave Labs
 //
+// Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
@@ -591,6 +591,7 @@ pub(crate) mod tests {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
             vector_index_info: None,
             cdc_table_type: None,
         };
@@ -658,7 +659,7 @@ pub(crate) mod tests {
         .into();
 
         let worker1 = WorkerNode {
-            id: 0,
+            id: 0.into(),
             r#type: WorkerType::ComputeNode as i32,
             host: Some(HostAddress {
                 host: "127.0.0.1".to_owned(),
@@ -676,7 +677,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let worker2 = WorkerNode {
-            id: 1,
+            id: 1.into(),
             r#type: WorkerType::ComputeNode as i32,
             host: Some(HostAddress {
                 host: "127.0.0.1".to_owned(),
@@ -694,7 +695,7 @@ pub(crate) mod tests {
             ..Default::default()
         };
         let worker3 = WorkerNode {
-            id: 2,
+            id: 2.into(),
             r#type: WorkerType::ComputeNode as i32,
             host: Some(HostAddress {
                 host: "127.0.0.1".to_owned(),
@@ -714,8 +715,10 @@ pub(crate) mod tests {
         let workers = vec![worker1, worker2, worker3];
         let worker_node_manager = Arc::new(WorkerNodeManager::mock(workers));
         let worker_node_selector = WorkerNodeSelector::new(worker_node_manager.clone(), false);
-        let mapping =
-            WorkerSlotMapping::new_uniform(std::iter::once(WorkerSlotId::new(0, 0)), vnode_count);
+        let mapping = WorkerSlotMapping::new_uniform(
+            std::iter::once(WorkerSlotId::new(0.into(), 0)),
+            vnode_count,
+        );
         worker_node_manager.insert_streaming_fragment_mapping(0.into(), mapping.clone());
         worker_node_manager
             .set_serving_fragment_mapping(vec![(0.into(), mapping)].into_iter().collect());
@@ -727,7 +730,6 @@ pub(crate) mod tests {
             worker_node_selector,
             catalog_reader,
             None,
-            "UTC".to_owned(),
             batch_exchange_node.clone(),
         )
         .unwrap();

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -89,7 +89,7 @@ impl StructType {
     }
 
     /// Creates a struct type with unnamed fields. The names will be assigned `f1`, `f2`, etc.
-    pub fn unnamed(fields: Vec<DataType>) -> Self {
+    pub fn unnamed(fields: impl IntoIterator<Item = DataType>) -> Self {
         let fields = fields
             .into_iter()
             .enumerate()
@@ -101,6 +101,11 @@ impl StructType {
             field_ids: None,
             is_unnamed: true,
         }))
+    }
+
+    /// Creates a struct type for `ROW` expression with unnamed fields.
+    pub fn row_expr_type(fields: impl IntoIterator<Item = DataType>) -> Self {
+        Self::unnamed(fields)
     }
 
     /// Attaches given field ids to the struct type.

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 use std::collections::{HashMap, HashSet};
 
+use chrono::DateTime;
 use itertools::Itertools;
-use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
@@ -24,14 +24,14 @@ use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
 use risingwave_meta::controller::utils::FragmentDesc;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta::model::ActorId;
-use risingwave_meta::stream::{SourceManagerRunningInfo, ThrottleConfig};
+use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{FragmentId, ObjectId, SinkId, SourceId, StreamingParallelism};
+use risingwave_meta_model::{ConnectionId, FragmentId, StreamingParallelism};
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
 use risingwave_pb::meta::list_actor_splits_response::FragmentType;
 use risingwave_pb::meta::list_cdc_progress_response::PbCdcProgress;
+use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_table_fragments_response::{
     ActorInfo, FragmentInfo, TableFragmentInfo,
 };
@@ -55,6 +55,7 @@ pub struct StreamServiceImpl {
     barrier_manager: BarrierManagerRef,
     stream_manager: GlobalStreamManagerRef,
     metadata_manager: MetadataManager,
+    refresh_manager: GlobalRefreshManagerRef,
 }
 
 impl StreamServiceImpl {
@@ -64,6 +65,7 @@ impl StreamServiceImpl {
         barrier_manager: BarrierManagerRef,
         stream_manager: GlobalStreamManagerRef,
         metadata_manager: MetadataManager,
+        refresh_manager: GlobalRefreshManagerRef,
     ) -> Self {
         StreamServiceImpl {
             env,
@@ -71,6 +73,7 @@ impl StreamServiceImpl {
             barrier_manager,
             stream_manager,
             metadata_manager,
+            refresh_manager,
         }
     }
 }
@@ -85,6 +88,30 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(FlushResponse {
             status: None,
             hummock_version_id: version_id.to_u64(),
+        }))
+    }
+
+    async fn list_refresh_table_states(
+        &self,
+        _request: Request<ListRefreshTableStatesRequest>,
+    ) -> TonicResponse<ListRefreshTableStatesResponse> {
+        let refresh_jobs = self.metadata_manager.list_refresh_jobs().await?;
+        let refresh_table_states = refresh_jobs
+            .into_iter()
+            .map(|job| RefreshTableState {
+                table_id: job.table_id,
+                current_status: job.current_status.to_string(),
+                last_trigger_time: job
+                    .last_trigger_time
+                    .map(|time| DateTime::from_timestamp_millis(time).unwrap().to_string()),
+                trigger_interval_secs: job.trigger_interval_secs,
+                last_success_time: job
+                    .last_success_time
+                    .map(|time| DateTime::from_timestamp_millis(time).unwrap().to_string()),
+            })
+            .collect();
+        Ok(Response::new(ListRefreshTableStatesResponse {
+            states: refresh_table_states,
         }))
     }
 
@@ -112,72 +139,88 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> Result<Response<ApplyThrottleResponse>, Status> {
         let request = request.into_inner();
 
-        let actor_to_apply = match request.kind() {
+        let raw_object_id: u32;
+        let jobs: HashSet<JobId>;
+        let fragments: HashSet<FragmentId>;
+
+        match request.kind() {
             ThrottleTarget::Source | ThrottleTarget::TableWithSource => {
-                self.metadata_manager
-                    .update_source_rate_limit_by_source_id(request.id as SourceId, request.rate)
-                    .await?
+                (jobs, fragments) = self
+                    .metadata_manager
+                    .update_source_rate_limit_by_source_id(request.id.into(), request.rate)
+                    .await?;
+                raw_object_id = request.id;
             }
             ThrottleTarget::Mv => {
-                self.metadata_manager
-                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
-                    .await?
+                fragments = self
+                    .metadata_manager
+                    .update_backfill_rate_limit_by_job_id(request.id.into(), request.rate)
+                    .await?;
+                jobs = [request.id.into()].into_iter().collect();
+                raw_object_id = request.id;
             }
             ThrottleTarget::CdcTable => {
-                self.metadata_manager
-                    .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
-                    .await?
+                fragments = self
+                    .metadata_manager
+                    .update_backfill_rate_limit_by_job_id(request.id.into(), request.rate)
+                    .await?;
+                jobs = [request.id.into()].into_iter().collect();
+                raw_object_id = request.id;
             }
             ThrottleTarget::TableDml => {
-                self.metadata_manager
-                    .update_dml_rate_limit_by_job_id(JobId::from(request.id), request.rate)
-                    .await?
+                fragments = self
+                    .metadata_manager
+                    .update_dml_rate_limit_by_job_id(request.id.into(), request.rate)
+                    .await?;
+                jobs = [request.id.into()].into_iter().collect();
+                raw_object_id = request.id;
             }
             ThrottleTarget::Sink => {
-                self.metadata_manager
-                    .update_sink_rate_limit_by_sink_id(request.id as SinkId, request.rate)
-                    .await?
+                fragments = self
+                    .metadata_manager
+                    .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
+                    .await?;
+                jobs = [request.id.into()].into_iter().collect();
+                raw_object_id = request.id;
             }
             ThrottleTarget::Fragment => {
                 self.metadata_manager
                     .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
-                    .await?
+                    .await?;
+                let fragment_id = request.id.into();
+                fragments = [fragment_id].into_iter().collect();
+                let job_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_fragment_streaming_job_id(fragment_id)
+                    .await?;
+                jobs = [job_id].into_iter().collect();
+                raw_object_id = job_id.as_raw_id();
             }
             ThrottleTarget::Unspecified => {
                 return Err(Status::invalid_argument("unspecified throttle target"));
             }
         };
 
-        let request_id = if request.kind() == ThrottleTarget::Fragment {
-            self.metadata_manager
-                .catalog_controller
-                .get_fragment_streaming_job_id(request.id.into())
-                .await?
-        } else {
-            request.id as _
-        };
-
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(request_id as ObjectId)
+            .get_object_database_id(raw_object_id)
             .await?;
+
         // TODO: check whether shared source is correct
-        let mutation: ThrottleConfig = actor_to_apply
-            .iter()
-            .map(|(fragment_id, actors)| {
-                (
-                    *fragment_id,
-                    actors
-                        .iter()
-                        .map(|actor_id| (*actor_id, request.rate))
-                        .collect::<HashMap<ActorId, Option<u32>>>(),
-                )
-            })
-            .collect();
         let _i = self
             .barrier_scheduler
-            .run_command(database_id, Command::Throttle(mutation))
+            .run_command(
+                database_id,
+                Command::Throttle {
+                    jobs,
+                    config: fragments
+                        .into_iter()
+                        .map(|fragment_id| (fragment_id, request.rate))
+                        .collect(),
+                },
+            )
             .await?;
 
         Ok(Response::new(ApplyThrottleResponse { status: None }))
@@ -195,7 +238,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .find_creating_streaming_job_ids(infos.infos)
                 .await?
                 .into_iter()
-                .map(|id| JobId::new(id as _))
+                .map(|id| id.as_job_id())
                 .collect(),
             Jobs::Ids(jobs) => jobs.job_ids,
         };
@@ -290,6 +333,7 @@ impl StreamManagerService for StreamServiceImpl {
                      resource_group,
                      database_id,
                      schema_id,
+                     config_override,
                      ..
                  }| {
                     let parallelism = match parallelism {
@@ -307,6 +351,7 @@ impl StreamManagerService for StreamServiceImpl {
                         resource_group,
                         database_id,
                         schema_id,
+                        config_override,
                     }
                 },
             )
@@ -438,7 +483,7 @@ impl StreamManagerService for StreamServiceImpl {
             .map(|actor_location| list_actor_states_response::ActorState {
                 actor_id: actor_location.actor_id,
                 fragment_id: actor_location.fragment_id,
-                worker_id: actor_location.worker_id as _,
+                worker_id: actor_location.worker_id,
             })
             .collect_vec();
 
@@ -486,7 +531,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .chain(source_fragments.values().flatten().copied())
                 .collect();
 
-            let guard = self.env.shared_actor_info.read_guard();
+            let guard = self.env.shared_actor_infos().read_guard();
             guard
                 .iter_over_fragments()
                 .filter(|(frag_id, _)| all_fragment_ids.contains(frag_id))
@@ -556,7 +601,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .into_iter()
                     .map(move |split| list_actor_splits_response::ActorSplit {
                         actor_id,
-                        source_id: source_id as _,
+                        source_id,
                         fragment_id,
                         split_id: split.id().to_string(),
                         fragment_type: fragment_type.into(),
@@ -588,14 +633,9 @@ impl StreamManagerService for StreamServiceImpl {
 
         tracing::info!("Refreshing table with id: {}", req.table_id);
 
-        // Create refresh manager and execute refresh
-        let refresh_manager = risingwave_meta::stream::RefreshManager::new(
-            self.metadata_manager.clone(),
-            self.barrier_scheduler.clone(),
-        );
-
-        let response = refresh_manager
-            .refresh_table(req, self.env.shared_actor_infos())
+        let response = self
+            .refresh_manager
+            .trigger_manual_refresh(req, self.env.shared_actor_infos())
             .await?;
 
         Ok(Response::new(response))
@@ -607,81 +647,147 @@ impl StreamManagerService for StreamServiceImpl {
     ) -> Result<Response<AlterConnectorPropsResponse>, Status> {
         let request = request.into_inner();
         let secret_manager = LocalSecretManager::global();
-        let (new_props_plaintext, object_id) =
-            match AlterConnectorPropsObject::try_from(request.object_type) {
-                Ok(AlterConnectorPropsObject::Sink) => (
-                    self.metadata_manager
-                        .update_sink_props_by_sink_id(
-                            request.object_id as i32,
-                            request.changed_props.clone().into_iter().collect(),
-                        )
-                        .await?,
-                    request.object_id,
-                ),
-                Ok(AlterConnectorPropsObject::IcebergTable) => {
-                    self.metadata_manager
-                        .update_iceberg_table_props_by_table_id(
-                            TableId::from(request.object_id),
-                            request.changed_props.clone().into_iter().collect(),
-                            request.extra_options,
-                        )
-                        .await?
+        let (new_props_plaintext, object_id) = match AlterConnectorPropsObject::try_from(
+            request.object_type,
+        ) {
+            Ok(AlterConnectorPropsObject::Sink) => (
+                self.metadata_manager
+                    .update_sink_props_by_sink_id(
+                        request.object_id.into(),
+                        request.changed_props.clone().into_iter().collect(),
+                    )
+                    .await?,
+                request.object_id.into(),
+            ),
+            Ok(AlterConnectorPropsObject::IcebergTable) => {
+                let (prop, sink_id) = self
+                    .metadata_manager
+                    .update_iceberg_table_props_by_table_id(
+                        request.object_id.into(),
+                        request.changed_props.clone().into_iter().collect(),
+                        request.extra_options,
+                    )
+                    .await?;
+                (prop, sink_id.as_object_id())
+            }
+
+            Ok(AlterConnectorPropsObject::Source) => {
+                // alter source and table's associated source
+                if request.connector_conn_ref.is_some() {
+                    return Err(Status::invalid_argument(
+                        "alter connector_conn_ref is not supported",
+                    ));
+                }
+                let options_with_secret = self
+                    .metadata_manager
+                    .catalog_controller
+                    .update_source_props_by_source_id(
+                        request.object_id.into(),
+                        request.changed_props.clone().into_iter().collect(),
+                        request.changed_secret_refs.clone().into_iter().collect(),
+                    )
+                    .await?;
+
+                self.stream_manager
+                    .source_manager
+                    .validate_source_once(request.object_id.into(), options_with_secret.clone())
+                    .await?;
+
+                let (options, secret_refs) = options_with_secret.into_parts();
+                (
+                    secret_manager
+                        .fill_secrets(options, secret_refs)
+                        .map_err(MetaError::from)?
+                        .into_iter()
+                        .collect(),
+                    request.object_id.into(),
+                )
+            }
+            Ok(AlterConnectorPropsObject::Connection) => {
+                // Update the connection and all dependent sources/sinks atomically, and later broadcast
+                // the complete plaintext properties to dependents via barrier.
+                let (
+                    connection_options_with_secret,
+                    updated_sources_with_props,
+                    updated_sinks_with_props,
+                ) = self
+                    .metadata_manager
+                    .catalog_controller
+                    .update_connection_and_dependent_objects_props(
+                        ConnectionId::from(request.object_id),
+                        request.changed_props.clone().into_iter().collect(),
+                        request.changed_secret_refs.clone().into_iter().collect(),
+                    )
+                    .await?;
+
+                // Materialize connection plaintext for observability/debugging (not broadcast directly).
+                let (options, secret_refs) = connection_options_with_secret.into_parts();
+                let new_props_plaintext = secret_manager
+                    .fill_secrets(options, secret_refs)
+                    .map_err(MetaError::from)?
+                    .into_iter()
+                    .collect::<HashMap<String, String>>();
+
+                // Broadcast changes to dependent sources and sinks if any exist.
+                let mut dependent_mutation = HashMap::default();
+                for (source_id, complete_source_props) in updated_sources_with_props {
+                    dependent_mutation.insert(source_id.as_object_id(), complete_source_props);
+                }
+                for (sink_id, complete_sink_props) in updated_sinks_with_props {
+                    dependent_mutation.insert(sink_id.as_object_id(), complete_sink_props);
                 }
 
-                Ok(AlterConnectorPropsObject::Source) => {
-                    // alter source and table's associated source
-                    if request.connector_conn_ref.is_some() {
-                        return Err(Status::invalid_argument(
-                            "alter connector_conn_ref is not supported",
-                        ));
-                    }
-                    let options_with_secret = self
+                if !dependent_mutation.is_empty() {
+                    let database_id = self
                         .metadata_manager
                         .catalog_controller
-                        .update_source_props_by_source_id(
-                            request.object_id as SourceId,
-                            request.changed_props.clone().into_iter().collect(),
-                            request.changed_secret_refs.clone().into_iter().collect(),
+                        .get_object_database_id(ConnectionId::from(request.object_id))
+                        .await?;
+                    tracing::info!(
+                        "broadcasting connection {} property changes to dependent object ids: {:?}",
+                        request.object_id,
+                        dependent_mutation.keys().collect_vec()
+                    );
+                    let _version = self
+                        .barrier_scheduler
+                        .run_command(
+                            database_id,
+                            Command::ConnectorPropsChange(dependent_mutation),
                         )
                         .await?;
-
-                    self.stream_manager
-                        .source_manager
-                        .validate_source_once(request.object_id, options_with_secret.clone())
-                        .await?;
-
-                    let (options, secret_refs) = options_with_secret.into_parts();
-                    (
-                        secret_manager
-                            .fill_secrets(options, secret_refs)
-                            .map_err(MetaError::from)?
-                            .into_iter()
-                            .collect(),
-                        request.object_id,
-                    )
                 }
 
-                _ => {
-                    unimplemented!(
-                        "Unsupported object type for AlterConnectorProps: {:?}",
-                        request.object_type
-                    );
-                }
-            };
+                (
+                    new_props_plaintext,
+                    ConnectionId::from(request.object_id).as_object_id(),
+                )
+            }
+
+            _ => {
+                unimplemented!(
+                    "Unsupported object type for AlterConnectorProps: {:?}",
+                    request.object_type
+                );
+            }
+        };
 
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(object_id as ObjectId)
+            .get_object_database_id(object_id)
             .await?;
-
-        let mut mutation = HashMap::default();
-        mutation.insert(object_id, new_props_plaintext);
-
-        let _i = self
-            .barrier_scheduler
-            .run_command(database_id, Command::ConnectorPropsChange(mutation))
-            .await?;
+        // Connection updates are broadcast to dependent sources/sinks inside the `Connection` branch above.
+        // For sources/sinks/iceberg-table updates, broadcast the change to the object itself.
+        if AlterConnectorPropsObject::try_from(request.object_type)
+            .is_ok_and(|t| t != AlterConnectorPropsObject::Connection)
+        {
+            let mut mutation = HashMap::default();
+            mutation.insert(object_id, new_props_plaintext);
+            let _version = self
+                .barrier_scheduler
+                .run_command(database_id, Command::ConnectorPropsChange(mutation))
+                .await?;
+        }
 
         Ok(Response::new(AlterConnectorPropsResponse {}))
     }
@@ -720,9 +826,9 @@ impl StreamManagerService for StreamServiceImpl {
         _request: Request<ListCdcProgressRequest>,
     ) -> Result<Response<ListCdcProgressResponse>, Status> {
         let cdc_progress = self
-            .env
-            .cdc_table_backfill_tracker()
-            .list_cdc_progress()
+            .barrier_manager
+            .get_cdc_progress()
+            .await?
             .into_iter()
             .map(|(job_id, p)| {
                 (

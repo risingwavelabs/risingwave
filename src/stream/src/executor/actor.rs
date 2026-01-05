@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,6 +29,7 @@ use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, IntGaugeExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_expr::ExprError;
 use risingwave_expr::expr_context::{FRAGMENT_ID, VNODE_COUNT, expr_context_scope};
+use risingwave_pb::id::SubscriberId;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::stream_service::inject_barrier_request::BuildActorInfo;
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
@@ -61,7 +62,7 @@ pub struct ActorContext {
     /// This is the number of dispatchers when the actor is created. It will not be updated during runtime when new downstreams are added.
     pub initial_dispatch_num: usize,
     // mv_table_id to subscription id
-    pub initial_subscriber_ids: HashSet<u32>,
+    pub initial_subscriber_ids: HashSet<SubscriberId>,
     pub initial_upstream_actors: HashMap<FragmentId, UpstreamActors>,
 
     // Meta client. currently used for auto schema change. `None` for test only
@@ -105,7 +106,7 @@ impl ActorContext {
         total_mem_val: Arc<TrAdder<i64>>,
         streaming_metrics: Arc<StreamingMetrics>,
         meta_client: Option<MetaClient>,
-        streaming_config: Arc<StreamingConfig>,
+        config: Arc<StreamingConfig>,
         stream_env: StreamEnvironment,
     ) -> ActorContextRef {
         Arc::new(Self {
@@ -128,7 +129,7 @@ impl ActorContext {
                 .collect(),
             initial_upstream_actors: stream_actor.fragment_upstreams.clone(),
             meta_client,
-            config: streaming_config,
+            config,
             stream_env,
         })
     }
@@ -136,7 +137,7 @@ impl ActorContext {
     pub fn on_compute_error(&self, err: ExprError, identity: &str) {
         static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
         if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
-            tracing::error!(identity, error = %err.as_report(), suppressed_count, "failed to evaluate expression");
+            tracing::error!(target: "stream_expr_error", identity, error = %err.as_report(), suppressed_count, "failed to evaluate expression");
         }
 
         let executor_name = identity.split(' ').next().unwrap_or("name_not_found");

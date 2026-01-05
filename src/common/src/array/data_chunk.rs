@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -735,14 +735,9 @@ impl DataChunkTestExt for DataChunk {
                 "T" => DataType::Varchar,
                 "SRL" => DataType::Serial,
                 "D" => DataType::Date,
-                array if array.starts_with('<') && array.ends_with('>') => {
-                    DataType::Struct(StructType::unnamed(
-                        array[1..array.len() - 1]
-                            .split(',')
-                            .map(parse_type)
-                            .collect(),
-                    ))
-                }
+                array if array.starts_with('<') && array.ends_with('>') => DataType::Struct(
+                    StructType::unnamed(array[1..array.len() - 1].split(',').map(parse_type)),
+                ),
                 _ => todo!("unsupported type: {s:?}"),
             }
         }

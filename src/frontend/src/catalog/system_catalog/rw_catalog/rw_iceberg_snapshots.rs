@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,7 +65,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergSnapshots>> 
                 .snapshots()
                 .map(|snapshot| {
                     Ok(RwIcebergSnapshots {
-                        source_id: source.id as i32,
+                        source_id: source.id.as_i32_id(),
                         schema_name: schema_name.clone(),
                         source_name: source.name.clone(),
                         sequence_number: snapshot.sequence_number(),

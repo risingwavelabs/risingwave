@@ -18,6 +18,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
+use risingwave_pb::id::SubscriberId;
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
 use tracing::warn;
@@ -37,6 +38,7 @@ struct FragmentInfo {
     actor_location: HashMap<ActorId, HostAddress>,
 }
 
+#[derive(Debug)]
 pub(super) struct FragmentEdgeBuildResult {
     pub(super) upstreams: HashMap<FragmentId, HashMap<ActorId, ActorUpstreams>>,
     pub(super) dispatchers: FragmentActorDispatchers,
@@ -51,7 +53,7 @@ impl FragmentEdgeBuildResult {
                 FragmentId,
                 &StreamNode,
                 impl Iterator<Item = (&StreamActor, WorkerId)>,
-                impl IntoIterator<Item = u32>,
+                impl IntoIterator<Item = SubscriberId>,
             ),
         >,
     ) -> StreamJobActorsToCreate {
@@ -79,6 +81,21 @@ impl FragmentEdgeBuildResult {
             }
         }
         actors_to_create
+    }
+
+    pub(super) fn is_empty(&self) -> bool {
+        self.merge_updates
+            .values()
+            .all(|updates| updates.is_empty())
+            && self.dispatchers.values().all(|dispatchers| {
+                dispatchers
+                    .values()
+                    .all(|dispatchers| dispatchers.is_empty())
+            })
+            && self
+                .merge_updates
+                .values()
+                .all(|updates| updates.is_empty())
     }
 }
 

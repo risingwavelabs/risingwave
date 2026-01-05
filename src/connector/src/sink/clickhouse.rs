@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1133,4 +1133,10 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
         }
     }
     Ok(vec)
+}
+
+impl From<::clickhouse::error::Error> for SinkError {
+    fn from(value: ::clickhouse::error::Error) -> Self {
+        SinkError::ClickHouse(value.to_report_string())
+    }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,8 +19,8 @@ use std::ops::RangeInclusive;
 use delta_btree_map::Change;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
+use risingwave_common::config::streaming::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::row::RowExt;
-use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::DefaultOrdered;
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;

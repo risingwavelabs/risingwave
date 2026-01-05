@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDatabases>> {
     Ok(catalog_reader
         .iter_databases()
         .map(|db| RwDatabases {
-            id: db.id().as_raw_id() as i32,
+            id: db.id().as_i32_id(),
             name: db.name().into(),
             owner: db.owner() as i32,
             acl: get_acl_items(db.id(), false, &users, username_map),

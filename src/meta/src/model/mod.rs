@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,14 +22,12 @@ use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 pub use error::*;
-pub use risingwave_common::id::{ActorId, FragmentId};
+pub use risingwave_common::id::{ActorId, FragmentId, SubscriptionId};
 pub use stream::*;
 use uuid::Uuid;
 
 /// Should be used together with `ActorId` to uniquely identify a dispatcher
-pub type DispatcherId = u64;
-
-pub type SubscriptionId = u32;
+pub type DispatcherId = FragmentId;
 
 #[derive(Clone, Debug)]
 pub struct ClusterId(String);

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -137,7 +137,7 @@ impl Planner {
                     let mut source_catalog = None;
                     for schema in catalog_reader.iter_schemas(db_name).unwrap() {
                         if schema
-                            .get_table_by_id(&base_table.table_catalog.id)
+                            .get_table_by_id(base_table.table_catalog.id)
                             .is_some()
                         {
                             source_catalog = schema.get_source_by_name(

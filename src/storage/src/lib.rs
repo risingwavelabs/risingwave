@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@
 #![feature(get_mut_unchecked)]
 #![feature(portable_simd)]
 #![feature(map_try_insert)]
+#![feature(never_type)]
 
 pub mod hummock;
 pub mod memory;

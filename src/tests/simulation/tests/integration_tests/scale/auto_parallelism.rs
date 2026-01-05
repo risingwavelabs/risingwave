@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use anyhow::Result;
 use itertools::Itertools;
+use risingwave_common::id::WorkerId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::ctl_ext::Fragment;
@@ -71,7 +72,7 @@ async fn test_passive_online_and_offline() -> Result<()> {
 
     assert_eq!(should_be_one, 1);
 
-    let worker_map: HashMap<_, _> = cluster
+    let worker_map: HashMap<WorkerId, _> = cluster
         .get_cluster_info()
         .await?
         .worker_nodes

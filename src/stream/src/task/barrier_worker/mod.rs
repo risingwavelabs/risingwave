@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::Display;
@@ -45,7 +46,8 @@ use crate::error::{ScoredStreamError, StreamError, StreamResult};
 use crate::task::LocalBarrierManager;
 use crate::task::managed_state::BarrierToComplete;
 use crate::task::{
-    ActorId, AtomicU64Ref, PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
+    ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache,
+    PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
 };
 pub mod managed_state;
 #[cfg(test)]
@@ -1091,6 +1093,7 @@ impl LocalBarrierWorker {
             watermark_epoch,
             await_tree_reg,
             runtime: runtime.into(),
+            config_override_cache: ConfigOverrideCache::new(CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY),
         });
         let worker = LocalBarrierWorker::new(actor_manager, "uninitialized".into());
         tokio::spawn(worker.run(actor_op_rx))

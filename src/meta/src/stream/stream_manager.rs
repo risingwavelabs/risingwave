@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::iter;
 use std::sync::Arc;
 
 use await_tree::span;
@@ -22,10 +21,10 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, Field, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::VnodeCountCompat;
-use risingwave_common::id::JobId;
-use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
+use risingwave_common::id::{JobId, SinkId};
+use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
-use risingwave_meta_model::{ObjectId, StreamingParallelism, fragment};
+use risingwave_meta_model::{StreamingParallelism, fragment};
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::expr::PbExprNode;
 use risingwave_pb::meta::table_fragments::ActorStatus;
@@ -52,9 +51,6 @@ use crate::model::{
     SubscriptionId,
 };
 use crate::stream::SourceManagerRef;
-use crate::stream::cdc::{
-    assign_cdc_table_snapshot_splits, is_parallelized_backfill_enabled_cdc_scan_fragment,
-};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
@@ -66,7 +62,7 @@ pub struct CreateStreamingJobOption {
 
 #[derive(Debug, Clone)]
 pub struct UpstreamSinkInfo {
-    pub sink_id: ObjectId,
+    pub sink_id: SinkId,
     pub sink_fragment_id: FragmentId,
     pub sink_output_fields: Vec<PbField>,
     // for backwards compatibility
@@ -99,6 +95,8 @@ pub struct CreateStreamingJobContext {
 
     pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
+
+    pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
 
     pub option: CreateStreamingJobOption,
 
@@ -177,18 +175,13 @@ impl CreatingStreamingJobInfo {
 
         Ok((receivers, background_job_ids))
     }
-
-    async fn check_job_exists(&self, job_id: JobId) -> bool {
-        let jobs = self.streaming_jobs.lock().await;
-        jobs.contains_key(&job_id)
-    }
 }
 
 type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 
 #[derive(Debug, Clone)]
 pub struct AutoRefreshSchemaSinkContext {
-    pub tmp_sink_id: JobId,
+    pub tmp_sink_id: SinkId,
     pub original_sink: PbSink,
     pub original_fragment: Fragment,
     pub new_schema: Vec<PbColumnCatalog>,
@@ -218,7 +211,7 @@ impl AutoRefreshSchemaSinkContext {
                                 .location
                                 .as_ref()
                                 .unwrap()
-                                .worker_node_id as _,
+                                .worker_node_id,
                             vnode_bitmap: actor.vnode_bitmap.clone(),
                             splits: vec![],
                         },
@@ -391,7 +384,7 @@ impl GlobalStreamManager {
             }
         };
 
-        tracing::info!("cleaning creating job info: {}", job_id);
+        tracing::debug!("cleaning creating job info: {}", job_id);
         self.creating_job_info.delete_job(job_id).await;
         result
     }
@@ -415,6 +408,7 @@ impl GlobalStreamManager {
             cross_db_snapshot_backfill_info,
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
+            cdc_table_snapshot_splits,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -442,41 +436,6 @@ impl GlobalStreamManager {
                 .await?,
         );
 
-        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
-            stream_job_fragments.stream_job_id,
-            &stream_job_fragments,
-            self.env.meta_store_ref(),
-        )
-        .await?;
-        let cdc_table_snapshot_split_assignment = if !cdc_table_snapshot_split_assignment.is_empty()
-        {
-            self.env.cdc_table_backfill_tracker.track_new_job(
-                stream_job_fragments.stream_job_id,
-                cdc_table_snapshot_split_assignment
-                    .values()
-                    .map(|s| u64::try_from(s.len()).unwrap())
-                    .sum(),
-            );
-            self.env
-                .cdc_table_backfill_tracker
-                .add_fragment_table_mapping(
-                    stream_job_fragments
-                        .fragments
-                        .values()
-                        .filter(|f| is_parallelized_backfill_enabled_cdc_scan_fragment(f))
-                        .map(|f| f.fragment_id),
-                    stream_job_fragments.stream_job_id,
-                );
-            CdcTableSnapshotSplitAssignmentWithGeneration::new(
-                cdc_table_snapshot_split_assignment,
-                self.env
-                    .cdc_table_backfill_tracker
-                    .next_generation(iter::once(stream_job_fragments.stream_job_id)),
-            )
-        } else {
-            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
-        };
-
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
             upstream_fragment_downstreams,
@@ -486,7 +445,7 @@ impl GlobalStreamManager {
             job_type,
             create_type,
             fragment_backfill_ordering,
-            cdc_table_snapshot_split_assignment,
+            cdc_table_snapshot_splits,
             locality_fragment_state_table_mapping,
         };
 
@@ -552,13 +511,6 @@ impl GlobalStreamManager {
             init_split_assignment
         );
 
-        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
-            old_fragments.stream_job_id,
-            &new_fragments.inner,
-            self.env.meta_store_ref(),
-        )
-        .await?;
-
         self.barrier_scheduler
             .run_command(
                 streaming_job.database_id(),
@@ -578,7 +530,6 @@ impl GlobalStreamManager {
                         }
                     },
                     auto_refresh_schema_sinks,
-                    cdc_table_snapshot_split_assignment,
                 }),
             )
             .await?;
@@ -594,23 +545,10 @@ impl GlobalStreamManager {
         database_id: DatabaseId,
         removed_actors: Vec<ActorId>,
         streaming_job_ids: Vec<JobId>,
-        state_table_ids: Vec<risingwave_meta_model::TableId>,
+        state_table_ids: Vec<TableId>,
         fragment_ids: HashSet<FragmentId>,
         dropped_sink_fragment_by_targets: HashMap<FragmentId, Vec<FragmentId>>,
     ) {
-        // TODO(august): This is a workaround for canceling SITT via drop, remove it after refactoring SITT.
-        for &job_id in &streaming_job_ids {
-            if self.creating_job_info.check_job_exists(job_id).await {
-                tracing::info!(
-                    ?job_id,
-                    "streaming job is creating, cancel it with drop directly"
-                );
-                self.metadata_manager
-                    .notify_cancelled(database_id, job_id)
-                    .await;
-            }
-        }
-
         if !removed_actors.is_empty()
             || !streaming_job_ids.is_empty()
             || !state_table_ids.is_empty()
@@ -670,6 +608,13 @@ impl GlobalStreamManager {
         let futures = background_job_ids.into_iter().map(|id| async move {
             let fragment = self.metadata_manager.get_job_fragments_by_id(id).await?;
             if fragment.is_created() {
+                tracing::warn!(
+                    "streaming job {} is already created, ignore cancel request",
+                    id
+                );
+                return Ok(None);
+            }
+            if fragment.is_created() {
                 Err(MetaError::invalid_parameter(format!(
                     "streaming job {} is already created",
                     id
@@ -694,15 +639,15 @@ impl GlobalStreamManager {
                     .await?;
             }
 
-            tracing::info!(?id, "cancelled recovered streaming job");
-            Ok(id)
+            tracing::info!(?id, "cancelled background streaming job");
+            Ok(Some(id))
         });
         let cancelled_recovered_ids = join_all(futures)
             .await
             .into_iter()
             .collect::<MetaResult<Vec<_>>>()?;
 
-        cancelled_ids.extend(cancelled_recovered_ids);
+        cancelled_ids.extend(cancelled_recovered_ids.into_iter().flatten());
         Ok(cancelled_ids)
     }
 
@@ -741,7 +686,7 @@ impl GlobalStreamManager {
             .into_iter()
             .filter(|w| w.is_streaming_schedulable())
             .collect_vec();
-        let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
+        let workers = worker_nodes.into_iter().map(|x| (x.id, x)).collect();
 
         let commands = self
             .scale_controller
@@ -787,7 +732,7 @@ impl GlobalStreamManager {
             .into_iter()
             .filter(|w| w.is_streaming_schedulable())
             .collect_vec();
-        let workers = worker_nodes.into_iter().map(|x| (x.id as i32, x)).collect();
+        let workers = worker_nodes.into_iter().map(|x| (x.id, x)).collect();
 
         let cdc_fragment_id = {
             let inner = self.metadata_manager.catalog_controller.inner.read().await;
@@ -858,7 +803,7 @@ impl GlobalStreamManager {
             .await?
             .into_iter()
             .filter(|w| w.is_streaming_schedulable())
-            .map(|worker| (worker.id as i32, worker))
+            .map(|worker| (worker.id, worker))
             .collect();
 
         let fragment_policy = fragment_targets

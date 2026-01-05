@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,8 +38,8 @@ use super::{
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::{JsonEncoder, RowEncoder};
 use crate::sink::starrocks::_default_stream_load_http_timeout_ms;
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{Sink, SinkParam, SinkWriter, SinkWriterParam};
+use crate::sink::writer::{LogSinkerOf, SinkWriter, SinkWriterExt};
+use crate::sink::{Sink, SinkParam, SinkWriterParam};
 
 pub const DORIS_SINK: &str = "doris";
 

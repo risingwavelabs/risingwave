@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,7 @@ use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAw
 use risingwave_pb::stream_plan::{ArrangeNode, MaterializeNode};
 
 use super::*;
-use crate::executor::MaterializeExecutor;
-use crate::executor::materialize::RefreshableMaterializeArgs;
+use crate::executor::{MaterializeExecutor, RefreshableMaterializeArgs};
 
 pub struct MaterializeExecutorBuilder;
 

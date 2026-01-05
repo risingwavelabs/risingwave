@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -70,6 +70,15 @@ impl Tier {
                 MaybeFeature::Feature(feature) => Some(*feature),
                 MaybeFeature::Unknown(_) => None,
             }),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Tier::Free => "free",
+            Tier::AllAsOf2_5 => "paid",
+            Tier::All => "all",
+            Tier::Custom { name, .. } => name,
         }
     }
 }

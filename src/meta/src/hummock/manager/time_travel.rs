@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -576,7 +576,7 @@ impl HummockManager {
             let version_id: u64 = delta.id.to_u64();
             let m = hummock_epoch_to_version::ActiveModel {
                 epoch: Set(committed_epoch.try_into().unwrap()),
-                table_id: Set(table_id.as_raw_id().into()),
+                table_id: Set(table_id.as_raw_id() as _),
                 version_id: Set(version_id.try_into().unwrap()),
             };
             batch.push(m);

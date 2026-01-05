@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -96,7 +96,7 @@ impl ChanReceiverImpl {
 
 /// Output-channel is a synchronous, bounded single-producer-multiple-consumer queue.
 /// The producer is the local task executor, the consumer is
-/// [`ExchangeService`](risingwave_pb::task_service::exchange_service_server::ExchangeService).
+/// [`BatchExchangeService`](risingwave_pb::task_service::batch_exchange_service_server::BatchExchangeService).
 /// The implementation depends on the shuffling strategy.
 pub fn create_output_channel(
     shuffle: &ExchangeInfo,

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::TableId;
 use risingwave_pb::catalog::PbSubscription;
-use risingwave_pb::id::TableId;
 use sea_orm::ActiveValue::Set;
 use sea_orm::entity::prelude::*;
 use serde::{Deserialize, Serialize};
@@ -55,7 +55,7 @@ impl ActiveModelBehavior for ActiveModel {}
 impl From<PbSubscription> for ActiveModel {
     fn from(pb_subscription: PbSubscription) -> Self {
         Self {
-            subscription_id: Set(pb_subscription.id as _),
+            subscription_id: Set(pb_subscription.id),
             name: Set(pb_subscription.name),
             retention_seconds: Set(pb_subscription.retention_seconds as _),
             definition: Set(pb_subscription.definition),

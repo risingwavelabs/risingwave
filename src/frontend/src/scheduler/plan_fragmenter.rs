@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,7 +47,6 @@ use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::{ExchangeInfo, ScanRange as ScanRangeProto};
 use risingwave_pb::plan_common::Field as PbField;
-use risingwave_sqlparser::ast::AsOf;
 use serde::ser::SerializeStruct;
 use serde::{Serialize, Serializer};
 use uuid::Uuid;
@@ -57,7 +56,6 @@ use crate::TableCatalog;
 use crate::catalog::TableId;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
     BatchIcebergScan, BatchKafkaScan, BatchPlanNodeType, BatchPlanRef as PlanRef, BatchSource,
     PlanNodeId,
@@ -186,7 +184,6 @@ pub struct BatchPlanFragmenter {
     catalog_reader: CatalogReader,
 
     batch_parallelism: usize,
-    timezone: String,
 
     stage_graph_builder: Option<StageGraphBuilder>,
     stage_graph: Option<StageGraph>,
@@ -205,7 +202,6 @@ impl BatchPlanFragmenter {
         worker_node_manager: WorkerNodeSelector,
         catalog_reader: CatalogReader,
         batch_parallelism: Option<NonZeroU64>,
-        timezone: String,
         batch_node: PlanRef,
     ) -> SchedulerResult<Self> {
         // if batch_parallelism is None, it means no limit, we will use the available nodes count as
@@ -229,7 +225,6 @@ impl BatchPlanFragmenter {
             worker_node_manager,
             catalog_reader,
             batch_parallelism,
-            timezone,
             stage_graph_builder: Some(StageGraphBuilder::new(batch_parallelism)),
             stage_graph: None,
         };
@@ -338,13 +333,13 @@ pub struct SourceFetchInfo {
     /// These parameters are internally derived by the plan node.
     /// e.g. predicate pushdown for iceberg, timebound for kafka.
     pub fetch_parameters: SourceFetchParameters,
-    pub as_of: Option<AsOf>,
 }
 
 #[derive(Debug, Clone)]
 pub struct IcebergSpecificInfo {
     pub iceberg_scan_type: IcebergScanType,
     pub predicate: IcebergPredicate,
+    pub snapshot_id: Option<i64>,
 }
 
 #[derive(Clone, Debug)]
@@ -359,11 +354,7 @@ impl SourceScanInfo {
         Self::Incomplete(fetch_info)
     }
 
-    pub async fn complete(
-        self,
-        batch_parallelism: usize,
-        timezone: String,
-    ) -> SchedulerResult<Self> {
+    pub async fn complete(self, batch_parallelism: usize) -> SchedulerResult<Self> {
         let fetch_info = match self {
             SourceScanInfo::Incomplete(fetch_info) => fetch_info,
             SourceScanInfo::Complete(_) => {
@@ -453,12 +444,10 @@ impl SourceScanInfo {
                     IcebergSplitEnumerator::new(*prop, SourceEnumeratorContext::dummy().into())
                         .await?;
 
-                let time_travel_info = to_iceberg_time_travel_as_of(&fetch_info.as_of, &timezone)?;
-
                 let split_info = iceberg_enumerator
                     .list_splits_batch(
                         fetch_info.schema,
-                        time_travel_info,
+                        iceberg_specific_info.snapshot_id,
                         batch_parallelism,
                         iceberg_specific_info.iceberg_scan_type,
                         iceberg_specific_info.predicate,
@@ -789,7 +778,6 @@ impl StageGraph {
         self,
         catalog_reader: &CatalogReader,
         worker_node_manager: &WorkerNodeSelector,
-        timezone: String,
     ) -> SchedulerResult<StageGraph> {
         let mut complete_stages = HashMap::new();
         self.complete_stage(
@@ -798,7 +786,6 @@ impl StageGraph {
             &mut complete_stages,
             catalog_reader,
             worker_node_manager,
-            timezone,
         )
         .await?;
         let mut stages = self.stages;
@@ -839,7 +826,6 @@ impl StageGraph {
         complete_stages: &mut HashMap<StageId, StageCompleteInfo>,
         catalog_reader: &CatalogReader,
         worker_node_manager: &WorkerNodeSelector,
-        timezone: String,
     ) -> SchedulerResult<()> {
         let stage = &self.stages[&stage_id];
         let parallelism = if stage.parallelism.is_some() {
@@ -855,7 +841,7 @@ impl StageGraph {
                 .as_ref()
                 .unwrap()
                 .clone()
-                .complete(self.batch_parallelism, timezone.clone())
+                .complete(self.batch_parallelism)
                 .await?;
 
             // For batch reading file source, the number of files involved is typically large.
@@ -930,7 +916,6 @@ impl StageGraph {
                 complete_stages,
                 catalog_reader,
                 worker_node_manager,
-                timezone.clone(),
             )
             .await?;
         }
@@ -1024,11 +1009,7 @@ impl BatchPlanFragmenter {
     pub async fn generate_complete_query(self) -> SchedulerResult<Query> {
         let stage_graph = self.stage_graph.unwrap();
         let new_stage_graph = stage_graph
-            .complete(
-                &self.catalog_reader,
-                &self.worker_node_manager,
-                self.timezone.clone(),
-            )
+            .complete(&self.catalog_reader, &self.worker_node_manager)
             .await?;
         Ok(Query {
             query_id: self.query_id,
@@ -1226,7 +1207,6 @@ impl BatchPlanFragmenter {
                         lower: timestamp_bound.0,
                         upper: timestamp_bound.1,
                     },
-                    as_of: None,
                 })));
             }
         } else if let Some(batch_iceberg_scan) = node.as_batch_iceberg_scan() {
@@ -1235,7 +1215,6 @@ impl BatchPlanFragmenter {
             if let Some(source_catalog) = source_catalog {
                 let property =
                     ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
-                let as_of = batch_iceberg_scan.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     schema: batch_iceberg_scan.base.schema().clone(),
                     connector: property,
@@ -1243,9 +1222,9 @@ impl BatchPlanFragmenter {
                         IcebergSpecificInfo {
                             predicate: batch_iceberg_scan.predicate.clone(),
                             iceberg_scan_type: batch_iceberg_scan.iceberg_scan_type(),
+                            snapshot_id: batch_iceberg_scan.snapshot_id(),
                         },
                     ),
-                    as_of,
                 })));
             }
         } else if let Some(source_node) = node.as_batch_source() {
@@ -1255,12 +1234,10 @@ impl BatchPlanFragmenter {
             if let Some(source_catalog) = source_catalog {
                 let property =
                     ConnectorProperties::extract(source_catalog.with_properties.clone(), false)?;
-                let as_of = source_node.as_of();
                 return Ok(Some(SourceScanInfo::new(SourceFetchInfo {
                     schema: source_node.base.schema().clone(),
                     connector: property,
                     fetch_parameters: SourceFetchParameters::Empty,
-                    as_of,
                 })));
             }
         }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -110,7 +110,7 @@ impl StackTraceResponse {
             match self.barrier_worker_state.entry(worker_id) {
                 Entry::Occupied(_entry) => {
                     warn!(
-                        worker_id,
+                        %worker_id,
                         worker_state, "duplicate barrier worker state. skipped"
                     );
                 }
@@ -123,7 +123,7 @@ impl StackTraceResponse {
             match self.jvm_stack_traces.entry(worker_id) {
                 Entry::Occupied(_entry) => {
                     warn!(
-                        worker_id,
+                        %worker_id,
                         worker_state, "duplicate jvm stack trace. skipped"
                     );
                 }

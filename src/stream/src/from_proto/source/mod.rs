@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,6 @@ use std::collections::BTreeMap;
 pub use trad_source::{SourceExecutorBuilder, create_source_desc_builder};
 mod fs_fetch;
 pub use fs_fetch::FsFetchExecutorBuilder;
-use risingwave_common::catalog::TableId;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::SourceRefreshMode;
@@ -34,14 +33,9 @@ fn get_connector_name(with_props: &BTreeMap<String, String>) -> String {
         .unwrap_or_default()
 }
 
-fn is_full_recompute_refresh(refresh_mode: &Option<SourceRefreshMode>) -> bool {
+fn is_full_reload_refresh(refresh_mode: &Option<SourceRefreshMode>) -> bool {
     refresh_mode
         .as_ref()
-        .map(|refresh_mode| {
-            matches!(
-                refresh_mode.refresh_mode,
-                Some(RefreshMode::FullRecompute(_))
-            )
-        })
+        .map(|refresh_mode| matches!(refresh_mode.refresh_mode, Some(RefreshMode::FullReload(_))))
         .unwrap_or(false)
 }

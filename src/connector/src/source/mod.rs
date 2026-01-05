@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,6 +57,7 @@ pub mod mqtt;
 pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
+pub mod utils;
 
 mod util;
 use std::future::IntoFuture;
@@ -70,18 +71,22 @@ pub use kafka::KAFKA_CONNECTOR;
 pub use kinesis::KINESIS_CONNECTOR;
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
-use risingwave_common::catalog::TableId;
+use utils::feature_gated_source_mod;
+
+pub use self::adbc_snowflake::ADBC_SNOWFLAKE_CONNECTOR;
 mod common;
 pub mod iceberg;
 mod manager;
 pub mod reader;
 pub mod test_source;
+feature_gated_source_mod!(adbc_snowflake, "adbc_snowflake");
 
 use async_nats::jetstream::consumer::AckPolicy as JetStreamAckPolicy;
 use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
 use risingwave_common::row::OwnedRow;
+use risingwave_pb::id::SourceId;
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
@@ -254,6 +259,6 @@ pub type CdcTableSnapshotSplit = CdcTableSnapshotSplitCommon<OwnedRow>;
 pub type CdcTableSnapshotSplitRaw = CdcTableSnapshotSplitCommon<Vec<u8>>;
 
 #[inline]
-pub fn build_pulsar_ack_channel_id(source_id: &TableId, split_id: &SplitId) -> String {
+pub fn build_pulsar_ack_channel_id(source_id: SourceId, split_id: &SplitId) -> String {
     format!("{}-{}", source_id, split_id)
 }

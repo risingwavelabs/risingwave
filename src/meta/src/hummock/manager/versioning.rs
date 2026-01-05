@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -392,9 +392,9 @@ mod tests {
         let mut context_info = ContextInfo::default();
         assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
         context_info.pinned_versions.insert(
-            1,
+            1.into(),
             HummockPinnedVersion {
-                context_id: 1,
+                context_id: 1.into(),
                 min_pinned_id: 10,
             },
         );

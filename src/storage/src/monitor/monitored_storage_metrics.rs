@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,9 +24,9 @@ use prometheus::{
 use risingwave_common::config::MetricLevel;
 use risingwave_common::id::TableId;
 use risingwave_common::metrics::{
-    LabelGuardedIntCounterVec, LabelGuardedIntGauge, LabelGuardedLocalHistogram,
-    LabelGuardedLocalIntCounter, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
-    RelabeledGuardedIntGaugeVec,
+    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGauge,
+    LabelGuardedLocalHistogram, LabelGuardedLocalIntCounter, RelabeledGuardedHistogramVec,
+    RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -57,6 +57,9 @@ pub struct MonitoredStorageMetrics {
     // [table_id, op_type]
     pub iter_log_op_type_counts: LabelGuardedIntCounterVec,
 
+    // [table_id, top_n, ef_search]
+    pub vector_nearest_duration: LabelGuardedHistogramVec,
+
     pub sync_duration: Histogram,
     pub sync_size: Histogram,
 }
@@ -73,6 +76,8 @@ impl MonitoredStorageMetrics {
     pub fn new(registry: &Registry, metric_level: MetricLevel) -> Self {
         // 256B ~ max 64GB
         let size_buckets = exponential_buckets(256.0, 16.0, 8).unwrap();
+        // Dedicated buckets for sync size: 16MB ~ 1TB (17 buckets, x2 growth)
+        let sync_size_buckets = exponential_buckets(16.0 * 1024.0 * 1024.0, 2.0, 17).unwrap();
         // 10ms ~ max 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         // ----- get -----
@@ -152,7 +157,7 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_iter_item",
             "Total bytes gotten from state store scan(), for calculating read throughput",
-            size_buckets.clone(),
+            size_buckets,
         );
         let iter_item = register_guarded_histogram_vec_with_registry!(
             opts,
@@ -249,9 +254,21 @@ impl MonitoredStorageMetrics {
         let opts = histogram_opts!(
             "state_store_sync_size",
             "Total size of upload to l0 every epoch",
-            size_buckets,
+            sync_size_buckets,
         );
         let sync_size = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let vector_nearest_duration_opts = histogram_opts!(
+            "state_store_vector_nearest_duration",
+            "Total latency of vector nearest that have been issued to state store",
+            state_store_read_time_buckets.clone(),
+        );
+        let vector_nearest_duration = register_guarded_histogram_vec_with_registry!(
+            vector_nearest_duration_opts,
+            &["table_id", "top_n", "ef_search"],
+            registry
+        )
+        .unwrap();
 
         Self {
             get_duration,
@@ -264,6 +281,7 @@ impl MonitoredStorageMetrics {
             iter_counts,
             iter_in_progress_counts,
             iter_log_op_type_counts,
+            vector_nearest_duration,
             sync_duration,
             sync_size,
         }

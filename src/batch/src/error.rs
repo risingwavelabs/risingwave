@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -133,6 +133,9 @@ pub enum BatchError {
 
     #[error("Serving vnode mapping not found for fragment {0}")]
     ServingVnodeMappingNotFound(FragmentId),
+
+    #[error("Streaming vnode mapping has not been initialized")]
+    StreamingVnodeMappingNotInitialized,
 
     #[error("Streaming vnode mapping not found for fragment {0}")]
     StreamingVnodeMappingNotFound(FragmentId),

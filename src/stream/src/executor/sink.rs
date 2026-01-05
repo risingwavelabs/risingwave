@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,6 +38,7 @@ use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam,
     SinkWriterParam,
 };
+use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_plan::stream_node::StreamKind;
 use thiserror_ext::AsReport;
 use tokio::select;
@@ -278,7 +279,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         };
 
         tracing::info!(
-            sink_id = sink_param.sink_id.sink_id,
+            sink_id = %sink_param.sink_id,
             actor_id = %actor_context.id,
             ?non_append_only_behavior,
             "Sink executor info"
@@ -379,6 +380,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         processed_input,
                         log_writer.monitored(log_writer_metrics),
                         actor_id,
+                        fragment_id,
                         sink_id,
                         rate_limit_tx,
                         rebuild_sink_tx,
@@ -417,6 +419,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input: impl MessageStream,
         mut log_writer: W,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         sink_id: SinkId,
         rate_limit_tx: UnboundedSender<RateLimit>,
         rebuild_sink_tx: UnboundedSender<RebuildSinkMessage>,
@@ -446,9 +449,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
                 Message::Barrier(barrier) => {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
-                    let add_columns = barrier.as_sink_add_columns(sink_id);
-                    if let Some(add_columns) = &add_columns {
-                        info!(?add_columns, %sink_id, "sink receive add columns");
+                    let schema_change = barrier.as_sink_schema_change(sink_id);
+                    if let Some(schema_change) = &schema_change {
+                        info!(?schema_change, %sink_id, "sink receive schema change");
                     }
                     let post_flush = log_writer
                         .flush_current_epoch(
@@ -457,7 +460,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 is_checkpoint: barrier.kind.is_checkpoint(),
                                 new_vnode_bitmap: update_vnode_bitmap.clone(),
                                 is_stop: barrier.is_stop(actor_id),
-                                add_columns,
+                                schema_change,
                             },
                         )
                         .await?;
@@ -486,8 +489,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 log_writer.resume()?;
                                 is_paused = false;
                             }
-                            Mutation::Throttle(actor_to_apply) => {
-                                if let Some(new_rate_limit) = actor_to_apply.get(&actor_id) {
+                            Mutation::Throttle(fragment_to_apply) => {
+                                if let Some(new_rate_limit) = fragment_to_apply.get(&fragment_id) {
                                     tracing::info!(
                                         rate_limit = new_rate_limit,
                                         "received sink rate limit on actor {actor_id}"
@@ -504,7 +507,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 }
                             }
                             Mutation::ConnectorPropsChange(config) => {
-                                if let Some(map) = config.get(&sink_id.sink_id)
+                                if let Some(map) = config.get(&sink_id.as_raw_id())
                                     && let Err(e) = rebuild_sink_tx
                                         .send(RebuildSinkMessage::UpdateConfig(map.clone()))
                                 {
@@ -628,10 +631,24 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     Message::Watermark(w) => yield Message::Watermark(w),
                     Message::Chunk(mut chunk) => {
                         // Compact the chunk to eliminate any unnecessary updates to external systems.
-                        if !skip_compact {
-                            chunk = dispatch_output_kind!(sink_type, KIND, {
-                                compact_chunk_inline::<KIND>(chunk, &stream_key, input_compact_ib)
-                            });
+                        // This should be performed against the downstream pk, not the stream key, to
+                        // ensure correct retract/upsert semantics from the downstream's perspective.
+                        if sink_type != SinkType::AppendOnly
+                            && let Some(downstream_pk) = &downstream_pk
+                        {
+                            if skip_compact {
+                                // We can only skip compaction if the keys are exactly the same, not just
+                                // matching by being a subset.
+                                assert_eq!(&stream_key, downstream_pk);
+                            } else {
+                                chunk = dispatch_output_kind!(sink_type, KIND, {
+                                    compact_chunk_inline::<KIND>(
+                                        chunk,
+                                        downstream_pk,
+                                        input_compact_ib,
+                                    )
+                                });
+                            }
                         }
                         match sink_type {
                             SinkType::AppendOnly => yield Message::Chunk(chunk),
@@ -740,7 +757,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if let Some(meta_client) = sink_writer_param.meta_client.as_ref() {
                         meta_client
                             .add_sink_fail_evet_log(
-                                sink_writer_param.sink_id.sink_id,
+                                sink_writer_param.sink_id,
                                 sink_writer_param.sink_name.clone(),
                                 sink_writer_param.connector.clone(),
                                 e.to_report_string(),
@@ -753,8 +770,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             Ok(()) => {
                                 error!(
                                     error = %e.as_report(),
-                                    executor_id = sink_writer_param.executor_id,
-                                    sink_id = sink_param.sink_id.sink_id,
+                                    executor_id = %sink_writer_param.executor_id,
+                                    sink_id = %sink_param.sink_id,
                                     "reset log reader stream successfully after sink error"
                                 );
                                 Ok(())
@@ -770,7 +787,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     } else {
                         Err(e)
                     }
-                    .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+                    .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                 }
             };
             select! {
@@ -792,10 +809,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 match log_reader.rewind().await {
                                     Ok(()) => {
                                         sink_param.properties.extend(config.into_iter());
-                                        sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+                                        sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                                         info!(
-                                            executor_id = sink_writer_param.executor_id,
-                                            sink_id = sink_param.sink_id.sink_id,
+                                            executor_id = %sink_writer_param.executor_id,
+                                            sink_id = %sink_param.sink_id,
                                             "alter sink config successfully with rewind"
                                         );
                                         Ok(())
@@ -810,10 +827,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 }
                             } else {
                                 sink_param.properties.extend(config.into_iter());
-                                sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+                                sink = TryFrom::try_from(sink_param.clone()).map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                                 Err(anyhow!("This is not an actual error condition. The system is intentionally triggering recovery procedures to ensure ALTER SINK CONFIG are fully applied.").into())
                             }
-                            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id.sink_id)))?;
+                            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
                         },
                     }
                 }
