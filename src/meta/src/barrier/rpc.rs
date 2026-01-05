@@ -1083,6 +1083,7 @@ impl ControlStreamManager {
                                                                 fragment_upstreams: upstreams
                                                                     .into_iter()
                                                                     .map(|(fragment_id, upstreams)| {
+                                                                        assert!(!upstreams.is_empty(), "should have upstreams");
                                                                         (
                                                                             fragment_id,
                                                                             UpstreamActors {

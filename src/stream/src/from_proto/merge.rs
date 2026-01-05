@@ -40,9 +40,9 @@ impl MergeExecutorBuilder {
             actor_context
                 .initial_upstream_actors
                 .get(&node.upstream_fragment_id)
-                .map(|actors| actors.actors.iter())
-                .into_iter()
-                .flatten()
+                .expect("upstream actors must be prepared")
+                .actors
+                .iter()
                 .map(|upstream_actor| {
                     new_input(
                         &local_barrier_manager,
