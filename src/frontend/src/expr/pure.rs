@@ -341,6 +341,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::L2Norm
             | Type::L2Normalize
             | Type::Subvector
+            | Type::Vnode
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull
@@ -353,8 +354,7 @@ impl ExprVisitor for ImpureAnalyzer {
                     .for_each(|expr| self.visit_expr(expr));
             }
             // expression output is not deterministic
-            Type::Vnode // obtain vnode count from the context
-            | Type::TestFeature
+            Type::TestFeature
             | Type::License
             | Type::Proctime
             | Type::PgSleep
