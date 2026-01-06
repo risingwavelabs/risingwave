@@ -31,7 +31,9 @@ use risingwave_rpc_client::StreamingControlHandle;
 use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::command::CommandContext;
-use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
+use crate::barrier::context::{
+    CreateSnapshotBackfillJobInfo, GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl,
+};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
@@ -81,6 +83,38 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     #[await_tree::instrument("post_collect_command({command})")]
     async fn post_collect_command<'a>(&'a self, command: &'a CommandContext) -> MetaResult<()> {
         command.post_collect(self).await
+    }
+
+    async fn post_collect_create_snapshot_backfill<'a>(
+        &'a self,
+        CreateSnapshotBackfillJobInfo {
+            info,
+            snapshot_backfill_info,
+            cross_db_snapshot_backfill_info,
+        }: &'a CreateSnapshotBackfillJobInfo,
+    ) -> MetaResult<()> {
+        self.metadata_manager
+            .catalog_controller
+            .fill_snapshot_backfill_epoch(
+                info.stream_job_fragments
+                    .fragments
+                    .iter()
+                    .filter_map(|(fragment_id, fragment)| {
+                        if fragment.fragment_type_mask.contains_any([
+                            FragmentTypeFlag::SnapshotBackfillStreamScan,
+                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
+                        ]) {
+                            Some(*fragment_id as _)
+                        } else {
+                            None
+                        }
+                    }),
+                Some(snapshot_backfill_info),
+                cross_db_snapshot_backfill_info,
+            )
+            .await?;
+
+        CommandContext::post_collect_create_streaming_job(self, info, None).await
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String) {
@@ -251,6 +285,42 @@ impl GlobalBarrierWorkerContextImpl {
 }
 
 impl CommandContext {
+    pub async fn post_collect_create_streaming_job(
+        barrier_manager_context: &GlobalBarrierWorkerContextImpl,
+        info: &CreateStreamingJobCommandInfo,
+        new_sink_downstream: Option<FragmentDownstreamRelation>,
+    ) -> MetaResult<()> {
+        // Do `post_collect_job_fragments` of the original streaming job in the end, so that in any previous failure,
+        // we won't mark the job as `Creating`, and then the job will be later clean by the recovery triggered by the returned error.
+        let CreateStreamingJobCommandInfo {
+            stream_job_fragments,
+            upstream_fragment_downstreams,
+            ..
+        } = info;
+
+        barrier_manager_context
+            .metadata_manager
+            .catalog_controller
+            .post_collect_job_fragments(
+                stream_job_fragments.stream_job_id(),
+                upstream_fragment_downstreams,
+                new_sink_downstream,
+                Some(&info.init_split_assignment),
+            )
+            .await?;
+
+        let source_change = SourceChange::CreateJob {
+            added_source_fragments: stream_job_fragments.stream_source_fragments(),
+            added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
+        };
+
+        barrier_manager_context
+            .source_manager
+            .apply_source_change(source_change)
+            .await;
+        Ok(())
+    }
+
     /// Do some stuffs after barriers are collected and the new storage version is committed, for
     /// the given command.
     pub async fn post_collect(
@@ -341,37 +411,12 @@ impl CommandContext {
                             )
                             .await?
                     }
-                    CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info) => {
-                        barrier_manager_context
-                            .metadata_manager
-                            .catalog_controller
-                            .fill_snapshot_backfill_epoch(
-                                info.stream_job_fragments.fragments.iter().filter_map(
-                                    |(fragment_id, fragment)| {
-                                        if fragment.fragment_type_mask.contains_any([
-                                            FragmentTypeFlag::SnapshotBackfillStreamScan,
-                                            FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
-                                        ]) {
-                                            Some(*fragment_id as _)
-                                        } else {
-                                            None
-                                        }
-                                    },
-                                ),
-                                Some(snapshot_backfill_info),
-                                cross_db_snapshot_backfill_info,
-                            )
-                            .await?
+                    CreateStreamingJobType::SnapshotBackfill(_) => {
+                        // post collect of snapshot backfill is handled in `post_collect_create_snapshot_backfill`
+                        return Ok(());
                     }
                 }
 
-                // Do `post_collect_job_fragments` of the original streaming job in the end, so that in any previous failure,
-                // we won't mark the job as `Creating`, and then the job will be later clean by the recovery triggered by the returned error.
-                let CreateStreamingJobCommandInfo {
-                    stream_job_fragments,
-                    upstream_fragment_downstreams,
-                    ..
-                } = info;
                 let new_sink_downstream =
                     if let CreateStreamingJobType::SinkIntoTable(ctx) = job_type {
                         let new_downstreams = ctx.new_sink_downstream.clone();
@@ -384,26 +429,12 @@ impl CommandContext {
                         None
                     };
 
-                barrier_manager_context
-                    .metadata_manager
-                    .catalog_controller
-                    .post_collect_job_fragments(
-                        stream_job_fragments.stream_job_id(),
-                        upstream_fragment_downstreams,
-                        new_sink_downstream,
-                        Some(&info.init_split_assignment),
-                    )
-                    .await?;
-
-                let source_change = SourceChange::CreateJob {
-                    added_source_fragments: stream_job_fragments.stream_source_fragments(),
-                    added_backfill_fragments: stream_job_fragments.source_backfill_fragments(),
-                };
-
-                barrier_manager_context
-                    .source_manager
-                    .apply_source_change(source_change)
-                    .await;
+                Self::post_collect_create_streaming_job(
+                    barrier_manager_context,
+                    info,
+                    new_sink_downstream,
+                )
+                .await?;
             }
             Command::RescheduleFragment { reschedules, .. } => {
                 let fragment_splits = reschedules

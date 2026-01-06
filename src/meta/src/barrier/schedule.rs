@@ -798,6 +798,7 @@ mod tests {
     use futures::FutureExt;
 
     use super::*;
+    use crate::barrier::context::CreateSnapshotBackfillJobInfo;
 
     fn create_test_database(
         id: u32,
@@ -857,6 +858,13 @@ mod tests {
         async fn post_collect_command<'a>(
             &'a self,
             _command: &'a crate::barrier::command::CommandContext,
+        ) -> MetaResult<()> {
+            unimplemented!()
+        }
+
+        async fn post_collect_create_snapshot_backfill<'a>(
+            &'a self,
+            _info: &'a CreateSnapshotBackfillJobInfo,
         ) -> MetaResult<()> {
             unimplemented!()
         }

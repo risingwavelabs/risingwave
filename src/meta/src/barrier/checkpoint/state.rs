@@ -30,6 +30,7 @@ use tracing::warn;
 
 use crate::MetaResult;
 use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
+use crate::barrier::context::CreateSnapshotBackfillJobInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
@@ -191,7 +192,13 @@ impl DatabaseCheckpointControl {
                         .collect();
 
                     let job = CreatingStreamingJobControl::new(
-                        info,
+                        CreateSnapshotBackfillJobInfo {
+                            info: info.clone(),
+                            snapshot_backfill_info: snapshot_backfill_info.clone(),
+                            cross_db_snapshot_backfill_info: cross_db_snapshot_backfill_info
+                                .clone(),
+                        },
+                        take(notifiers),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
                         hummock_version_stats,

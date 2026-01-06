@@ -611,11 +611,17 @@ impl InflightDatabaseInfo {
                 );
                 continue;
             };
-            let CreateStreamingJobStatus::Creating { tracker, .. } =
-                &mut self.jobs.get_mut(job_id).expect("should exist").status
-            else {
-                warn!("update the progress of an created streaming job: {progress:?}");
-                continue;
+            let tracker = match &mut self.jobs.get_mut(job_id).expect("should exist").status {
+                CreateStreamingJobStatus::Init => {
+                    continue;
+                }
+                CreateStreamingJobStatus::Creating { tracker, .. } => tracker,
+                CreateStreamingJobStatus::Created => {
+                    if !progress.done {
+                        warn!("update the progress of an created streaming job: {progress:?}");
+                    }
+                    continue;
+                }
             };
             tracker.apply_progress(progress, version_stats);
         }
@@ -635,7 +641,7 @@ impl InflightDatabaseInfo {
                 .expect("should exist")
                 .cdc_table_backfill_tracker
             else {
-                warn!("update the progress of an created streaming job: {progress:?}");
+                warn!("update the cdc progress of an created streaming job: {progress:?}");
                 continue;
             };
             tracker.update_split_progress(progress);
