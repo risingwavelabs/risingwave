@@ -448,6 +448,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 job_infos,
                 &mut state_table_committed_epochs,
                 &mut state_table_log_epochs,
+                &fragment_relations,
                 &mut edges,
                 &stream_actors,
                 &mut source_splits,

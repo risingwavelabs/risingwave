@@ -41,7 +41,7 @@ use crate::controller::scale::{
 };
 use crate::error::bail_invalid_parameter;
 use crate::manager::{LocalNotification, MetaSrvEnv, MetadataManager};
-use crate::model::{ActorId, DispatcherId, FragmentId, StreamActor, StreamActorWithDispatchers};
+use crate::model::{ActorId, FragmentId, StreamActor, StreamActorWithDispatchers};
 use crate::stream::{GlobalStreamManager, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -195,12 +195,7 @@ impl ScaleController {
         let upstream_fragment_dispatcher_ids = upstream_fragments
             .iter()
             .filter(|&(_, dispatcher_type)| *dispatcher_type != DispatcherType::NoShuffle)
-            .map(|(upstream_fragment, _)| {
-                (
-                    *upstream_fragment,
-                    prev_fragment_info.fragment_id.as_raw_id() as DispatcherId,
-                )
-            })
+            .map(|(upstream_fragment, _)| (*upstream_fragment, prev_fragment_info.fragment_id))
             .collect();
 
         let downstream_fragment_ids = downstream_fragments

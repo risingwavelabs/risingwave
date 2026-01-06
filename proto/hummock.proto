@@ -483,6 +483,9 @@ message CompactTask {
   uint32 max_sub_compaction = 26;
   // The compaction group id when the compaction task is created.
   uint64 compaction_group_version_id = 27;
+  // The maximum key-value count threshold for using Xor16 filter.
+  // When the number of keys exceeds this threshold, a BlockedXor16 filter will be used.
+  optional uint64 max_kv_count_for_xor16 = 28;
 }
 
 message LevelHandler {
@@ -784,6 +787,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       // Enable the optimization of the interval selection for the level0 compaction
       bool enable_optimize_l0_interval_selection = 30;
       uint64 vnode_aligned_level_size_threshold = 31;
+      // The maximum key-value count threshold for using Xor16 filter
+      uint64 max_kv_count_for_xor16 = 32;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -1018,6 +1023,13 @@ message CompactionConfig {
   //
   // Typical value: 50GB.
   optional uint64 vnode_aligned_level_size_threshold = 31;
+
+  // The maximum key-value count threshold for using Xor16 filter instead of BlockedXor16 filter.
+  // When the number of keys in a compaction task or SST exceeds this threshold,
+  // a BlockedXor16 filter will be used instead of a single Xor16 filter.
+  //
+  // Typical value: 256 * 1024 (256K keys).
+  optional uint64 max_kv_count_for_xor16 = 32;
 }
 
 message TableStats {

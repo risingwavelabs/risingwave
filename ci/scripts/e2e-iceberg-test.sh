@@ -47,3 +47,9 @@ risedev slt './e2e_test/iceberg/test_case/pure_slt/*.slt'
 # Run benchmarks separately (not parallelized)
 echo "--- Running benchmarks"
 poetry run python main.py -t ./benches/predicate_pushdown.toml
+
+# Go back to repo root for CDC test
+cd ../..
+
+echo "--- Running PostgreSQL CDC with Iceberg sink schema change test"
+bash ci/scripts/e2e-iceberg-sink-cdc-test.sh

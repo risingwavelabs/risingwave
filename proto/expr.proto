@@ -688,6 +688,9 @@ message UserDefinedFunctionMetadata {
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 14;
+  optional bool is_batched = 15;
 
   UdfExprVersion version = 1000;
 }

@@ -27,11 +27,11 @@ use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::Field;
 use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_rate_limit::{RateLimit, RateLimiter};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use tokio::select;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -122,7 +122,7 @@ pub enum LogStoreReadItem {
         is_checkpoint: bool,
         new_vnode_bitmap: Option<Arc<Bitmap>>,
         is_stop: bool,
-        add_columns: Option<Vec<Field>>,
+        schema_change: Option<PbSinkSchemaChange>,
     },
 }
 
@@ -147,7 +147,7 @@ pub struct FlushCurrentEpochOptions {
     pub is_checkpoint: bool,
     pub new_vnode_bitmap: Option<Arc<Bitmap>>,
     pub is_stop: bool,
-    pub add_columns: Option<Vec<Field>>,
+    pub schema_change: Option<PbSinkSchemaChange>,
 }
 
 pub trait LogWriter: Send {

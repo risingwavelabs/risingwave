@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use risingwave_meta_model::pending_sink_state::{self};
-use risingwave_meta_model::{Epoch, SinkId};
+use risingwave_meta_model::{Epoch, SinkId, SinkSchemachange};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use sea_orm::{
     ColumnTrait, DatabaseConnection, EntityTrait, Order, QueryFilter, QueryOrder, QuerySelect, Set,
     TransactionTrait,
@@ -27,12 +28,15 @@ pub async fn persist_pre_commit_metadata(
     sink_id: SinkId,
     epoch: u64,
     commit_metadata: Vec<u8>,
+    schema_change: Option<&PbSinkSchemaChange>,
 ) -> anyhow::Result<()> {
+    let schema_change = schema_change.map(Into::into);
     let m = pending_sink_state::ActiveModel {
         sink_id: Set(sink_id),
         epoch: Set(epoch as Epoch),
         sink_state: Set(pending_sink_state::SinkState::Pending),
         metadata: Set(commit_metadata),
+        schema_change: Set(schema_change),
     };
     match pending_sink_state::Entity::insert(m).exec(db).await {
         Ok(_) => Ok(()),
@@ -113,30 +117,49 @@ pub async fn clean_aborted_records(
 pub async fn list_sink_states_ordered_by_epoch(
     db: &DatabaseConnection,
     sink_id: SinkId,
-) -> anyhow::Result<Vec<(u64, pending_sink_state::SinkState, Vec<u8>)>> {
-    let rows: Vec<(Epoch, pending_sink_state::SinkState, Vec<u8>)> =
-        match pending_sink_state::Entity::find()
-            .select_only()
-            .columns([
-                pending_sink_state::Column::Epoch,
-                pending_sink_state::Column::SinkState,
-                pending_sink_state::Column::Metadata,
-            ])
-            .filter(pending_sink_state::Column::SinkId.eq(sink_id))
-            .order_by(pending_sink_state::Column::Epoch, Order::Asc)
-            .into_tuple()
-            .all(db)
-            .await
-        {
-            Ok(rows) => rows,
-            Err(e) => {
-                tracing::error!("Error querying pending sink states: {:?}", e.as_report());
-                return Err(e.into());
-            }
-        };
+) -> anyhow::Result<
+    Vec<(
+        u64,
+        pending_sink_state::SinkState,
+        Vec<u8>,
+        Option<PbSinkSchemaChange>,
+    )>,
+> {
+    let rows: Vec<(
+        Epoch,
+        pending_sink_state::SinkState,
+        Vec<u8>,
+        Option<SinkSchemachange>,
+    )> = match pending_sink_state::Entity::find()
+        .select_only()
+        .columns([
+            pending_sink_state::Column::Epoch,
+            pending_sink_state::Column::SinkState,
+            pending_sink_state::Column::Metadata,
+            pending_sink_state::Column::SchemaChange,
+        ])
+        .filter(pending_sink_state::Column::SinkId.eq(sink_id))
+        .order_by(pending_sink_state::Column::Epoch, Order::Asc)
+        .into_tuple()
+        .all(db)
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            tracing::error!("Error querying pending sink states: {:?}", e.as_report());
+            return Err(e.into());
+        }
+    };
 
     Ok(rows
         .into_iter()
-        .map(|(epoch, state, metadata)| (epoch as u64, state, metadata))
+        .map(|(epoch, state, metadata, schema_change)| {
+            (
+                epoch as u64,
+                state,
+                metadata,
+                schema_change.map(|v| v.to_protobuf()),
+            )
+        })
         .collect())
 }

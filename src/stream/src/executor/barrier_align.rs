@@ -30,7 +30,8 @@ use crate::task::{ActorId, FragmentId};
 pub type AlignedMessageStreamItem = StreamExecutorResult<AlignedMessage>;
 pub trait AlignedMessageStream = futures::Stream<Item = AlignedMessageStreamItem> + Send;
 
-#[derive(Debug, EnumAsInner, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, EnumAsInner)]
 pub enum AlignedMessage {
     Barrier(Barrier),
     WatermarkLeft(Watermark),

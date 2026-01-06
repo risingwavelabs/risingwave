@@ -21,15 +21,14 @@ use std::sync::Arc;
 
 use tokio::sync::Notify;
 
-type TaskId = u64;
+/// Unique key combining `(task_id, plan_index)` since one task can have multiple plans.
+pub(crate) type TaskKey = (u64, usize);
 
 /// Task metadata for queue operations.
-///
-/// The actual runner payload is stored separately to support queue operations
-/// without moving ownership, and to allow tests without runner instances.
 #[derive(Debug, Clone)]
 pub struct IcebergTaskMeta {
     pub task_id: u64,
+    pub plan_index: usize,
     /// Must be in range `1..=max_parallelism`
     pub required_parallelism: u32,
 }
@@ -40,18 +39,24 @@ pub struct PoppedIcebergTask {
     pub runner: Option<IcebergCompactionPlanRunner>,
 }
 
+impl IcebergTaskMeta {
+    fn key(&self) -> TaskKey {
+        (self.task_id, self.plan_index)
+    }
+}
+
 /// Internal storage for the task queue.
 struct IcebergTaskQueueInner {
     /// FIFO queue of waiting task metadata
     deque: VecDeque<IcebergTaskMeta>,
-    /// Maps `task_id` to `required_parallelism` for tracking
-    id_map: HashMap<TaskId, u32>,
+    /// Maps `(task_id, plan_index)` to `required_parallelism` for tracking
+    id_map: HashMap<TaskKey, u32>,
     /// Sum of `required_parallelism` for all waiting tasks
     waiting_parallelism_sum: u32,
     /// Sum of `required_parallelism` for all running tasks
     running_parallelism_sum: u32,
-    /// Optional runner payloads indexed by `task_id`
-    runners: HashMap<TaskId, IcebergCompactionPlanRunner>,
+    /// Optional runner payloads indexed by `(task_id, plan_index)`
+    runners: HashMap<TaskKey, IcebergCompactionPlanRunner>,
 }
 
 /// FIFO task queue with parallelism-based scheduling for Iceberg compaction.
@@ -73,8 +78,8 @@ pub struct IcebergTaskQueue {
     max_parallelism: u32,
     /// Maximum total parallelism for waiting tasks (backpressure limit)
     pending_parallelism_budget: u32,
-    /// Optional notification for event-driven scheduling
-    schedule_notify: Option<Arc<Notify>>,
+    /// Notification for event-driven scheduling
+    schedule_notify: Arc<Notify>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -86,6 +91,8 @@ pub enum PushResult {
     RejectedTooLarge,
     /// `required_parallelism` == 0
     RejectedInvalidParallelism,
+    /// Task with same `(task_id, plan_index)` already exists
+    RejectedDuplicate,
 }
 
 impl IcebergTaskQueue {
@@ -105,32 +112,22 @@ impl IcebergTaskQueue {
             },
             max_parallelism,
             pending_parallelism_budget,
-            schedule_notify: None,
+            schedule_notify: Arc::new(Notify::new()),
         }
     }
 
-    pub fn new_with_notify(
-        max_parallelism: u32,
-        pending_parallelism_budget: u32,
-    ) -> (Self, Arc<Notify>) {
-        let notify = Arc::new(Notify::new());
-        let mut queue = Self::new(max_parallelism, pending_parallelism_budget);
-        queue.schedule_notify = Some(notify.clone());
-        (queue, notify)
-    }
-
+    /// Waits until there are tasks that can be scheduled.
+    ///
+    /// Returns `true` if there are schedulable tasks, `false` otherwise.
+    /// Use this in a `tokio::select!` to wake up when tasks become schedulable.
     pub async fn wait_schedulable(&self) -> bool {
-        if let Some(notify) = &self.schedule_notify {
-            // Check if we have tasks that can be scheduled right now
-            if self.has_schedulable_tasks() {
-                return true;
-            }
-            // Otherwise wait for notification
-            notify.notified().await;
-            self.has_schedulable_tasks()
-        } else {
-            self.has_schedulable_tasks()
+        // Check if we have tasks that can be scheduled right now
+        if self.has_schedulable_tasks() {
+            return true;
         }
+        // Otherwise wait for notification
+        self.schedule_notify.notified().await;
+        self.has_schedulable_tasks()
     }
 
     fn has_schedulable_tasks(&self) -> bool {
@@ -145,10 +142,8 @@ impl IcebergTaskQueue {
     }
 
     fn notify_schedulable(&self) {
-        if let Some(notify) = &self.schedule_notify
-            && self.has_schedulable_tasks()
-        {
-            notify.notify_one();
+        if self.has_schedulable_tasks() {
+            self.schedule_notify.notify_one();
         }
     }
 
@@ -180,20 +175,26 @@ impl IcebergTaskQueue {
             return PushResult::RejectedTooLarge;
         }
 
+        let key = meta.key();
+
+        // Reject duplicate keys to prevent inconsistent state between id_map and deque
+        if self.inner.id_map.contains_key(&key) {
+            return PushResult::RejectedDuplicate;
+        }
+
         let new_total = self.inner.waiting_parallelism_sum + meta.required_parallelism;
         if new_total > self.pending_parallelism_budget {
             return PushResult::RejectedCapacity;
         }
 
-        self.inner
-            .id_map
-            .insert(meta.task_id, meta.required_parallelism);
+        self.inner.id_map.insert(key, meta.required_parallelism);
         self.inner.waiting_parallelism_sum = new_total;
-        self.inner.deque.push_back(meta);
 
         if let Some(r) = runner {
-            self.inner.runners.insert(r.task_id, r);
+            self.inner.runners.insert(key, r);
         }
+
+        self.inner.deque.push_back(meta);
 
         self.notify_schedulable();
         PushResult::Added
@@ -219,21 +220,26 @@ impl IcebergTaskQueue {
             .running_parallelism_sum
             .saturating_add(meta.required_parallelism);
 
-        let runner = self.inner.runners.remove(&meta.task_id);
+        let runner = self.inner.runners.remove(&meta.key());
         Some(PoppedIcebergTask { meta, runner })
     }
 
     /// Mark a task as finished, freeing its parallelism for other tasks.
     ///
     /// Returns `true` if the task was found and removed, `false` otherwise.
-    pub fn finish_running(&mut self, task_id: TaskId) -> bool {
-        let Some(required) = self.inner.id_map.remove(&task_id) else {
+    pub fn finish_running(&mut self, task_key: TaskKey) -> bool {
+        let Some(required) = self.inner.id_map.remove(&task_key) else {
+            tracing::warn!(
+                task_id = task_key.0,
+                plan_index = task_key.1,
+                "finish_running called for unknown task key, possible bug: double-finish or invalid key"
+            );
             return false;
         };
 
         self.inner.running_parallelism_sum =
             self.inner.running_parallelism_sum.saturating_sub(required);
-        self.inner.runners.remove(&task_id);
+        self.inner.runners.remove(&task_key);
         self.notify_schedulable();
         true
     }
@@ -243,9 +249,10 @@ impl IcebergTaskQueue {
 mod tests {
     use super::*;
 
-    fn mk_meta(id: u64, p: u32) -> IcebergTaskMeta {
+    fn mk_meta(id: u64, plan_index: usize, p: u32) -> IcebergTaskMeta {
         IcebergTaskMeta {
             task_id: id,
+            plan_index,
             required_parallelism: p,
         }
     }
@@ -253,7 +260,7 @@ mod tests {
     #[test]
     fn test_basic_push_pop() {
         let mut q = IcebergTaskQueue::new(8, 32);
-        assert_eq!(q.push(mk_meta(1, 4), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(1, 0, 4), None), PushResult::Added);
         assert_eq!(q.waiting_parallelism_sum(), 4);
 
         let popped = q.pop().expect("should pop");
@@ -261,16 +268,16 @@ mod tests {
         assert_eq!(q.waiting_parallelism_sum(), 0);
         assert_eq!(q.running_parallelism_sum(), 4);
 
-        assert!(q.finish_running(1));
+        assert!(q.finish_running((1, 0)));
         assert_eq!(q.running_parallelism_sum(), 0);
     }
 
     #[test]
     fn test_fifo_ordering() {
         let mut q = IcebergTaskQueue::new(8, 32);
-        assert_eq!(q.push(mk_meta(1, 2), None), PushResult::Added);
-        assert_eq!(q.push(mk_meta(2, 2), None), PushResult::Added);
-        assert_eq!(q.push(mk_meta(3, 2), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(1, 0, 2), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(2, 0, 2), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(3, 0, 2), None), PushResult::Added);
 
         assert_eq!(q.pop().unwrap().meta.task_id, 1);
         assert_eq!(q.pop().unwrap().meta.task_id, 2);
@@ -280,26 +287,52 @@ mod tests {
     #[test]
     fn test_capacity_reject() {
         let mut q = IcebergTaskQueue::new(4, 6);
-        assert_eq!(q.push(mk_meta(1, 3), None), PushResult::Added);
-        assert_eq!(q.push(mk_meta(2, 3), None), PushResult::Added); // sum=6
-        assert_eq!(q.push(mk_meta(3, 1), None), PushResult::RejectedCapacity); // would exceed
+        assert_eq!(q.push(mk_meta(1, 0, 3), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(2, 0, 3), None), PushResult::Added); // sum=6
+        assert_eq!(q.push(mk_meta(3, 0, 1), None), PushResult::RejectedCapacity); // would exceed
     }
 
     #[test]
     fn test_invalid_parallelism() {
         let mut q = IcebergTaskQueue::new(4, 10);
         assert_eq!(
-            q.push(mk_meta(1, 0), None),
+            q.push(mk_meta(1, 0, 0), None),
             PushResult::RejectedInvalidParallelism
         );
-        assert_eq!(q.push(mk_meta(2, 5), None), PushResult::RejectedTooLarge); // > max
+        assert_eq!(q.push(mk_meta(2, 0, 5), None), PushResult::RejectedTooLarge); // > max
+    }
+
+    #[test]
+    fn test_duplicate_key_rejected() {
+        let mut q = IcebergTaskQueue::new(8, 32);
+        assert_eq!(q.push(mk_meta(1, 0, 3), None), PushResult::Added);
+        // Same (task_id, plan_index) should be rejected
+        assert_eq!(
+            q.push(mk_meta(1, 0, 5), None),
+            PushResult::RejectedDuplicate
+        );
+        // Parallelism sum should not have changed
+        assert_eq!(q.waiting_parallelism_sum(), 3);
+
+        // Different plan_index is allowed
+        assert_eq!(q.push(mk_meta(1, 1, 2), None), PushResult::Added);
+        assert_eq!(q.waiting_parallelism_sum(), 5);
+
+        // After pop and finish, the key can be reused
+        let p = q.pop().unwrap();
+        assert_eq!(p.meta.task_id, 1);
+        assert_eq!(p.meta.plan_index, 0);
+        q.finish_running((1, 0));
+
+        // Now the same key can be pushed again
+        assert_eq!(q.push(mk_meta(1, 0, 4), None), PushResult::Added);
     }
 
     #[test]
     fn test_pop_insufficient_parallelism() {
         let mut q = IcebergTaskQueue::new(8, 32);
-        assert_eq!(q.push(mk_meta(1, 6), None), PushResult::Added);
-        assert_eq!(q.push(mk_meta(2, 4), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(1, 0, 6), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(2, 0, 4), None), PushResult::Added);
 
         let p1 = q.pop().unwrap();
         assert_eq!(p1.meta.task_id, 1);
@@ -307,7 +340,7 @@ mod tests {
         assert!(q.pop().is_none());
 
         // Finish first, then second becomes schedulable
-        assert!(q.finish_running(1));
+        assert!(q.finish_running((1, 0)));
         let p2 = q.pop().unwrap();
         assert_eq!(p2.meta.task_id, 2);
     }
@@ -315,72 +348,79 @@ mod tests {
     #[test]
     fn test_finish_nonexistent_task() {
         let mut q = IcebergTaskQueue::new(4, 16);
-        assert!(!q.finish_running(999)); // no such task
+        assert!(!q.finish_running((999, 0)));
         assert_eq!(q.running_parallelism_sum(), 0);
     }
 
     #[test]
-    fn test_parallelism_sum_accounting() {
-        let mut q = IcebergTaskQueue::new(10, 20);
+    fn test_double_finish() {
+        let mut q = IcebergTaskQueue::new(8, 32);
+        assert_eq!(q.push(mk_meta(1, 0, 4), None), PushResult::Added);
+        q.pop().unwrap();
+        assert_eq!(q.running_parallelism_sum(), 4);
 
-        assert_eq!(q.push(mk_meta(1, 3), None), PushResult::Added);
-        assert_eq!(q.push(mk_meta(2, 5), None), PushResult::Added);
-        assert_eq!(q.waiting_parallelism_sum(), 8);
+        // First finish succeeds
+        assert!(q.finish_running((1, 0)));
         assert_eq!(q.running_parallelism_sum(), 0);
 
-        let _p1 = q.pop().unwrap();
-        assert_eq!(q.waiting_parallelism_sum(), 5);
-        assert_eq!(q.running_parallelism_sum(), 3);
-
-        let _p2 = q.pop().unwrap();
-        assert_eq!(q.waiting_parallelism_sum(), 0);
-        assert_eq!(q.running_parallelism_sum(), 8);
-
-        assert!(q.finish_running(1));
-        assert_eq!(q.running_parallelism_sum(), 5);
-
-        assert!(q.finish_running(2));
+        // Second finish on same key returns false (triggers warn log)
+        assert!(!q.finish_running((1, 0)));
         assert_eq!(q.running_parallelism_sum(), 0);
     }
 
     #[test]
-    fn test_multiple_tasks_same_parallelism() {
+    fn test_max_parallelism_boundary() {
+        // pending_budget == max_parallelism: minimal valid configuration
+        let mut q = IcebergTaskQueue::new(4, 4);
+
+        // Task with required_parallelism == max_parallelism should be accepted
+        assert_eq!(q.push(mk_meta(1, 0, 4), None), PushResult::Added);
+        // Budget exhausted
+        assert_eq!(q.push(mk_meta(2, 0, 1), None), PushResult::RejectedCapacity);
+
+        // Can pop and run at full parallelism
+        let p = q.pop().unwrap();
+        assert_eq!(p.meta.required_parallelism, 4);
+        assert_eq!(q.running_parallelism_sum(), 4);
+
+        // No room for any new running task
+        assert_eq!(q.push(mk_meta(3, 0, 1), None), PushResult::Added);
+        assert!(q.pop().is_none());
+    }
+
+    #[test]
+    fn test_same_task_id_multiple_plans() {
         let mut q = IcebergTaskQueue::new(10, 30);
-        // All tasks can be enqueued (total = 30)
-        for i in 1..=10 {
-            assert_eq!(q.push(mk_meta(i, 3), None), PushResult::Added);
+        let task_id = 1u64;
+
+        // Same task_id with different plan_index are independent
+        assert_eq!(q.push(mk_meta(task_id, 0, 3), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(task_id, 1, 4), None), PushResult::Added);
+        assert_eq!(q.push(mk_meta(task_id, 2, 2), None), PushResult::Added);
+        assert_eq!(q.waiting_parallelism_sum(), 9);
+
+        // Pop all
+        for i in 0..3 {
+            let p = q.pop().unwrap();
+            assert_eq!(p.meta.task_id, task_id);
+            assert_eq!(p.meta.plan_index, i);
         }
-        assert_eq!(q.waiting_parallelism_sum(), 30);
-
-        // Can pop 3 tasks (total parallelism = 9)
-        assert!(q.pop().is_some());
-        assert!(q.pop().is_some());
-        assert!(q.pop().is_some());
-        assert!(q.pop().is_none()); // would need 12 total
-
         assert_eq!(q.running_parallelism_sum(), 9);
-        assert_eq!(q.waiting_parallelism_sum(), 21);
+
+        // Finish out of order
+        assert!(q.finish_running((task_id, 1)));
+        assert_eq!(q.running_parallelism_sum(), 5);
+        assert!(q.finish_running((task_id, 0)));
+        assert!(q.finish_running((task_id, 2)));
+        assert_eq!(q.running_parallelism_sum(), 0);
     }
 
     #[test]
     fn test_empty_queue_behavior() {
         let mut q = IcebergTaskQueue::new(8, 32);
         assert!(q.pop().is_none());
-        assert!(!q.finish_running(1));
+        assert!(!q.finish_running((1, 0)));
         assert_eq!(q.waiting_parallelism_sum(), 0);
         assert_eq!(q.running_parallelism_sum(), 0);
-    }
-
-    #[test]
-    fn test_runner_lifecycle() {
-        let mut q = IcebergTaskQueue::new(8, 32);
-        // Push without runner
-        assert_eq!(q.push(mk_meta(1, 4), None), PushResult::Added);
-        let popped = q.pop().unwrap();
-        assert!(popped.runner.is_none());
-        assert!(q.finish_running(1));
-
-        // Verify runner map is cleaned up
-        assert!(q.inner.runners.is_empty());
     }
 }

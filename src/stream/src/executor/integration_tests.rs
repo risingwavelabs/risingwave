@@ -151,7 +151,7 @@ async fn test_merger_sum_aggr() {
                 vec![DispatcherImpl::RoundRobin(RoundRobinDataDispatcher::new(
                     inputs,
                     DispatchOutputMapping::Simple(vec![0]),
-                    0,
+                    0.into(),
                 ))],
                 0.into(),
                 0.into(),

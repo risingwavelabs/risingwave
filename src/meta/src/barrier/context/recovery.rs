@@ -14,13 +14,16 @@
 
 use std::cmp::{Ordering, max, min};
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
+use std::num::NonZeroUsize;
 
 use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::SinkId;
@@ -34,6 +37,9 @@ use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::context::GlobalBarrierWorkerContextImpl;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
+use crate::controller::scale::{
+    FragmentRenderMap, LoadedFragmentContext, RenderedGraph, WorkerInfo, render_actor_assignments,
+};
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
@@ -155,44 +161,61 @@ impl GlobalBarrierWorkerContextImpl {
             .collect())
     }
 
-    /// Resolve actor information from cluster, fragment manager and `ChangedTableId`.
-    /// We use `changed_table_id` to modify the actors to be sent or collected. Because these actor
-    /// will create or drop before this barrier flow through them.
-    async fn resolve_database_info(
+    /// Async load stage: collect all metadata required for rendering actor assignments.
+    async fn load_fragment_context(
         &self,
         database_id: Option<DatabaseId>,
-        worker_nodes: &ActiveStreamingWorkerNodes,
-    ) -> MetaResult<HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>>
-    {
-        let all_actor_infos = self
-            .metadata_manager
+    ) -> MetaResult<LoadedFragmentContext> {
+        self.metadata_manager
             .catalog_controller
-            .load_all_actors_dynamic(database_id, worker_nodes)
-            .await?;
+            .load_fragment_context(database_id)
+            .await
+    }
 
-        Ok(all_actor_infos
-            .into_iter()
-            .map(|(loaded_database_id, job_fragment_infos)| {
-                if let Some(database_id) = database_id {
-                    assert_eq!(database_id, loaded_database_id);
-                }
+    /// Sync render stage: use loaded context and current workers to produce actor assignments.
+    fn render_actor_assignments(
+        &self,
+        database_id: Option<DatabaseId>,
+        loaded: &LoadedFragmentContext,
+        worker_nodes: &ActiveStreamingWorkerNodes,
+        adaptive_parallelism_strategy: AdaptiveParallelismStrategy,
+    ) -> MetaResult<FragmentRenderMap> {
+        if loaded.is_empty() {
+            return Ok(HashMap::new());
+        }
+
+        let available_workers: BTreeMap<_, _> = worker_nodes
+            .current()
+            .values()
+            .filter(|worker| worker.is_streaming_schedulable())
+            .map(|worker| {
                 (
-                    loaded_database_id,
-                    job_fragment_infos
-                        .into_iter()
-                        .map(|(job_id, fragment_infos)| {
-                            (
-                                job_id,
-                                fragment_infos
-                                    .into_iter()
-                                    .map(|(fragment_id, info)| (fragment_id as _, info))
-                                    .collect(),
-                            )
-                        })
-                        .collect(),
+                    worker.id,
+                    WorkerInfo {
+                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        resource_group: worker.resource_group(),
+                    },
                 )
             })
-            .collect())
+            .collect();
+
+        let RenderedGraph { fragments, .. } = render_actor_assignments(
+            self.metadata_manager
+                .catalog_controller
+                .env
+                .actor_id_generator(),
+            &available_workers,
+            adaptive_parallelism_strategy,
+            loaded,
+        )?;
+
+        if let Some(database_id) = database_id {
+            for loaded_database_id in fragments.keys() {
+                assert_eq!(*loaded_database_id, database_id);
+            }
+        }
+
+        Ok(fragments)
     }
 
     #[expect(clippy::type_complexity)]
@@ -330,10 +353,7 @@ impl GlobalBarrierWorkerContextImpl {
     /// the operator.
     async fn recovery_table_with_upstream_sinks(
         &self,
-        inflight_jobs: &mut HashMap<
-            DatabaseId,
-            HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
-        >,
+        inflight_jobs: &mut FragmentRenderMap,
     ) -> MetaResult<()> {
         let mut jobs = inflight_jobs.values_mut().try_fold(
             HashMap::new(),
@@ -423,6 +443,16 @@ impl GlobalBarrierWorkerContextImpl {
                         .cleanup_dropped_tables()
                         .await;
 
+                    let adaptive_parallelism_strategy = {
+                        let system_params_reader = self
+                            .metadata_manager
+                            .catalog_controller
+                            .env
+                            .system_params_reader()
+                            .await;
+                        system_params_reader.adaptive_parallelism_strategy()
+                    };
+
                     let active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
                             .await?;
@@ -467,11 +497,18 @@ impl GlobalBarrierWorkerContextImpl {
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     let mut info = if unreschedulable_jobs.is_empty() {
                         info!("trigger offline scaling");
-                        self.resolve_database_info(None, &active_streaming_nodes)
-                            .await
-                            .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "resolve actor info failed");
-                            })?
+                        let loaded = self.load_fragment_context(None).await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "load fragment context failed");
+                        })?;
+                        self.render_actor_assignments(
+                            None,
+                            &loaded,
+                            &active_streaming_nodes,
+                            adaptive_parallelism_strategy,
+                        )
+                        .inspect_err(|err| {
+                            warn!(error = %err.as_report(), "render actor assignments failed");
+                        })?
                     } else {
                         bail!(
                             "Recovery for unreschedulable background jobs is not yet implemented. \
@@ -486,11 +523,18 @@ impl GlobalBarrierWorkerContextImpl {
                             .catalog_controller
                             .complete_dropped_tables(dropped_table_ids)
                             .await;
+                        let loaded = self.load_fragment_context(None).await.inspect_err(|err| {
+                            warn!(error = %err.as_report(), "load fragment context failed");
+                        })?;
                         info = self
-                            .resolve_database_info(None, &active_streaming_nodes)
-                            .await
+                            .render_actor_assignments(
+                                None,
+                                &loaded,
+                                &active_streaming_nodes,
+                                adaptive_parallelism_strategy,
+                            )
                             .inspect_err(|err| {
-                                warn!(error = %err.as_report(), "resolve actor info failed");
+                                warn!(error = %err.as_report(), "render actor assignments failed");
                             })?
                     }
 
@@ -635,14 +679,35 @@ impl GlobalBarrierWorkerContextImpl {
             .complete_dropped_tables(dropped_table_ids)
             .await;
 
+        let adaptive_parallelism_strategy = {
+            let system_params_reader = self
+                .metadata_manager
+                .catalog_controller
+                .env
+                .system_params_reader()
+                .await;
+            system_params_reader.adaptive_parallelism_strategy()
+        };
+
         let active_streaming_nodes =
             ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone()).await?;
 
-        let mut all_info = self
-            .resolve_database_info(Some(database_id), &active_streaming_nodes)
+        let loaded = self
+            .load_fragment_context(Some(database_id))
             .await
             .inspect_err(|err| {
-                warn!(error = %err.as_report(), "resolve actor info failed");
+                warn!(error = %err.as_report(), "load fragment context failed");
+            })?;
+
+        let mut all_info = self
+            .render_actor_assignments(
+                Some(database_id),
+                &loaded,
+                &active_streaming_nodes,
+                adaptive_parallelism_strategy,
+            )
+            .inspect_err(|err| {
+                warn!(error = %err.as_report(), "render actor assignments failed");
             })?;
 
         let mut database_info = all_info
@@ -727,7 +792,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     async fn load_stream_actors(
         &self,
-        all_info: &HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>,
+        all_info: &FragmentRenderMap,
     ) -> MetaResult<HashMap<ActorId, StreamActor>> {
         let job_ids = all_info
             .values()
