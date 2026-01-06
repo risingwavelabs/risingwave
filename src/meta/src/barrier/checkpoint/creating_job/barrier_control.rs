@@ -26,6 +26,7 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
 
 use crate::barrier::BarrierKind;
+use crate::barrier::context::CreateSnapshotBackfillJobInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -37,7 +38,7 @@ struct CreatingStreamingJobEpochState {
     resps: Vec<BarrierCompleteResponse>,
     notifiers: Vec<Notifier>,
     kind: BarrierKind,
-    is_first_commit: bool,
+    first_create_info: Option<CreateSnapshotBackfillJobInfo>,
     enqueue_time: Instant,
 }
 
@@ -47,7 +48,7 @@ pub(super) struct CreatingStreamingJobBarrierControl {
     // key is prev_epoch of barrier
     inflight_barrier_queue: BTreeMap<u64, CreatingStreamingJobEpochState>,
     snapshot_epoch: u64,
-    is_first_committed: bool,
+    first_create_info: Option<CreateSnapshotBackfillJobInfo>,
     max_collected_epoch: Option<u64>,
     max_committed_epoch: Option<u64>,
     // newer epoch at the front.
@@ -66,7 +67,7 @@ impl CreatingStreamingJobBarrierControl {
     pub(super) fn new(
         job_id: JobId,
         snapshot_epoch: u64,
-        is_first_committed: bool,
+        first_create_info: Option<CreateSnapshotBackfillJobInfo>,
         committed_epoch: Option<u64>,
     ) -> Self {
         let table_id_str = format!("{}", job_id);
@@ -74,7 +75,7 @@ impl CreatingStreamingJobBarrierControl {
             job_id,
             inflight_barrier_queue: Default::default(),
             snapshot_epoch,
-            is_first_committed,
+            first_create_info,
             max_collected_epoch: committed_epoch,
             max_committed_epoch: committed_epoch,
             pending_barriers_to_complete: Default::default(),
@@ -135,9 +136,8 @@ impl CreatingStreamingJobBarrierControl {
             job_id = %self.job_id,
             "creating job enqueue epoch"
         );
-        let is_first_commit = !self.is_first_committed;
-        if !self.is_first_committed {
-            self.is_first_committed = true;
+        let first_create_info = self.first_create_info.take();
+        if first_create_info.is_some() {
             assert!(
                 kind.is_checkpoint(),
                 "first barrier must be checkpoint barrier"
@@ -165,7 +165,7 @@ impl CreatingStreamingJobBarrierControl {
             resps: vec![],
             notifiers,
             kind,
-            is_first_commit,
+            first_create_info,
             enqueue_time: Instant::now(),
         };
         if epoch_state.node_to_collect.is_empty() && self.inflight_barrier_queue.is_empty() {
@@ -212,7 +212,11 @@ impl CreatingStreamingJobBarrierControl {
     pub(super) fn start_completing(
         &mut self,
         epoch_end_bound: Bound<u64>,
-    ) -> Option<(u64, Vec<BarrierCompleteResponse>, bool)> {
+    ) -> Option<(
+        u64,
+        Vec<BarrierCompleteResponse>,
+        Option<CreateSnapshotBackfillJobInfo>,
+    )> {
         assert!(self.completing_barrier.is_none());
         let epoch_range: (Bound<u64>, Bound<u64>) = (Unbounded, epoch_end_bound);
         while let Some(epoch_state) = self.pending_barriers_to_complete.back()
@@ -223,8 +227,8 @@ impl CreatingStreamingJobBarrierControl {
                 .pop_back()
                 .expect("non-empty");
             let epoch = epoch_state.epoch;
-            let is_first = epoch_state.is_first_commit;
-            if is_first {
+            let first_create_info = epoch_state.first_create_info.take();
+            if first_create_info.is_some() {
                 assert!(epoch_state.kind.is_checkpoint());
             } else if !epoch_state.kind.is_checkpoint() {
                 continue;
@@ -232,7 +236,7 @@ impl CreatingStreamingJobBarrierControl {
 
             let resps = take(&mut epoch_state.resps);
             self.completing_barrier = Some((epoch_state, self.wait_commit_latency.start_timer()));
-            return Some((epoch, resps, is_first));
+            return Some((epoch, resps, first_create_info));
         }
         None
     }

@@ -761,15 +761,15 @@ impl DatabaseCheckpointControl {
                 if let Some((epoch, resps, status)) =
                     job.start_completing(min_upstream_inflight_barrier)
                 {
-                    let is_first_time = match status {
-                        CompleteJobType::First => true,
-                        CompleteJobType::Normal => false,
+                    let create_info = match status {
+                        CompleteJobType::First(info) => Some(info),
+                        CompleteJobType::Normal => None,
                         CompleteJobType::Finished => {
                             finished_jobs.push((*job_id, epoch, resps));
                             continue;
                         }
                     };
-                    creating_jobs_task.push((*job_id, epoch, resps, is_first_time));
+                    creating_jobs_task.push((*job_id, epoch, resps, create_info));
                 }
             }
             if !finished_jobs.is_empty()
@@ -868,7 +868,7 @@ impl DatabaseCheckpointControl {
         }
         if !creating_jobs_task.is_empty() {
             let task = task.get_or_insert_default();
-            for (job_id, epoch, resps, is_first_time) in creating_jobs_task {
+            for (job_id, epoch, resps, create_info) in creating_jobs_task {
                 collect_creating_job_commit_epoch_info(
                     &mut task.commit_info,
                     epoch,
@@ -877,11 +877,11 @@ impl DatabaseCheckpointControl {
                         .state_table_ids()
                         .iter()
                         .copied(),
-                    is_first_time,
+                    create_info.is_some(),
                 );
                 let (_, creating_job_epochs) =
                     task.epoch_infos.entry(self.database_id).or_default();
-                creating_job_epochs.push((job_id, epoch));
+                creating_job_epochs.push((job_id, epoch, create_info));
             }
         }
     }
