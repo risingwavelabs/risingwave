@@ -825,8 +825,10 @@ impl PlanAggCall {
         });
     }
 
-    pub fn to_protobuf(&self) -> PbAggCall {
-        PbAggCall {
+    /// Serialize the aggregate call. Returns an error if the filter contains an impure expression
+    /// on a non-append-only stream, which may lead to inconsistent results.
+    pub fn to_protobuf_checked_pure(&self, append_only: bool) -> crate::error::Result<PbAggCall> {
+        Ok(PbAggCall {
             kind: match &self.agg_type {
                 AggType::Builtin(kind) => *kind,
                 AggType::UserDefined(_) => PbAggKind::UserDefined,
@@ -842,7 +844,11 @@ impl PlanAggCall {
                 .copied()
                 .map(ColumnOrder::to_protobuf)
                 .collect(),
-            filter: self.filter.as_expr_unless_true().map(|x| x.to_expr_proto()),
+            filter: self
+                .filter
+                .as_expr_unless_true()
+                .map(|x| x.to_expr_proto_checked_pure(append_only, "AGGREGATE filter"))
+                .transpose()?,
             direct_args: self
                 .direct_args
                 .iter()
@@ -859,7 +865,11 @@ impl PlanAggCall {
                 AggType::WrapScalar(expr) => Some(expr.clone()),
                 _ => None,
             },
-        }
+        })
+    }
+
+    pub fn to_protobuf(&self) -> PbAggCall {
+        self.to_protobuf_checked_pure(true).unwrap()
     }
 
     pub fn partial_to_total_agg_call(&self, partial_output_idx: usize) -> PlanAggCall {

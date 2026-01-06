@@ -19,11 +19,12 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, plan_node_name, watermark_pretty};
-use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamPlanRef as PlanRef, TryToStreamPb};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, IndexSet};
 
@@ -186,22 +187,28 @@ impl PlanTreeNodeUnary<Stream> for StreamHashAgg {
 }
 impl_plan_tree_node_for_unary! { Stream, StreamHashAgg }
 
-impl StreamNode for StreamHashAgg {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
+impl TryToStreamPb for StreamHashAgg {
+    fn try_to_stream_prost_body(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbNodeBody> {
         use risingwave_pb::stream_plan::*;
         let (intermediate_state_table, agg_states, distinct_dedup_tables) =
             self.core
                 .infer_tables(&self.base, self.vnode_col_idx, self.window_col_idx);
 
-        PbNodeBody::HashAgg(Box::new(HashAggNode {
-            group_key: self.group_key().to_vec_as_u32(),
-            agg_calls: self
-                .agg_calls()
-                .iter()
-                .map(PlanAggCall::to_protobuf)
-                .collect(),
+        let append_only = self.input().append_only();
+        let agg_calls = self
+            .agg_calls()
+            .iter()
+            .map(|call| call.to_protobuf_checked_pure(append_only))
+            .collect::<crate::error::Result<Vec<_>>>()?;
 
-            is_append_only: self.input().append_only(),
+        Ok(PbNodeBody::HashAgg(Box::new(HashAggNode {
+            group_key: self.group_key().to_vec_as_u32(),
+            agg_calls,
+
+            is_append_only: append_only,
             agg_call_states: agg_states
                 .into_iter()
                 .map(|s| s.into_prost(state))
@@ -226,7 +233,7 @@ impl StreamNode for StreamHashAgg {
             row_count_index: self.row_count_idx as u32,
             emit_on_window_close: self.base.emit_on_window_close(),
             version: PbAggNodeVersion::LATEST as _,
-        }))
+        })))
     }
 }
 
