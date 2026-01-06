@@ -1,0 +1,161 @@
+control substitution on
+
+statement ok
+set streaming_use_shared_source to false;
+
+# Test 1: Basic RabbitMQ MQTT source
+statement ok
+set streaming_parallelism to 2;
+
+statement ok
+create table t_rabbitmq_mqtt (
+  id int,
+  value varchar
+) with (
+  connector = 'mqtt',
+  url = 'mqtt://rabbitmq-server:1883',
+  topic = 'test_topic_1',
+  qos = 'at_least_once'
+) format plain encode json;
+
+sleep 1s
+
+# Produce initial messages
+system ok
+python3 e2e_test/source_inline/mqtt/rabbitmq_operation.py produce test_topic_1 100
+
+sleep 3s
+
+statement ok
+flush;
+
+# Verify we received at least 100 messages (at least once semantics)
+query T retry 3 backoff 1s
+select count(*) >= 100 from t_rabbitmq_mqtt;
+----
+t
+
+# Verify the data structure
+query I retry 3 backoff 1s
+select count(distinct id) >= 100 from t_rabbitmq_mqtt where id >= 0 and id < 100;
+----
+t
+
+# Test some specific values
+query T retry 3 backoff 1s
+select count(*) > 0 from t_rabbitmq_mqtt where id = 0 and value = 'message_0';
+----
+t
+
+query T retry 3 backoff 1s
+select count(*) > 0 from t_rabbitmq_mqtt where id = 50 and value = 'message_50';
+----
+t
+
+query T retry 3 backoff 1s
+select count(*) > 0 from t_rabbitmq_mqtt where id = 99 and value = 'message_99';
+----
+t
+
+statement ok
+drop table t_rabbitmq_mqtt;
+
+# Test 2: Multiple topics with wildcard subscription
+
+statement ok
+create table t_rabbitmq_mqtt_wildcard (
+  id int,
+  value varchar
+) with (
+  connector = 'mqtt',
+  url = 'mqtt://rabbitmq-server:1883',
+  topic = 'multi/topic/#',
+  qos = 'at_least_once'
+) format plain encode json;
+
+sleep 1s
+
+system ok
+python3 e2e_test/source_inline/mqtt/rabbitmq_operation.py produce multi/topic/a 50
+
+system ok
+python3 e2e_test/source_inline/mqtt/rabbitmq_operation.py produce multi/topic/b 50
+
+sleep 3s
+
+statement ok
+flush;
+
+# Should receive messages from both topics
+query T retry 3 backoff 1s
+select count(*) >= 100 from t_rabbitmq_mqtt_wildcard;
+----
+t
+
+statement ok
+drop table t_rabbitmq_mqtt_wildcard;
+
+# Test 3: QoS levels
+statement ok
+create table t_rabbitmq_mqtt_qos0 (
+  id int,
+  value varchar
+) with (
+  connector = 'mqtt',
+  url = 'mqtt://rabbitmq-server:1883',
+  topic = 'test_topic_qos0',
+  qos = 'at_most_once'
+) format plain encode json;
+
+sleep 1s
+
+system ok
+python3 e2e_test/source_inline/mqtt/rabbitmq_operation.py produce test_topic_qos0 100
+
+sleep 3s
+
+statement ok
+flush;
+
+# With QoS 0, we might receive fewer messages, but should receive some
+query T retry 3 backoff 1s
+select count(*) > 0 from t_rabbitmq_mqtt_qos0;
+----
+t
+
+statement ok
+drop table t_rabbitmq_mqtt_qos0;
+
+# Test 4: Clean start behavior
+statement ok
+create table t_rabbitmq_mqtt_clean (
+  id int,
+  value varchar
+) with (
+  connector = 'mqtt',
+  url = 'mqtt://rabbitmq-server:1883',
+  topic = 'test_topic_clean',
+  qos = 'at_least_once',
+  clean_start = 'true'
+) format plain encode json;
+
+sleep 1s
+
+system ok
+python3 e2e_test/source_inline/mqtt/rabbitmq_operation.py produce test_topic_clean 50
+
+sleep 3s
+
+statement ok
+flush;
+
+query T retry 3 backoff 1s
+select count(*) >= 50 from t_rabbitmq_mqtt_clean;
+----
+t
+
+statement ok
+drop table t_rabbitmq_mqtt_clean;
+
+statement ok
+set streaming_use_shared_source to true;

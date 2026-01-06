@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,7 +60,7 @@ impl ExecutorBuilder for WatermarkFilterBuilder {
             BatchTable::new_partial(store.clone(), column_ids, Some(other_vnodes), &desc);
 
         let table = StateTableBuilder::new(&table, store, Some(vnodes))
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.config)
             .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
             .build()
             .await;

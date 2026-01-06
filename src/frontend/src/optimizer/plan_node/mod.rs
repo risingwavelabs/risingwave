@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -313,6 +313,12 @@ impl<C: ConventionMarker> Layer for PlanRef<C> {
 
 #[derive(Clone, Debug, Copy, Serialize, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct PlanNodeId(pub i32);
+
+impl PlanNodeId {
+    pub fn to_stream_node_operator_id(self) -> StreamNodeLocalOperatorId {
+        StreamNodeLocalOperatorId::new(self.0 as _)
+    }
+}
 
 /// A more sophisticated `Endo` taking into account of the DAG structure of `PlanRef`.
 /// In addition to `Endo`, one have to specify the `cached` function
@@ -892,7 +898,7 @@ impl dyn StreamPlanNode {
                 input,
                 identity: self.explain_myself_to_string(),
                 node_body: node,
-                operator_id: self.id().0 as _,
+                operator_id: self.id().to_stream_node_operator_id(),
                 stream_key: self
                     .stream_key()
                     .unwrap_or_default()
@@ -971,6 +977,7 @@ mod batch_delete;
 mod batch_exchange;
 mod batch_expand;
 mod batch_filter;
+mod batch_get_channel_delta_stats;
 mod batch_group_topn;
 mod batch_hash_agg;
 mod batch_hash_join;
@@ -1005,12 +1012,15 @@ mod logical_delete;
 mod logical_except;
 mod logical_expand;
 mod logical_filter;
+mod logical_gap_fill;
+mod logical_get_channel_delta_stats;
 mod logical_hop_window;
 mod logical_insert;
 mod logical_intersect;
 mod logical_join;
 mod logical_kafka_scan;
 mod logical_limit;
+mod logical_locality_provider;
 mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
@@ -1033,11 +1043,13 @@ mod stream_dedup;
 mod stream_delta_join;
 mod stream_dml;
 mod stream_dynamic_filter;
+mod stream_eowc_gap_fill;
 mod stream_eowc_over_window;
 mod stream_exchange;
 mod stream_expand;
 mod stream_filter;
 mod stream_fs_fetch;
+mod stream_gap_fill;
 mod stream_global_approx_percentile;
 mod stream_group_topn;
 mod stream_hash_agg;
@@ -1045,6 +1057,7 @@ mod stream_hash_join;
 mod stream_hop_window;
 mod stream_join_common;
 mod stream_local_approx_percentile;
+mod stream_locality_provider;
 mod stream_materialize;
 mod stream_materialized_exprs;
 mod stream_now;
@@ -1062,6 +1075,7 @@ mod stream_stateless_simple_agg;
 mod stream_sync_log_store;
 mod stream_table_scan;
 mod stream_topn;
+mod stream_union;
 mod stream_values;
 mod stream_watermark_filter;
 
@@ -1079,11 +1093,12 @@ mod logical_postgres_query;
 mod batch_vector_search;
 mod logical_mysql_query;
 mod logical_vector_search;
+mod logical_vector_search_lookup_join;
 mod stream_cdc_table_scan;
 mod stream_share;
 mod stream_temporal_join;
-mod stream_union;
 mod stream_upstream_sink_union;
+mod stream_vector_index_lookup_join;
 mod stream_vector_index_write;
 pub mod utils;
 
@@ -1092,6 +1107,7 @@ pub use batch_exchange::BatchExchange;
 pub use batch_expand::BatchExpand;
 pub use batch_file_scan::BatchFileScan;
 pub use batch_filter::BatchFilter;
+pub use batch_get_channel_delta_stats::BatchGetChannelDeltaStats;
 pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
@@ -1132,6 +1148,8 @@ pub use logical_except::LogicalExcept;
 pub use logical_expand::LogicalExpand;
 pub use logical_file_scan::LogicalFileScan;
 pub use logical_filter::LogicalFilter;
+pub use logical_gap_fill::LogicalGapFill;
+pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
@@ -1139,6 +1157,7 @@ pub use logical_intersect::LogicalIntersect;
 pub use logical_join::LogicalJoin;
 pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
+pub use logical_locality_provider::LogicalLocalityProvider;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_mysql_query::LogicalMySqlQuery;
@@ -1158,6 +1177,8 @@ pub use logical_union::LogicalUnion;
 pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use logical_vector_search::LogicalVectorSearch;
+pub use logical_vector_search_lookup_join::LogicalVectorSearchLookupJoin;
+use risingwave_pb::id::StreamNodeLocalOperatorId;
 pub use stream_asof_join::StreamAsOfJoin;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_changelog::StreamChangeLog;
@@ -1165,11 +1186,13 @@ pub use stream_dedup::StreamDedup;
 pub use stream_delta_join::StreamDeltaJoin;
 pub use stream_dml::StreamDml;
 pub use stream_dynamic_filter::StreamDynamicFilter;
+pub use stream_eowc_gap_fill::StreamEowcGapFill;
 pub use stream_eowc_over_window::StreamEowcOverWindow;
 pub use stream_exchange::StreamExchange;
 pub use stream_expand::StreamExpand;
 pub use stream_filter::StreamFilter;
 pub use stream_fs_fetch::StreamFsFetch;
+pub use stream_gap_fill::StreamGapFill;
 pub use stream_global_approx_percentile::StreamGlobalApproxPercentile;
 pub use stream_group_topn::StreamGroupTopN;
 pub use stream_hash_agg::StreamHashAgg;
@@ -1177,6 +1200,7 @@ pub use stream_hash_join::StreamHashJoin;
 pub use stream_hop_window::StreamHopWindow;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
+pub use stream_locality_provider::StreamLocalityProvider;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_materialized_exprs::StreamMaterializedExprs;
 pub use stream_now::StreamNow;
@@ -1199,6 +1223,7 @@ pub use stream_topn::StreamTopN;
 pub use stream_union::StreamUnion;
 pub use stream_upstream_sink_union::StreamUpstreamSinkUnion;
 pub use stream_values::StreamValues;
+pub use stream_vector_index_lookup_join::StreamVectorIndexLookupJoin;
 pub use stream_vector_index_write::StreamVectorIndexWrite;
 pub use stream_watermark_filter::StreamWatermarkFilter;
 
@@ -1263,7 +1288,11 @@ macro_rules! for_all_plan_nodes {
             , { Logical, FileScan }
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
+            , { Logical, GapFill }
             , { Logical, VectorSearch }
+            , { Logical, GetChannelDeltaStats }
+            , { Logical, LocalityProvider }
+            , { Logical, VectorSearchLookupJoin }
             , { Batch, SimpleAgg }
             , { Batch, HashAgg }
             , { Batch, SortAgg }
@@ -1297,6 +1326,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
+            , { Batch, GetChannelDeltaStats }
             , { Batch, VectorSearch }
             , { Stream, Project }
             , { Stream, Filter }
@@ -1339,7 +1369,11 @@ macro_rules! for_all_plan_nodes {
             , { Stream, SyncLogStore }
             , { Stream, MaterializedExprs }
             , { Stream, VectorIndexWrite }
+            , { Stream, VectorIndexLookupJoin }
             , { Stream, UpstreamSinkUnion }
+            , { Stream, LocalityProvider }
+            , { Stream, EowcGapFill }
+            , { Stream, GapFill }
             $(,$rest)*
         }
     };

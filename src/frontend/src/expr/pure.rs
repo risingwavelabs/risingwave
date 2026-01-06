@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -172,6 +172,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::ArraySum
             | Type::ArraySort
             | Type::ArrayAppend
+            | Type::ArrayReverse
             | Type::ArrayPrepend
             | Type::FormatType
             | Type::ArrayDistinct
@@ -233,6 +234,11 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::Acosh
             | Type::Decode
             | Type::Encode
+            | Type::GetBit
+            | Type::GetByte
+            | Type::SetBit
+            | Type::SetByte
+            | Type::BitCount
             | Type::Sha1
             | Type::Sha224
             | Type::Sha256
@@ -278,6 +284,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::VecConcat
             | Type::L2Norm
             | Type::L2Normalize
+            | Type::Subvector
             | Type::VnodeUser
             | Type::RwEpochToTs
             | Type::CheckNotNull
@@ -312,6 +319,9 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::MakeTimestamptz
             | Type::PgIsInRecovery
             | Type::RwRecoveryStatus
+            | Type::RwClusterId
+            | Type::RwFragmentVnodes
+            | Type::RwActorVnodes
             | Type::PgTableIsVisible
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding

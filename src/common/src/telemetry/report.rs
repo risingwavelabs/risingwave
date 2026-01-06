@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -157,8 +157,7 @@ where
                 }
             };
 
-            let url =
-                (TELEMETRY_REPORT_URL.to_owned() + "/" + report_creator.report_type()).to_owned();
+            let url = TELEMETRY_REPORT_URL.to_owned() + "/" + report_creator.report_type();
 
             match post_telemetry_report_pb(&url, bin_report).await {
                 Ok(_) => tracing::info!("Telemetry post success, id {}", tracking_id),

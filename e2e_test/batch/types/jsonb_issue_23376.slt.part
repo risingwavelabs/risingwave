@@ -1,0 +1,36 @@
+# https://github.com/risingwavelabs/risingwave/issues/23376#issuecomment-3397462966
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table t (v varchar);
+
+statement ok
+create materialized view jt as select v::jsonb as v from t;
+
+statement ok
+create materialized view mv as select t1.v from jt as t1, jt as t2 where t1.v = t2.v;
+
+statement ok
+insert into t values
+    ('{"":114514191981011451419198101145141919810}'),
+    ('{"":1926081719260817192608171926081719260817}'),
+    ('{"":555555155555572055555781056}');
+
+query T rowsort
+select * from jt;
+----
+{"": 1.1451419198101145e38}
+{"": 1.9260817192608173e39}
+{"": 5.5555515555557204e26}
+
+query T rowsort
+select * from mv;
+----
+{"": 1.1451419198101145e38}
+{"": 1.9260817192608173e39}
+{"": 5.5555515555557204e26}
+
+statement ok
+drop table t cascade;

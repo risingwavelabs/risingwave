@@ -21,7 +21,6 @@ use crate::model::{FragmentNewNoShuffle, FragmentReplaceUpstream, StreamJobFragm
 #[derive(Debug, Clone)]
 pub struct SplitState {
     pub split_assignment: SplitAssignment,
-    pub discovered_source_splits: DiscoveredSourceSplits,
 }
 
 impl SourceManager {
@@ -50,8 +49,8 @@ impl SourceManager {
             .get(&upstream_source_fragment_id)
             .unwrap();
         tracing::info!(
-            fragment_id,
-            upstream_source_fragment_id,
+            %fragment_id,
+            %upstream_source_fragment_id,
             ?upstream_assignment,
             "migrate_splits_for_backfill_actors"
         );
@@ -88,7 +87,7 @@ impl SourceManager {
             }
 
             for fragment_id in fragments {
-                let empty_actor_splits: HashMap<u32, Vec<SplitImpl>> = table_fragments
+                let empty_actor_splits: HashMap<ActorId, Vec<SplitImpl>> = table_fragments
                     .fragments
                     .get(&fragment_id)
                     .unwrap()
@@ -96,10 +95,10 @@ impl SourceManager {
                     .iter()
                     .map(|actor| (actor.actor_id, vec![]))
                     .collect();
-                let actor_hashset: HashSet<u32> = empty_actor_splits.keys().cloned().collect();
-                let splits = handle.discovered_splits(source_id, &actor_hashset).await?;
+                let actor_count = empty_actor_splits.keys().len();
+                let splits = handle.discovered_splits(source_id, actor_count).await?;
                 if splits.is_empty() {
-                    tracing::warn!(?stream_job_id, source_id, "no splits detected");
+                    tracing::warn!(?stream_job_id, %source_id, "no splits detected");
                     continue 'loop_source;
                 }
                 if let Some(diff) = reassign_splits(
@@ -280,7 +279,6 @@ impl SourceManagerCore {
     /// after the mutation barrier has been collected.
     pub async fn reassign_splits(&self) -> MetaResult<HashMap<DatabaseId, SplitState>> {
         let mut split_assignment: SplitAssignment = HashMap::new();
-        let mut source_splits_discovered = HashMap::new();
 
         'loop_source: for (source_id, handle) in &self.managed_sources {
             let source_fragment_ids = match self.source_fragments.get(source_id) {
@@ -295,7 +293,6 @@ impl SourceManagerCore {
                 let actors = match self
                     .metadata_manager
                     .get_running_actors_of_fragment(fragment_id)
-                    .await
                 {
                     Ok(actors) => {
                         if actors.is_empty() {
@@ -310,7 +307,7 @@ impl SourceManagerCore {
                     }
                 };
 
-                let discovered_splits = handle.discovered_splits(*source_id, &actors).await?;
+                let discovered_splits = handle.discovered_splits(*source_id, actors.len()).await?;
                 if discovered_splits.is_empty() {
                     // The discover loop for this source is not ready yet; we'll wait for the next run
                     continue 'loop_source;
@@ -332,16 +329,6 @@ impl SourceManagerCore {
                         })
                         .unwrap_or_default()
                 };
-
-                source_splits_discovered.insert(
-                    *source_id,
-                    discovered_splits.values().cloned().collect_vec(),
-                );
-
-                source_splits_discovered.insert(
-                    *source_id,
-                    discovered_splits.values().cloned().collect_vec(),
-                );
 
                 if let Some(new_assignment) = reassign_splits(
                     fragment_id,
@@ -402,22 +389,10 @@ impl SourceManagerCore {
 
         let mut result = HashMap::new();
         for (database_id, assignment) in assignments {
-            let mut source_splits = HashMap::new();
-            for (source_id, fragment_ids) in &self.source_fragments {
-                if fragment_ids
-                    .iter()
-                    .any(|fragment_id| assignment.contains_key(fragment_id))
-                    && let Some(splits) = source_splits_discovered.get(source_id)
-                {
-                    source_splits.insert(*source_id, splits.clone());
-                }
-            }
-
             result.insert(
                 database_id,
                 SplitState {
                     split_assignment: assignment,
-                    discovered_source_splits: source_splits,
                 },
             );
         }
@@ -473,8 +448,8 @@ where
         .flat_map(|splits| splits.iter().map(SplitMetaData::id))
         .collect();
 
-    tracing::trace!(fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
-    tracing::trace!(fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
+    tracing::trace!(%fragment_id, prev_split_ids = ?prev_split_ids, "previous splits");
+    tracing::trace!(%fragment_id, prev_split_ids = ?discovered_splits.keys(), "discovered splits");
 
     let discovered_split_ids: HashSet<_> = discovered_splits.keys().cloned().collect();
 
@@ -485,9 +460,9 @@ where
 
     if !dropped_splits.is_empty() {
         if opts.enable_scale_in {
-            tracing::info!(fragment_id, dropped_spltis = ?dropped_splits, "new dropped splits");
+            tracing::info!(%fragment_id, dropped_spltis = ?dropped_splits, "new dropped splits");
         } else {
-            tracing::warn!(fragment_id, dropped_spltis = ?dropped_splits, "split dropping happened, but it is not allowed");
+            tracing::warn!(%fragment_id, dropped_spltis = ?dropped_splits, "split dropping happened, but it is not allowed");
         }
     }
 
@@ -513,7 +488,7 @@ where
         }
     }
 
-    tracing::info!(fragment_id, new_discovered_splits = ?new_discovered_splits, "new discovered splits");
+    tracing::info!(%fragment_id, new_discovered_splits = ?new_discovered_splits, "new discovered splits");
 
     let mut heap = BinaryHeap::with_capacity(actor_splits.len());
 
@@ -695,9 +670,9 @@ mod tests {
     #[test]
     fn test_drop_splits() {
         let mut actor_splits: HashMap<ActorId, _> = HashMap::new();
-        actor_splits.insert(0, vec![TestSplit { id: 0 }, TestSplit { id: 1 }]);
-        actor_splits.insert(1, vec![TestSplit { id: 2 }, TestSplit { id: 3 }]);
-        actor_splits.insert(2, vec![TestSplit { id: 4 }, TestSplit { id: 5 }]);
+        actor_splits.insert(0.into(), vec![TestSplit { id: 0 }, TestSplit { id: 1 }]);
+        actor_splits.insert(1.into(), vec![TestSplit { id: 2 }, TestSplit { id: 3 }]);
+        actor_splits.insert(2.into(), vec![TestSplit { id: 4 }, TestSplit { id: 5 }]);
 
         let mut prev_split_to_actor = HashMap::new();
         for (actor_id, splits) in &actor_splits {
@@ -755,7 +730,7 @@ mod tests {
     #[test]
     fn test_drop_splits_to_empty() {
         let mut actor_splits: HashMap<ActorId, _> = HashMap::new();
-        actor_splits.insert(0, vec![TestSplit { id: 0 }]);
+        actor_splits.insert(0.into(), vec![TestSplit { id: 0 }]);
 
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
 
@@ -789,7 +764,7 @@ mod tests {
             .is_none()
         );
 
-        let actor_splits = (0..3).map(|i| (i, vec![])).collect();
+        let actor_splits = (0..3).map(|i| (i.into(), vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = BTreeMap::new();
         let diff = reassign_splits(
             FragmentId::default(),
@@ -803,7 +778,7 @@ mod tests {
             assert!(splits.is_empty())
         }
 
-        let actor_splits = (0..3).map(|i| (i, vec![])).collect();
+        let actor_splits = (0..3).map(|i| (i.into(), vec![])).collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = (0..3)
             .map(|i| {
                 let split = TestSplit { id: i };
@@ -825,7 +800,9 @@ mod tests {
 
         check_all_splits(&discovered_splits, &diff);
 
-        let actor_splits = (0..3).map(|i| (i, vec![TestSplit { id: i }])).collect();
+        let actor_splits = (0..3)
+            .map(|i| (i.into(), vec![TestSplit { id: i }]))
+            .collect();
         let discovered_splits: BTreeMap<SplitId, TestSplit> = (0..5)
             .map(|i| {
                 let split = TestSplit { id: i };
@@ -848,10 +825,11 @@ mod tests {
 
         check_all_splits(&discovered_splits, &diff);
 
-        let mut actor_splits: HashMap<ActorId, Vec<TestSplit>> =
-            (0..3).map(|i| (i, vec![TestSplit { id: i }])).collect();
-        actor_splits.insert(3, vec![]);
-        actor_splits.insert(4, vec![]);
+        let mut actor_splits: HashMap<ActorId, Vec<TestSplit>> = (0..3)
+            .map(|i| (i.into(), vec![TestSplit { id: i }]))
+            .collect();
+        actor_splits.insert(3.into(), vec![]);
+        actor_splits.insert(4.into(), vec![]);
 
         let discovered_splits: BTreeMap<SplitId, TestSplit> = (0..5)
             .map(|i| {

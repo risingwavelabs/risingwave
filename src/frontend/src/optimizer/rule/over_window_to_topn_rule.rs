@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -122,7 +122,7 @@ impl Rule<Logical> for OverWindowToTopNRule {
             offset,
             with_ties,
             Order {
-                column_orders: window_func.order_by.to_vec(),
+                column_orders: window_func.order_by.clone(),
             },
             window_func.partition_by.iter().map(|i| i.index).collect(),
         )

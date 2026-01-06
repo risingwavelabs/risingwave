@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_trigger` stores triggers on tables and views.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-trigger.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-trigger.html`
 /// This is introduced only for pg compatibility and is not used in our system.
 #[system_catalog(view, "pg_catalog.pg_trigger")]
 #[derive(Fields)]

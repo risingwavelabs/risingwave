@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,10 @@ struct ExprVis<'a> {
 
 impl ExprVisitor for ExprVis<'_> {
     fn visit_input_ref(&mut self, input_ref: &crate::expr::InputRef) {
-        if input_ref.data_type != self.schema[input_ref.index].data_type {
+        if !input_ref
+            .data_type
+            .equals_datatype(&self.schema[input_ref.index].data_type)
+        {
             self.string.replace(format!(
                 "InputRef#{} has type {}, but its type is {} in the input schema",
                 input_ref.index, input_ref.data_type, self.schema[input_ref.index].data_type

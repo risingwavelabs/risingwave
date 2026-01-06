@@ -14,6 +14,7 @@ anchors:
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
         propagate-environment: true
+        upload-container-logs: always
     - docker-compose-standard: &docker-compose-standard
         <<: *docker-compose
         run: ci-standard-env
@@ -67,7 +68,7 @@ steps:
           <<: *docker-compose
           environment:
           - GITHUB_TOKEN
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "build simulation test"
@@ -180,7 +181,7 @@ steps:
             <<: *docker-compose
             run: source-test-env
         - ./ci/plugins/upload-failure-logs
-      timeout_in_minutes: 25
+      timeout_in_minutes: 30
       retry: *auto-retry
 
     - label: "end-to-end sink test ({{matrix.backend}} backend)"
@@ -254,7 +255,7 @@ steps:
           <<: *docker-compose
           environment:
           - CODECOV_TOKEN
-    timeout_in_minutes: 25
+    timeout_in_minutes: 30
     retry: *auto-retry
 
   - label: "unit test (madsim)"
@@ -615,7 +616,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
-          run: source-test-env
+          run: backward-compatibility-test-env
           environment:
             - BUILDKITE_BRANCH
       - ./ci/plugins/upload-failure-logs
@@ -767,6 +768,23 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "LDAP authentication test"
+    key: "ldap-tests"
+    command: "ci/scripts/e2e-ldap-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-ldap-tests"
+      || build.env("CI_STEPS") =~ /(^|,)ldap-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose
+          run: ldap-test-env
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
   - label: "end-to-end starrocks sink test"
     key: "e2e-starrocks-sink-tests"
     command: "ci/scripts/e2e-starrocks-sink-test.sh -p ci-release"
@@ -910,6 +928,21 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "e2e internal_get_channel_delta_stats test with monitoring"
+    key: "e2e-monitoring-tests"
+    command: "ci/scripts/e2e-monitoring-tests.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-monitoring-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-monitoring-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
   - label: "connector node integration test Java {{matrix.java_version}}"
     key: "connector-node-integration-test"
     command: "ci/scripts/connector-node-integration-test.sh -p ci-release -v {{matrix.java_version}}"
@@ -926,8 +959,8 @@ steps:
     matrix:
       setup:
         java_version:
-          - "11"
           - "17"
+          - "21"
     timeout_in_minutes: 10
     retry: *auto-retry
 

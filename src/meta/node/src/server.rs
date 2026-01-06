@@ -35,7 +35,7 @@ use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
 use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
-use risingwave_meta::stream::ScaleController;
+use risingwave_meta::stream::{GlobalRefreshManager, ScaleController};
 use risingwave_meta_service::AddressInfo;
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
@@ -93,9 +93,7 @@ use crate::hummock::HummockManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
-use crate::rpc::metrics::{
-    GLOBAL_META_METRICS, start_fragment_info_monitor, start_worker_info_monitor,
-};
+use crate::rpc::metrics::{GLOBAL_META_METRICS, start_info_monitor, start_worker_info_monitor};
 use crate::serving::ServingVnodeMapping;
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
@@ -406,6 +404,7 @@ pub async fn start_service_as_election_leader(
         prometheus_client.clone(),
         prometheus_selector.clone(),
         opts.redact_sql_option_keywords.clone(),
+        env.system_params_manager_impl_ref(),
     ));
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
@@ -505,7 +504,18 @@ pub async fn start_service_as_election_leader(
 
     sub_tasks.push(IcebergCompactionManager::gc_loop(
         iceberg_compaction_mgr.clone(),
+        env.opts.iceberg_gc_interval_sec,
     ));
+
+    let refresh_scheduler_interval = Duration::from_secs(env.opts.refresh_scheduler_interval_sec);
+    let (refresh_manager, refresh_handle, refresh_shutdown) = GlobalRefreshManager::start(
+        metadata_manager.clone(),
+        barrier_scheduler.clone(),
+        &env,
+        refresh_scheduler_interval,
+    )
+    .await?;
+    sub_tasks.push((refresh_handle, refresh_shutdown));
 
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
@@ -522,6 +532,7 @@ pub async fn start_service_as_election_leader(
         sink_manager.clone(),
         scale_controller.clone(),
         barrier_scheduler.clone(),
+        refresh_manager.clone(),
     )
     .await;
     tracing::info!("GlobalBarrierManager started");
@@ -559,8 +570,13 @@ pub async fn start_service_as_election_leader(
         sink_manager.clone(),
         meta_metrics.clone(),
         iceberg_compaction_mgr.clone(),
+        barrier_scheduler.clone(),
     )
     .await;
+
+    if env.opts.enable_legacy_table_migration {
+        sub_tasks.push(ddl_srv.start_migrate_table_fragments());
+    }
 
     let user_srv = UserServiceImpl::new(metadata_manager.clone());
 
@@ -578,6 +594,7 @@ pub async fn start_service_as_election_leader(
         barrier_manager.clone(),
         stream_manager.clone(),
         metadata_manager.clone(),
+        refresh_manager.clone(),
     );
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
@@ -622,9 +639,10 @@ pub async fn start_service_as_election_leader(
         Duration::from_secs(env.opts.node_num_monitor_interval_sec),
         meta_metrics.clone(),
     ));
-    sub_tasks.push(start_fragment_info_monitor(
+    sub_tasks.push(start_info_monitor(
         metadata_manager.clone(),
         hummock_manager.clone(),
+        env.system_params_manager_impl_ref(),
         meta_metrics.clone(),
     ));
     sub_tasks.push(SystemParamsController::start_params_notifier(
@@ -734,7 +752,10 @@ pub async fn start_service_as_election_leader(
         .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
-        .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
+        .add_service(
+            SinkCoordinationServiceServer::new(sink_coordination_srv)
+                .max_decoding_message_size(usize::MAX),
+        )
         .add_service(
             EventLogServiceServer::new(event_log_srv).max_decoding_message_size(usize::MAX),
         )

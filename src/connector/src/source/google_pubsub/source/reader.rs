@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
 
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
+use google_cloud_gax::grpc::Code;
 use google_cloud_pubsub::subscription::Subscription;
 use risingwave_common::{bail, ensure};
-use tonic::Code;
 
 use super::TaggedReceivedMessage;
 use crate::error::{ConnectorError, ConnectorResult as Result};

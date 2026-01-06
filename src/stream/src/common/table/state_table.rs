@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,6 @@ use either::Either;
 use foyer::Hint;
 use futures::future::try_join_all;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
-use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{ArrayImplBuilder, ArrayRef, DataChunk, Op, StreamChunk};
@@ -34,8 +33,8 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt, VnodeCountCompat};
-use risingwave_common::row::{self, Once, OwnedRow, Row, RowExt, once};
-use risingwave_common::types::{DataType, Datum, DefaultOrd, DefaultOrdered, ScalarImpl};
+use risingwave_common::row::{self, OwnedRow, Row, RowExt};
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
@@ -60,20 +59,13 @@ use risingwave_storage::row_serde::row_serde_util::{
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::*;
-use risingwave_storage::table::merge_sort::merge_sort;
 use risingwave_storage::table::{KeyedRow, TableDistribution};
 use thiserror_ext::AsReport;
 use tracing::{Instrument, trace};
 
 use crate::cache::cache_may_stale;
-use crate::common::state_cache::{StateCache, StateCacheFiller};
-use crate::common::table::state_table_cache::StateTableWatermarkCache;
 use crate::executor::StreamExecutorResult;
-
-/// Mostly watermark operators will have inserts (append-only).
-/// So this number should not need to be very large.
-/// But we may want to improve this choice in the future.
-const WATERMARK_CACHE_ENTRIES: usize = 16;
+use crate::executor::monitor::streaming_stats::StateTableMetrics;
 
 /// This macro is used to mark a point where we want to randomly discard the operation and early
 /// return, only in insane mode.
@@ -86,14 +78,109 @@ macro_rules! insane_mode_discard_point {
     }};
 }
 
+/// Per-vnode statistics for pruning. None means this stat is not maintained.
+/// For each vnode, we maintain the min and max storage table key (excluding the vnode part) observed in the vnode.
+/// The stat won't differentiate between tombstone and normal keys.
+struct VnodeStatistics {
+    min_key: Option<Bytes>,
+    max_key: Option<Bytes>,
+}
+
+impl VnodeStatistics {
+    fn new() -> Self {
+        Self {
+            min_key: None,
+            max_key: None,
+        }
+    }
+
+    fn update_with_key(&mut self, key: &Bytes) {
+        if let Some(min) = &self.min_key {
+            if key < min {
+                self.min_key = Some(key.clone());
+            }
+        } else {
+            self.min_key = Some(key.clone());
+        }
+
+        if let Some(max) = &self.max_key {
+            if key > max {
+                self.max_key = Some(key.clone());
+            }
+        } else {
+            self.max_key = Some(key.clone());
+        }
+    }
+
+    fn can_prune(&self, key: &Bytes) -> bool {
+        if let Some(min) = &self.min_key
+            && key < min
+        {
+            return true;
+        }
+        if let Some(max) = &self.max_key
+            && key > max
+        {
+            return true;
+        }
+        false
+    }
+
+    fn can_prune_range(&self, start: &Bound<Bytes>, end: &Bound<Bytes>) -> bool {
+        // Check if the range is completely outside vnode bounds
+        if let Some(max) = &self.max_key {
+            match start {
+                Included(s) if s > max => return true,
+                Excluded(s) if s >= max => return true,
+                _ => {}
+            }
+        }
+        if let Some(min) = &self.min_key {
+            match end {
+                Included(e) if e < min => return true,
+                Excluded(e) if e <= min => return true,
+                _ => {}
+            }
+        }
+        false
+    }
+
+    fn pruned_key_range(
+        &self,
+        start: &Bound<Bytes>,
+        end: &Bound<Bytes>,
+    ) -> Option<(Bound<Bytes>, Bound<Bytes>)> {
+        if self.can_prune_range(start, end) {
+            return None;
+        }
+        let new_start = if let Some(min) = &self.min_key {
+            match start {
+                Included(s) if s <= min => Included(min.clone()),
+                Excluded(s) if s < min => Included(min.clone()),
+                _ => start.clone(),
+            }
+        } else {
+            start.clone()
+        };
+
+        let new_end = if let Some(max) = &self.max_key {
+            match end {
+                Included(e) if e >= max => Included(max.clone()),
+                Excluded(e) if e > max => Included(max.clone()),
+                _ => end.clone(),
+            }
+        } else {
+            end.clone()
+        };
+
+        Some((new_start, new_end))
+    }
+}
+
 /// `StateTableInner` is the interface accessing relational data in KV(`StateStore`) with
 /// row-based encoding.
-pub struct StateTableInner<
-    S,
-    SD = BasicSerde,
-    const IS_REPLICATED: bool = false,
-    const USE_WATERMARK_CACHE: bool = false,
-> where
+pub struct StateTableInner<S, SD = BasicSerde, const IS_REPLICATED: bool = false>
+where
     S: StateStore,
     SD: ValueRowSerde,
 {
@@ -128,12 +215,14 @@ pub struct StateTableInner<
 
     value_indices: Option<Vec<usize>>,
 
+    /// The index of the watermark column used for state cleaning in all columns.
+    pub clean_watermark_index: Option<usize>,
     /// Pending watermark for state cleaning. Old states below this watermark will be cleaned when committing.
     pending_watermark: Option<ScalarImpl>,
     /// Last committed watermark for state cleaning. Will be restored on state table recovery.
     committed_watermark: Option<ScalarImpl>,
-    /// Cache for the top-N primary keys for reducing unnecessary range deletion.
-    watermark_cache: StateTableWatermarkCache,
+    /// Serializer and serde type for the watermark column.
+    watermark_serde: Option<(OrderedRowSerde, WatermarkSerdeType)>,
 
     /// Data Types
     /// We will need to use to build data chunks from state table rows.
@@ -154,8 +243,6 @@ pub struct StateTableInner<
 
     op_consistency_level: StateTableOpConsistencyLevel,
 
-    clean_watermark_index_in_pk: Option<i32>,
-
     /// Flag to indicate whether the state table has called `commit`, but has not called
     /// `post_yield_barrier` on the `StateTablePostCommit` callback yet.
     on_post_commit: bool,
@@ -166,15 +253,9 @@ pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 /// `ReplicatedStateTable` is meant to replicate upstream shared buffer.
 /// Used for `ArrangementBackfill` executor.
 pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
-/// `WatermarkCacheStateTable` caches the watermark column.
-/// It will reduce state cleaning overhead.
-pub type WatermarkCacheStateTable<S> = StateTableInner<S, BasicSerde, false, true>;
-pub type WatermarkCacheParameterizedStateTable<S, const USE_WATERMARK_CACHE: bool> =
-    StateTableInner<S, BasicSerde, false, USE_WATERMARK_CACHE>;
 
 // initialize
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -265,9 +346,76 @@ struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
     row_serde: Arc<SD>,
     // should be only used for debugging in panic message of handle_mem_table_error
     pk_serde: OrderedRowSerde,
+
+    // Per-vnode min/max key statistics for pruning
+    vnode_stats: Option<HashMap<VirtualNode, VnodeStatistics>>,
+    // Optional metrics for state table operations
+    pub metrics: Option<StateTableMetrics>,
 }
 
 impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
+    async fn may_load_vnode_stats(&mut self, vnode_bitmap: &Bitmap) -> StreamExecutorResult<()> {
+        if self.vnode_stats.is_none() {
+            return Ok(());
+        }
+
+        // vnode stats must be disabled when all rows are preloaded
+        assert!(self.all_rows.is_none());
+
+        let start_time = Instant::now();
+        let mut stats_map = HashMap::new();
+
+        // Scan each vnode to get min/max keys
+        for vnode in vnode_bitmap.iter_vnodes() {
+            let mut stats = VnodeStatistics::new();
+
+            // Get min key via forward iteration
+            let memcomparable_range_with_vnode = prefixed_range_with_vnode::<Bytes>(.., vnode);
+            let read_options = ReadOptions {
+                retention_seconds: self.table_option.retention_seconds,
+                cache_policy: CachePolicy::Fill(Hint::Low),
+                ..Default::default()
+            };
+
+            let mut iter = self
+                .state_store
+                .iter(memcomparable_range_with_vnode.clone(), read_options.clone())
+                .await?;
+            if let Some(item) = iter.try_next().await? {
+                let (key_vnode, key_without_vnode) = item.0.user_key.table_key.split_vnode();
+                assert_eq!(vnode, key_vnode);
+                stats.min_key = Some(Bytes::copy_from_slice(key_without_vnode));
+            }
+
+            // Get max key via reverse iteration
+            let mut rev_iter = self
+                .state_store
+                .rev_iter(memcomparable_range_with_vnode, read_options)
+                .await?;
+            if let Some(item) = rev_iter.try_next().await? {
+                let (key_vnode, key_without_vnode) = item.0.user_key.table_key.split_vnode();
+                assert_eq!(vnode, key_vnode);
+                stats.max_key = Some(Bytes::copy_from_slice(key_without_vnode));
+            }
+
+            stats_map.insert(vnode, stats);
+        }
+
+        self.vnode_stats = Some(stats_map);
+
+        // avoid flooding e2e-test log
+        if !cfg!(debug_assertions) {
+            info!(
+                table_id = %self.table_id,
+                vnode_count = vnode_bitmap.count_ones(),
+                duration = ?start_time.elapsed(),
+                "finished initializing vnode statistics"
+            );
+        }
+
+        Ok(())
+    }
+
     async fn may_reload_all_rows(&mut self, vnode_bitmap: &Bitmap) -> StreamExecutorResult<()> {
         if let Some(rows) = &mut self.all_rows {
             rows.clear();
@@ -318,7 +466,8 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
     async fn init(&mut self, epoch: EpochPair, vnode_bitmap: &Bitmap) -> StreamExecutorResult<()> {
         self.state_store.init(InitOptions::new(epoch)).await?;
-        self.may_reload_all_rows(vnode_bitmap).await
+        self.may_reload_all_rows(vnode_bitmap).await?;
+        self.may_load_vnode_stats(vnode_bitmap).await
     }
 
     async fn update_vnode_bitmap(
@@ -327,6 +476,8 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     ) -> StreamExecutorResult<Arc<Bitmap>> {
         let prev_vnodes = self.state_store.update_vnode_bitmap(vnodes.clone()).await?;
         self.may_reload_all_rows(&vnodes).await?;
+        self.may_load_vnode_stats(&vnodes).await?;
+
         Ok(prev_vnodes)
     }
 
@@ -412,31 +563,21 @@ pub enum StateTableOpConsistencyLevel {
     LogStoreEnabled,
 }
 
-pub struct StateTableBuilder<
-    'a,
-    S,
-    SD,
-    const IS_REPLICATED: bool,
-    const USE_WATERMARK_CACHE: bool,
-    PreloadAllRow,
-> {
+pub struct StateTableBuilder<'a, S, SD, const IS_REPLICATED: bool, PreloadAllRow> {
     table_catalog: &'a Table,
     store: S,
     vnodes: Option<Arc<Bitmap>>,
     op_consistency_level: Option<StateTableOpConsistencyLevel>,
     output_column_ids: Option<Vec<ColumnId>>,
     preload_all_rows: PreloadAllRow,
+    enable_vnode_key_pruning: Option<bool>,
+    metrics: Option<StateTableMetrics>,
 
     _serde: PhantomData<SD>,
 }
 
-impl<
-    'a,
-    S: StateStore,
-    SD: ValueRowSerde,
-    const IS_REPLICATED: bool,
-    const USE_WATERMARK_CACHE: bool,
-> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, ()>
+impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
+    StateTableBuilder<'a, S, SD, IS_REPLICATED, ()>
 {
     pub fn new(table_catalog: &'a Table, store: S, vnodes: Option<Arc<Bitmap>>) -> Self {
         Self {
@@ -446,6 +587,8 @@ impl<
             op_consistency_level: None,
             output_column_ids: None,
             preload_all_rows: (),
+            enable_vnode_key_pruning: None,
+            metrics: None,
             _serde: Default::default(),
         }
     }
@@ -453,7 +596,7 @@ impl<
     fn with_preload_all_rows(
         self,
         preload_all_rows: bool,
-    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool> {
+    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, bool> {
         StateTableBuilder {
             table_catalog: self.table_catalog,
             store: self.store,
@@ -461,6 +604,8 @@ impl<
             op_consistency_level: self.op_consistency_level,
             output_column_ids: self.output_column_ids,
             preload_all_rows,
+            enable_vnode_key_pruning: self.enable_vnode_key_pruning,
+            metrics: self.metrics,
             _serde: Default::default(),
         }
     }
@@ -468,35 +613,27 @@ impl<
     pub fn enable_preload_all_rows_by_config(
         self,
         config: &StreamingConfig,
-    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool> {
+    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, bool> {
         let developer = &config.developer;
         let preload_all_rows = if developer.default_enable_mem_preload_state_table {
             !developer
                 .mem_preload_state_table_ids_blacklist
-                .contains(&self.table_catalog.id)
+                .contains(&self.table_catalog.id.as_raw_id())
         } else {
             developer
                 .mem_preload_state_table_ids_whitelist
-                .contains(&self.table_catalog.id)
+                .contains(&self.table_catalog.id.as_raw_id())
         };
         self.with_preload_all_rows(preload_all_rows)
     }
 
-    pub fn forbid_preload_all_rows(
-        self,
-    ) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool> {
+    pub fn forbid_preload_all_rows(self) -> StateTableBuilder<'a, S, SD, IS_REPLICATED, bool> {
         self.with_preload_all_rows(false)
     }
 }
 
-impl<
-    'a,
-    S: StateStore,
-    SD: ValueRowSerde,
-    const IS_REPLICATED: bool,
-    const USE_WATERMARK_CACHE: bool,
-    PreloadAllRow,
-> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, PreloadAllRow>
+impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool, PreloadAllRow>
+    StateTableBuilder<'a, S, SD, IS_REPLICATED, PreloadAllRow>
 {
     pub fn with_op_consistency_level(
         mut self,
@@ -510,25 +647,40 @@ impl<
         self.output_column_ids = Some(output_column_ids);
         self
     }
+
+    pub fn enable_vnode_key_pruning(mut self, enable: bool) -> Self {
+        self.enable_vnode_key_pruning = Some(enable);
+        self
+    }
+
+    pub fn with_metrics(mut self, metrics: StateTableMetrics) -> Self {
+        self.metrics = Some(metrics);
+        self
+    }
 }
 
-impl<
-    'a,
-    S: StateStore,
-    SD: ValueRowSerde,
-    const IS_REPLICATED: bool,
-    const USE_WATERMARK_CACHE: bool,
-> StateTableBuilder<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE, bool>
+impl<'a, S: StateStore, SD: ValueRowSerde, const IS_REPLICATED: bool>
+    StateTableBuilder<'a, S, SD, IS_REPLICATED, bool>
 {
-    pub async fn build(self) -> StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE> {
+    pub async fn build(self) -> StateTableInner<S, SD, IS_REPLICATED> {
         let mut preload_all_rows = self.preload_all_rows;
         if preload_all_rows
             && let Err(e) =
                 risingwave_common::license::Feature::StateTableMemoryPreload.check_available()
         {
-            warn!(table_id=self.table_catalog.id, e=%e.as_report(), "table configured to preload rows to memory but disabled by license");
+            warn!(table_id=%self.table_catalog.id, e=%e.as_report(), "table configured to preload rows to memory but disabled by license");
             preload_all_rows = false;
         }
+
+        let should_enable_vnode_key_pruning = if preload_all_rows
+            && let Some(enable_vnode_key_pruning) = self.enable_vnode_key_pruning
+            && enable_vnode_key_pruning
+        {
+            false
+        } else {
+            self.enable_vnode_key_pruning.unwrap_or(false)
+        };
+
         StateTableInner::from_table_catalog_inner(
             self.table_catalog,
             self.store,
@@ -537,6 +689,8 @@ impl<
                 .unwrap_or(StateTableOpConsistencyLevel::ConsistentOldValue),
             self.output_column_ids.unwrap_or_default(),
             preload_all_rows,
+            should_enable_vnode_key_pruning,
+            self.metrics,
         )
         .await
     }
@@ -546,8 +700,7 @@ impl<
 // FIXME(kwannoel): Enforce that none of the constructors here
 // should be used by replicated state table.
 // Apart from from_table_catalog_inner.
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -581,6 +734,7 @@ where
     }
 
     /// Create state table from table catalog and store.
+    #[allow(clippy::too_many_arguments)]
     async fn from_table_catalog_inner(
         table_catalog: &Table,
         store: S,
@@ -588,8 +742,10 @@ where
         op_consistency_level: StateTableOpConsistencyLevel,
         output_column_ids: Vec<ColumnId>,
         preload_all_rows: bool,
+        enable_vnode_key_pruning: bool,
+        metrics: Option<StateTableMetrics>,
     ) -> Self {
-        let table_id = TableId::new(table_catalog.id);
+        let table_id = table_catalog.id;
         let table_columns: Vec<ColumnDesc> = table_catalog
             .columns
             .iter()
@@ -716,47 +872,6 @@ where
             row_serde.kind().is_column_aware()
         );
 
-        // Restore persisted table watermark.
-        let watermark_serde = if pk_indices.is_empty() {
-            None
-        } else {
-            match table_catalog.clean_watermark_index_in_pk {
-                None => Some(pk_serde.index(0)),
-                Some(clean_watermark_index_in_pk) => {
-                    Some(pk_serde.index(clean_watermark_index_in_pk as usize))
-                }
-            }
-        };
-        let max_watermark_of_vnodes = distribution
-            .vnodes()
-            .iter_vnodes()
-            .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
-            .max();
-        let committed_watermark = if let Some(deser) = watermark_serde
-            && let Some(max_watermark) = max_watermark_of_vnodes
-        {
-            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
-                assert!(row.len() == 1);
-                row[0].clone()
-            });
-            if deserialized.is_none() {
-                tracing::error!(
-                    vnodes = ?distribution.vnodes(),
-                    watermark = ?max_watermark,
-                    "Failed to deserialize persisted watermark from state store.",
-                );
-            }
-            deserialized
-        } else {
-            None
-        };
-
-        let watermark_cache = if USE_WATERMARK_CACHE {
-            StateTableWatermarkCache::new(WATERMARK_CACHE_ENTRIES)
-        } else {
-            StateTableWatermarkCache::new(0)
-        };
-
         // Get info for replicated state table.
         let output_column_ids_to_input_idx = output_column_ids
             .iter()
@@ -786,6 +901,61 @@ where
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
 
+        let clean_watermark_indices = table_catalog.get_clean_watermark_column_indices();
+        if clean_watermark_indices.len() > 1 {
+            unimplemented!("multiple clean watermark columns are not supported yet")
+        }
+        let clean_watermark_index = clean_watermark_indices.first().map(|&i| i as usize);
+
+        let watermark_serde = clean_watermark_index.map(|idx| {
+            let pk_idx = pk_indices.iter().position(|&i| i == idx);
+            let (watermark_serde, watermark_serde_type) = match pk_idx {
+                Some(0) => (pk_serde.index(0).into_owned(), WatermarkSerdeType::PkPrefix),
+                Some(pk_idx) => (
+                    pk_serde.index(pk_idx).into_owned(),
+                    WatermarkSerdeType::NonPkPrefix,
+                ),
+                None => (
+                    OrderedRowSerde::new(
+                        vec![data_types[idx].clone()],
+                        vec![OrderType::ascending()],
+                    ),
+                    // TODO(ttl): may introduce a new type for watermark not in pk.
+                    WatermarkSerdeType::NonPkPrefix,
+                ),
+            };
+            (watermark_serde, watermark_serde_type)
+        });
+
+        // Restore persisted table watermark.
+        //
+        // Note: currently the underlying local state store only exposes persisted watermarks for
+        // `PkPrefix` type (i.e., the first PK column), so we only restore in that case.
+        let max_watermark_of_vnodes = distribution
+            .vnodes()
+            .iter_vnodes()
+            .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
+            .max();
+        let committed_watermark = if let Some((deser, WatermarkSerdeType::PkPrefix)) =
+            watermark_serde.as_ref()
+            && let Some(max_watermark) = max_watermark_of_vnodes
+        {
+            let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
+                assert!(row.len() == 1);
+                row[0].clone()
+            });
+            if deserialized.is_none() {
+                tracing::error!(
+                    vnodes = ?distribution.vnodes(),
+                    watermark = ?max_watermark,
+                    "Failed to deserialize persisted watermark from state store.",
+                );
+            }
+            deserialized
+        } else {
+            None
+        };
+
         Self {
             table_id,
             row_store: StateTableRowStore {
@@ -795,6 +965,9 @@ where
                 row_serde,
                 pk_serde: pk_serde.clone(),
                 table_id,
+                // Need to maintain vnode min/max key stats when vnode key pruning is enabled
+                vnode_stats: enable_vnode_key_pruning.then(HashMap::new),
+                metrics,
             },
             store,
             epoch: None,
@@ -805,12 +978,12 @@ where
             value_indices,
             pending_watermark: None,
             committed_watermark,
-            watermark_cache,
+            watermark_serde,
             data_types,
             output_indices,
             i2o_mapping,
             op_consistency_level: state_table_op_consistency_level,
-            clean_watermark_index_in_pk: table_catalog.clean_watermark_index_in_pk,
+            clean_watermark_index,
             on_post_commit: false,
         }
     }
@@ -819,8 +992,8 @@ where
         &self.data_types
     }
 
-    pub fn table_id(&self) -> u32 {
-        self.table_id.table_id
+    pub fn table_id(&self) -> TableId {
+        self.table_id
     }
 
     /// Get the vnode value with given (prefix of) primary key
@@ -871,9 +1044,13 @@ where
                 | StateTableOpConsistencyLevel::LogStoreEnabled
         )
     }
+
+    pub fn metrics(&self) -> Option<&StateTableMetrics> {
+        self.row_store.metrics.as_ref()
+    }
 }
 
-impl<S, SD, const USE_WATERMARK_CACHE: bool> StateTableInner<S, SD, true, USE_WATERMARK_CACHE>
+impl<S, SD> StateTableInner<S, SD, true>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -897,8 +1074,7 @@ where
 }
 
 // point get
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -956,10 +1132,26 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         key_bytes: TableKey<Bytes>,
         prefix_hint: Option<Bytes>,
     ) -> StreamExecutorResult<Option<OwnedRow>> {
-        if let Some(rows) = &self.all_rows {
-            let (vnode, key) = key_bytes.split_vnode();
-            return Ok(rows.get(&vnode).expect("covered vnode").get(key).cloned());
+        if let Some(m) = &self.metrics {
+            m.get_count.inc();
         }
+        if let Some(rows) = &self.all_rows {
+            let (vnode, key) = key_bytes.split_vnode_bytes();
+            return Ok(rows.get(&vnode).expect("covered vnode").get(&key).cloned());
+        }
+
+        // Try to prune using vnode statistics
+        if let Some(stats) = &self.vnode_stats
+            && let (vnode, key) = key_bytes.split_vnode_bytes()
+            && let Some(vnode_stat) = stats.get(&vnode)
+            && vnode_stat.can_prune(&key)
+        {
+            if let Some(m) = &self.metrics {
+                m.get_vnode_pruned_count.inc();
+            }
+            return Ok(None);
+        }
+
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -967,12 +1159,9 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             ..Default::default()
         };
 
-        // TODO: avoid clone when `on_key_value_fn` can be non-static
-        let row_serde = self.row_serde.clone();
-
         self.state_store
             .on_key_value(key_bytes, read_options, move |_, value| {
-                let row = row_serde.deserialize(value)?;
+                let row = self.row_serde.deserialize(value)?;
                 Ok(OwnedRow::new(row))
             })
             .await
@@ -984,10 +1173,26 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         key_bytes: TableKey<Bytes>,
         prefix_hint: Option<Bytes>,
     ) -> StreamExecutorResult<bool> {
-        if let Some(rows) = &self.all_rows {
-            let (vnode, key) = key_bytes.split_vnode();
-            return Ok(rows.get(&vnode).expect("covered vnode").contains_key(key));
+        if let Some(m) = &self.metrics {
+            m.get_count.inc();
         }
+        if let Some(rows) = &self.all_rows {
+            let (vnode, key) = key_bytes.split_vnode_bytes();
+            return Ok(rows.get(&vnode).expect("covered vnode").contains_key(&key));
+        }
+
+        // Try to prune using vnode statistics
+        if let Some(stats) = &self.vnode_stats
+            && let (vnode, key) = key_bytes.split_vnode_bytes()
+            && let Some(vnode_stat) = stats.get(&vnode)
+            && vnode_stat.can_prune(&key)
+        {
+            if let Some(m) = &self.metrics {
+                m.get_vnode_pruned_count.inc();
+            }
+            return Ok(false);
+        }
+
         let read_options = ReadOptions {
             prefix_hint,
             retention_seconds: self.table_option.retention_seconds,
@@ -1017,21 +1222,15 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 /// should be called for all barriers rather than only for the barrier with update vnode bitmap. In this way, though we don't have scale test for all
 /// streaming executor, we can ensure that all executor covered by normal e2e test have properly handled the `StateTablePostCommit`.
 #[must_use]
-pub struct StateTablePostCommit<
-    'a,
-    S,
-    SD = BasicSerde,
-    const IS_REPLICATED: bool = false,
-    const USE_WATERMARK_CACHE: bool = false,
-> where
+pub struct StateTablePostCommit<'a, S, SD = BasicSerde, const IS_REPLICATED: bool = false>
+where
     S: StateStore,
     SD: ValueRowSerde,
 {
-    inner: &'a mut StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>,
+    inner: &'a mut StateTableInner<S, SD, IS_REPLICATED>,
 }
 
-impl<'a, S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTablePostCommit<'a, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<'a, S, SD, const IS_REPLICATED: bool> StateTablePostCommit<'a, S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1044,7 +1243,7 @@ where
             (
                 Arc<Bitmap>,
                 Arc<Bitmap>,
-                &'a mut StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>,
+                &'a mut StateTableInner<S, SD, IS_REPLICATED>,
             ),
             bool,
         )>,
@@ -1059,7 +1258,7 @@ where
         })
     }
 
-    pub fn inner(&self) -> &StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE> {
+    pub fn inner(&self) -> &StateTableInner<S, SD, IS_REPLICATED> {
         &*self.inner
     }
 
@@ -1092,9 +1291,6 @@ where
 
         if cache_may_stale {
             self.inner.pending_watermark = None;
-            if USE_WATERMARK_CACHE {
-                self.inner.watermark_cache.clear();
-            }
         }
 
         Ok((
@@ -1129,11 +1325,21 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     fn insert(&mut self, key: TableKey<Bytes>, value: impl Row) {
         insane_mode_discard_point!();
         let value_bytes = self.row_serde.serialize(&value).into();
+
+        let (vnode, key_without_vnode) = key.split_vnode_bytes();
+
+        // Update vnode statistics (skip if all_rows is present)
+        if self.all_rows.is_none()
+            && let Some(stats) = &mut self.vnode_stats
+            && let Some(vnode_stat) = stats.get_mut(&vnode)
+        {
+            vnode_stat.update_with_key(&key_without_vnode);
+        }
+
         if let Some(rows) = &mut self.all_rows {
-            let (vnode, key) = key.split_vnode_bytes();
             rows.get_mut(&vnode)
                 .expect("covered vnode")
-                .insert(key, value.into_owned_row());
+                .insert(key_without_vnode, value.into_owned_row());
         }
         self.state_store
             .insert(key, value_bytes, None)
@@ -1143,9 +1349,22 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     fn delete(&mut self, key: TableKey<Bytes>, value: impl Row) {
         insane_mode_discard_point!();
         let value_bytes = self.row_serde.serialize(value).into();
+
+        let (vnode, key_without_vnode) = key.split_vnode_bytes();
+
+        // Clear vnode statistics on delete (conservative approach, skip if all_rows is present)
+        // The deleted key might be the min or max, so we invalidate the stats
+        if self.all_rows.is_none()
+            && let Some(stats) = &mut self.vnode_stats
+            && let Some(vnode_stat) = stats.get_mut(&vnode)
+        {
+            vnode_stat.update_with_key(&key_without_vnode);
+        }
+
         if let Some(rows) = &mut self.all_rows {
-            let (vnode, key) = key.split_vnode();
-            rows.get_mut(&vnode).expect("covered vnode").remove(key);
+            rows.get_mut(&vnode)
+                .expect("covered vnode")
+                .remove(&key_without_vnode);
         }
         self.state_store
             .delete(key, value_bytes)
@@ -1156,11 +1375,22 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         insane_mode_discard_point!();
         let new_value_bytes = self.row_serde.serialize(&new_value).into();
         let old_value_bytes = self.row_serde.serialize(old_value).into();
+
+        let (vnode, key_without_vnode) = key_bytes.split_vnode_bytes();
+
+        // Update does not change the key, so statistics remain valid (skip if all_rows is present)
+        // But we update to ensure consistency
+        if self.all_rows.is_none()
+            && let Some(stats) = &mut self.vnode_stats
+            && let Some(vnode_stat) = stats.get_mut(&vnode)
+        {
+            vnode_stat.update_with_key(&key_without_vnode);
+        }
+
         if let Some(rows) = &mut self.all_rows {
-            let (vnode, key) = key_bytes.split_vnode_bytes();
             rows.get_mut(&vnode)
                 .expect("covered vnode")
-                .insert(key, new_value.into_owned_row());
+                .insert(key_without_vnode, new_value.into_owned_row());
         }
         self.state_store
             .insert(key_bytes, new_value_bytes, Some(old_value_bytes))
@@ -1168,8 +1398,7 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
     }
 }
 
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1179,9 +1408,6 @@ where
     pub fn insert(&mut self, value: impl Row) {
         let pk_indices = &self.pk_indices;
         let pk = (&value).project(pk_indices);
-        if USE_WATERMARK_CACHE {
-            self.watermark_cache.insert(&pk);
-        }
 
         let key_bytes = self.serialize_pk(&pk);
         dispatch_value_indices!(&self.value_indices, [value], {
@@ -1194,9 +1420,6 @@ where
     pub fn delete(&mut self, old_value: impl Row) {
         let pk_indices = &self.pk_indices;
         let pk = (&old_value).project(pk_indices);
-        if USE_WATERMARK_CACHE {
-            self.watermark_cache.delete(&pk);
-        }
 
         let key_bytes = self.serialize_pk(&pk);
         dispatch_value_indices!(&self.value_indices, [old_value], {
@@ -1256,17 +1479,11 @@ where
             let key_bytes = serialize_pk_with_vnode(pk, &self.pk_serde, vnode);
             match op {
                 Op::Insert | Op::UpdateInsert => {
-                    if USE_WATERMARK_CACHE {
-                        self.watermark_cache.insert(&pk);
-                    }
                     dispatch_value_indices!(&self.value_indices, [row], {
                         self.row_store.insert(key_bytes, row);
                     });
                 }
                 Op::Delete | Op::UpdateDelete => {
-                    if USE_WATERMARK_CACHE {
-                        self.watermark_cache.delete(&pk);
-                    }
                     dispatch_value_indices!(&self.value_indices, [row], {
                         self.row_store.delete(key_bytes, row);
                     });
@@ -1294,8 +1511,7 @@ where
     pub async fn commit(
         &mut self,
         new_epoch: EpochPair,
-    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
-    {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED>> {
         self.commit_inner(new_epoch, None).await
     }
 
@@ -1317,8 +1533,7 @@ where
         &mut self,
         new_epoch: EpochPair,
         op_consistency_level: StateTableOpConsistencyLevel,
-    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
-    {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED>> {
         if self.op_consistency_level != op_consistency_level {
             // avoid flooding e2e-test log
             if !cfg!(debug_assertions) {
@@ -1326,7 +1541,7 @@ where
                     ?new_epoch,
                     prev_op_consistency_level = ?self.op_consistency_level,
                     ?op_consistency_level,
-                    table_id = self.table_id.table_id,
+                    table_id = %self.table_id,
                     "switch to new op consistency level"
                 );
             }
@@ -1341,8 +1556,7 @@ where
         &mut self,
         new_epoch: EpochPair,
         switch_consistent_op: Option<StateTableOpConsistencyLevel>,
-    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>>
-    {
+    ) -> StreamExecutorResult<StateTablePostCommit<'_, S, SD, IS_REPLICATED>> {
         assert!(!self.on_post_commit);
         assert_eq!(
             self.epoch.expect("should only be called after init").curr,
@@ -1364,56 +1578,6 @@ where
             .await?;
         self.epoch = Some(new_epoch);
 
-        // Refresh watermark cache if it is out of sync.
-        if USE_WATERMARK_CACHE
-            && !self.watermark_cache.is_synced()
-            && let Some(ref watermark) = self.committed_watermark
-        {
-            let range: (Bound<Once<Datum>>, Bound<Once<Datum>>) =
-                (Included(once(Some(watermark.clone()))), Unbounded);
-            // NOTE(kwannoel): We buffer `pks` before inserting into watermark cache
-            // because we can't hold an immutable ref (via `iter_key_and_val_with_pk_range`)
-            // and a mutable ref (via `self.watermark_cache.insert`) at the same time.
-            // TODO(kwannoel): We can optimize it with:
-            // 1. Either use `RefCell`.
-            // 2. Or pass in a direct reference to LocalStateStore,
-            //    instead of referencing it indirectly from `self`.
-            //    Similar to how we do for pk_indices.
-            let mut pks = Vec::with_capacity(self.watermark_cache.capacity());
-            {
-                let mut streams = vec![];
-                for vnode in self.vnodes().iter_vnodes() {
-                    let stream = self
-                        .iter_keyed_row_with_vnode(vnode, &range, PrefetchOptions::default())
-                        .await?;
-                    streams.push(Box::pin(stream));
-                }
-                let merged_stream = merge_sort(streams);
-                pin_mut!(merged_stream);
-
-                #[for_await]
-                for entry in merged_stream.take(self.watermark_cache.capacity()) {
-                    let keyed_row = entry?;
-                    let pk = self.pk_serde.deserialize(keyed_row.key())?;
-                    // watermark column should be part of the pk
-                    if !pk.is_null_at(self.clean_watermark_index_in_pk.unwrap_or(0) as usize) {
-                        pks.push(pk);
-                    }
-                }
-            }
-
-            let mut filler = self.watermark_cache.begin_syncing();
-            for pk in pks {
-                filler.insert_unchecked(DefaultOrdered(pk), ());
-            }
-            filler.finish();
-
-            let n_cache_entries = self.watermark_cache.len();
-            if n_cache_entries < self.watermark_cache.capacity() {
-                self.watermark_cache.set_table_row_count(n_cache_entries);
-            }
-        }
-
         self.on_post_commit = true;
         Ok(StateTablePostCommit { inner: self })
     }
@@ -1429,93 +1593,29 @@ where
             !self.pk_indices().is_empty(),
             "see pending watermark on empty pk"
         );
-        let watermark_serializer = {
-            match self.clean_watermark_index_in_pk {
-                None => self.pk_serde.index(0),
-                Some(clean_watermark_index_in_pk) => {
-                    self.pk_serde.index(clean_watermark_index_in_pk as usize)
-                }
-            }
-        };
-
-        let watermark_type = match self.clean_watermark_index_in_pk {
-            None => WatermarkSerdeType::PkPrefix,
-            Some(clean_watermark_index_in_pk) => match clean_watermark_index_in_pk {
-                0 => WatermarkSerdeType::PkPrefix,
-                _ => WatermarkSerdeType::NonPkPrefix,
-            },
-        };
-
-        let should_clean_watermark = {
-            {
-                if USE_WATERMARK_CACHE && self.watermark_cache.is_synced() {
-                    if let Some(key) = self.watermark_cache.lowest_key() {
-                        watermark.as_scalar_ref_impl().default_cmp(&key).is_ge()
-                    } else {
-                        // Watermark cache is synced,
-                        // And there's no key in watermark cache.
-                        // That implies table is empty.
-                        // We should not clean watermark.
-                        false
-                    }
-                } else {
-                    // Either we are not using watermark cache,
-                    // Or watermark_cache is not synced.
-                    // In either case we should clean watermark.
-                    true
-                }
-            }
-        };
+        let (watermark_serializer, watermark_type) = self
+            .watermark_serde
+            .as_ref()
+            .expect("watermark serde should be initialized to commit watermark");
 
         let watermark_suffix =
-            serialize_pk(row::once(Some(watermark.clone())), &watermark_serializer);
+            serialize_pk(row::once(Some(watermark.clone())), watermark_serializer);
+        let vnode_watermark = VnodeWatermark::new(
+            self.vnodes().clone(),
+            Bytes::copy_from_slice(watermark_suffix.as_ref()),
+        );
 
-        // Compute Delete Ranges
-        let seal_watermark = if should_clean_watermark {
-            trace!(table_id = %self.table_id, watermark = ?watermark_suffix, vnodes = ?{
-                self.vnodes().iter_vnodes().collect_vec()
-            }, "delete range");
+        trace!(table_id = %self.table_id, ?vnode_watermark, "table watermark");
 
-            let order_type = watermark_serializer.get_order_types().get(0).unwrap();
-
-            if order_type.is_ascending() {
-                Some((
-                    WatermarkDirection::Ascending,
-                    VnodeWatermark::new(
-                        self.vnodes().clone(),
-                        Bytes::copy_from_slice(watermark_suffix.as_ref()),
-                    ),
-                    watermark_type,
-                ))
-            } else {
-                Some((
-                    WatermarkDirection::Descending,
-                    VnodeWatermark::new(
-                        self.vnodes().clone(),
-                        Bytes::copy_from_slice(watermark_suffix.as_ref()),
-                    ),
-                    watermark_type,
-                ))
-            }
+        let order_type = watermark_serializer.get_order_types().get(0).unwrap();
+        let direction = if order_type.is_ascending() {
+            WatermarkDirection::Ascending
         } else {
-            None
+            WatermarkDirection::Descending
         };
+
         self.committed_watermark = Some(watermark);
-
-        // Clear the watermark cache and force a resync.
-        // TODO(kwannoel): This can be further optimized:
-        // 1. Add a `cache.drain_until` interface, so we only clear the watermark cache
-        //    up to the largest end of delete ranges.
-        // 2. Mark the cache as not_synced, so we can still refill it later.
-        // 3. When refilling the cache,
-        //    we just refill from the largest value of the cache, as the lower bound.
-        if USE_WATERMARK_CACHE && seal_watermark.is_some() {
-            self.watermark_cache.clear();
-        }
-
-        seal_watermark.map(|(direction, watermark, is_non_pk_prefix)| {
-            (direction, vec![watermark], is_non_pk_prefix)
-        })
+        Some((direction, vec![vnode_watermark], *watermark_type))
     }
 
     pub async fn try_flush(&mut self) -> StreamExecutorResult<()> {
@@ -1524,9 +1624,15 @@ where
     }
 }
 
-pub trait RowStream<'a> = Stream<Item = StreamExecutorResult<OwnedRow>> + 'a;
-pub trait KeyedRowStream<'a> = Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a;
-pub trait PkRowStream<'a, K> = Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a;
+// Manually expand trait alias for better IDE experience.
+pub trait RowStream<'a>: Stream<Item = StreamExecutorResult<OwnedRow>> + 'a {}
+impl<'a, S: Stream<Item = StreamExecutorResult<OwnedRow>> + 'a> RowStream<'a> for S {}
+
+pub trait KeyedRowStream<'a>: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a {}
+impl<'a, S: Stream<Item = StreamExecutorResult<KeyedRow<Bytes>>> + 'a> KeyedRowStream<'a> for S {}
+
+pub trait PkRowStream<'a, K>: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a {}
+impl<'a, K, S: Stream<Item = StreamExecutorResult<(K, OwnedRow)>> + 'a> PkRowStream<'a, K> for S {}
 
 pub trait FromVnodeBytes {
     fn from_vnode_bytes(vnode: VirtualNode, bytes: &Bytes) -> Self;
@@ -1543,8 +1649,7 @@ impl FromVnodeBytes for () {
 }
 
 // Iterator functions
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1605,13 +1710,37 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl PkRowStream<'_, K>> {
+        if let Some(m) = &self.metrics {
+            m.iter_count.inc();
+        }
+        // Check if we can prune the entire range using vnode statistics
+        let (pruned_start, pruned_end) = if let Some(stats) = &self.vnode_stats
+            && let Some(vnode_stat) = stats.get(&vnode)
+        {
+            match vnode_stat.pruned_key_range(&start, &end) {
+                Some((new_start, new_end)) => (new_start, new_end),
+                None => {
+                    if let Some(m) = &self.metrics {
+                        m.iter_vnode_pruned_count.inc();
+                    }
+                    return Ok(futures::future::Either::Left(futures::stream::empty()));
+                }
+            }
+        } else {
+            (start, end)
+        };
+
         if let Some(rows) = &self.all_rows {
-            return Ok(futures::future::Either::Left(futures::stream::iter(
-                rows.get(&vnode)
-                    .expect("covered vnode")
-                    .range((start, end))
-                    .map(move |(key, value)| Ok((K::from_vnode_bytes(vnode, key), value.clone()))),
-            )));
+            return Ok(futures::future::Either::Right(
+                futures::future::Either::Left(futures::stream::iter(
+                    rows.get(&vnode)
+                        .expect("covered vnode")
+                        .range((pruned_start, pruned_end))
+                        .map(move |(key, value)| {
+                            Ok((K::from_vnode_bytes(vnode, key), value.clone()))
+                        }),
+                )),
+            ));
         }
         let read_options = ReadOptions {
             prefix_hint,
@@ -1621,12 +1750,15 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         };
 
         Ok(futures::future::Either::Right(
-            deserialize_keyed_row_stream(
+            futures::future::Either::Right(deserialize_keyed_row_stream(
                 self.state_store
-                    .iter(prefixed_range_with_vnode((start, end), vnode), read_options)
+                    .iter(
+                        prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
+                        read_options,
+                    )
                     .await?,
                 &*self.row_serde,
-            ),
+            )),
         ))
     }
 
@@ -1637,14 +1769,38 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         prefix_hint: Option<Bytes>,
         prefetch_options: PrefetchOptions,
     ) -> StreamExecutorResult<impl PkRowStream<'_, K>> {
+        if let Some(m) = &self.metrics {
+            m.iter_count.inc();
+        }
+        // Check if we can prune the entire range using vnode statistics
+        let (pruned_start, pruned_end) = if let Some(stats) = &self.vnode_stats
+            && let Some(vnode_stat) = stats.get(&vnode)
+        {
+            match vnode_stat.pruned_key_range(&start, &end) {
+                Some((new_start, new_end)) => (new_start, new_end),
+                None => {
+                    if let Some(m) = &self.metrics {
+                        m.iter_vnode_pruned_count.inc();
+                    }
+                    return Ok(futures::future::Either::Left(futures::stream::empty()));
+                }
+            }
+        } else {
+            (start, end)
+        };
+
         if let Some(rows) = &self.all_rows {
-            return Ok(futures::future::Either::Left(futures::stream::iter(
-                rows.get(&vnode)
-                    .expect("covered vnode")
-                    .range((start, end))
-                    .rev()
-                    .map(move |(key, value)| Ok((K::from_vnode_bytes(vnode, key), value.clone()))),
-            )));
+            return Ok(futures::future::Either::Right(
+                futures::future::Either::Left(futures::stream::iter(
+                    rows.get(&vnode)
+                        .expect("covered vnode")
+                        .range((pruned_start, pruned_end))
+                        .rev()
+                        .map(move |(key, value)| {
+                            Ok((K::from_vnode_bytes(vnode, key), value.clone()))
+                        }),
+                )),
+            ));
         }
         let read_options = ReadOptions {
             prefix_hint,
@@ -1654,18 +1810,20 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         };
 
         Ok(futures::future::Either::Right(
-            deserialize_keyed_row_stream(
+            futures::future::Either::Right(deserialize_keyed_row_stream(
                 self.state_store
-                    .rev_iter(prefixed_range_with_vnode((start, end), vnode), read_options)
+                    .rev_iter(
+                        prefixed_range_with_vnode((pruned_start, pruned_end), vnode),
+                        read_options,
+                    )
                     .await?,
                 &*self.row_serde,
-            ),
+            )),
         ))
     }
 }
 
-impl<S, SD, const IS_REPLICATED: bool, const USE_WATERMARK_CACHE: bool>
-    StateTableInner<S, SD, IS_REPLICATED, USE_WATERMARK_CACHE>
+impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
     S: StateStore,
     SD: ValueRowSerde,
@@ -1813,11 +1971,6 @@ where
         self.row_store
             .iter_kv(vnode, memcomparable_range, None, prefetch_options)
             .await
-    }
-
-    #[cfg(test)]
-    pub fn get_watermark_cache(&self) -> &StateTableWatermarkCache {
-        &self.watermark_cache
     }
 }
 

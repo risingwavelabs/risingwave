@@ -10,7 +10,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use core::ops::RangeBounds;
+use std::ops::RangeBounds;
 
 use winnow::combinator::{cut_err, delimited};
 use winnow::error::{ContextError, StrContext};

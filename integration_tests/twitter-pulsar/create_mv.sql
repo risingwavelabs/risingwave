@@ -12,7 +12,7 @@ WHERE
     AND (data->>'lang') = 'English';
 
 --
--- Find the top10 hotest hashtags.
+-- Find the top10 hottest hashtags.
 --
 CREATE MATERIALIZED VIEW hot_hashtags AS WITH tags AS (
     SELECT

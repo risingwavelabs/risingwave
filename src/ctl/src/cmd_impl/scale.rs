@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,7 +28,7 @@ pub async fn set_cdc_table_backfill_parallelism(
     let meta_client = context.meta_client().await?;
     meta_client
         .alter_cdc_table_backfill_parallelism(
-            table_id,
+            table_id.into(),
             TableParallelism {
                 parallelism: Some(table_parallelism::Parallelism::Fixed(FixedParallelism {
                     parallelism,

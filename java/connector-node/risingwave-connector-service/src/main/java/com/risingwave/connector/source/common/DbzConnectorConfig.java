@@ -1,22 +1,25 @@
-// Copyright 2025 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector.source.common;
 
 import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
+import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -33,6 +36,10 @@ public class DbzConnectorConfig {
 
     private static final String WAIT_FOR_STREAMING_START_TIMEOUT_SECS =
             "cdc.source.wait.streaming.start.timeout";
+
+    private static final String QUEUE_MAX_MEMORY_RATIO = "queue.memory.ratio";
+    public static final double MIN_QUEUE_MAX_MEMORY_RATIO = 0.01;
+    public static final double MAX_QUEUE_MAX_MEMORY_RATIO = 0.8;
 
     /* Common configs */
     public static final String HOST = "hostname";
@@ -55,6 +62,7 @@ public class DbzConnectorConfig {
     public static final String PG_PUB_CREATE = "publication.create.enable";
     public static final String PG_SCHEMA_NAME = "schema.name";
     public static final String PG_SSL_ROOT_CERT = "ssl.root.cert";
+    public static final String PG_IS_AWS_RDS = "postgres.is.aws.rds";
     public static final String PG_TEST_ONLY_FORCE_RDS = "test.only.force.rds";
 
     /* Sql Server configs */
@@ -147,14 +155,18 @@ public class DbzConnectorConfig {
 
         if (source == SourceTypeE.MYSQL) {
             var mysqlProps = initiateDbConfig(MYSQL_CONFIG_FILE, substitutor);
+
+            // Enable schema history for all MySQL CDC modes to handle schema changes properly
+            mysqlProps.setProperty(OpendalSchemaHistory.SOURCE_ID, String.valueOf(sourceId));
+            mysqlProps.setProperty(OpendalSchemaHistory.MAX_RECORDS_PER_FILE_CONFIG, "2048");
+
             if (isCdcBackfill) {
                 // disable snapshot locking at all
                 mysqlProps.setProperty("snapshot.locking.mode", "none");
-
                 // If cdc backfill enabled, the source only emit incremental changes, so we must
                 // rewind to the given offset and continue binlog reading from there
                 if (null != startOffset && !startOffset.isBlank()) {
-                    mysqlProps.setProperty("snapshot.mode", "recovery");
+                    mysqlProps.setProperty("snapshot.mode", "custom");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 } else {
@@ -165,10 +177,11 @@ public class DbzConnectorConfig {
                 // if snapshot phase is finished and offset is specified, we will continue binlog
                 // reading from the given offset
                 if (snapshotDone && null != startOffset && !startOffset.isBlank()) {
-                    // 'snapshot.mode=recovery' must be configured if binlog offset is
-                    // specified. It only snapshots the schemas, not the data, and continue binlog
-                    // reading from the specified offset
-                    mysqlProps.setProperty("snapshot.mode", "recovery");
+                    // 'snapshot.mode=no_data' is used when binlog offset is specified.
+                    // Since we use persistent schema history, we only need to snapshot schema when
+                    // no offset is passed, restore directly from schema history when offset is
+                    // available.
+                    mysqlProps.setProperty("snapshot.mode", "custom");
                     mysqlProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 }
@@ -324,7 +337,19 @@ public class DbzConnectorConfig {
         for (var entry : otherProps.entrySet()) {
             dbzProps.putIfAbsent(entry.getKey(), entry.getValue());
         }
+
+        // Calculate max.queue.size.in.bytes based on JVM heap size and ratio
+        calculateAndSetMaxQueueSizeInBytes(dbzProps);
+
         LOG.info("Final Debezium properties: {}", dbzProps);
+        LOG.info(
+                "Debezium max.queue.size.in.bytes: {} bytes ({} MB)",
+                dbzProps.getProperty("max.queue.size.in.bytes", "not set"),
+                dbzProps.getProperty("max.queue.size.in.bytes") != null
+                        ? Long.parseLong(dbzProps.getProperty("max.queue.size.in.bytes"))
+                                / 1024
+                                / 1024
+                        : 0);
 
         this.sourceId = sourceId;
         this.sourceType = source;
@@ -345,5 +370,62 @@ public class DbzConnectorConfig {
             throw new RuntimeException("failed to load config file " + fileName, e);
         }
         return dbProps;
+    }
+
+    /**
+     * Calculate and set max.queue.size.in.bytes based on JVM heap size and memory ratio.
+     *
+     * <p>If user does not specify queue.memory.ratio, this method does nothing. Debezium will use
+     * whatever is configured in debezium.properties (max.queue.size = 8192 by default).
+     *
+     * <p>If user specifies a valid ratio (0.01-0.8), calculate and set max.queue.size.in.bytes
+     * accordingly.
+     *
+     * <p>JVM heap size is obtained from Runtime.getRuntime().maxMemory(), which reflects the -Xmx
+     * value set by Rust code during JVM initialization. See: src/jni_core/src/jvm_runtime.rs:85-103
+     *
+     * <p>The Rust code sets -Xmx based on: 1. JVM_HEAP_SIZE env var if set 2. Otherwise:
+     * system_memory_available_bytes() * 0.07
+     *
+     * @param dbzProps The Debezium properties to update
+     */
+    private void calculateAndSetMaxQueueSizeInBytes(Properties dbzProps) {
+        // Check if user specified a custom ratio
+        String ratioStr = dbzProps.getProperty(QUEUE_MAX_MEMORY_RATIO);
+        if (ratioStr == null) {
+            // User did not specify ratio, do nothing
+            // Debezium will use its default max.queue.size from debezium.properties
+            LOG.info(
+                    "Debezium {} not specified, skipping calculating and setting max.queue.size.in.bytes calculation",
+                    QUEUE_MAX_MEMORY_RATIO);
+            return;
+        }
+
+        // Validation is already done in SourceValidateHandler during CREATE/ALTER SOURCE
+        // At this point, ratioStr is guaranteed to be valid (0.01-0.8)
+        double queueMemoryRatio = Double.parseDouble(ratioStr);
+
+        // Get JVM max heap size from Runtime
+        // This reflects the -Xmx value set by Rust during JVM initialization
+        // No need to read JVM_HEAP_SIZE env var again - it's already baked into the JVM
+        Runtime runtime = Runtime.getRuntime();
+        long jvmHeapSize = runtime.maxMemory();
+
+        LOG.info(
+                "JVM max heap size (from Runtime): {} bytes ({} MB)",
+                jvmHeapSize,
+                jvmHeapSize / 1024 / 1024);
+        LOG.info("Debezium {}: {}", QUEUE_MAX_MEMORY_RATIO, queueMemoryRatio);
+
+        // Calculate max queue size in bytes
+        long maxQueueSizeInBytes = (long) (jvmHeapSize * queueMemoryRatio);
+
+        // Set the calculated value
+        dbzProps.setProperty("max.queue.size.in.bytes", String.valueOf(maxQueueSizeInBytes));
+
+        LOG.info(
+                "Calculated debezium max.queue.size.in.bytes: {} bytes ({} MB)",
+                maxQueueSizeInBytes,
+                maxQueueSizeInBytes / 1024 / 1024);
     }
 }

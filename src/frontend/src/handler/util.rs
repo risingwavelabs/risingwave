@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -43,6 +43,8 @@ use risingwave_sqlparser::ast::{
     TableFactor, TableWithJoins,
 };
 use thiserror_ext::AsReport;
+use tokio::select;
+use tokio::time::{Duration, sleep};
 
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::ProtocolError;
@@ -315,6 +317,86 @@ pub fn get_table_catalog_by_table_name(
         reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
 
     Ok((table.clone(), schema_name.to_owned()))
+}
+
+/// Execute an async operation with a notification if it takes too long.
+/// This is useful for operations that might be delayed due to high barrier latency.
+///
+/// The notification timeout duration is controlled by the `slow_ddl_notification_secs` session variable.
+///
+/// # Arguments
+/// * `operation_fut` - The async operation to execute
+/// * `session` - The session to send notifications to
+/// * `operation_name` - The name of the operation for the notification message (e.g., "DROP TABLE")
+///
+/// # Example
+/// ```ignore
+/// execute_with_long_running_notification(
+///     catalog_writer.drop_table(source_id, table_id, cascade),
+///     &session,
+///     "DROP TABLE",
+/// ).await?;
+/// ```
+#[derive(Clone, Copy)]
+pub enum LongRunningNotificationAction {
+    SuggestRecover,
+    DiagnoseBarrierLatency,
+    MonitorBackfillJob,
+}
+
+impl LongRunningNotificationAction {
+    fn build_message(self, operation_name: &str, notify_timeout_secs: u32) -> String {
+        match self {
+            LongRunningNotificationAction::SuggestRecover => format!(
+                "{} has taken more than {} secs, likely due to high barrier latency.\n\
+                You may trigger cluster recovery to let {} take effect immediately.\n\
+                Run RECOVER in a separate session to trigger recovery.\n\
+                See: https://docs.risingwave.com/sql/commands/sql-recover#recover",
+                operation_name, notify_timeout_secs, operation_name
+            ),
+            LongRunningNotificationAction::DiagnoseBarrierLatency => format!(
+                "{} has taken more than {} secs, likely due to high barrier latency.\n\
+                See: https://docs.risingwave.com/performance/metrics#barrier-monitoring for steps to diagnose high barrier latency.",
+                operation_name, notify_timeout_secs
+            ),
+            LongRunningNotificationAction::MonitorBackfillJob => format!(
+                "{} has taken more than {} secs, barrier latency might be high. Please check barrier latency metrics to confirm.\n\
+                You can also run SHOW JOBS to track the progress of the job.\n\
+                See: https://docs.risingwave.com/performance/metrics#barrier-monitoring and https://docs.risingwave.com/sql/commands/sql-show-jobs",
+                operation_name, notify_timeout_secs
+            ),
+        }
+    }
+}
+
+pub async fn execute_with_long_running_notification<F, T>(
+    operation_fut: F,
+    session: &SessionImpl,
+    operation_name: &str,
+    action: LongRunningNotificationAction,
+) -> RwResult<T>
+where
+    F: std::future::Future<Output = RwResult<T>>,
+{
+    let notify_timeout_secs = session.config().slow_ddl_notification_secs();
+
+    // If timeout is 0, disable notifications and just execute the operation
+    if notify_timeout_secs == 0 {
+        return operation_fut.await;
+    }
+
+    let notify_fut = sleep(Duration::from_secs(notify_timeout_secs as u64));
+    tokio::pin!(operation_fut);
+
+    select! {
+        _ = notify_fut => {
+            session.notice_to_user(action.build_message(operation_name, notify_timeout_secs));
+            operation_fut.await
+        }
+        result = &mut operation_fut => {
+            result
+        }
+    }
 }
 
 #[cfg(test)]

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -78,7 +78,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         }
 
         Ok(Self {
-            subscription: properties.subscription.to_owned(),
+            subscription: properties.subscription,
             split_count,
         })
     }
@@ -88,7 +88,7 @@ impl SplitEnumerator for PubsubSplitEnumerator {
         let splits: Vec<PubsubSplit> = (0..self.split_count)
             .map(|i| PubsubSplit {
                 index: i,
-                subscription: self.subscription.to_owned(),
+                subscription: self.subscription.clone(),
                 __deprecated_start_offset: None,
                 __deprecated_stop_offset: None,
             })

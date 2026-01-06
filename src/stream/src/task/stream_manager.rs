@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ pub mod await_tree_key {
     }
 }
 
-/// `LocalStreamManager` directly handles public API for streaming, e.g., `StreamService`, `ExchangeService`.
+/// `LocalStreamManager` directly handles public API for streaming, e.g., `StreamService`, `StreamExchangeService`.
 ///
 /// Interacts with meta, and sends [`LocalActorOperation`] events to [`LocalBarrierWorker`].
 /// Note: barriers are handled by [`ControlStreamHandle`]. The control stream is established in [`Self::handle_new_control_stream`],
@@ -94,13 +94,13 @@ impl LocalStreamManager {
         await_tree_config: Option<await_tree::Config>,
         watermark_epoch: AtomicU64Ref,
     ) -> Self {
-        if !env.config().unsafe_enable_strict_consistency {
+        if !env.global_config().unsafe_enable_strict_consistency {
             // If strict consistency is disabled, should disable storage sanity check.
             // Since this is a special config, we have to check it here.
             risingwave_storage::hummock::utils::disable_sanity_check();
         }
 
-        let await_tree_reg = await_tree_config.clone().map(await_tree::Registry::new);
+        let await_tree_reg = await_tree_config.map(await_tree::Registry::new);
 
         let (actor_op_tx, actor_op_rx) = unbounded_channel();
 
@@ -178,11 +178,12 @@ impl LocalStreamManager {
 
 #[cfg(test)]
 pub mod test_utils {
+    use risingwave_common::id::ActorId;
     use risingwave_pb::common::{ActorInfo, HostAddress};
 
     use super::*;
 
-    pub fn helper_make_local_actor(actor_id: u32) -> ActorInfo {
+    pub fn helper_make_local_actor(actor_id: ActorId) -> ActorInfo {
         ActorInfo {
             actor_id,
             host: Some(HostAddress {

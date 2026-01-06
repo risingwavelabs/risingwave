@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ use super::{
     BatchHashAgg, BatchSimpleAgg, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
     PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamHashAgg, StreamPlanRef, StreamProject,
     StreamShare, StreamSimpleAgg, StreamStatelessSimpleAgg, ToBatch, ToStream,
+    try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -83,7 +84,7 @@ impl LogicalAgg {
             approx_percentile_col_mapping,
             approx_percentile,
             core,
-        ) = self.prepare_approx_percentile(stream_input.clone())?;
+        ) = self.prepare_approx_percentile(stream_input)?;
 
         if core.agg_calls.is_empty() {
             if let Some(approx_percentile) = approx_percentile {
@@ -156,7 +157,7 @@ impl LogicalAgg {
         local_group_key.insert(vnode_col_idx);
         let n_local_group_key = local_group_key.len();
         let local_agg = new_stream_hash_agg(
-            Agg::new(core.agg_calls.to_vec(), local_group_key, project.into()),
+            Agg::new(core.agg_calls.clone(), local_group_key, project.into()),
             Some(vnode_col_idx),
         )?;
         // Global group key excludes vnode.
@@ -348,7 +349,7 @@ impl LogicalAgg {
             || approx_percentile_agg_calls.len() >= 2;
         let input = if needs_row_merge {
             // If there's row merge, we need to share the input.
-            StreamShare::new_from_input(stream_input.clone()).into()
+            StreamShare::new_from_input(stream_input).into()
         } else {
             stream_input
         };
@@ -640,7 +641,7 @@ impl LogicalAggBuilder {
                     agg_call.distinct,
                     agg_call.order_by.clone(),
                     agg_call.filter.clone(),
-                    agg_call.direct_args.clone(),
+                    agg_call.direct_args,
                 )?)?);
 
                 Ok(FunctionCall::new(ExprType::Divide, Vec::from([sum, count]))?.into())
@@ -1192,7 +1193,7 @@ impl PlanTreeNodeUnary<Logical> for LogicalAgg {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Agg::new(self.agg_calls().to_vec(), self.group_key().clone(), input)
+        Agg::new(self.agg_calls().clone(), self.group_key().clone(), input)
             .with_grouping_sets(self.grouping_sets().clone())
             .with_enable_two_phase(self.core().enable_two_phase)
             .into()
@@ -1416,28 +1417,25 @@ impl ToStream for LogicalAgg {
         use super::stream::prelude::*;
 
         let eowc = ctx.emit_on_window_close();
-        let input = self
-            .input()
-            .try_better_locality(&self.group_key().to_vec())
-            .unwrap_or_else(|| self.input());
+        let input = if self.group_key().is_empty() {
+            self.input()
+        } else {
+            try_enforce_locality_requirement(self.input(), &self.group_key().to_vec())
+        };
+
         let stream_input = input.to_stream(ctx)?;
 
         // Use Dedup operator, if possible.
         if stream_input.append_only() && self.agg_calls().is_empty() && !self.group_key().is_empty()
         {
-            let input = if self.group_key().len() != self.input().schema().len() {
-                let cols = &self.group_key().to_vec();
-                LogicalProject::with_mapping(
-                    self.input(),
-                    ColIndexMapping::with_remaining_columns(cols, self.input().schema().len()),
-                )
-                .into()
-            } else {
-                self.input()
-            };
+            let group_key = self.group_key().to_vec();
             let input_schema_len = input.schema().len();
-            let logical_dedup = LogicalDedup::new(input, (0..input_schema_len).collect());
-            return logical_dedup.to_stream(ctx);
+            let dedup: PlanRef = LogicalDedup::new(input, group_key.clone()).into();
+            let project = LogicalProject::with_mapping(
+                dedup,
+                ColIndexMapping::with_remaining_columns(&group_key, input_schema_len),
+            );
+            return project.to_stream(ctx);
         }
 
         if self.agg_calls().iter().any(|call| {
@@ -1571,7 +1569,7 @@ mod tests {
             .unwrap();
 
             let logical_agg = plan.as_logical_agg().unwrap();
-            let agg_calls = logical_agg.agg_calls().to_vec();
+            let agg_calls = logical_agg.agg_calls().clone();
             let group_key = logical_agg.group_key().clone();
 
             (exprs, agg_calls, group_key)

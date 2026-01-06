@@ -53,9 +53,21 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
         );
         let [upstream] = params.input.try_into().unwrap();
 
-        let pause_duration_ms = node.pause_duration_ms as _;
-        let buffer_max_size = node.buffer_size as usize;
-        let chunk_size = actor_context.streaming_config.developer.chunk_size;
+        // Previously, these configs are persisted in the plan node.
+        // Now it's always `None` and we should refer to the job's config override.
+        #[allow(deprecated)]
+        let pause_duration_ms = node.pause_duration_ms.map_or(
+            params.config.developer.sync_log_store_pause_duration_ms,
+            |v| v as usize,
+        );
+        #[allow(deprecated)]
+        let buffer_max_size = node
+            .buffer_size
+            .map_or(params.config.developer.sync_log_store_buffer_size, |v| {
+                v as usize
+            });
+
+        let chunk_size = actor_context.config.developer.chunk_size;
 
         let executor = SyncedKvLogStoreExecutor::new(
             actor_context,
@@ -66,7 +78,7 @@ impl ExecutorBuilder for SyncLogStoreExecutorBuilder {
             buffer_max_size,
             chunk_size,
             upstream,
-            Duration::from_millis(pause_duration_ms),
+            Duration::from_millis(pause_duration_ms as _),
             node.aligned,
         );
         Ok((params.info, executor).into())

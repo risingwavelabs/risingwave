@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -139,6 +139,8 @@ static TABLE_FUNCTION_CONVERT: LazyLock<OptimizationStage> = LazyLock::new(|| {
             TableFunctionToInternalBackfillProgressRule::create(),
             // Apply internal source backfill progress rule next
             TableFunctionToInternalSourceBackfillProgressRule::create(),
+            // Apply internal get channel delta stats rule next
+            TableFunctionToInternalGetChannelDeltaStatsRule::create(),
             // Apply postgres query rule next
             TableFunctionToPostgresQueryRule::create(),
             // Apply mysql query rule next
@@ -188,6 +190,15 @@ static TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS: LazyLock<Optimizatio
         OptimizationStage::new(
             "Table Function To Internal Source Backfill Progress",
             vec![TableFunctionToInternalSourceBackfillProgressRule::create()],
+            ApplyOrder::TopDown,
+        )
+    });
+
+static TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Table Function To Internal Get Channel Delta Stats",
+            vec![TableFunctionToInternalGetChannelDeltaStatsRule::create()],
             ApplyOrder::TopDown,
         )
     });
@@ -408,6 +419,21 @@ static CONVERT_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+// DataFusion cannot apply `OverWindowToTopNRule`
+static CONVERT_OVER_WINDOW_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Convert Over Window",
+        vec![
+            ProjectMergeRule::create(),
+            ProjectEliminateRule::create(),
+            TrivialProjectToValuesRule::create(),
+            UnionInputValuesMergeRule::create(),
+            OverWindowToAggAndJoinRule::create(),
+        ],
+        ApplyOrder::TopDown,
+    )
+});
+
 static MERGE_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Merge Over Window",
@@ -427,7 +453,19 @@ static REWRITE_LIKE_EXPR: LazyLock<OptimizationStage> = LazyLock::new(|| {
 static TOP_N_AGG_ON_INDEX: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "TopN/SimpleAgg on Index",
-        vec![TopNOnIndexRule::create(), MinMaxOnIndexRule::create()],
+        vec![
+            TopNProjectTransposeRule::create(),
+            TopNOnIndexRule::create(),
+            MinMaxOnIndexRule::create(),
+        ],
+        ApplyOrder::TopDown,
+    )
+});
+
+static PROJECT_TOP_N_TRANSPOSE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Project TopN Transpose",
+        vec![ProjectTopNTransposeRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -512,6 +550,24 @@ static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
         ApplyOrder::BottomUp,
     )
 });
+
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(true)],
+            ApplyOrder::BottomUp,
+        )
+    });
+
+static CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM: LazyLock<OptimizationStage> =
+    LazyLock::new(|| {
+        OptimizationStage::new(
+            "Correlated TopN to Vector Search",
+            vec![CorrelatedTopNToVectorSearchRule::create(false)],
+            ApplyOrder::BottomUp,
+        )
+    });
 
 impl LogicalOptimizer {
     pub fn predicate_pushdown(
@@ -659,6 +715,8 @@ impl LogicalOptimizer {
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_STREAM)?;
+
         plan = Self::subquery_unnesting(plan, enable_share_plan, explain_trace, &ctx)?;
         if has_logical_max_one_row(plan.clone()) {
             // `MaxOneRow` is currently only used for the runtime check of
@@ -768,11 +826,12 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_POSTGRES_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_MYSQL_QUERY)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_BACKFILL_PROGRESS)?;
+        plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_GET_CHANNEL_DELTA_STATS)?;
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_TO_INTERNAL_SOURCE_BACKFILL_PROGRESS)?;
         // In order to unnest a table function, we need to convert it into a `project_set` first.
         plan = plan.optimize_by_rules(&TABLE_FUNCTION_CONVERT)?;
 
-        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
+        plan = plan.optimize_by_rules(&CORRELATED_TOP_N_TO_VECTOR_SEARCH_FOR_BATCH)?;
 
         plan = Self::subquery_unnesting(plan, false, explain_trace, &ctx)?;
 
@@ -812,7 +871,7 @@ impl LogicalOptimizer {
             last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
-        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW)?;
+        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW_FOR_BATCH)?;
         plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW)?;
 
         // Convert distinct aggregates.
@@ -821,6 +880,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&SIMPLIFY_AGG)?;
 
         plan = plan.optimize_by_rules(&JOIN_COMMUTE)?;
+
+        plan = plan.optimize_by_rules(&TOP_N_TO_VECTOR_SEARCH)?;
 
         // Do a final column pruning and predicate pushing down to clean up the plan.
         plan = Self::column_pruning(plan, explain_trace, &ctx);
@@ -838,6 +899,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PULL_UP_HOP)?;
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX)?;
+
+        plan = plan.optimize_by_rules(&PROJECT_TOP_N_TRANSPOSE)?;
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN)?;
 

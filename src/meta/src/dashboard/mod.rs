@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,6 @@
 mod prometheus;
 
 use std::net::SocketAddr;
-use std::path::Path as FilePath;
 use std::sync::Arc;
 
 use anyhow::{Context as _, Result, anyhow};
@@ -59,8 +58,7 @@ pub(super) mod handlers {
     use axum::extract::Query;
     use futures::future::join_all;
     use itertools::Itertools;
-    use risingwave_common::catalog::TableId;
-    use risingwave_common_heap_profiling::COLLAPSED_SUFFIX;
+    use risingwave_common::id::JobId;
     use risingwave_meta_model::WorkerId;
     use risingwave_pb::catalog::table::TableType;
     use risingwave_pb::catalog::{
@@ -326,7 +324,7 @@ pub(super) mod handlers {
         let mut fragment_to_relation_map = HashMap::new();
         for (relation_id, tf) in table_fragments {
             for fragment_id in tf.fragments.keys() {
-                fragment_to_relation_map.insert(*fragment_id, relation_id as u32);
+                fragment_to_relation_map.insert(*fragment_id, relation_id.as_raw_id());
             }
         }
         let map = FragmentToRelationMap {
@@ -353,7 +351,7 @@ pub(super) mod handlers {
                 fragment_id_to_actor_ids.insert(*fragment_id, ActorIds { ids: actor_ids });
             }
             map.insert(
-                id as u32,
+                id.as_raw_id(),
                 FragmentIdToActorIdMap {
                     map: fragment_id_to_actor_ids,
                 },
@@ -368,10 +366,10 @@ pub(super) mod handlers {
         Extension(srv): Extension<Service>,
         Path(job_id): Path<u32>,
     ) -> Result<Json<PbTableFragments>> {
-        let table_id = TableId::new(job_id);
+        let job_id = JobId::new(job_id);
         let table_fragments = srv
             .metadata_manager
-            .get_job_fragments_by_id(&table_id)
+            .get_job_fragments_by_id(job_id)
             .await
             .map_err(err)?;
         let upstream_fragments = srv
@@ -551,14 +549,6 @@ pub(super) mod handlers {
         let file_path =
             String::from_utf8(base64_url::decode(&file_path).map_err(err)?).map_err(err)?;
 
-        let file_name = FilePath::new(&file_path)
-            .file_name()
-            .unwrap()
-            .to_string_lossy()
-            .to_string();
-
-        let collapsed_file_name = format!("{}.{}", file_name, COLLAPSED_SUFFIX);
-
         let worker_node = srv
             .metadata_manager
             .get_worker_by_id(worker_id)
@@ -578,7 +568,6 @@ pub(super) mod handlers {
 
         let response = Response::builder()
             .header("Content-Type", "application/octet-stream")
-            .header("Content-Disposition", collapsed_file_name)
             .body(collapsed_str.into());
 
         response.map_err(err)

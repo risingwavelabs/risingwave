@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,9 +39,9 @@ pub fn create_subscription_catalog(
     let (table_schema_name, subscription_from_table_name) =
         Binder::resolve_schema_qualified_name(db_name, &stmt.subscription_from)?;
     let (table_database_id, table_schema_id) =
-        session.get_database_and_schema_id_for_create(table_schema_name.clone())?;
+        session.get_database_and_schema_id_for_create(table_schema_name)?;
     let (subscription_database_id, subscription_schema_id) =
-        session.get_database_and_schema_id_for_create(subscription_schema_name.clone())?;
+        session.get_database_and_schema_id_for_create(subscription_schema_name)?;
     let definition = context.normalized_sql().to_owned();
     let dependent_table_id = session
         .get_table_by_name(
@@ -87,7 +87,7 @@ pub async fn handle_create_subscription(
     };
     let subscription_catalog = {
         let context = Rc::new(OptimizerContext::from_handler_args(handle_args));
-        create_subscription_catalog(&session, context.clone(), stmt)?
+        create_subscription_catalog(&session, context, stmt)?
     };
 
     let _job_guard =

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ impl Rule<Logical> for SplitNowOrRule {
 
         let share = LogicalShare::create(input);
         let filter1 = LogicalFilter::create_with_expr(share.clone(), arm1);
-        let filter2 = LogicalFilter::create_with_expr(share.clone(), arm2);
+        let filter2 = LogicalFilter::create_with_expr(share, arm2);
         let union_all = LogicalUnion::create(true, vec![filter1, filter2]);
         Some(union_all)
     }

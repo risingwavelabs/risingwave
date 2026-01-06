@@ -1,0 +1,20 @@
+# Create organizational unit for people
+dn: ou=people,dc=example,dc=com
+objectClass: organizationalUnit
+ou: people
+
+# Test user for LDAP authentication
+dn: uid=testuser1,ou=people,dc=example,dc=com
+objectClass: inetOrgPerson
+objectClass: posixAccount
+objectClass: shadowAccount
+uid: testuser1
+cn: Test User 1
+sn: User1
+givenName: Test
+mail: testuser1@example.com
+userPassword: {SSHA}testpass1
+uidNumber: 10001
+gidNumber: 10001
+homeDirectory: /home/testuser1
+loginShell: /bin/bash

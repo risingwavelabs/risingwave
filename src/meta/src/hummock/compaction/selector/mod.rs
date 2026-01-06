@@ -1,17 +1,17 @@
-//  Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
@@ -57,7 +57,7 @@ pub struct CompactionSelectorContext<'a> {
     pub member_table_ids: &'a BTreeSet<TableId>,
     pub level_handlers: &'a mut [LevelHandler],
     pub selector_stats: &'a mut LocalSelectorStatistic,
-    pub table_id_to_options: &'a HashMap<u32, TableOption>,
+    pub table_id_to_options: &'a HashMap<TableId, TableOption>,
     pub developer_config: Arc<CompactionDeveloperConfig>,
     pub table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
     pub state_table_info: &'a HummockVersionStateTableInfo,
@@ -199,7 +199,7 @@ pub mod tests {
                 right_exclusive: false,
             },
             file_size: object_size,
-            table_ids: vec![table_prefix as u32],
+            table_ids: vec![(table_prefix as u32).into()],
             uncompressed_file_size: (right - left + 1) as u64,
             total_key_count: (right - left + 1) as u64,
             sst_size: object_size,
@@ -228,7 +228,7 @@ pub mod tests {
                 right_exclusive: false,
             },
             file_size: object_size,
-            table_ids,
+            table_ids: table_ids.into_iter().map_into().collect(),
             uncompressed_file_size: object_size,
             min_epoch,
             max_epoch,

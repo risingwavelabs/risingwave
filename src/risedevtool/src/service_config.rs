@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -107,6 +107,7 @@ pub struct FrontendConfig {
 
     pub provide_meta_node: Option<Vec<MetaNodeConfig>>,
     pub provide_tempo: Option<Vec<TempoConfig>>,
+    pub provide_prometheus: Option<Vec<PrometheusConfig>>,
 
     pub user_managed: bool,
 }

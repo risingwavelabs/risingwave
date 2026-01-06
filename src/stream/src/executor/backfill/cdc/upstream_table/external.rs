@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -122,8 +122,8 @@ impl ExternalStorageTable {
                 self.schema.clone(),
                 self.pk_indices.clone(),
                 SchemaTableName {
-                    schema_name: self.schema_name.to_owned(),
-                    table_name: self.table_name.to_owned(),
+                    schema_name: self.schema_name.clone(),
+                    table_name: self.table_name.clone(),
                 },
             )
             .await

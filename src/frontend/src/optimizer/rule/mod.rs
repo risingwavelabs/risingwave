@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -124,6 +124,10 @@ mod project_eliminate_rule;
 pub use project_eliminate_rule::*;
 mod project_merge_rule;
 pub use project_merge_rule::*;
+mod project_top_n_transpose_rule;
+pub use project_top_n_transpose_rule::*;
+mod top_n_project_transpose_rule;
+pub use top_n_project_transpose_rule::*;
 mod pull_up_correlated_predicate_rule;
 pub use pull_up_correlated_predicate_rule::*;
 mod pull_up_correlated_project_value_rule;
@@ -250,11 +254,13 @@ pub use unify_first_last_value_rule::*;
 mod empty_agg_remove_rule;
 pub use empty_agg_remove_rule::*;
 mod add_logstore_rule;
+mod correlated_topn_to_vector_search;
 mod pull_up_correlated_predicate_agg_rule;
 mod source_to_iceberg_scan_rule;
 mod source_to_kafka_scan_rule;
 mod table_function_to_file_scan_rule;
 mod table_function_to_internal_backfill_progress;
+mod table_function_to_internal_get_channel_delta_stats;
 mod table_function_to_internal_source_backfill_progress;
 mod table_function_to_mysql_query_rule;
 mod table_function_to_postgres_query_rule;
@@ -265,11 +271,13 @@ pub use add_logstore_rule::*;
 pub use batch::batch_iceberg_count_star::*;
 pub use batch::batch_iceberg_predicate_pushdown::*;
 pub use batch::batch_push_limit_to_scan_rule::*;
+pub use correlated_topn_to_vector_search::*;
 pub use pull_up_correlated_predicate_agg_rule::*;
 pub use source_to_iceberg_scan_rule::*;
 pub use source_to_kafka_scan_rule::*;
 pub use table_function_to_file_scan_rule::*;
 pub use table_function_to_internal_backfill_progress::*;
+pub use table_function_to_internal_get_channel_delta_stats::*;
 pub use table_function_to_internal_source_backfill_progress::*;
 pub use table_function_to_mysql_query_rule::*;
 pub use table_function_to_postgres_query_rule::*;
@@ -316,6 +324,8 @@ macro_rules! for_all_rules {
             , { SplitNowOrRule }
             , { FilterWithNowToJoinRule }
             , { GenerateSeriesWithNowRule }
+            , { ProjectTopNTransposeRule }
+            , { TopNProjectTransposeRule }
             , { TopNOnIndexRule }
             , { TrivialProjectToValuesRule }
             , { UnionInputValuesMergeRule }
@@ -344,6 +354,7 @@ macro_rules! for_all_rules {
             , { TableFunctionToPostgresQueryRule }
             , { TableFunctionToMySqlQueryRule }
             , { TableFunctionToInternalBackfillProgressRule }
+            , { TableFunctionToInternalGetChannelDeltaStatsRule }
             , { TableFunctionToInternalSourceBackfillProgressRule }
             , { ApplyLimitTransposeRule }
             , { CommonSubExprExtractRule }
@@ -365,6 +376,7 @@ macro_rules! for_all_rules {
             , { AddLogstoreRule }
             , { EmptyAggRemoveRule }
             , { TopNToVectorSearchRule }
+            , { CorrelatedTopNToVectorSearchRule }
         }
     };
 }

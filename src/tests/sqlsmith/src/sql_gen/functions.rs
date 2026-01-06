@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,7 +60,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
     }
 
     /// We do custom generation for the `OVERLAY` function call.
-    /// See: [`https://github.com/risingwavelabs/risingwave/issues/10695`] for rationale.
+    /// See: `https://github.com/risingwavelabs/risingwave/issues/10695` for rationale.
     fn gen_overlay(&mut self, context: SqlGeneratorContext) -> Expr {
         let expr = Box::new(self.gen_expr(&DataType::Varchar, context));
         let new_substring = Box::new(self.gen_expr(&DataType::Varchar, context));

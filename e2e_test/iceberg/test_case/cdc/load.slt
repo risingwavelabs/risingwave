@@ -83,14 +83,13 @@ ENGINE = ICEBERG;
 statement ok
 FLUSH;
 
-sleep 20s
 
-query I
+query I retry 21 backoff 1s
 select count(*) from products;
 ----
 8
 
-query I
+query I retry 10 backoff 1s
 select count(*) from products_iceberg;
 ----
 8
@@ -102,9 +101,8 @@ mysql --host=mysql --port=3306 -u root -p123456 < ./test_case/cdc/mysql_cdc_inse
 statement ok
 FLUSH;
 
-sleep 20s
 
-query I
+query ??? retry 21 backoff 1s
 SELECT * FROM products_iceberg ORDER BY id ASC;
 ----
 101 101 101

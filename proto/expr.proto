@@ -202,6 +202,11 @@ message ExprNode {
     QUOTE_NULLABLE = 331;
     HMAC = 332;
     SECURE_COMPARE = 333;
+    GET_BIT = 334;
+    GET_BYTE = 335;
+    SET_BIT = 336;
+    SET_BYTE = 337;
+    BIT_COUNT = 338;
 
     // Constraints Check
     CHECK_NOT_NULL = 350;
@@ -239,6 +244,7 @@ message ExprNode {
     ARRAY_CONTAINS = 550;
     ARRAY_CONTAINED = 551;
     ARRAY_FLATTEN = 552;
+    ARRAY_REVERSE = 553;
 
     // Int256 functions
     HEX_TO_INT256 = 560;
@@ -316,6 +322,7 @@ message ExprNode {
     VEC_CONCAT = 754;
     L2_NORM = 755;
     L2_NORMALIZE = 756;
+    SUBVECTOR = 757;
 
     // Internal function for schema change
     COMPOSITE_CAST = 800;
@@ -354,6 +361,9 @@ message ExprNode {
     PG_TABLE_IS_VISIBLE = 2414;
     HAS_FUNCTION_PRIVILEGE = 2415;
     HAS_DATABASE_PRIVILEGE = 2416;
+    RW_CLUSTER_ID = 2417;
+    RW_FRAGMENT_VNODES = 2418;
+    RW_ACTOR_VNODES = 2419;
 
     // EXTERNAL
     ICEBERG_TRANSFORM = 2201;
@@ -403,6 +413,8 @@ message TableFunction {
     INTERNAL_BACKFILL_PROGRESS = 30;
     // Internal source backfill table function
     INTERNAL_SOURCE_BACKFILL_PROGRESS = 31;
+    // Internal channel delta stats table function
+    INTERNAL_GET_CHANNEL_DELTA_STATS = 32;
     // User defined table function
     USER_DEFINED = 100;
   }
@@ -677,6 +689,9 @@ message UserDefinedFunctionMetadata {
   optional string runtime = 11;
   reserved 12;
   reserved "function_type";
+  // additional options for javascript functions
+  optional bool is_async = 14;
+  optional bool is_batched = 15;
 
   UdfExprVersion version = 1000;
 }

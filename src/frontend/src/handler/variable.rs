@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -103,7 +103,7 @@ pub(super) fn handle_show(handler_args: HandlerArgs, variable: Vec<Ident>) -> Re
     if name.eq_ignore_ascii_case("PARAMETERS") {
         handle_show_system_params(handler_args)
     } else if name.eq_ignore_ascii_case("ALL") {
-        handle_show_all(handler_args.clone())
+        handle_show_all(handler_args)
     } else {
         let config_reader = handler_args.session.config();
         Ok(PgResponse::builder(StatementType::SHOW_VARIABLE)

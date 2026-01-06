@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -99,9 +99,21 @@ impl ColIndexMapping {
     /// required distribution after the column index mapping, it will return None.
     /// ShardByKey(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to ShardByKey(1,0,2).
     /// ShardByKey(0,1,2), with mapping(0->1,2->0) will return ShardByKey(1,0).
+    /// ShardByExactKey(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to ShardByExactKey(1,0,2).
+    /// ShardByExactKey(0,1,2), with mapping(0->1,2->0) will return `Any`.
     /// ShardByKey(0,1), with mapping(2->0) will return `Any`.
     pub fn rewrite_required_distribution(&self, dist: &RequiredDist) -> RequiredDist {
         match dist {
+            RequiredDist::ShardByExactKey(keys) => {
+                assert!(!keys.is_clear());
+                let original_key_count = keys.count_ones(..);
+                let keys = self.rewrite_bitset(keys);
+                if keys.count_ones(..) != original_key_count {
+                    RequiredDist::Any
+                } else {
+                    RequiredDist::ShardByExactKey(keys)
+                }
+            }
             RequiredDist::ShardByKey(keys) => {
                 assert!(!keys.is_clear());
                 let keys = self.rewrite_bitset(keys);

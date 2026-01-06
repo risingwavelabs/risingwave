@@ -1,10 +1,10 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -71,9 +71,9 @@ pub trait ToArrow {
         chunk: &DataChunk,
     ) -> Result<arrow_array::RecordBatch, ArrayError> {
         // compact the chunk if it's not compacted
-        if !chunk.is_compacted() {
+        if !chunk.is_vis_compacted() {
             let c = chunk.clone();
-            return self.to_record_batch(schema, &c.compact());
+            return self.to_record_batch(schema, &c.compact_vis());
         }
 
         // convert each column to arrow array
@@ -1267,16 +1267,23 @@ impl TryFrom<&arrow_array::Decimal128Array> for DecimalArray {
         if array.scale() < 0 {
             bail!("support negative scale for arrow decimal")
         }
+
+        // Calculate the max value based on the Arrow decimal's precision
+        // When writing Inf to Arrow Decimal128(precision, scale), we use 10^precision - 1
+        let precision = array.precision();
+        let max_value = 10_i128.pow(precision as u32) - 1;
+
         let from_arrow = |value| {
             const NAN: i128 = i128::MIN + 1;
             let res = match value {
+                // Check for special values using Arrow Decimal's max value, not i128::MAX
                 NAN => Decimal::NaN,
-                i128::MAX => Decimal::PositiveInf,
-                i128::MIN => Decimal::NegativeInf,
-                _ => Decimal::Normalized(
-                    rust_decimal::Decimal::try_from_i128_with_scale(value, array.scale() as u32)
-                        .map_err(ArrayError::internal)?,
-                ),
+                v if v == max_value => Decimal::PositiveInf,
+                v if v == -max_value => Decimal::NegativeInf,
+                i128::MAX => Decimal::PositiveInf, // Fallback for old data
+                i128::MIN => Decimal::NegativeInf, // Fallback for old data
+                _ => Decimal::truncated_i128_and_scale(value, array.scale() as u32)
+                    .ok_or_else(|| ArrayError::from_arrow("decimal overflow"))?,
             };
             Ok(res)
         };

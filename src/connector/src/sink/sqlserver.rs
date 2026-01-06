@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -154,13 +154,9 @@ impl TryFrom<SinkParam> for SqlServerSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = SqlServerConfig::from_btreemap(param.properties)?;
-        SqlServerSink::new(
-            config,
-            schema,
-            param.downstream_pk,
-            param.sink_type.is_append_only(),
-        )
+        SqlServerSink::new(config, schema, pk_indices, param.sink_type.is_append_only())
     }
 }
 
@@ -419,7 +415,7 @@ impl SqlServerSinkWriter {
                 SqlOp::Merge(_) => {
                     write!(
                         &mut query_str,
-                        r#"MERGE {} AS [TARGET]
+                        r#"MERGE {} WITH (HOLDLOCK) AS [TARGET]
                         USING (VALUES ({})) AS [SOURCE] ({})
                         ON {}
                         WHEN MATCHED THEN UPDATE SET {}

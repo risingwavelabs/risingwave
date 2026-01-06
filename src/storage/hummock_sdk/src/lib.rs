@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,7 @@
 
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(let_chains)]
 #![feature(btree_cursors)]
-#![feature(strict_overflow_ops)]
 #![feature(map_try_insert)]
 
 mod key_cmp;
@@ -42,6 +40,7 @@ pub mod change_log;
 pub mod compact;
 pub mod compact_task;
 pub mod compaction_group;
+pub mod filter_utils;
 pub mod key;
 pub mod key_range;
 pub mod level;
@@ -181,7 +180,7 @@ impl_object_id!(HummockVectorFileId);
 impl_object_id!(HummockHnswGraphFileId);
 
 pub type HummockRefCount = u64;
-pub type HummockContextId = u32;
+pub type HummockContextId = risingwave_common::id::WorkerId;
 pub type HummockEpoch = u64;
 pub type HummockCompactionTaskId = u64;
 pub type CompactionGroupId = u64;

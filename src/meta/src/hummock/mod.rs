@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 pub mod compaction;
 pub mod compactor_manager;
 pub mod error;
@@ -56,7 +57,7 @@ pub fn start_hummock_workers(
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
         start_vacuum_time_travel_metadata_loop(
-            hummock_manager.clone(),
+            hummock_manager,
             Duration::from_secs(meta_opts.time_travel_vacuum_interval_sec),
         ),
     ];

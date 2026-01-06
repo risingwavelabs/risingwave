@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use phf::{Set, phf_set};
+use risingwave_common::id::ActorId;
 use rumqttc::tokio_rustls::rustls;
 use rumqttc::v5::mqttbytes::QoS;
 use rumqttc::v5::mqttbytes::v5::ConnectProperties;
@@ -103,8 +104,8 @@ impl EnforceSecret for MqttCommon {
 impl MqttCommon {
     pub(crate) fn build_client(
         &self,
-        actor_id: u32,
-        id: u64,
+        actor_id: ActorId,
+        id: u32,
     ) -> ConnectorResult<(AsyncClient, EventLoop)> {
         let client_id = format!(
             "{}_{}_{}",

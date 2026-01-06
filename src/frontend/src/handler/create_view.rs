@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ pub async fn handle_create_view(
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let super::query::BatchQueryPlanResult {
+        let super::query::RwBatchQueryPlanResult {
             schema,
             dependent_relations,
             ..
@@ -60,7 +60,8 @@ pub async fn handle_create_view(
             &session,
             context.into(),
             Statement::Query(Box::new(query.clone())),
-        )?;
+        )?
+        .unwrap_rw()?;
 
         (dependent_relations, schema)
     };
@@ -96,7 +97,7 @@ pub async fn handle_create_view(
     }
 
     let view = PbView {
-        id: 0,
+        id: 0.into(),
         schema_id,
         database_id,
         name: view_name,
@@ -104,17 +105,13 @@ pub async fn handle_create_view(
         owner: session.user_id(),
         sql: format!("{}", query),
         columns: columns.into_iter().map(|f| f.to_prost()).collect(),
+        created_at_epoch: None,
+        created_at_cluster_version: None,
     };
 
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
-        .create_view(
-            view,
-            dependent_relations
-                .into_iter()
-                .map(|t| t.table_id)
-                .collect(),
-        )
+        .create_view(view, dependent_relations.into_iter().collect())
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_VIEW))

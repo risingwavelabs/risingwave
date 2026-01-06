@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The view `pg_indexes` provides access to useful information about each index in the database.
-/// Ref: [`https://www.postgresql.org/docs/current/view-pg-indexes.html`]
+/// Ref: `https://www.postgresql.org/docs/current/view-pg-indexes.html`
 #[system_catalog(
     view,
     "pg_catalog.pg_indexes",

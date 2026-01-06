@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -121,6 +121,8 @@ impl StreamNode for StreamFsFetch {
                 with_properties,
                 rate_limit: source_catalog.rate_limit,
                 secret_refs,
+                refresh_mode: source_catalog.refresh_mode,
+                associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
             }
         });
         NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {

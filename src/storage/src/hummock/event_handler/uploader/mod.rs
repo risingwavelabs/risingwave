@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -485,6 +485,7 @@ struct LocalInstanceUnsyncData {
     // newer data comes first
     flushing_imms: VecDeque<SharedBufferBatchId>,
     is_destroyed: bool,
+    is_stopped: bool,
 }
 
 impl LocalInstanceUnsyncData {
@@ -496,11 +497,13 @@ impl LocalInstanceUnsyncData {
             sealed_data: VecDeque::new(),
             flushing_imms: Default::default(),
             is_destroyed: false,
+            is_stopped: false,
         }
     }
 
     fn add_imm(&mut self, imm: UploaderImm) {
         assert!(!self.is_destroyed);
+        assert!(!self.is_stopped);
         assert_eq!(self.table_id, imm.table_id);
         self.current_epoch_data
             .as_mut()
@@ -508,8 +511,7 @@ impl LocalInstanceUnsyncData {
             .add_imm(imm);
     }
 
-    fn local_seal_epoch(&mut self, next_epoch: HummockEpoch) -> HummockEpoch {
-        assert!(!self.is_destroyed);
+    fn local_seal_epoch(&mut self, next_epoch: HummockEpoch, stopped: bool) -> HummockEpoch {
         let data = self
             .current_epoch_data
             .as_mut()
@@ -517,9 +519,12 @@ impl LocalInstanceUnsyncData {
         let current_epoch = data.epoch;
         debug!(
             instance_id = self.instance_id,
-            next_epoch, current_epoch, "local seal epoch"
+            next_epoch, current_epoch, stopped, "local seal epoch"
         );
         assert_gt!(next_epoch, current_epoch);
+        assert!(!self.is_destroyed);
+        assert!(!self.is_stopped);
+        self.is_stopped = stopped;
         let epoch_data = replace(data, LocalInstanceEpochData::new(next_epoch));
         if !epoch_data.is_empty() {
             self.sealed_data.push_front(epoch_data);
@@ -613,14 +618,14 @@ impl LocalInstanceUnsyncData {
             if cfg!(debug_assertions) {
                 panic!(
                     "sync epoch exceeds latest epoch, and the current instance should have been archived, table_id = {}, latest_epoch_data = {}, epoch = {}",
-                    self.table_id.table_id,
+                    self.table_id,
                     latest_epoch_data.epoch(),
                     epoch
                 );
             }
             warn!(
                 instance_id = self.instance_id,
-                table_id = self.table_id.table_id,
+                table_id = %self.table_id,
                 "sync epoch exceeds latest epoch, and the current instance should have be archived"
             );
             self.current_epoch_data = None;
@@ -655,10 +660,6 @@ struct TableUnsyncData {
     )>,
     spill_tasks: BTreeMap<HummockEpoch, VecDeque<UploadingTaskId>>,
     unsync_epochs: BTreeMap<HummockEpoch, ()>,
-    // Initialized to be `None`. Transform to `Some(_)` when called
-    // `local_seal_epoch` with a non-existing epoch, to mark that
-    // the fragment of the table has stopped.
-    stopped_next_epoch: Option<HummockEpoch>,
     // newer epoch at the front
     syncing_epochs: VecDeque<HummockEpoch>,
     max_synced_epoch: Option<HummockEpoch>,
@@ -672,7 +673,6 @@ impl TableUnsyncData {
             table_watermarks: None,
             spill_tasks: Default::default(),
             unsync_epochs: Default::default(),
-            stopped_next_epoch: None,
             syncing_epochs: Default::default(),
             max_synced_epoch: committed_epoch,
         }
@@ -824,7 +824,7 @@ impl UnsyncData {
         init_epoch: HummockEpoch,
     ) {
         debug!(
-            table_id = table_id.table_id,
+            table_id = %table_id,
             instance_id, init_epoch, "init epoch"
         );
         let table_data = self
@@ -883,45 +883,11 @@ impl UnsyncData {
             .instance_data
             .get_mut(&instance_id)
             .expect("should exist");
-        let epoch = instance_data.local_seal_epoch(next_epoch);
         // When drop/cancel a streaming job, for the barrier to stop actor, the
         // local instance will call `local_seal_epoch`, but the `next_epoch` won't be
         // called `start_epoch` because we have stopped writing on it.
-        if !table_data.unsync_epochs.contains_key(&next_epoch) {
-            if let Some(stopped_next_epoch) = table_data.stopped_next_epoch {
-                if stopped_next_epoch != next_epoch {
-                    let table_id = table_data.table_id.table_id;
-                    let unsync_epochs = table_data.unsync_epochs.keys().collect_vec();
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "table_id {} stop epoch {} different to prev stop epoch {}. unsync epochs: {:?}, syncing epochs {:?}, max_synced_epoch {:?}",
-                            table_id,
-                            next_epoch,
-                            stopped_next_epoch,
-                            unsync_epochs,
-                            table_data.syncing_epochs,
-                            table_data.max_synced_epoch
-                        );
-                    } else {
-                        warn!(
-                            table_id,
-                            stopped_next_epoch,
-                            next_epoch,
-                            ?unsync_epochs,
-                            syncing_epochs = ?table_data.syncing_epochs,
-                            max_synced_epoch = ?table_data.max_synced_epoch,
-                            "different stop epoch"
-                        );
-                    }
-                }
-            } else {
-                if let Some(max_epoch) = table_data.max_epoch() {
-                    assert_gt!(next_epoch, max_epoch);
-                }
-                debug!(?table_id, epoch, next_epoch, "table data has stopped");
-                table_data.stopped_next_epoch = Some(next_epoch);
-            }
-        }
+        let stopped = !table_data.unsync_epochs.contains_key(&next_epoch);
+        let epoch = instance_data.local_seal_epoch(next_epoch, stopped);
         if let Some((direction, table_watermarks, watermark_type)) = opts.table_watermarks {
             table_data.add_table_watermarks(epoch, table_watermarks, direction, watermark_type);
         }

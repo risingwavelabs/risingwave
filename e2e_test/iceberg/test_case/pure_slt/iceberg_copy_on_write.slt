@@ -40,7 +40,7 @@ flush;
 sleep 5s
 
 # without VACUUM, the old version is still visible
-query ?? rowsort
+query ?? rowsort retry 6 backoff 1s
 select * from t_cow;
 ----
 
@@ -62,7 +62,7 @@ flush;
 sleep 5s
 
 # without VACUUM, the old version is still visible
-query ?? rowsort
+query ?? rowsort retry 6 backoff 1s
 select * from t_cow;
 ----
 1 1

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -105,7 +105,7 @@ impl From<PbFunction> for ActiveModel {
             options.insert("async".to_string(), b.to_string());
         }
         Self {
-            function_id: Set(function.id as _),
+            function_id: Set(function.id),
             name: Set(function.name),
             arg_names: Set(function.arg_names.join(",")),
             arg_types: Set(DataTypeArray::from(function.arg_types)),

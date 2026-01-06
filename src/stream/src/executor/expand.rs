@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ mod tests {
 
     use super::ExpandExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{Execute, PkIndices};
+    use crate::executor::{Execute, StreamKey};
 
     #[tokio::test]
     async fn test_expand() {
@@ -93,7 +93,7 @@ mod tests {
                 Field::unnamed(DataType::Int64),
                 Field::unnamed(DataType::Int64),
             ]),
-            PkIndices::new(),
+            StreamKey::new(),
         );
 
         let column_subsets = vec![vec![0, 1], vec![1, 2]];

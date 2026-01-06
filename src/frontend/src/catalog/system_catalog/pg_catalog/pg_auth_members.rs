@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_auth_members` shows the membership relations between roles. Any non-circular set of relationships is allowed.
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-auth-members.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-auth-members.html`
 #[system_catalog(view, "pg_catalog.pg_auth_members")]
 #[derive(Fields)]
 struct PgAuthMember {

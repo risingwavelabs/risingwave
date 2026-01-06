@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -161,7 +161,8 @@ pub async fn create_stream_for_cursor_stmt(
     let session = handler_args.session.clone();
     let plan_fragmenter_result = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
+        let plan_result =
+            gen_batch_plan_by_statement(&session, context.into(), stmt)?.unwrap_rw()?;
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
     create_chunk_stream_for_cursor(session, plan_fragmenter_result).await
@@ -175,7 +176,6 @@ pub async fn create_chunk_stream_for_cursor(
         plan_fragmenter,
         query_mode,
         schema,
-        read_storage_tables,
         ..
     } = plan_fragmenter_result;
 
@@ -188,22 +188,10 @@ pub async fn create_chunk_stream_for_cursor(
         match query_mode {
             QueryMode::Auto => unreachable!(),
             QueryMode::Local => CursorDataChunkStream::LocalDataChunk(Some(
-                local_execute(
-                    session.clone(),
-                    query,
-                    can_timeout_cancel,
-                    &read_storage_tables,
-                )
-                .await?,
+                local_execute(session.clone(), query, can_timeout_cancel).await?,
             )),
             QueryMode::Distributed => CursorDataChunkStream::DistributedDataChunk(Some(
-                distribute_execute(
-                    session.clone(),
-                    query,
-                    can_timeout_cancel,
-                    read_storage_tables,
-                )
-                .await?,
+                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
             )),
         },
         schema.fields.clone(),

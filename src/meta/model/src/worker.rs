@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -92,7 +92,7 @@ impl From<&PbWorkerNode> for ActiveModel {
     fn from(worker: &PbWorkerNode) -> Self {
         let host = worker.host.clone().unwrap();
         Self {
-            worker_id: Set(worker.id as _),
+            worker_id: Set(worker.id),
             worker_type: Set(worker.r#type().into()),
             host: Set(host.host),
             port: Set(host.port),

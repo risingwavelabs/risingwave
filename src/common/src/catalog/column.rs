@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -465,6 +465,13 @@ impl ColumnCatalog {
 
     pub fn is_row_id_column(&self) -> bool {
         self.column_desc.column_id == ROW_ID_COLUMN_ID
+    }
+
+    pub fn is_iceberg_hidden_column(&self) -> bool {
+        let name = &self.column_desc.name;
+        name == ICEBERG_SEQUENCE_NUM_COLUMN_NAME
+            || name == ICEBERG_FILE_PATH_COLUMN_NAME
+            || name == ICEBERG_FILE_POS_COLUMN_NAME
     }
 }
 

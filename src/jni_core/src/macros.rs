@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -410,6 +410,18 @@ macro_rules! for_all_plain_native_methods {
                 static native long iteratorNewStreamChunk(long pointer);
 
                 static native boolean iteratorNext(long pointer);
+
+                public static native void initObjectStoreForTest(String stateStoreUrl, String dataDirectory);
+
+                public static native void putObject(String objectName, byte[] data);
+
+                public static native String getObjectStoreType();
+
+                public static native void deleteObjects(String dir);
+
+                public static native byte[] getObject(String objectName);
+
+                public static native String[] listObject(String dir);
 
                 static native void iteratorClose(long pointer);
 
@@ -867,6 +879,12 @@ mod tests {
                 defaultVnodeCount                        ()I,
                 iteratorNewStreamChunk                   (J)J,
                 iteratorNext                             (J)Z,
+                initObjectStoreForTest                   (Ljava/lang/String;Ljava/lang/String;)V,
+                putObject                                (Ljava/lang/String;[B)V,
+                getObjectStoreType                       ()Ljava/lang/String;,
+                deleteObjects                            (Ljava/lang/String;)V,
+                getObject                                (Ljava/lang/String;)[B,
+                listObject                               (Ljava/lang/String;)[Ljava/lang/String;,
                 iteratorClose                            (J)V,
                 newStreamChunkFromPayload                ([B)J,
                 newStreamChunkFromPretty                 (Ljava/lang/String;)J,

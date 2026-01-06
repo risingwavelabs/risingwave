@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,12 +46,13 @@ const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
     ORDER BY array_position(i.indkey, a.attnum)
 "#;
 
-#[derive(Debug, Clone, PartialEq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum SslMode {
     #[serde(alias = "disable")]
     Disabled,
     #[serde(alias = "prefer")]
+    #[default]
     Preferred,
     #[serde(alias = "require")]
     Required,
@@ -63,12 +64,6 @@ pub enum SslMode {
     /// matches the name stored in the server certificate.
     #[serde(alias = "verify-full")]
     VerifyFull,
-}
-
-impl Default for SslMode {
-    fn default() -> Self {
-        Self::Preferred
-    }
 }
 
 pub struct PostgresExternalTable {

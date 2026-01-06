@@ -21,6 +21,8 @@ pub mod batch;
 pub use batch::BatchConfig;
 pub mod frontend;
 pub use frontend::FrontendConfig;
+pub mod hba;
+pub use hba::{AddressPattern, AuthMethod, ConnectionType, HbaConfig, HbaEntry};
 pub mod meta;
 pub use meta::{CompactionConfig, DefaultParallelism, MetaBackend, MetaConfig, MetaStoreConfig};
 pub mod streaming;
@@ -34,8 +36,11 @@ pub use storage::{
     CacheEvictionConfig, EvictionConfig, ObjectStoreConfig, StorageConfig, StorageMemoryConfig,
     extract_storage_memory_config,
 };
+pub mod merge;
+pub mod mutate;
 pub mod system;
 pub mod utils;
+
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -43,6 +48,7 @@ use std::num::NonZeroUsize;
 use anyhow::Context;
 use clap::ValueEnum;
 use educe::Educe;
+pub use merge::*;
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
@@ -340,7 +346,7 @@ pub mod default {
         }
 
         pub fn enable_actor_tokio_metrics() -> bool {
-            false
+            true
         }
 
         pub fn stream_enable_auto_schema_change() -> bool {
@@ -369,7 +375,7 @@ pub mod default {
         }
 
         pub fn iceberg_list_interval_sec() -> u64 {
-            1
+            10
         }
 
         pub fn iceberg_fetch_batch_size() -> u64 {
@@ -383,6 +389,18 @@ pub mod default {
         pub fn iceberg_sink_write_parquet_max_row_group_rows() -> usize {
             100_000
         }
+
+        pub fn refresh_scheduler_interval_sec() -> u64 {
+            60
+        }
+
+        pub fn sync_log_store_pause_duration_ms() -> usize {
+            64
+        }
+
+        pub fn sync_log_store_buffer_size() -> usize {
+            2048
+        }
     }
 }
 
@@ -392,6 +410,7 @@ pub const MAX_BLOCK_CACHE_SHARD_BITS: usize = 6; // It means that there will be 
 
 #[cfg(test)]
 pub mod tests {
+    use expect_test::expect;
     use risingwave_license::LicenseKey;
 
     use super::*;
@@ -485,8 +504,7 @@ pub mod tests {
     ) {
         // Set the default value if it's a config name-value pair, otherwise it's a sub-section (Table) that should be recursively processed.
         if let toml::Value::Table(table) = value {
-            let section_configs: BTreeMap<String, toml::Value> =
-                table.clone().into_iter().collect();
+            let section_configs: BTreeMap<String, toml::Value> = table.into_iter().collect();
             let sub_section = if section.is_empty() {
                 name
             } else {
@@ -620,5 +638,72 @@ pub mod tests {
             assert_eq!(config.meta.table_high_write_throughput_threshold, 10);
             assert_eq!(config.meta.table_low_write_throughput_threshold, 5);
         }
+    }
+
+    // Previously, we have prefixes like `stream_` for all configs under `streaming.developer`.
+    // Later we removed the prefixes, but we still want to guarantee the backward compatibility.
+    #[test]
+    fn test_prefix_alias() {
+        let config: RwConfig = toml::from_str(
+            "
+            [streaming.developer]
+            stream_chunk_size = 114514
+
+            [streaming.developer.stream_compute_client_config]
+            connect_timeout_secs = 42
+            ",
+        )
+        .unwrap();
+
+        assert_eq!(config.streaming.developer.chunk_size, 114514);
+        assert_eq!(
+            config
+                .streaming
+                .developer
+                .compute_client_config
+                .connect_timeout_secs,
+            42
+        );
+    }
+
+    #[test]
+    fn test_prefix_alias_duplicate() {
+        let config = toml::from_str::<RwConfig>(
+            "
+            [streaming.developer]
+            stream_chunk_size = 114514
+            chunk_size = 1919810
+            ",
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 2, column 13
+              |
+            2 |             [streaming.developer]
+              |             ^^^^^^^^^^^^^^^^^^^^^
+            duplicate field `chunk_size`
+        "#]]
+        .assert_eq(&config.to_string());
+
+        let config = toml::from_str::<RwConfig>(
+            "
+            [streaming.developer.stream_compute_client_config]
+            connect_timeout_secs = 5
+
+            [streaming.developer.compute_client_config]
+            connect_timeout_secs = 10
+            ",
+        )
+        .unwrap_err();
+
+        expect![[r#"
+            TOML parse error at line 2, column 24
+              |
+            2 |             [streaming.developer.stream_compute_client_config]
+              |                        ^^^^^^^^^
+            duplicate field `compute_client_config`
+        "#]]
+        .assert_eq(&config.to_string());
     }
 }

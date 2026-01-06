@@ -31,9 +31,10 @@ export default function Tables() {
     content: (t) => t.optionalAssociatedSourceId?.associatedSourceId ?? "-",
   }
 
-  return Relations("Tables", getTables, [
-    associatedSourceColumn,
-    ...streamingJobColumns,
-    ...tableColumns,
-  ])
+  return Relations(
+    "Tables",
+    getTables,
+    [associatedSourceColumn, ...streamingJobColumns, ...tableColumns],
+    { withStreamingJobs: true }
+  )
 }

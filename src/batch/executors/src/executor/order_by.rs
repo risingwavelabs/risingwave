@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -125,7 +125,7 @@ impl SortExecutor {
         let mut input_stream = self.child.execute();
         #[for_await]
         for chunk in &mut input_stream {
-            let chunk = chunk?.compact();
+            let chunk = chunk?.compact_vis();
             let chunk_estimated_heap_size = chunk.estimated_heap_size();
             chunks.push(chunk);
             if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {

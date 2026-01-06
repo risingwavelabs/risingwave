@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,13 +19,12 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{GenericPlanNode, GenericPlanRef};
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
+    BackfillType, BatchFilter, BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical,
     LogicalPlanRef as PlanRef, PlanBase, PlanNodeId, PredicatePushdown, StreamTableScan, ToBatch,
     ToStream, generic,
 };
@@ -192,6 +191,10 @@ impl LogicalScan {
         self.core.watermark_columns()
     }
 
+    pub fn cross_database(&self) -> bool {
+        self.core.cross_database()
+    }
+
     /// Return indexes can satisfy the required order.
     pub fn indexes_satisfy_order(&self, required_order: &Order) -> Vec<&Arc<TableIndex>> {
         self.indexes_satisfy_order_with_prefix(required_order, &HashSet::new())
@@ -324,7 +327,7 @@ impl LogicalScan {
         predicate = predicate.rewrite_expr(&mut inverse_mapping);
 
         let scan_without_predicate = generic::TableScan::new(
-            self.required_col_idx().to_vec(),
+            self.required_col_idx().clone(),
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
@@ -342,11 +345,11 @@ impl LogicalScan {
 
     fn clone_with_predicate(&self, predicate: Condition) -> Self {
         generic::TableScan::new_inner(
-            self.output_col_idx().to_vec(),
+            self.output_col_idx().clone(),
             self.table().clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             predicate,
             self.as_of(),
         )
@@ -359,7 +362,7 @@ impl LogicalScan {
             self.core.table_catalog.clone(),
             self.table_indexes().to_vec(),
             self.vector_indexes().to_vec(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.predicate().clone(),
             self.as_of(),
         )
@@ -615,8 +618,7 @@ impl ToStream for LogicalScan {
         ctx: &mut ToStreamContext,
     ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         if self.predicate().always_true() {
-            if self.core.cross_database() && ctx.stream_scan_type() == StreamScanType::UpstreamOnly
-            {
+            if self.core.cross_database() && ctx.backfill_type() == BackfillType::UpstreamOnly {
                 return Err(ErrorCode::NotSupported(
                     "We currently do not support cross database scan in upstream only mode."
                         .to_owned(),
@@ -627,7 +629,7 @@ impl ToStream for LogicalScan {
 
             Ok(StreamTableScan::new_with_stream_scan_type(
                 self.core.clone(),
-                ctx.stream_scan_type(),
+                ctx.backfill_type().to_stream_scan_type(),
             )
             .into())
         } else {
@@ -680,21 +682,20 @@ impl ToStream for LogicalScan {
     }
 
     fn try_better_locality(&self, columns: &[usize]) -> Option<PlanRef> {
-        if !self
+        if columns.is_empty() {
+            return None;
+        }
+        let enable_index_selection = self
             .core
             .ctx()
             .session_ctx()
             .config()
-            .enable_index_selection()
-        {
-            return None;
-        }
-        if columns.is_empty() {
-            return None;
-        }
-        if self.table_indexes().is_empty() {
-            return None;
-        }
+            .enable_index_selection();
+        let has_indexes = !self.table_indexes().is_empty();
+        let primary_order = self.get_out_column_index_order();
+        let primary_dist_key_satisfied = self
+            .distribution_key()
+            .is_some_and(|dist_key| dist_key.iter().all(|k| columns.contains(k)));
         let orders = if columns.len() <= 3 {
             OrderType::all()
         } else {
@@ -715,10 +716,27 @@ impl ToStream for LogicalScan {
                 column_orders: order_type_combo,
             };
 
+            if primary_dist_key_satisfied && primary_order.satisfies(&required_order) {
+                return Some(self.clone().into());
+            }
+
+            if !enable_index_selection || !has_indexes {
+                continue;
+            }
+
             let order_satisfied_index = self.indexes_satisfy_order(&required_order);
             for index in order_satisfied_index {
                 if let Some(index_scan) = self.to_index_scan_if_index_covered(index) {
-                    return Some(index_scan.into());
+                    // The selected index's distribution key must be the subset the locality columns.
+                    // Because index's stream key is [distribution key] + [primary table's primary key].
+                    // For streaming queries, we have to ensure any updates ordering (U-/U+) isn't disturbed
+                    // after the later shuffle introduced by the locality operator,
+                    // so we have to ensure the distribution key of the index scan is the subset of the locality columns.
+                    if let Some(dist_key) = index_scan.distribution_key()
+                        && dist_key.iter().all(|k| columns.contains(k))
+                    {
+                        return Some(index_scan.into());
+                    }
                 }
             }
         }

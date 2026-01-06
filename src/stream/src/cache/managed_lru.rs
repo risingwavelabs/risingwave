@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ where
     inner: LruCache<K, V, S, A>,
 
     /// The entry with sequence less than `watermark_sequence` should be evicted.
-    /// `watermark_sequence` should only be updatd by `MemoryManager`.
+    /// `watermark_sequence` should only be updated by `MemoryManager`.
     watermark_sequence: Arc<AtomicSequence>,
 
     // Metrics info

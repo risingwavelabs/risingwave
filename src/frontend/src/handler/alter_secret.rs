@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,7 @@ pub async fn handle_alter_secret(
     {
         let AlterSecretOperation::ChangeCredential { new_credential } = operation;
 
-        let secret_id = secret_catalog.id.secret_id();
+        let secret_id = secret_catalog.id;
         let secret_payload = if sql_options.is_empty() {
             let original_pb_secret_bytes = LocalSecretManager::global()
                 .get_secret(secret_id)

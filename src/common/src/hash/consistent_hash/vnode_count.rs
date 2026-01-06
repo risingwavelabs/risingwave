@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,7 +34,12 @@ pub enum VnodeCount {
 impl VnodeCount {
     /// Creates a `VnodeCount` set to the given value.
     pub fn set(v: impl TryInto<usize> + Copy + std::fmt::Debug) -> Self {
-        let v = (v.try_into().ok())
+        let v = v.try_into().ok();
+        if v == Some(0) {
+            return VnodeCount::Placeholder;
+        }
+
+        let v = v
             .filter(|v| (1..=VirtualNode::MAX_COUNT).contains(v))
             .unwrap_or_else(|| panic!("invalid vnode count {v:?}"));
 

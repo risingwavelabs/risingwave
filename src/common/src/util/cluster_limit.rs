@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 
+use risingwave_pb::id::WorkerId;
 use risingwave_pb::meta::actor_count_per_parallelism::PbWorkerActorCount;
 use risingwave_pb::meta::cluster_limit::PbLimit;
 use risingwave_pb::meta::{PbActorCountPerParallelism, PbClusterLimit};
@@ -66,7 +67,7 @@ impl From<PbWorkerActorCount> for WorkerActorCount {
 }
 
 pub struct ActorCountPerParallelism {
-    pub worker_id_to_actor_count: HashMap<u32, WorkerActorCount>,
+    pub worker_id_to_actor_count: HashMap<WorkerId, WorkerActorCount>,
     pub hard_limit: usize,
     pub soft_limit: usize,
 }

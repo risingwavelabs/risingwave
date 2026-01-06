@@ -1,0 +1,31 @@
+# Test that we can cast row id (both for pk and changelog) from serial type to timestamptz
+# to extract the timestamp from row id.
+
+statement ok
+set RW_IMPLICIT_FLUSH to true;
+
+statement ok
+create table t (v1 int);
+
+statement ok
+create materialized view t_changelog as
+with c as changelog from t
+select _changelog_row_id, v1 from c;
+
+statement ok
+insert into t values (1);
+
+query I
+select count(*) from t
+where abs(date_part('epoch', now() - _row_id::timestamptz)) < 60;
+----
+1
+
+query I
+select count(*) from t_changelog
+where abs(date_part('epoch', now() - _changelog_row_id::timestamptz)) < 60;
+----
+1
+
+statement ok
+drop table t cascade;

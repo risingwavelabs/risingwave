@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::LazyLock;
+
 use risingwave_common::array::{Array, ArrayBuilder, ArrayRef, Op, SerialArrayBuilder};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::types::Serial;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::row_id::RowIdGenerator;
+use risingwave_common::util::row_id::{RowIdGenerator, compute_vnode_from_row_id};
+use risingwave_storage::table::check_vnode_is_set;
 
 use crate::executor::prelude::*;
 
@@ -30,6 +33,8 @@ pub struct RowIdGenExecutor {
     row_id_index: usize,
 
     row_id_generator: RowIdGenerator,
+
+    vnodes: Arc<Bitmap>,
 }
 
 impl RowIdGenExecutor {
@@ -44,6 +49,7 @@ impl RowIdGenExecutor {
             upstream: Some(upstream),
             row_id_index,
             row_id_generator: Self::new_generator(&vnodes),
+            vnodes: Arc::new(vnodes),
         }
     }
 
@@ -59,21 +65,52 @@ impl RowIdGenExecutor {
         ops: &'_ [Op],
         vis: &Bitmap,
     ) -> ArrayRef {
+        let column = column.as_serial();
         let len = column.len();
         let mut builder = SerialArrayBuilder::new(len);
 
-        for ((datum, op), vis) in column.iter().zip_eq_fast(ops).zip_eq_fast(vis.iter()) {
-            // Only refill row_id for insert operation.
-            match op {
-                Op::Insert => builder.append(Some(self.row_id_generator.next().into())),
-                _ => {
-                    if vis {
-                        builder.append(Some(Serial::try_from(datum.unwrap()).unwrap()))
-                    } else {
-                        builder.append(None)
+        for ((serial, op), vis) in column.iter().zip_eq_fast(ops).zip_eq_fast(vis.iter()) {
+            macro_rules! warn_absent_row_id {
+                ($op:expr) => {{
+                    static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                        LazyLock::new(LogSuppressor::default);
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                        tracing::warn!(
+                            suppressed_count,
+                            ?op,
+                            "absent row id for non-insert operation"
+                        );
                     }
-                }
+                    None
+                }};
             }
+
+            let row_id = if vis {
+                match serial {
+                    // If the row id is already present, e.g., from `UPDATE` or `DELETE`, keep it.
+                    Some(serial) => {
+                        // Check if the data is shuffled correctly.
+                        if cfg!(debug_assertions) {
+                            check_vnode_is_set(
+                                compute_vnode_from_row_id(serial.as_row_id(), self.vnodes.len()),
+                                &self.vnodes,
+                            );
+                        }
+                        Some(serial)
+                    }
+                    // Otherwise, generate a new row id only if it's an `Insert` operation.
+                    None => match op {
+                        Op::Insert => Some(self.row_id_generator.next().into()),
+                        Op::Delete => warn_absent_row_id!(op),
+                        Op::UpdateDelete => warn_absent_row_id!(op),
+                        Op::UpdateInsert => warn_absent_row_id!(op),
+                    },
+                }
+            } else {
+                None
+            };
+
+            builder.append(row_id);
         }
 
         builder.finish().into_ref()
@@ -105,6 +142,7 @@ impl RowIdGenExecutor {
                     // barrier, duplicated row id won't be generated.
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
                         self.row_id_generator = Self::new_generator(&vnodes);
+                        self.vnodes = vnodes;
                     }
                     yield Message::Barrier(barrier);
                 }
@@ -126,6 +164,7 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::Serial;
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
@@ -140,11 +179,11 @@ mod tests {
             Field::unnamed(DataType::Serial),
             Field::unnamed(DataType::Int64),
         ]);
-        let pk_indices = vec![0];
+        let stream_key = vec![0];
         let row_id_index = 0;
         let row_id_generator = Bitmap::ones(VirtualNode::COUNT_FOR_TEST);
         let (mut tx, upstream) = MockSource::channel();
-        let upstream = upstream.into_executor(schema.clone(), pk_indices.clone());
+        let upstream = upstream.into_executor(schema.clone(), stream_key.clone());
 
         let row_id_gen_executor = RowIdGenExecutor::new(
             ActorContext::for_test(233),

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -143,7 +143,7 @@ impl BackupReader {
             let expect_manifest_id = expect_manifest_id.unwrap();
             // Use the same store throughout one run.
             let current_store = backup_reader.store.load_full();
-            let previous_id = current_store.0.manifest().manifest_id;
+            let previous_id = current_store.0.manifest().await.manifest_id;
             if expect_manifest_id <= previous_id {
                 continue;
             }
@@ -161,6 +161,7 @@ impl BackupReader {
             let manifest: HashSet<MetaSnapshotId> = current_store
                 .0
                 .manifest()
+                .await
                 .snapshot_metadata
                 .iter()
                 .map(|s| s.id)
@@ -192,10 +193,11 @@ impl BackupReader {
         let Some(snapshot_metadata) = current_store
             .0
             .manifest()
+            .await
             .snapshot_metadata
             .iter()
             .find(|v| {
-                if let Some(m) = v.state_table_info.get(&table_id.table_id()) {
+                if let Some(m) = v.state_table_info.get(&table_id) {
                     return epoch == m.committed_epoch;
                 }
                 false

@@ -1,21 +1,22 @@
-//  Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
 // (found in the LICENSE.Apache file in the root directory).
+
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockCompactionTaskId;
@@ -140,7 +141,7 @@ impl DynamicLevelSelectorCore {
     // TODO: calculate this scores in apply compact result.
     /// `calculate_level_base_size` calculate base level and the base size of LSM tree build for
     /// current dataset. In other words,  `level_max_bytes` is our compaction goal which shall
-    /// reach. This algorithm refers to the implementation in  [`https://github.com/facebook/rocksdb/blob/v7.2.2/db/version_set.cc#L3706`]
+    /// reach. This algorithm refers to the implementation in  `https://github.com/facebook/rocksdb/blob/v7.2.2/db/version_set.cc#L3706`
     pub fn calculate_level_base_size(&self, levels: &Levels) -> SelectContext {
         let mut first_non_empty_level = 0;
         let mut max_level_size = 0;
@@ -350,7 +351,7 @@ impl DynamicLevelSelectorCore {
     /// `compact_pending_bytes_needed` calculates the number of compact bytes needed to balance the
     /// LSM Tree from the current state of each level in the LSM Tree in combination with
     /// `compaction_config`
-    /// This algorithm refers to the implementation in  [`https://github.com/facebook/rocksdb/blob/main/db/version_set.cc#L3141`]
+    /// This algorithm refers to the implementation in  `https://github.com/facebook/rocksdb/blob/main/db/version_set.cc#L3141`
     pub fn compact_pending_bytes_needed(&self, levels: &Levels) -> u64 {
         let ctx = self.calculate_level_base_size(levels);
         self.compact_pending_bytes_needed_with_ctx(levels, &ctx)

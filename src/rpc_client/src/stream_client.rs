@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -91,7 +91,7 @@ impl StreamClient {
                 init_request,
             )),
         };
-        let mut client = self.0.to_owned();
+        let mut client = self.0.clone();
         let (handle, first_rsp) =
             UnboundedBidiStreamHandle::initialize(first_request, |rx| async move {
                 client

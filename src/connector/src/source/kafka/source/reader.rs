@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -144,9 +144,9 @@ impl SplitReader for KafkaSplitReader {
         tracing::info!(
             topic = properties.common.topic,
             source_name = source_ctx.source_name,
-            fragment_id = source_ctx.fragment_id,
-            source_id = source_ctx.source_id.table_id,
-            actor_id = source_ctx.actor_id,
+            fragment_id = %source_ctx.fragment_id,
+            source_id = %source_ctx.source_id,
+            actor_id = %source_ctx.actor_id,
             "backfill_info: {:?}",
             backfill_info
         );

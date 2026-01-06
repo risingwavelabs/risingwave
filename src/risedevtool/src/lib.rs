@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(exit_status_error)]
-#![feature(let_chains)]
 
 mod config;
 pub use config::*;

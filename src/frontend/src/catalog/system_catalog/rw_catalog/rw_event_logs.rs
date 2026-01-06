@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwEventLog>> {
             RwEventLog {
                 unique_id: id,
                 timestamp: ts,
-                event_type: event_type.clone(),
+                event_type,
                 info: json!(e).into(),
             }
         })

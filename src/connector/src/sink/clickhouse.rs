@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -389,11 +389,12 @@ impl TryFrom<SinkParam> for ClickHouseSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = ClickHouseConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
-            pk_indices: param.downstream_pk,
+            pk_indices,
             is_append_only: param.sink_type.is_append_only(),
         })
     }
@@ -1132,4 +1133,10 @@ pub fn build_fields_name_type_from_schema(schema: &Schema) -> Result<Vec<(String
         }
     }
     Ok(vec)
+}
+
+impl From<::clickhouse::error::Error> for SinkError {
+    fn from(value: ::clickhouse::error::Error) -> Self {
+        SinkError::ClickHouse(value.to_report_string())
+    }
 }

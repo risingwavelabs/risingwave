@@ -23,12 +23,12 @@ use risingwave_common::array::{DataChunk, Op, SerialArray};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
     ColumnId, ICEBERG_FILE_PATH_COLUMN_NAME, ICEBERG_FILE_POS_COLUMN_NAME, ROW_ID_COLUMN_NAME,
-    TableId,
 };
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::id::SourceId;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
-use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk};
+use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
 use risingwave_storage::store::PrefetchOptions;
@@ -65,16 +65,16 @@ pub struct IcebergFetchExecutor<S: StateStore> {
 ///
 /// Currently 1 `FileScanTask` -> 1 `ChunksWithState`.
 /// Later after we support reading part of a file, we will support 1 `FileScanTask` -> n `ChunksWithState`.
-struct ChunksWithState {
+pub(crate) struct ChunksWithState {
     /// The actual data chunks read from the file
-    chunks: Vec<StreamChunk>,
+    pub chunks: Vec<StreamChunk>,
 
     /// Path to the data file, used for checkpointing and error reporting.
-    data_file_path: String,
+    pub data_file_path: String,
 
     /// The last read position in the file, used for checkpointing.
     #[expect(dead_code)]
-    last_read_pos: Datum,
+    pub last_read_pos: Datum,
 }
 
 pub(super) use state::PersistedFileScanTask;
@@ -130,7 +130,7 @@ mod state {
         /// sequence number
         pub sequence_number: i64,
         /// equality ids
-        pub equality_ids: Vec<i32>,
+        pub equality_ids: Option<Vec<i32>>,
 
         pub file_size_in_bytes: u64,
     }
@@ -357,13 +357,14 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         for task in batch {
             let mut chunks = vec![];
             #[for_await]
-            for chunk in scan_task_to_chunk(
+            for chunk in scan_task_to_chunk_with_deletes(
                 table.clone(),
                 task,
                 IcebergScanOpts {
                     chunk_size: streaming_config.developer.chunk_size,
-                    need_seq_num: true, /* TODO: this column is not needed. But need to support col pruning in frontend to remove it. */
+                    need_seq_num: true, /* Although this column is unnecessary, we still keep it for potential usage in the future */
                     need_file_path_and_pos: true,
+                    handle_delete_files: false,
                 },
                 None,
             ) {
@@ -393,7 +394,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
     fn build_source_ctx(
         &self,
         source_desc: &SourceDesc,
-        source_id: TableId,
+        source_id: SourceId,
         source_name: &str,
     ) -> SourceContext {
         SourceContext::new(
@@ -498,9 +499,9 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
-                                            Mutation::Throttle(actor_to_apply) => {
-                                                if let Some(new_rate_limit) =
-                                                    actor_to_apply.get(&self.actor_ctx.id)
+                                            Mutation::Throttle(fragment_to_apply) => {
+                                                if let Some(new_rate_limit) = fragment_to_apply
+                                                    .get(&self.actor_ctx.fragment_id)
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     tracing::debug!(
@@ -585,8 +586,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                             for chunk in &chunks {
                                 let chunk = prune_additional_cols(
                                     chunk,
-                                    file_path_idx,
-                                    file_pos_idx,
+                                    &[file_path_idx, file_pos_idx],
                                     &source_desc.columns,
                                 );
                                 // pad row_id
@@ -597,7 +597,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                     Arc::new(
                                         SerialArray::from_iter_bitmap(
                                             itertools::repeat_n(Serial::from(0), columns[0].len()),
-                                            Bitmap::ones(columns[0].len()),
+                                            Bitmap::zeros(columns[0].len()),
                                         )
                                         .into(),
                                     ),

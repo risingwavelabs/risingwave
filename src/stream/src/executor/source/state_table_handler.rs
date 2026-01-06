@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -224,9 +224,9 @@ pub fn default_source_internal_table(id: u32) -> PbTable {
         make_column(TypeName::Jsonb, 1),
     ];
     PbTable {
-        id,
-        schema_id: SchemaId::placeholder().schema_id,
-        database_id: DatabaseId::placeholder().database_id,
+        id: id.into(),
+        schema_id: SchemaId::placeholder(),
+        database_id: DatabaseId::placeholder(),
         name: String::new(),
         columns,
         table_type: TableType::Internal as i32,

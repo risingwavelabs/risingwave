@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@
 //!
 //! ### External Interface Layer
 //! - Meta Service: Central coordination service
-//! - [`LocalStreamManager`]: Public API handler for StreamService/ExchangeService
+//! - [`LocalStreamManager`]: Public API handler for StreamService/StreamExchangeService
 //!
 //! ### Core Control Layer
 //! - [`LocalBarrierWorker`]: Central event coordinator and barrier processor
@@ -95,12 +95,11 @@ pub use actor_manager::*;
 pub use barrier_manager::*;
 pub use barrier_worker::*;
 pub use env::*;
+pub use risingwave_common::id::{ActorId, FragmentId};
 pub use stream_manager::*;
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
-pub type ActorId = u32;
-pub type FragmentId = u32;
-pub type DispatcherId = u64;
+pub type DispatcherId = FragmentId;
 /// (`upstream_actor_id`, `downstream_actor_id`)
 pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);

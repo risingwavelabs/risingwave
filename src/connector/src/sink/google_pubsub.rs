@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,7 +27,7 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::serde_as;
-use tonic::Status;
+use google_cloud_gax::grpc::Status;
 use with_options::WithOptions;
 
 use super::catalog::SinkFormatDesc;
@@ -175,17 +175,16 @@ impl TryFrom<SinkParam> for GooglePubSubSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = GooglePubSubConfig::from_btreemap(param.properties)?;
-
         let format_desc = param
             .format_desc
             .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?;
         Ok(Self {
             config,
             is_append_only: param.sink_type.is_append_only(),
-
             schema,
-            pk_indices: param.downstream_pk,
+            pk_indices,
             format_desc,
             db_name: param.db_name,
             sink_from_name: param.sink_from_name,

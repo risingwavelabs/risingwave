@@ -1,17 +1,17 @@
-//  Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
-//  Licensed under the Apache License, Version 2.0 (the "License");
-//  you may not use this file except in compliance with the License.
-//  You may obtain a copy of the License at
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
 //
-//  http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-//  Unless required by applicable law or agreed to in writing, software
-//  distributed under the License is distributed on an "AS IS" BASIS,
-//  WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-//  See the License for the specific language governing permissions and
-//  limitations under the License.
-//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 // Copyright (c) 2011-present, Facebook, Inc.  All rights reserved.
 // This source code is licensed under both the GPLv2 (found in the
 // COPYING file in the root directory) and Apache 2.0 License
@@ -50,10 +50,7 @@ impl CompactionSelector for SpaceReclaimCompactionSelector {
             DynamicLevelSelectorCore::new(group.compaction_config.clone(), developer_config);
         let mut picker = SpaceReclaimCompactionPicker::new(
             group.compaction_config.max_space_reclaim_bytes,
-            member_table_ids
-                .iter()
-                .map(|table_id| table_id.table_id)
-                .collect(),
+            member_table_ids.iter().copied().collect(),
         );
         let ctx = dynamic_level_core.calculate_level_base_size(levels);
         let state = self.state.entry(group.group_id).or_default();

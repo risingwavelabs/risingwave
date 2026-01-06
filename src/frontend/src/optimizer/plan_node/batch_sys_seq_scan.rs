@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -92,7 +92,7 @@ impl ToBatchPb for BatchSysSeqScan {
             .map(PbColumnDesc::from)
             .collect();
         NodeBody::SysRowSeqScan(SysRowSeqScanNode {
-            table_id: self.core.table.id.table_id,
+            table_id: self.core.table.id,
             column_descs,
         })
     }

@@ -57,6 +57,7 @@ criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
+risingwave_storage = { workspace = true, features = ["test"] }
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
 tokio-stream = { workspace = true }

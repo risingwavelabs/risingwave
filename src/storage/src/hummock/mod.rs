@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,7 +52,6 @@ pub mod recent_filter;
 pub use recent_filter::*;
 
 pub mod block_stream;
-mod iceberg_compactor_runner;
 mod time_travel_version_cache;
 
 pub(crate) mod vector;

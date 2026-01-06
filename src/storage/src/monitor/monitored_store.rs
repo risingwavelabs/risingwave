@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashSet;
+use std::cell::RefCell;
+use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
 use std::sync::Arc;
 
@@ -23,6 +24,8 @@ use futures::{Future, FutureExt, TryFutureExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::metrics::LabelGuardedHistogram;
+use risingwave_common::types::VectorRef;
 use risingwave_hummock_sdk::key::{TableKey, TableKeyRange};
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch, SyncResult};
 use thiserror_ext::AsReport;
@@ -103,8 +106,8 @@ impl<S, E> MonitoredStateStore<S, E> {
         let monitored = MonitoredStateStoreIter {
             inner: iter_stream,
             stats: MonitoredStateStoreIterStats {
-                inner: Stat::new(table_id.table_id, &self.storage_metrics, iter_init_duration),
-                table_id: table_id.table_id,
+                inner: Stat::new(table_id, &self.storage_metrics, iter_init_duration),
+                table_id,
                 metrics: self.storage_metrics.clone(),
             },
             _phantom: PhantomData,
@@ -118,8 +121,7 @@ impl<S, E> MonitoredStateStore<S, E> {
         table_id: TableId,
         key_len: usize,
     ) -> StorageResult<Option<O>> {
-        let mut stats =
-            MonitoredStateStoreGetStats::new(table_id.table_id, self.storage_metrics.clone());
+        let mut stats = MonitoredStateStoreGetStats::new(table_id, self.storage_metrics.clone());
 
         let value = on_key_value_future
             .instrument_await("store_on_key_value".verbose())
@@ -139,12 +141,12 @@ impl<S, E> MonitoredStateStore<S, E> {
 }
 
 impl<S: StateStoreGet> StateStoreGet for MonitoredTableStateStore<S> {
-    fn on_key_value<O: Send + 'static>(
-        &self,
+    fn on_key_value<'a, O: Send + 'a>(
+        &'a self,
         key: TableKey<Bytes>,
         read_options: ReadOptions,
-        on_key_value_fn: impl KeyValueFn<O>,
-    ) -> impl StorageFuture<'_, Option<O>> {
+        on_key_value_fn: impl KeyValueFn<'a, O>,
+    ) -> impl StorageFuture<'a, Option<O>> {
         let table_id = self.table_id();
         let key_len = key.len();
         self.monitored_on_key_value(
@@ -207,14 +209,33 @@ impl<S: StateStoreReadLog> StateStoreReadLog for MonitoredStateStore<S> {
 }
 
 impl<S: StateStoreReadVector> StateStoreReadVector for MonitoredTableStateStore<S> {
-    fn nearest<O: Send + 'static>(
-        &self,
-        vec: Vector,
+    fn nearest<'a, O: Send + 'a>(
+        &'a self,
+        vec: VectorRef<'a>,
         options: VectorNearestOptions,
-        on_nearest_item_fn: impl OnNearestItemFn<O>,
-    ) -> impl StorageFuture<'_, Vec<O>> {
-        // TODO: monitor
-        self.inner.nearest(vec, options, on_nearest_item_fn)
+        on_nearest_item_fn: impl OnNearestItemFn<'a, O>,
+    ) -> impl StorageFuture<'a, Vec<O>> {
+        thread_local! {
+            static THREAD_HISTOGRAM_VEC: RefCell<HashMap<(TableId, usize, usize), LabelGuardedHistogram>> = RefCell::new(HashMap::new());
+        }
+        let start_time = Instant::now();
+        let metric_key = (self.table_id(), options.top_n, options.hnsw_ef_search);
+
+        self.inner
+            .nearest(vec, options, on_nearest_item_fn)
+            .inspect_ok(move |_| {
+                THREAD_HISTOGRAM_VEC.with_borrow_mut(|map| {
+                    map.entry(metric_key)
+                        .or_insert_with(|| {
+                            let (table_id, top_n, ef) = metric_key;
+                            let labels = [table_id.to_string(), top_n.to_string(), ef.to_string()];
+                            self.storage_metrics
+                                .vector_nearest_duration
+                                .with_guarded_label_values(&labels.each_ref().map(|s| s.as_str()))
+                        })
+                        .observe(start_time.elapsed().as_secs_f64());
+                });
+            })
     }
 }
 
@@ -300,7 +321,7 @@ impl<S: StateStoreWriteEpochControl> StateStoreWriteEpochControl for MonitoredTa
 }
 
 impl<S: StateStoreWriteVector> StateStoreWriteVector for MonitoredTableStateStore<S> {
-    fn insert(&mut self, vec: Vector, info: Bytes) -> StorageResult<()> {
+    fn insert(&mut self, vec: VectorRef<'_>, info: Bytes) -> StorageResult<()> {
         // TODO: monitor
         self.inner.insert(vec, info)
     }

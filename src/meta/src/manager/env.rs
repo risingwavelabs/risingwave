@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,6 +15,7 @@
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU32;
 
 use anyhow::Context;
 use risingwave_common::config::{
@@ -33,7 +34,6 @@ use sea_orm::EntityTrait;
 
 use crate::MetaResult;
 use crate::barrier::SharedActorInfos;
-use crate::barrier::cdc_progress::{CdcTableBackfillTracker, CdcTableBackfillTrackerRef};
 use crate::controller::SqlMetaStore;
 use crate::controller::id::{
     IdGeneratorManager as SqlIdGeneratorManager, IdGeneratorManagerRef as SqlIdGeneratorManagerRef,
@@ -64,7 +64,7 @@ pub struct MetaSrvEnv {
     /// notification manager.
     notification_manager: NotificationManagerRef,
 
-    shared_actor_info: SharedActorInfos,
+    pub shared_actor_info: SharedActorInfos,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -88,7 +88,7 @@ pub struct MetaSrvEnv {
     /// options read by all services
     pub opts: Arc<MetaOpts>,
 
-    pub cdc_table_backfill_tracker: CdcTableBackfillTrackerRef,
+    actor_id_generator: Arc<AtomicU32>,
 }
 
 /// Options shared by all meta service instances
@@ -121,6 +121,8 @@ pub struct MetaOpts {
     /// The spin interval inside a vacuum job. It avoids the vacuum job monopolizing resources of
     /// meta node.
     pub vacuum_spin_interval_ms: u64,
+    /// Interval of invoking iceberg garbage collection, to expire old snapshots.
+    pub iceberg_gc_interval_sec: u64,
     pub time_travel_vacuum_interval_sec: u64,
     /// Interval of hummock version checkpoint.
     pub hummock_version_checkpoint_interval_sec: u64,
@@ -207,13 +209,13 @@ pub struct MetaOpts {
     pub compaction_task_max_progress_interval_secs: u64,
     pub compaction_config: Option<CompactionConfig>,
 
-    /// hybird compaction group config
+    /// hybrid compaction group config
     ///
     /// `hybrid_partition_vnode_count` determines the granularity of vnodes in the hybrid compaction group for SST alignment.
     /// When `hybrid_partition_vnode_count` > 0, in hybrid compaction group
     /// - Tables with high write throughput will be split at vnode granularity
     /// - Tables with high size tables will be split by table granularity
-    ///   When `hybrid_partition_vnode_count` = 0,no longer be special alignment operations for the hybird compaction group
+    ///   When `hybrid_partition_vnode_count` = 0,no longer be special alignment operations for the hybrid compaction group
     pub hybrid_partition_node_count: u32,
 
     pub event_log_enabled: bool,
@@ -235,6 +237,9 @@ pub struct MetaOpts {
 
     /// Whether to split the compaction group when the size of the group exceeds the threshold.
     pub split_group_size_ratio: f64,
+
+    /// The interval in seconds for the refresh scheduler to check and trigger scheduled refreshes.
+    pub refresh_scheduler_interval_sec: u64,
 
     /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
     pub table_stat_high_write_throughput_ratio_for_split: f64,
@@ -283,6 +288,9 @@ pub struct MetaOpts {
     pub cdc_table_split_init_sleep_interval_splits: u64,
     pub cdc_table_split_init_sleep_duration_millis: u64,
     pub cdc_table_split_init_insert_batch_size: u64,
+
+    pub enable_legacy_table_migration: bool,
+    pub pause_on_next_bootstrap_offline: bool,
 }
 
 impl MetaOpts {
@@ -301,6 +309,7 @@ impl MetaOpts {
             vacuum_interval_sec: 30,
             time_travel_vacuum_interval_sec: 30,
             vacuum_spin_interval_ms: 0,
+            iceberg_gc_interval_sec: 3600,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             hummock_time_travel_snapshot_interval: 0,
@@ -374,6 +383,9 @@ impl MetaOpts {
             cdc_table_split_init_sleep_interval_splits: 1000,
             cdc_table_split_init_sleep_duration_millis: 10,
             cdc_table_split_init_insert_batch_size: 1000,
+            enable_legacy_table_migration: true,
+            refresh_scheduler_interval_sec: 60,
+            pause_on_next_bootstrap_offline: false,
         }
     }
 }
@@ -449,9 +461,6 @@ impl MetaSrvEnv {
             )
             .await?,
         );
-        let cdc_table_backfill_tracker = CdcTableBackfillTracker::new(meta_store_impl.clone())
-            .await?
-            .into();
         Ok(Self {
             id_gen_manager_impl: Arc::new(SqlIdGeneratorManager::new(&meta_store_impl.conn).await?),
             system_param_manager_impl: system_param_controller,
@@ -468,7 +477,7 @@ impl MetaSrvEnv {
             opts: opts.into(),
             // Await trees on the meta node is lightweight, thus always enabled.
             await_tree_reg: await_tree::Registry::new(Default::default()),
-            cdc_table_backfill_tracker,
+            actor_id_generator: Arc::new(AtomicU32::new(0)),
         })
     }
 
@@ -498,6 +507,10 @@ impl MetaSrvEnv {
 
     pub fn idle_manager(&self) -> &IdleManager {
         self.idle_manager.deref()
+    }
+
+    pub fn actor_id_generator(&self) -> &AtomicU32 {
+        self.actor_id_generator.deref()
     }
 
     pub async fn system_params_reader(&self) -> SystemParamsReader {
@@ -538,10 +551,6 @@ impl MetaSrvEnv {
 
     pub fn shared_actor_infos(&self) -> &SharedActorInfos {
         &self.shared_actor_info
-    }
-
-    pub fn cdc_table_backfill_tracker(&self) -> CdcTableBackfillTrackerRef {
-        self.cdc_table_backfill_tracker.clone()
     }
 }
 

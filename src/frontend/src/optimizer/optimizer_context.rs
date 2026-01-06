@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -91,7 +91,7 @@ impl OptimizerContext {
     /// Create a new [`OptimizerContext`] from the given [`HandlerArgs`] and [`ExplainOptions`].
     pub fn new(mut handler_args: HandlerArgs, explain_options: ExplainOptions) -> Self {
         let session_timezone = RefCell::new(SessionTimezone::new(
-            handler_args.session.config().timezone().to_owned(),
+            handler_args.session.config().timezone(),
         ));
         let overwrite_options = OverwriteOptions::new(&mut handler_args);
         Self {

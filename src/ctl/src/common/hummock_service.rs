@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -200,6 +200,7 @@ impl HummockServiceOpts {
                 MetricLevel::Disabled,
             )),
             use_new_object_prefix_strategy,
+            skip_bloom_filter_in_serde: opts.sst_skip_bloom_filter_in_serde,
             meta_cache,
             block_cache,
             vector_meta_cache: CacheBuilder::new(1 << 10).build(),

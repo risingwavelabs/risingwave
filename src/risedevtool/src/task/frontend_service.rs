@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -63,6 +63,23 @@ impl FrontendService {
 
         let provide_tempo = config.provide_tempo.as_ref().unwrap();
         add_tempo_endpoint(provide_tempo, cmd)?;
+
+        // Add Prometheus endpoint and selector if configured
+        match config.provide_prometheus.as_ref().unwrap().as_slice() {
+            [] => {}
+            [prometheus] => {
+                cmd.arg("--prometheus-endpoint")
+                    .arg(format!("http://{}:{}", prometheus.address, prometheus.port));
+                // Note: prometheus_selector is not currently configured in risedev.yml
+                // but we can add it here if needed in the future
+            }
+            _ => {
+                return Err(anyhow!(
+                    "unexpected prometheus config {:?}, only 1 instance is supported",
+                    config.provide_prometheus
+                ));
+            }
+        }
 
         Ok(())
     }

@@ -826,7 +826,7 @@
     create table a(v int);
     explain create index b on a((1+1)*v);
   explain_output: |
-    StreamMaterialize { columns: [MULTIPLY, v, a._row_id(hidden)], stream_key: [a._row_id], pk_columns: [MULTIPLY, a._row_id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [MULTIPLY, v, a._row_id(hidden)], stream_key: [MULTIPLY, a._row_id], pk_columns: [MULTIPLY, a._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard($expr1) }
       └─StreamProject { exprs: [(2:Int32 * a.v) as $expr1, a.v, a._row_id] }
         └─StreamTableScan { table: a, columns: [v, _row_id] }
@@ -948,3 +948,71 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchLimit { limit: 10, offset: 0 }
           └─BatchScan { table: idx3, columns: [idx3.a, idx3.b, idx3.c], scan_ranges: [idx3.a = Int32(2) AND idx3.c = Int32(2)], limit: 10, distribution: UpstreamHashShard(idx3.a) }
+- name: topn index selection + limit pushdown with multi point get + various order combination point get for primary table
+  sql: |
+    create table t1 (a int, b int, c int, primary key (a, b, c));
+    select * from t1 where a = 1 and b = 2 order by c limit 10;
+  batch_plan: |-
+    BatchSort { order: [t1.c ASC] }
+    └─BatchTopN { order: [t1.a ASC, t1.b ASC, t1.c ASC], limit: 10, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchLimit { limit: 10, offset: 0 }
+          └─BatchScan { table: t1, columns: [t1.a, t1.b, t1.c], scan_ranges: [t1.a = Int32(1) AND t1.b = Int32(2)], limit: 10, distribution: UpstreamHashShard(t1.a, t1.b, t1.c) }
+- name: topn index selection + limit pushdown with multi point get + various order combination point get for primary table
+  sql: |
+    create table t1 (a int, b int, c int, primary key (a, b, c));
+    create index idx1 on t1(a, b, c desc);
+    select * from t1 where a = 1 and b = 2 order by c desc limit 10;
+  batch_plan: |-
+    BatchSort { order: [idx1.c DESC] }
+    └─BatchTopN { order: [idx1.a ASC, idx1.b ASC, idx1.c DESC], limit: 10, offset: 0 }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchLimit { limit: 10, offset: 0 }
+          └─BatchScan { table: idx1, columns: [idx1.a, idx1.b, idx1.c], scan_ranges: [idx1.a = Int32(1) AND idx1.b = Int32(2)], limit: 10, distribution: UpstreamHashShard(idx1.a) }
+- name: Use primary table instead of indexes if possible
+  sql: |
+    CREATE TABLE t1(id INT, t2_id INT, PRIMARY KEY(id));
+    CREATE TABLE t2(id INT, t3_id INT, PRIMARY KEY(id));
+    CREATE TABLE t3(id INT, PRIMARY KEY(id));
+    CREATE INDEX idx_t2_m2m ON t2(id, t3_id);
+    SELECT t1.id as toto, t2.id as tata, t3.id as titi
+    FROM t1
+    INNER JOIN t2 ON t2.id=t1.t2_id
+    INNER JOIN t3 ON t3.id=t2.t3_id;
+  stream_plan: |-
+    StreamMaterialize { columns: [toto, tata, titi, t1.t2_id(hidden), t2.t3_id(hidden)], stream_key: [toto, t1.t2_id, t2.t3_id], pk_columns: [toto, t1.t2_id, t2.t3_id], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(t1.id, t1.t2_id, t2.t3_id) }
+      └─StreamHashJoin { type: Inner, predicate: t2.t3_id = t3.id, output: [t1.id, t2.id, t3.id, t1.t2_id, t2.t3_id] }
+        ├─StreamExchange { dist: HashShard(t2.t3_id) }
+        │ └─StreamHashJoin { type: Inner, predicate: t1.t2_id = t2.id, output: [t1.id, t2.id, t2.t3_id, t1.t2_id] }
+        │   ├─StreamExchange { dist: HashShard(t1.t2_id) }
+        │   │ └─StreamTableScan { table: t1, columns: [t1.id, t1.t2_id], stream_scan_type: ArrangementBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
+        │   └─StreamExchange { dist: HashShard(t2.id) }
+        │     └─StreamTableScan { table: t2, columns: [t2.id, t2.t3_id], stream_scan_type: ArrangementBackfill, stream_key: [t2.id], pk: [id], dist: UpstreamHashShard(t2.id) }
+        └─StreamExchange { dist: HashShard(t3.id) }
+          └─StreamTableScan { table: t3, columns: [t3.id], stream_scan_type: ArrangementBackfill, stream_key: [t3.id], pk: [id], dist: UpstreamHashShard(t3.id) }
+- name: topn index selection for scan with output column idx
+  sql: |
+    create table t (c int, b int, a int);
+    create index idx on t(a, b desc, c desc);
+    select b from t where a = 1 order by b desc, c desc limit 1;
+  batch_plan: |-
+    BatchProject { exprs: [idx.b] }
+    └─BatchProject { exprs: [idx.b, idx.c] }
+      └─BatchSort { order: [idx.b DESC, idx.c DESC] }
+        └─BatchTopN { order: [idx.a ASC, idx.b DESC, idx.c DESC], limit: 1, offset: 0 }
+          └─BatchExchange { order: [], dist: Single }
+            └─BatchLimit { limit: 1, offset: 0 }
+              └─BatchScan { table: idx, columns: [idx.c, idx.b, idx.a], scan_ranges: [idx.a = Int32(1)], limit: 1, distribution: UpstreamHashShard(idx.a) }
+- name: topn index selection for scan with output column idx
+  sql: |
+    create table t (c int, b int, a int, primary key (a, b, c));
+    select b from t where a = 1 order by b, c limit 1;
+  batch_plan: |-
+    BatchProject { exprs: [t.b] }
+    └─BatchProject { exprs: [t.b, t.c] }
+      └─BatchSort { order: [t.b ASC, t.c ASC] }
+        └─BatchTopN { order: [t.a ASC, t.b ASC, t.c ASC], limit: 1, offset: 0 }
+          └─BatchExchange { order: [], dist: Single }
+            └─BatchLimit { limit: 1, offset: 0 }
+              └─BatchScan { table: t, columns: [t.c, t.b, t.a], scan_ranges: [t.a = Int32(1)], limit: 1, distribution: UpstreamHashShard(t.a, t.b, t.c) }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONL
         let table = node.get_table()?;
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let state_table = StateTableBuilder::new(table, store, vnodes)
-            .enable_preload_all_rows_by_config(&params.actor_context.streaming_config)
+            .enable_preload_all_rows_by_config(&params.config)
             .build()
             .await;
         let storage_key = table
@@ -51,8 +51,8 @@ impl<const APPEND_ONLY: bool> ExecutorBuilder for TopNExecutorBuilder<APPEND_ONL
             .collect();
 
         macro_rules! build {
-            ($excutor:ident, $with_ties:literal) => {
-                Ok($excutor::<_, $with_ties>::new(
+            ($executor:ident, $with_ties:literal) => {
+                Ok($executor::<_, $with_ties>::new(
                     input,
                     params.actor_context,
                     params.info.schema.clone(),

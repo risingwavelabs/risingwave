@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -162,11 +162,11 @@ impl BoxedExecutorBuilder for GenericExchangeExecutorBuilder {
         let sequential = node.get_sequential();
 
         ensure!(!node.get_sources().is_empty());
-        let proto_sources: Vec<PbExchangeSource> = node.get_sources().to_vec();
+        let proto_sources: Vec<PbExchangeSource> = node.get_sources().clone();
         let source_creators =
             vec![DefaultCreateSource::new(source.context().client_pool()); proto_sources.len()];
 
-        let input_schema: Vec<NodeField> = node.get_input_schema().to_vec();
+        let input_schema: Vec<NodeField> = node.get_input_schema().clone();
         let fields = input_schema.iter().map(Field::from).collect::<Vec<Field>>();
         Ok(Box::new(ExchangeExecutor {
             proto_sources,

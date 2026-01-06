@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,8 @@ use risingwave_common::catalog::{
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::iceberg::{
-    IcebergFileScanTask, IcebergProperties, IcebergScanOpts, IcebergSplit, scan_task_to_chunk,
+    IcebergFileScanTask, IcebergProperties, IcebergScanOpts, IcebergSplit,
+    scan_task_to_chunk_with_deletes,
 };
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
 use risingwave_expr::expr::LiteralExpression;
@@ -109,13 +110,14 @@ impl IcebergScanExecutor {
 
         for data_file_scan_task in data_file_scan_tasks {
             #[for_await]
-            for chunk in scan_task_to_chunk(
+            for chunk in scan_task_to_chunk_with_deletes(
                 table.clone(),
                 data_file_scan_task,
                 IcebergScanOpts {
                     chunk_size: self.chunk_size,
                     need_seq_num: self.need_seq_num,
                     need_file_path_and_pos: self.need_file_path_and_pos,
+                    handle_delete_files: false,
                 },
                 self.metrics.as_ref().map(|m| m.iceberg_scan_metrics()),
             ) {
@@ -148,7 +150,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             source_node.with_properties.clone(),
             source_node.secret_refs.clone(),
         );
-        let config = ConnectorProperties::extract(options_with_secret.clone(), false)?;
+        let config = ConnectorProperties::extract(options_with_secret, false)?;
 
         let split_list = source_node
             .split
@@ -168,7 +170,7 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
             })
             .collect();
         let schema = Schema::new(fields);
-        let metrics = source.context().batch_metrics().clone();
+        let metrics = source.context().batch_metrics();
 
         if let ConnectorProperties::Iceberg(iceberg_properties) = config
             && let SplitImpl::Iceberg(split) = &split_list[0]

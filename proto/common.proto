@@ -64,11 +64,17 @@ message WorkerNode {
 
     // resource group for scheduling
     optional string resource_group = 7;
+
+    // Whether this is an iceberg compactor (only applicable for Compactor worker type)
+    bool is_iceberg_compactor = 8;
   }
   message Resource {
     string rw_version = 1;
     uint64 total_memory_bytes = 2;
     uint64 total_cpu_cores = 3;
+    // The host name reported by `gethostname()`.
+    // Not to be confused with `host` field in `WorkerNode`.
+    string hostname = 4;
   }
   uint32 id = 1;
   WorkerType type = 2;
@@ -94,6 +100,11 @@ message WorkerNode {
   // Moved to `Property` message.
   reserved 10;
   reserved "parallelism";
+}
+
+message ClusterResource {
+  uint64 total_memory_bytes = 1;
+  uint64 total_cpu_cores = 2;
 }
 
 message Buffer {

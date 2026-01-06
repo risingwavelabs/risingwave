@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -128,7 +128,7 @@ impl UserDefinedFunction {
         }
 
         let output = self.arrow_convert.from_record_batch(&arrow_output)?;
-        let output = output.uncompact(input.visibility().clone());
+        let output = output.expand_vis(input.visibility().clone());
 
         let Some(array) = output.columns().first() else {
             bail!("UDF returned no columns");
@@ -214,7 +214,7 @@ impl Build for UserDefinedFunction {
             name,
             // batch query does not have a fragment_id
             &FRAGMENT_ID::try_with(ToOwned::to_owned)
-                .unwrap_or(0)
+                .unwrap_or(0.into())
                 .to_string(),
         );
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::ops::Bound;
@@ -66,7 +67,7 @@ struct JoinSide<K: HashKey, S: StateStore, E: JoinEncoding> {
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
-    /// The mapping from input indices of a side to output columes.
+    /// The mapping from input indices of a side to output columns.
     i2o_mapping: Vec<(usize, usize)>,
     i2o_mapping_indexed: MultiMap<usize, usize>,
     /// Whether degree table is needed for this side.
@@ -154,7 +155,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
             .field("input_right", &self.input_r.as_ref().unwrap().identity())
             .field("side_l", &self.side_l)
             .field("side_r", &self.side_r)
-            .field("pk_indices", &self.info.pk_indices)
+            .field("stream_key", &self.info.stream_key)
             .field("schema", &self.info.schema)
             .field("actual_output_data_types", &self.actual_output_data_types)
             .finish()
@@ -224,17 +225,15 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
         let state_all_data_types_l = input_l.schema().data_types();
         let state_all_data_types_r = input_r.schema().data_types();
 
-        let state_pk_indices_l = input_l.pk_indices().to_vec();
-        let state_pk_indices_r = input_r.pk_indices().to_vec();
+        let state_pk_indices_l = input_l.stream_key().to_vec();
+        let state_pk_indices_r = input_r.stream_key().to_vec();
 
         let state_join_key_indices_l = params_l.join_key_indices;
         let state_join_key_indices_r = params_r.join_key_indices;
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l =
-            is_subset(state_pk_indices_l.clone(), state_join_key_indices_l.clone());
-        let pk_contained_in_jk_r =
-            is_subset(state_pk_indices_r.clone(), state_join_key_indices_r.clone());
+        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
+        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
 
         let join_key_data_types_l = state_join_key_indices_l
             .iter()
@@ -934,11 +933,11 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
                 let key = key.deserialize(join_key_data_types)?;
                 tracing::warn!(target: "high_join_amplification",
                     matched_rows_len = join_matched_rows_cnt,
-                    update_table_id = side_update.ht.table_id(),
-                    match_table_id = side_match.ht.table_id(),
+                    update_table_id = %side_update.ht.table_id(),
+                    match_table_id = %side_match.ht.table_id(),
                     join_key = ?key,
-                    actor_id = ctx.id,
-                    fragment_id = ctx.fragment_id,
+                    actor_id = %ctx.id,
+                    fragment_id = %ctx.fragment_id,
                     "large rows matched for join key when AsOf join updating right side",
                 );
             }
@@ -1286,8 +1285,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I I I
-                + 3 8 1 . . .
-                - 3 8 1 . . ."
+                + 3 8 1 . . . D
+                - 3 8 1 . . . D"
             )
         );
 

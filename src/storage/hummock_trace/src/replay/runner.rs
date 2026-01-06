@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -57,7 +57,7 @@ impl<R: TraceReader, G: GlobalReplay + 'static> HummockReplay<R, G> {
                 _ => {
                     worker_scheduler.schedule(r);
                     total_ops += 1;
-                    if total_ops % 10000 == 0 {
+                    if total_ops.is_multiple_of(10000) {
                         println!("replayed {} ops", total_ops);
                     }
                 }

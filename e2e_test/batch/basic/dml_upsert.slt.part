@@ -1,0 +1,10 @@
+# Test DML behavior when session config `upsert_dml` is enabled.
+
+statement ok
+SET upsert_dml TO true;
+
+include ./dml_basic.slt.part
+include ./dml_update.slt.part
+
+statement ok
+SET upsert_dml TO false;

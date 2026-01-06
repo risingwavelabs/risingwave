@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(iterator_try_collect)]
 #![recursion_limit = "256"]
-#![feature(let_chains)]
 #![feature(int_roundings)]
 #![feature(allocator_api)]
 #![feature(impl_trait_in_assoc_type)]

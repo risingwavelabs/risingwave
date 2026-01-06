@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,12 +31,12 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_storage::store::PrefetchOptions;
 
 use super::barrier_align::*;
-use crate::common::table::state_table::WatermarkCacheParameterizedStateTable;
+use crate::common::table::state_table::StateTable;
 use crate::consistency::consistency_panic;
 use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
 
-pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool> {
+pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
     eval_error_report: ActorEvalErrorReport,
@@ -46,7 +46,7 @@ pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool>
     source_r: Option<Executor>,
     key_l: usize,
     comparator: PbExprNodeType,
-    left_table: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
+    left_table: StateTable<S>,
     right_table: StateTable<S>,
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
@@ -54,7 +54,7 @@ pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool>
     cleaned_by_watermark: bool,
 }
 
-impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, USE_WATERMARK_CACHE> {
+impl<S: StateStore> DynamicFilterExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -64,7 +64,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         source_r: Executor,
         key_l: usize,
         comparator: PbExprNodeType,
-        state_table_l: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
+        state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
@@ -330,7 +330,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             match msg? {
                 AlignedMessage::Left(chunk) => {
                     // Reuse the logic from `FilterExecutor`
-                    let chunk = chunk.compact(); // Is this unnecessary work?
+                    let chunk = chunk.compact_vis(); // Is this unnecessary work?
 
                     // The condition is `None` if it is always false by virtue of a NULL right
                     // input, so we save evaluating it on the datachunk.
@@ -361,7 +361,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                 }
                 AlignedMessage::Right(chunk) => {
                     // Record the latest update to the right value
-                    let chunk = chunk.compact(); // Is this unnecessary work?
+                    let chunk = chunk.compact_vis(); // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
                     for (row, op) in data_chunk.rows().zip_eq_debug(ops.iter()) {
@@ -447,7 +447,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     }
 
                     if let Some(watermark) = staging_state_watermark.take() {
-                        self.left_table.update_watermark(watermark.clone());
+                        self.left_table.update_watermark(watermark);
                     };
 
                     if let Some(watermark) = watermark_to_propagate.take() {
@@ -492,9 +492,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
     }
 }
 
-impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Execute
-    for DynamicFilterExecutor<S, USE_WATERMARK_CACHE>
-{
+impl<S: StateStore> Execute for DynamicFilterExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -561,7 +559,7 @@ mod tests {
             actor_context: ctx.clone(),
             identity: "DynamicFilterExecutor".into(),
         };
-        let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
+        let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
             ctx,
             eval_error_report,
             source_l.schema().clone(),
@@ -651,7 +649,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(3), false);
         tx_r.push_barrier(test_epoch(3), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -661,7 +659,7 @@ mod tests {
             )
         );
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -691,7 +689,7 @@ mod tests {
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -708,7 +706,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(4), false);
         tx_r.push_barrier(test_epoch(4), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -727,7 +725,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(5), false);
         tx_r.push_barrier(test_epoch(5), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -784,7 +782,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(2), false);
         tx_r.push_barrier(test_epoch(2), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -798,7 +796,7 @@ mod tests {
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -815,7 +813,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(3), false);
         tx_r.push_barrier(test_epoch(3), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -834,7 +832,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(4), false);
         tx_r.push_barrier(test_epoch(4), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -891,7 +889,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(2), false);
         tx_r.push_barrier(test_epoch(2), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -905,7 +903,7 @@ mod tests {
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -922,7 +920,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(3), false);
         tx_r.push_barrier(test_epoch(3), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -941,7 +939,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(4), false);
         tx_r.push_barrier(test_epoch(4), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -998,7 +996,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(2), false);
         tx_r.push_barrier(test_epoch(2), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1012,7 +1010,7 @@ mod tests {
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1029,7 +1027,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(3), false);
         tx_r.push_barrier(test_epoch(3), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1048,7 +1046,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(4), false);
         tx_r.push_barrier(test_epoch(4), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1105,7 +1103,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(2), false);
         tx_r.push_barrier(test_epoch(2), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1119,7 +1117,7 @@ mod tests {
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1136,7 +1134,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(3), false);
         tx_r.push_barrier(test_epoch(3), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1155,7 +1153,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(4), false);
         tx_r.push_barrier(test_epoch(4), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1233,7 +1231,7 @@ mod tests {
 
         let chunk = dynamic_filter.expect_chunk().await;
         assert_eq!(
-            chunk.compact(),
+            chunk.compact_vis(),
             StreamChunk::from_pretty(
                 " I
                 + 1
@@ -1257,7 +1255,7 @@ mod tests {
 
         let chunk = dynamic_filter.expect_chunk().await;
         assert_eq!(
-            chunk.compact(),
+            chunk.compact_vis(),
             StreamChunk::from_pretty(
                 // the two rows are directly sent to the output cuz they satisfy the condition of previously committed rhs
                 " I

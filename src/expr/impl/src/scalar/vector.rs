@@ -13,9 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::array::Finite32;
-use risingwave_common::types::{
-    DataType, F32, F64, ListRef, ListValue, ScalarRefImpl, VectorRef, VectorVal,
-};
+use risingwave_common::types::{DataType, F32, F64, ListRef, ScalarRefImpl, VectorRef, VectorVal};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::vector::MeasureDistanceBuilder;
 use risingwave_common::vector::distance::{L1Distance, L2SqrDistance, inner_product_faiss};
@@ -335,8 +333,12 @@ fn vector_concat(lhs: VectorRef<'_>, rhs: VectorRef<'_>) -> Result<VectorVal> {
 /// {1,2,3}
 /// ```
 #[function("cast(vector) -> float4[]")]
-fn vector_to_float4(v: VectorRef<'_>) -> ListValue {
-    v.as_raw_slice().iter().copied().map(F32::from).collect()
+fn vector_to_float4(v: VectorRef<'_>, writer: &mut impl risingwave_common::array::ListWrite) {
+    writer.write_iter(
+        v.as_raw_slice()
+            .iter()
+            .map(|&f| Some(ScalarRefImpl::Float32(F32::from(f)))),
+    );
 }
 
 /// ```slt
@@ -520,4 +522,69 @@ fn l2_norm(vector: VectorRef<'_>) -> F64 {
 )]
 fn l2_normalize(vector: VectorRef<'_>) -> VectorVal {
     vector.normalized()
+}
+
+#[derive(Debug)]
+pub struct SubvectorContext {
+    pub start: usize,
+    pub end: usize,
+}
+
+impl SubvectorContext {
+    pub fn from_start_count(start: i32, count: i32) -> Result<Self> {
+        Ok(Self {
+            start: (start - 1) as usize,
+            end: (start + count - 1) as usize,
+        })
+    }
+}
+
+/// ```slt
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 1, 3);
+/// ----
+/// [1,2,3]
+///
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 3, 2);
+/// ----
+/// [3,4]
+///
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 1, 5);
+/// ----
+/// [1,2,3,4,5]
+///
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 5, 1);
+/// ----
+/// [5]
+///
+/// query R
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), 2, 3);
+/// ----
+/// [2,3,4]
+///
+/// query R
+/// select subvector(vec, 1, 3) from (values ('[1,2,3,4,5]'::vector(5)), ('[6,7,8,9,10]'::vector(5))) as t(vec);
+/// ----
+/// [1,2,3]
+/// [6,7,8]
+///
+/// statement error
+/// SELECT subvector('[1,2,3,4,5]'::vector(5), -1, 2);
+///
+/// statement error
+/// SELECT subvector('[6,7,8,9,10]'::vector(5), 1, 6);
+///
+/// statement error
+/// SELECT subvector('[6,7,8,9,10]'::vector(5), 5, 2);
+/// ```
+#[function(
+    "subvector(vector, int4, int4) -> vector",
+    prebuild = "SubvectorContext::from_start_count($1, $2)?",
+    type_infer = "unreachable"
+)]
+fn subvector(v: VectorRef<'_>, ctx: &SubvectorContext) -> Result<VectorVal> {
+    Ok(v.subvector(ctx.start, ctx.end))
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -742,6 +742,11 @@ impl<'a> Unit<'a> {
     }
 
     fn units(sst: &Sstable, unit: usize) -> usize {
-        sst.block_count() / unit + if sst.block_count() % unit == 0 { 0 } else { 1 }
+        sst.block_count() / unit
+            + if sst.block_count().is_multiple_of(unit) {
+                0
+            } else {
+                1
+            }
     }
 }

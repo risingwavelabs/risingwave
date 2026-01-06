@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ async fn read_rw_table_fragments_info(
         .map(|state| {
             let parallelism = extract_parallelism_from_table_state(&state);
             RwTableFragment {
-                table_id: state.table_id as i32,
+                table_id: state.table_id.as_i32_id(),
                 status: state.state().as_str_name().into(),
                 parallelism: parallelism.to_uppercase(),
                 max_parallelism: state.max_parallelism as i32,

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ use super::explain::ExplainRow;
 use super::show::ShowColumnRow;
 use super::{RwPgResponse, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
-use crate::catalog::CatalogError;
+use crate::catalog::{CatalogError, FragmentId};
 use crate::error::{ErrorCode, Result};
 use crate::handler::show::ShowColumnName;
 use crate::handler::{HandlerArgs, RwPgResponseBuilderExt};
@@ -43,7 +43,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
 
     Binder::validate_cross_db_reference(&session.database(), &object_name)?;
     let not_found_err =
-        CatalogError::NotFound("table, source, sink or view", object_name.to_string());
+        CatalogError::not_found("table, source, sink or view", object_name.to_string());
 
     // Vec<ColumnCatalog>, Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>, String, Option<String>
     let (columns, pk_columns, dist_columns, indices, relname, description) =
@@ -141,9 +141,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
             }
         } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
             let columns = sink.sink_catalog.full_columns().to_vec();
-            let pk_columns = sink
-                .sink_catalog
-                .downstream_pk_indices()
+            let pk_columns = (sink.sink_catalog.downstream_pk.clone().unwrap_or_default())
                 .into_iter()
                 .map(|idx| columns[idx].column_desc.clone())
                 .collect_vec();
@@ -261,13 +259,13 @@ pub async fn handle_describe_fragments(
         let mut binder = Binder::new_for_system(&session);
 
         Binder::validate_cross_db_reference(&session.database(), &object_name)?;
-        let not_found_err = CatalogError::NotFound("stream job", object_name.to_string());
+        let not_found_err = CatalogError::not_found("stream job", object_name.to_string());
 
         if let Ok(relation) = binder.bind_catalog_relation_by_object_name(&object_name, true) {
             match relation {
                 Relation::Source(s) => {
                     if s.is_shared() {
-                        s.catalog.id
+                        s.catalog.id.as_share_source_job_id()
                     } else {
                         bail!(ErrorCode::NotSupported(
                             "non shared source has no fragments to describe".to_owned(),
@@ -275,7 +273,7 @@ pub async fn handle_describe_fragments(
                         ));
                     }
                 }
-                Relation::BaseTable(t) => t.table_catalog.id.table_id,
+                Relation::BaseTable(t) => t.table_catalog.id.as_job_id(),
                 Relation::SystemTable(_t) => {
                     bail!(ErrorCode::NotSupported(
                         "system table has no fragments to describe".to_owned(),
@@ -294,7 +292,7 @@ pub async fn handle_describe_fragments(
                 }
             }
         } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
-            sink.sink_catalog.id.sink_id
+            sink.sink_catalog.id.as_job_id()
         } else {
             return Err(not_found_err.into());
         }
@@ -374,14 +372,14 @@ fn explain_node<'a>(node: &StreamNode, verbose: bool) -> Pretty<'a> {
 
 pub async fn handle_describe_fragment(
     handler_args: HandlerArgs,
-    fragment_id: u32,
+    fragment_id: FragmentId,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
     let meta_client = session.env().meta_client();
     let distribution = &meta_client
         .get_fragment_by_id(fragment_id)
         .await?
-        .ok_or_else(|| CatalogError::NotFound("fragment", fragment_id.to_string()))?;
+        .ok_or_else(|| CatalogError::not_found("fragment", fragment_id.to_string()))?;
     let res: PgResponse<super::PgResponseStream> = generate_enhanced_fragment_string(distribution)?;
     Ok(res)
 }

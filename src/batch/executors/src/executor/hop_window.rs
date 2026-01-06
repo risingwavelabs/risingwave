@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -168,7 +168,7 @@ impl HopWindowExecutor {
         #[for_await]
         for data_chunk in child.execute() {
             let data_chunk = data_chunk?;
-            assert!(data_chunk.is_compacted());
+            assert!(data_chunk.is_vis_compacted());
             let len = data_chunk.cardinality();
             for i in 0..units {
                 let window_start_col = if output_indices.contains(&window_start_col_index) {

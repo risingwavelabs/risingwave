@@ -19,10 +19,13 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{DefaultHasher, Hash as _, Hasher as _};
 
 use itertools::Itertools;
-use risingwave_common::catalog::TableDesc;
+use risingwave_common::catalog::{TableDesc, TableId};
+use risingwave_common::id::FragmentId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables_inner;
 use risingwave_pb::catalog::PbTable;
-use risingwave_pb::stream_plan::StreamNode;
+use risingwave_pb::id::StreamNodeLocalOperatorId;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::{PbStreamScanType, StreamNode};
 use strum::IntoDiscriminant;
 
 use crate::model::StreamJobFragments;
@@ -71,10 +74,7 @@ pub(crate) enum Error {
 type Result<T, E = Error> = std::result::Result<T, E>;
 
 /// Fragment id.
-type Id = u32;
-
-/// State table id.
-type TableId = u32;
+type Id = FragmentId;
 
 /// Node for a fragment in the [`Graph`].
 struct Fragment {
@@ -181,12 +181,19 @@ impl Graph {
     }
 }
 
+#[derive(Default)]
+pub(crate) struct MatchResult {
+    /// The mapping from source table id to target table within the fragment.
+    pub table_matches: HashMap<TableId, PbTable>,
+    /// The mapping from source `operator_id` to snapshot epoch
+    pub snapshot_backfill_epochs: HashMap<StreamNodeLocalOperatorId, u64>,
+}
+
 /// The match result of a fragment in the source graph to a fragment in the target graph.
 struct Match {
     /// The target fragment id.
     target: Id,
-    /// The mapping from source table id to target table within the fragment.
-    table_matches: HashMap<TableId, PbTable>,
+    result: MatchResult,
 }
 
 /// The successful matching result of two [`Graph`]s.
@@ -244,7 +251,7 @@ impl Matches {
             tables
         };
 
-        let mut table_matches = HashMap::new();
+        let mut result = MatchResult::default();
 
         // Use BFS to match the operator nodes.
         let mut uq = VecDeque::from([&u.root]);
@@ -277,6 +284,28 @@ impl Matches {
                 != vn.node_body.as_ref().unwrap().discriminant()
             {
                 bail_operator!(from = un, to = vn, "operator has different type");
+            }
+            if let PbNodeBody::StreamScan(uscan) = un.node_body.as_ref().unwrap() {
+                let PbNodeBody::StreamScan(vscan) = vn.node_body.as_ref().unwrap() else {
+                    unreachable!("checked same discriminant");
+                };
+                if let scan_type @ (PbStreamScanType::SnapshotBackfill
+                | PbStreamScanType::CrossDbSnapshotBackfill) = uscan.stream_scan_type()
+                {
+                    let Some(snapshot_epoch) = vscan.snapshot_backfill_epoch else {
+                        bail_operator!(
+                            from = un,
+                            to = vn,
+                            "expect snapshot_backfill_epoch set for new stream_scan_type {:?} with old stream_scan_type {:?}",
+                            scan_type,
+                            vscan.stream_scan_type()
+                        );
+                    };
+                    result
+                        .snapshot_backfill_epochs
+                        .try_insert(un.operator_id, snapshot_epoch)
+                        .unwrap();
+                }
             }
             if un.input.len() != vn.input.len() {
                 bail_operator!(
@@ -317,7 +346,7 @@ impl Matches {
                 // the "physical" part of the table, best illustrated by `TableDesc`.
                 let table_desc_for_compare = |table: &PbTable| {
                     let mut table = table.clone();
-                    table.id = 0; // ignore id
+                    table.id = 0.into(); // ignore id
                     table.maybe_vnode_count = Some(42); // vnode count is unfilled for new fragment graph, fill it with a dummy value before proceeding
 
                     TableDesc::from_pb_table(&table)
@@ -335,15 +364,18 @@ impl Matches {
                     );
                 }
 
-                table_matches.try_insert(ut.id, vt).unwrap_or_else(|_| {
-                    panic!("duplicated table id {} in fragment {}", ut.id, u.id)
-                });
+                result
+                    .table_matches
+                    .try_insert(ut.id, vt)
+                    .unwrap_or_else(|_| {
+                        panic!("duplicated table id {} in fragment {}", ut.id, u.id)
+                    });
             }
         }
 
         let m = Match {
             target: v.id,
-            table_matches,
+            result,
         };
         self.inner.insert(u.id, m);
         self.matched_targets.insert(v.id);
@@ -364,16 +396,28 @@ impl Matches {
     }
 
     /// Converts the match result into a table mapping.
-    fn into_table_mapping(self) -> HashMap<TableId, PbTable> {
-        self.inner
-            .into_iter()
-            .flat_map(|(_, m)| m.table_matches.into_iter())
-            .collect()
+    fn into_match_result(self) -> MatchResult {
+        let mut result = MatchResult::default();
+        for matches in self.inner.into_values() {
+            for (table_id, table) in matches.result.table_matches {
+                result
+                    .table_matches
+                    .try_insert(table_id, table)
+                    .expect("non-duplicated");
+            }
+            for (operator_id, epoch) in matches.result.snapshot_backfill_epochs {
+                result
+                    .snapshot_backfill_epochs
+                    .try_insert(operator_id, epoch)
+                    .expect("non-duplicated");
+            }
+        }
+        result
     }
 }
 
 /// Matches two [`Graph`]s, and returns the match result from each fragment in `g1` to `g2`.
-fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
+pub(crate) fn match_graph(g1: &Graph, g2: &Graph) -> Result<MatchResult> {
     if g1.len() != g2.len() {
         bail_graph!(
             "graphs have different number of fragments ({} vs {})",
@@ -416,7 +460,7 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
 
         let mut last_error = None;
 
-        for &v in &u_cands {
+        'cand_v: for &v in &u_cands {
             // Skip if v is already used.
             if matches.target_matched(v) {
                 continue;
@@ -429,7 +473,7 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
                     && !g2.upstreams(v).contains(&v_upstream)
                 {
                     // Not a valid match.
-                    continue;
+                    continue 'cand_v;
                 }
             }
             // Same for downstream of u.
@@ -439,7 +483,7 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
                     && !g2.downstreams(v).contains(&v_downstream)
                 {
                     // Not a valid match.
-                    continue;
+                    continue 'cand_v;
                 }
             }
 
@@ -487,15 +531,7 @@ fn match_graph(g1: &Graph, g2: &Graph) -> Result<Matches> {
 
     let mut matches = Matches::new();
     dfs(g1, g2, &mut fp_cand, &mut matches)?;
-    Ok(matches)
-}
-
-/// Matches two [`Graph`]s, and returns the internal table mapping from `g1` to `g2`.
-pub(crate) fn match_graph_internal_tables(
-    g1: &Graph,
-    g2: &Graph,
-) -> Result<HashMap<TableId, PbTable>> {
-    match_graph(g1, g2).map(|matches| matches.into_table_mapping())
+    Ok(matches.into_match_result())
 }
 
 impl Graph {
@@ -505,10 +541,11 @@ impl Graph {
             .fragments
             .iter()
             .map(|(&id, f)| {
+                let id = id.as_global_id();
                 (
-                    id.as_global_id(),
+                    id,
                     Fragment {
-                        id: id.as_global_id(),
+                        id,
                         root: f.node.clone().unwrap(),
                     },
                 )

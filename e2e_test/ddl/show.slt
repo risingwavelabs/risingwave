@@ -97,41 +97,65 @@ rw_catalog
 query T
 show tables;
 ----
-t3
+public.t3
 
 query T
 show tables from public;
 ----
-t3
+public.t3
 
 query T
 show tables from public like 't_';
 ----
-t3
+public.t3
 
 query T
 show tables from public like '_t';
 ----
 
+# Test that `SHOW TABLES` shows tables from all schemas in the search path.
+statement ok
+create schema my_schema;
+
+statement ok
+create table my_schema.t4 (v1 int, v2 int, v3 int);
+
+statement ok
+set search_path to my_schema, public;
+
+query T rowsort
+show tables;
+----
+my_schema.t4
+public.t3
+
+statement ok
+set search_path to default;
+
+statement ok
+drop schema my_schema cascade;
+
+# Test search path done.
+
 query T
 show views;
 ----
-v3
+public.v3
 
 query T
 show views from public;
 ----
-v3
+public.v3
 
 query T
 show materialized views from public;
 ----
-mv3
+public.mv3
 
 query T
 show materialized views;
 ----
-mv3
+public.mv3
 
 query T
 show sources;
@@ -239,7 +263,7 @@ create table t4 (v1 int);
 query T
 show tables;
 ----
-t4
+public.t4
 
 statement ok
 set search_path to show_another_schema, public;
@@ -247,8 +271,8 @@ set search_path to show_another_schema, public;
 query T
 show tables;
 ----
-t_another
-t4
+show_another_schema.t_another
+public.t4
 
 statement ok
 drop table t4;

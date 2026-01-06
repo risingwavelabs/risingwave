@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -84,7 +84,7 @@ impl MonitorService for MonitorServiceImpl {
                 .into_iter()
                 .map(|(k, v)| {
                     (
-                        k.0,
+                        k.0.as_raw_id(),
                         if req.actor_traces_format == ActorTracesFormat::Text as i32 {
                             v.to_string()
                         } else {
@@ -301,7 +301,7 @@ impl MonitorService for MonitorServiceImpl {
         let metrics = global_streaming_metrics(MetricLevel::Info);
         let inner = request.into_inner();
         let executor_ids = &inner.executor_ids;
-        let fragment_ids = HashSet::from_iter(inner.dispatcher_fragment_ids.into_iter());
+        let fragment_ids = HashSet::from_iter(inner.dispatcher_fragment_ids);
         let stream_node_output_row_count = metrics
             .mem_stream_node_output_row_count
             .collect(executor_ids);
@@ -312,8 +312,8 @@ impl MonitorService for MonitorServiceImpl {
         // Collect count metrics by fragment_ids
         fn collect_by_fragment_ids<T: Collector>(
             m: &T,
-            fragment_ids: &HashSet<u32>,
-        ) -> HashMap<u32, u64> {
+            fragment_ids: &HashSet<FragmentId>,
+        ) -> HashMap<FragmentId, u64> {
             let mut metrics = HashMap::new();
             for mut metric_family in m.collect() {
                 for metric in metric_family.take_metric() {
@@ -496,17 +496,14 @@ impl MonitorService for MonitorServiceImpl {
                 options =
                     options.with_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
             }
-            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
-                options = options
-                    .with_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
-            }
             if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
                 options = options
                     .with_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
-                options = options
-                    .with_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+                options = options.with_record_hybrid_get_or_fetch_threshold(Duration::from_millis(
+                    threshold as _,
+                ));
             }
             cache.update_tracing_options(options);
         }
@@ -526,17 +523,14 @@ impl MonitorService for MonitorServiceImpl {
                 options =
                     options.with_record_hybrid_get_threshold(Duration::from_millis(threshold as _));
             }
-            if let Some(threshold) = req.record_hybrid_obtain_threshold_ms {
-                options = options
-                    .with_record_hybrid_obtain_threshold(Duration::from_millis(threshold as _));
-            }
             if let Some(threshold) = req.record_hybrid_remove_threshold_ms {
                 options = options
                     .with_record_hybrid_remove_threshold(Duration::from_millis(threshold as _));
             }
             if let Some(threshold) = req.record_hybrid_fetch_threshold_ms {
-                options = options
-                    .with_record_hybrid_fetch_threshold(Duration::from_millis(threshold as _));
+                options = options.with_record_hybrid_get_or_fetch_threshold(Duration::from_millis(
+                    threshold as _,
+                ));
             }
             cache.update_tracing_options(options);
         }
@@ -547,6 +541,7 @@ impl MonitorService for MonitorServiceImpl {
 
 pub use grpc_middleware::*;
 use risingwave_common::metrics::get_label_infallible;
+use risingwave_pb::id::FragmentId;
 
 pub mod grpc_middleware {
     use std::sync::Arc;

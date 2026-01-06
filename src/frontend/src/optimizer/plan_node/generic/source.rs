@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -150,6 +150,29 @@ impl Source {
                     column_desc: ColumnDesc::from_field_with_column_id(
                         &Field {
                             name: "file_scan_task".to_owned(),
+                            data_type: DataType::Jsonb,
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+            ]
+        } else if core.is_batch_connector() {
+            vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_id".to_owned(),
+                            data_type: DataType::Varchar,
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_info".to_owned(),
                             data_type: DataType::Jsonb,
                         },
                         1,

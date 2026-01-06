@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use std::ops::{Bound, RangeBounds};
 use std::time::Instant;
 
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::TableId;
+use risingwave_common::id::JobId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -41,12 +41,13 @@ struct CreatingStreamingJobEpochState {
 
 #[derive(Debug)]
 pub(super) struct CreatingStreamingJobBarrierControl {
-    table_id: TableId,
+    job_id: JobId,
     // key is prev_epoch of barrier
     inflight_barrier_queue: BTreeMap<u64, CreatingStreamingJobEpochState>,
-    backfill_epoch: u64,
+    snapshot_epoch: u64,
     is_first_committed: bool,
     max_collected_epoch: Option<u64>,
+    max_committed_epoch: Option<u64>,
     // newer epoch at the front.
     pending_barriers_to_complete: VecDeque<CreatingStreamingJobEpochState>,
     completing_barrier: Option<(CreatingStreamingJobEpochState, HistogramTimer)>,
@@ -60,14 +61,20 @@ pub(super) struct CreatingStreamingJobBarrierControl {
 }
 
 impl CreatingStreamingJobBarrierControl {
-    pub(super) fn new(table_id: TableId, backfill_epoch: u64, is_first_committed: bool) -> Self {
-        let table_id_str = format!("{}", table_id.table_id);
+    pub(super) fn new(
+        job_id: JobId,
+        snapshot_epoch: u64,
+        is_first_committed: bool,
+        committed_epoch: Option<u64>,
+    ) -> Self {
+        let table_id_str = format!("{}", job_id);
         Self {
-            table_id,
+            job_id,
             inflight_barrier_queue: Default::default(),
-            backfill_epoch,
+            snapshot_epoch,
             is_first_committed,
-            max_collected_epoch: None,
+            max_collected_epoch: committed_epoch,
+            max_committed_epoch: committed_epoch,
             pending_barriers_to_complete: Default::default(),
             completing_barrier: None,
 
@@ -103,8 +110,8 @@ impl CreatingStreamingJobBarrierControl {
             .or(self.max_collected_epoch)
     }
 
-    pub(super) fn max_collected_epoch(&self) -> Option<u64> {
-        self.max_collected_epoch
+    pub(super) fn max_committed_epoch(&self) -> Option<u64> {
+        self.max_committed_epoch
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -122,7 +129,7 @@ impl CreatingStreamingJobBarrierControl {
         debug!(
             epoch,
             ?node_to_collect,
-            table_id = self.table_id.table_id,
+            job_id = %self.job_id,
             "creating job enqueue epoch"
         );
         let is_first_commit = !self.is_first_committed;
@@ -133,9 +140,22 @@ impl CreatingStreamingJobBarrierControl {
                 "first barrier must be checkpoint barrier"
             );
         }
-        if let Some(latest_epoch) = self.latest_epoch() {
-            assert!(epoch > latest_epoch, "{} {}", epoch, latest_epoch);
+        match &kind {
+            BarrierKind::Initial => {
+                assert_eq!(
+                    self.latest_epoch().expect(
+                        "should have committed when recovered and injecting Initial barrier"
+                    ),
+                    epoch
+                );
+            }
+            BarrierKind::Barrier | BarrierKind::Checkpoint(_) => {
+                if let Some(latest_epoch) = self.latest_epoch() {
+                    assert!(epoch > latest_epoch, "{} {}", epoch, latest_epoch);
+                }
+            }
         }
+
         let epoch_state = CreatingStreamingJobEpochState {
             epoch,
             node_to_collect,
@@ -155,11 +175,11 @@ impl CreatingStreamingJobBarrierControl {
 
     pub(super) fn collect(&mut self, resp: BarrierCompleteResponse) {
         let epoch = resp.epoch;
-        let worker_id = resp.worker_id as WorkerId;
+        let worker_id = resp.worker_id;
         debug!(
             epoch,
-            worker_id,
-            table_id = self.table_id.table_id,
+            %worker_id,
+            job_id = %self.job_id,
             "collect barrier from worker"
         );
 
@@ -221,6 +241,9 @@ impl CreatingStreamingJobBarrierControl {
             self.completing_barrier.take().expect("should exist");
         wait_commit_timer.observe_duration();
         assert_eq!(epoch_state.epoch, completed_epoch);
+        if let Some(prev_max_committed_epoch) = self.max_committed_epoch.replace(completed_epoch) {
+            assert!(completed_epoch > prev_max_committed_epoch);
+        }
     }
 
     fn add_collected(&mut self, epoch_state: CreatingStreamingJobEpochState) {
@@ -229,11 +252,18 @@ impl CreatingStreamingJobBarrierControl {
             assert!(prev_epoch_state.epoch < epoch_state.epoch);
         }
         if let Some(max_collected_epoch) = self.max_collected_epoch {
-            assert!(epoch_state.epoch > max_collected_epoch);
+            match &epoch_state.kind {
+                BarrierKind::Initial => {
+                    assert_eq!(epoch_state.epoch, max_collected_epoch);
+                }
+                BarrierKind::Barrier | BarrierKind::Checkpoint(_) => {
+                    assert!(epoch_state.epoch > max_collected_epoch);
+                }
+            }
         }
         self.max_collected_epoch = Some(epoch_state.epoch);
         let barrier_latency = epoch_state.enqueue_time.elapsed().as_secs_f64();
-        let barrier_latency_metrics = if epoch_state.epoch < self.backfill_epoch {
+        let barrier_latency_metrics = if epoch_state.epoch < self.snapshot_epoch {
             &self.consuming_snapshot_barrier_latency
         } else {
             &self.consuming_log_store_barrier_latency
