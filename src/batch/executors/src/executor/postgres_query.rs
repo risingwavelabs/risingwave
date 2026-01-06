@@ -144,8 +144,6 @@ impl PostgresQueryExecutor {
         )
         .await?;
 
-        // Connection is spawned in create_pg_client
-
         let params: &[&str] = &[];
         let row_stream = client
             .query_raw(&self.query, params)
@@ -189,18 +187,7 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
                 username: postgres_query_node.username.clone(),
                 password: postgres_query_node.password.clone(),
                 database: postgres_query_node.database.clone(),
-                ssl_mode: if postgres_query_node.ssl_mode.is_empty() {
-                    SslMode::Preferred
-                } else {
-                    match postgres_query_node.ssl_mode.as_str() {
-                        "disable" => SslMode::Disabled,
-                        "prefer" => SslMode::Preferred,
-                        "require" => SslMode::Required,
-                        "verify-ca" => SslMode::VerifyCa,
-                        "verify-full" => SslMode::VerifyFull,
-                        _ => SslMode::Preferred,
-                    }
-                },
+                ssl_mode: postgres_query_node.ssl_mode.parse().unwrap_or_default(),
                 ssl_root_cert: if postgres_query_node.ssl_root_cert.is_empty() {
                     None
                 } else {
