@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -157,7 +157,9 @@ impl MockSinkCoordinationRpcClient {
                         msg:
                             Some(coordinate_request::Msg::CommitRequest(
                                 coordinate_request::CommitRequest {
-                                    epoch, metadata, ..
+                                    epoch,
+                                    metadata,
+                                    schema_change,
                                 },
                             )),
                     }) => {
@@ -167,15 +169,31 @@ impl MockSinkCoordinationRpcClient {
                                 SinkCommitCoordinator::SinglePhase(coordinator) => {
                                     coordinator.init().await?;
                                     coordinator
-                                        .commit(epoch, vec![metadata.unwrap()], None)
+                                        .commit_data(epoch, vec![metadata.unwrap()])
                                         .await?;
+                                    if let Some(schema_change) = schema_change {
+                                        coordinator
+                                            .commit_schema_change(epoch, schema_change)
+                                            .await?;
+                                    }
                                 }
                                 SinkCommitCoordinator::TwoPhase(coordinator) => {
                                     coordinator.init().await?;
                                     let metadata = coordinator
-                                        .pre_commit(epoch, vec![metadata.unwrap()], None)
+                                        .pre_commit(
+                                            epoch,
+                                            vec![metadata.unwrap()],
+                                            schema_change.clone(),
+                                        )
                                         .await?;
-                                    coordinator.commit(epoch, metadata).await?;
+                                    if let Some(metadata) = metadata {
+                                        coordinator.commit_data(epoch, metadata).await?;
+                                    }
+                                    if let Some(schema_change) = schema_change {
+                                        coordinator
+                                            .commit_schema_change(epoch, schema_change)
+                                            .await?;
+                                    }
                                 }
                             }
                         };

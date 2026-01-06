@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,8 +27,12 @@ pub struct ErrorOrNoticeMessage<'a> {
 
 impl<'a> ErrorOrNoticeMessage<'a> {
     /// Create a Postgres error message from an error, with the error code and message extracted from the error.
-    pub fn error(error: &(dyn std::error::Error + 'static)) -> Self {
-        let message = error.to_report_string_pretty();
+    pub fn error(error: &(dyn std::error::Error + 'static), pretty: bool) -> Self {
+        let message = if pretty {
+            error.to_report_string_pretty()
+        } else {
+            error.to_report_string()
+        };
         let error_code = error_request_copy::<PostgresErrorCode>(error)
             .filter(|e| e.is_error()) // should not be warning or success
             .unwrap_or(PostgresErrorCode::InternalError);

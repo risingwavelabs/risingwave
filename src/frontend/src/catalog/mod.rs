@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -129,8 +129,14 @@ impl CatalogError {
     /// Provide the Postgres error code for the error.
     fn provide_postgres_error_code(&self, request: &mut std::error::Request<'_>) {
         match self.inner() {
-            CatalogErrorInner::NotFound { .. } => {
-                request.provide_value(PostgresErrorCode::UndefinedObject);
+            CatalogErrorInner::NotFound { object_type, .. } => {
+                // `database` not found should map to SQLSTATE 3D000 (Invalid Catalog Name),
+                // which is used by Postgres for non-existing database in startup.
+                if *object_type == "database" {
+                    request.provide_value(PostgresErrorCode::InvalidCatalogName);
+                } else {
+                    request.provide_value(PostgresErrorCode::UndefinedObject);
+                }
             }
             CatalogErrorInner::Duplicated { .. } => {
                 request.provide_value(PostgresErrorCode::DuplicateObject);

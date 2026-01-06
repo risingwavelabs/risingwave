@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,13 @@
 
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{
-    Array, ArrayBuilder, DataChunk, Op, PrimitiveArrayBuilder, StreamChunk,
+    Array, ArrayBuilder, DataChunk, PrimitiveArrayBuilder, StreamChunk, StreamChunkBuilder,
 };
 use risingwave_common::catalog::{Field, Schema, TableId, TableVersionId};
 use risingwave_common::transaction::transaction_id::TxnId;
 use risingwave_common::types::DataType;
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::expr::{BoxedExpression, build_from_prost};
@@ -49,6 +49,7 @@ pub struct UpdateExecutor {
     returning: bool,
     txn_id: TxnId,
     session_id: u32,
+    upsert: bool,
 }
 
 impl UpdateExecutor {
@@ -64,6 +65,7 @@ impl UpdateExecutor {
         identity: String,
         returning: bool,
         session_id: u32,
+        upsert: bool,
     ) -> Self {
         let chunk_size = chunk_size.next_multiple_of(2);
         let table_schema = child.schema().clone();
@@ -88,6 +90,7 @@ impl UpdateExecutor {
             returning,
             txn_id,
             session_id,
+            upsert,
         }
     }
 }
@@ -130,27 +133,18 @@ impl UpdateExecutor {
             "bad update schema"
         );
 
-        let mut builder = DataChunkBuilder::new(data_types, self.chunk_size);
+        let mut builder = StreamChunkBuilder::new(self.chunk_size, data_types);
 
         let mut write_handle: risingwave_dml::WriteHandle =
             table_dml_handle.write_handle(self.session_id, self.txn_id)?;
         write_handle.begin()?;
 
-        // Transform the data chunk to a stream chunk, then write to the source.
-        let write_txn_data = |chunk: DataChunk| async {
-            // Note: we've banned updating the primary key when binding `UPDATE` statement.
-            // So we can safely use `Update` op.
-            let ops = [Op::UpdateDelete, Op::UpdateInsert]
-                .into_iter()
-                .cycle()
-                .take(chunk.capacity())
-                .collect_vec();
-            let stream_chunk = StreamChunk::from_parts(ops, chunk);
-
-            #[cfg(debug_assertions)]
-            table_dml_handle.check_chunk_schema(&stream_chunk);
-
-            write_handle.write_chunk(stream_chunk).await
+        // Write to the source to the handle.
+        let write_txn_data = |chunk: StreamChunk| async {
+            if cfg!(debug_assertions) {
+                table_dml_handle.check_chunk_schema(&chunk);
+            }
+            write_handle.write_chunk(chunk).await
         };
 
         let mut rows_updated = 0;
@@ -187,21 +181,31 @@ impl UpdateExecutor {
                 (old_data_chunk.rows()).zip_eq_debug(updated_data_chunk.rows())
             {
                 rows_updated += 1;
-                // If row_delete == row_insert, we don't need to do a actual update
-                if row_delete != row_insert {
-                    let None = builder.append_one_row(row_delete) else {
-                        unreachable!(
-                            "no chunk should be yielded when appending the deleted row as the chunk size is always even"
-                        );
-                    };
-                    if let Some(chunk) = builder.append_one_row(row_insert) {
-                        write_txn_data(chunk).await?;
-                    }
+                // If row_delete == row_insert, we don't need to do an actual update.
+                if row_delete == row_insert {
+                    continue;
+                }
+                let chunk = if self.upsert {
+                    // In upsert mode, we only write the new row.
+                    builder.append_record(Record::Insert {
+                        new_row: row_insert,
+                    })
+                } else {
+                    // Note: we've banned updating the primary key when binding `UPDATE` statement.
+                    // So we can safely use `Update` op.
+                    builder.append_record(Record::Update {
+                        old_row: row_delete,
+                        new_row: row_insert,
+                    })
+                };
+
+                if let Some(chunk) = chunk {
+                    write_txn_data(chunk).await?;
                 }
             }
         }
 
-        if let Some(chunk) = builder.consume_all() {
+        if let Some(chunk) = builder.take() {
             write_txn_data(chunk).await?;
         }
         write_handle.end().await?;
@@ -256,6 +260,7 @@ impl BoxedExecutorBuilder for UpdateExecutor {
             source.plan_node().get_identity().clone(),
             update_node.returning,
             update_node.session_id,
+            update_node.upsert,
         )))
     }
 }

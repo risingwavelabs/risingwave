@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -218,7 +218,7 @@ impl LogReader for BoundedInMemLogStoreReader {
                                 is_checkpoint: options.is_checkpoint,
                                 new_vnode_bitmap: options.new_vnode_bitmap,
                                 is_stop: options.is_stop,
-                                add_columns: options.add_columns,
+                                schema_change: options.schema_change,
                             },
                         ))
                     }

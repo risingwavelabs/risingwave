@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::bail;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::{Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -526,20 +526,12 @@ impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
         Ok(())
     }
 
-    async fn commit(
+    async fn commit_data(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
     ) -> Result<()> {
-        tracing::info!("Starting DeltaLake commit in epoch {epoch}.");
-        if let Some(add_columns) = add_columns {
-            return Err(anyhow!(
-                "Delta lake sink not support add columns, but got: {:?}",
-                add_columns
-            )
-            .into());
-        }
+        tracing::debug!("Starting DeltaLake commit in epoch {epoch}.");
 
         let deltalake_write_result = metadata
             .iter()
@@ -575,7 +567,7 @@ impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
             .await?
             .version();
         self.table.update().await?;
-        tracing::info!(
+        tracing::debug!(
             "Succeeded to commit to DeltaLake table in epoch {epoch}, version {version}."
         );
         Ok(())
@@ -692,7 +684,7 @@ mod tests {
             table: deltalake_table,
         };
         let metadata = deltalake_writer.barrier(true).await.unwrap().unwrap();
-        committer.commit(1, vec![metadata], None).await.unwrap();
+        committer.commit_data(1, vec![metadata]).await.unwrap();
 
         // The following code is to test reading the deltalake data table written with test data.
         // To enable the following code, add `deltalake = { workspace = true, features = ["datafusion"] }`

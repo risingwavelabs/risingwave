@@ -136,20 +136,18 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_latency(
+                panels.timeseries_percentage(
                     "Merger Barrier Align",
                     "",
                     [
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('stream_merge_barrier_align_duration_bucket')}[$__rate_interval])) by (le, fragment_id, {COMPONENT_LABEL}))",
-                                f"p{legend} - fragment {{{{fragment_id}}}} - {{{{{COMPONENT_LABEL}}}}}",
-                            ),
-                            [90, 99, 999, "max"],
-                        ),
                         panels.target(
-                            f"sum by(le, fragment_id, job)(rate({metric('stream_merge_barrier_align_duration_sum')}[$__rate_interval])) / sum by(le,fragment_id,{COMPONENT_LABEL}) (rate({metric('stream_merge_barrier_align_duration_count')}[$__rate_interval])) > 0",
-                            "avg - fragment {{fragment_id}} - {{%s}}" % COMPONENT_LABEL,
+                            f"sum(rate({metric('stream_merge_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id) \
+                            / sum({metric('stream_actor_count')}) by (fragment_id)",
+                            "avg - fragment {{fragment_id}}",
+                        ),
+                        panels.target_hidden(
+                            f"rate({metric('stream_merge_barrier_align_duration_ns', actor_level_filter)}[$__rate_interval]) / 1000000000",
+                            "actor {{actor_id}} - fragment {{fragment_id}}",
                         ),
                     ],
                 ),

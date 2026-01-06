@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 
 //! bind columns from external schema
 
+use risingwave_connector::source::ADBC_SNOWFLAKE_CONNECTOR;
+
 use super::*;
 
 mod json;
@@ -26,6 +28,41 @@ use iceberg::extract_iceberg_columns;
 mod protobuf;
 use protobuf::extract_protobuf_table_schema;
 pub mod nexmark;
+
+/// Define a feature-gated function from a module.
+///
+/// This macro conditionally includes a module and re-exports a function from it.
+/// When the feature is disabled, it generates a stub function that returns an error.
+macro_rules! feature_gated_function {
+    (
+        mod $mod_name:ident,
+        $feature_name:literal,
+        async fn $func_name:ident ( $( $param_name:ident : $param_type:ty ),* $(,)? ) -> $ret_type:ty
+    ) => {
+        #[cfg(feature = $feature_name)]
+        pub mod $mod_name;
+        #[cfg(feature = $feature_name)]
+        use $mod_name::$func_name;
+
+        #[cfg(not(feature = $feature_name))]
+        #[allow(unused_variables)]
+        pub async fn $func_name( $( $param_name : $param_type ),* ) -> $ret_type {
+            Err(anyhow::anyhow!(
+                "Feature `{}` is not enabled at compile time. \
+                Please enable it in `Cargo.toml` and rebuild.",
+                $feature_name
+            ))
+        }
+    };
+}
+
+feature_gated_function!(
+    mod adbc_snowflake,
+    "source-adbc_snowflake",
+    async fn extract_adbc_snowflake_columns(
+        with_properties: &WithOptionsSecResolved,
+    ) -> anyhow::Result<Vec<ColumnCatalog>>
+);
 
 /// Resolves the schema of the source from external schema file.
 /// See <https://www.risingwave.dev/docs/current/sql-create-source> for more information.
@@ -278,6 +315,15 @@ async fn bind_columns_from_source_for_non_cdc(
             if options_with_secret.is_iceberg_connector() {
                 Some(
                     extract_iceberg_columns(&options_with_secret)
+                        .await
+                        .map_err(|err| ProtocolError(err.to_report_string()))?,
+                )
+            } else if options_with_secret
+                .get(UPSTREAM_SOURCE_KEY)
+                .is_some_and(|s| s.eq_ignore_ascii_case(ADBC_SNOWFLAKE_CONNECTOR))
+            {
+                Some(
+                    extract_adbc_snowflake_columns(&options_with_secret)
                         .await
                         .map_err(|err| ProtocolError(err.to_report_string()))?,
                 )

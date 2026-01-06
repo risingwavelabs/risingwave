@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -124,6 +124,10 @@ mod project_eliminate_rule;
 pub use project_eliminate_rule::*;
 mod project_merge_rule;
 pub use project_merge_rule::*;
+mod project_top_n_transpose_rule;
+pub use project_top_n_transpose_rule::*;
+mod top_n_project_transpose_rule;
+pub use top_n_project_transpose_rule::*;
 mod pull_up_correlated_predicate_rule;
 pub use pull_up_correlated_predicate_rule::*;
 mod pull_up_correlated_project_value_rule;
@@ -320,6 +324,8 @@ macro_rules! for_all_rules {
             , { SplitNowOrRule }
             , { FilterWithNowToJoinRule }
             , { GenerateSeriesWithNowRule }
+            , { ProjectTopNTransposeRule }
+            , { TopNProjectTransposeRule }
             , { TopNOnIndexRule }
             , { TrivialProjectToValuesRule }
             , { UnionInputValuesMergeRule }

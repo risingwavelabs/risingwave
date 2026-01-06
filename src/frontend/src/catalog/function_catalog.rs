@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -102,6 +102,8 @@ impl From<&FunctionCatalog> for PbUserDefinedFunctionMetadata {
             body: c.body.clone(),
             compressed_binary: c.compressed_binary.clone(),
             version: PbUdfExprVersion::LATEST as _,
+            is_async: c.is_async,
+            is_batched: c.is_batched,
         }
     }
 }

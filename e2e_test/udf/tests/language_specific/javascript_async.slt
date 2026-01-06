@@ -46,3 +46,50 @@ world!
 
 statement ok
 drop function echo_batch_async;
+
+statement ok
+create function async_series(n int) returns table (x int) language javascript as $$
+export async function* async_series(n) {
+    for(let i = 0; i < n; i++) {
+        yield i;
+    }
+}
+$$ WITH (async = true);
+
+query I
+select async_series(5);
+----
+0
+1
+2
+3
+4
+
+statement ok
+drop function async_series;
+
+statement ok
+create function async_key_values(kv varchar) returns table (key varchar, value varchar) language javascript as $$
+export async function* async_key_values(kv) {
+    if (!kv) {
+        return;
+    }
+    const pairs = kv.split(',');
+    for (const pair of pairs) {
+        if (pair.includes('=')) {
+            const [key, value] = pair.split('=', 2);
+            yield {key, value};
+        }
+    }
+}
+$$ WITH (async = true);
+
+query TT
+select * from async_key_values('a=1,b=2,c=3');
+----
+a 1
+b 2
+c 3
+
+statement ok
+drop function async_key_values;

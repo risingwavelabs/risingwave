@@ -499,9 +499,9 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
-                                            Mutation::Throttle(actor_to_apply) => {
-                                                if let Some(new_rate_limit) =
-                                                    actor_to_apply.get(&self.actor_ctx.id)
+                                            Mutation::Throttle(fragment_to_apply) => {
+                                                if let Some(new_rate_limit) = fragment_to_apply
+                                                    .get(&self.actor_ctx.fragment_id)
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     tracing::debug!(
@@ -597,7 +597,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                     Arc::new(
                                         SerialArray::from_iter_bitmap(
                                             itertools::repeat_n(Serial::from(0), columns[0].len()),
-                                            Bitmap::ones(columns[0].len()),
+                                            Bitmap::zeros(columns[0].len()),
                                         )
                                         .into(),
                                     ),

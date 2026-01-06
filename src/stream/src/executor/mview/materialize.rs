@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -34,6 +34,7 @@ use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::catalog::table::Engine;
 use risingwave_pb::id::{SourceId, SubscriberId};
+use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
 use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
 use risingwave_storage::table::KeyedRow;
@@ -256,10 +257,17 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         let subscriber_ids = actor_context.initial_subscriber_ids.clone();
         let op_consistency_level =
             get_op_consistency_level(conflict_behavior, may_have_downstream, &subscriber_ids);
+        let state_table_metrics = metrics.new_state_table_metrics(
+            table_catalog.id,
+            actor_context.id,
+            actor_context.fragment_id,
+        );
         // Note: The current implementation could potentially trigger a switch on the inconsistent_op flag. If the storage relies on this flag to perform optimizations, it would be advisable to maintain consistency with it throughout the lifecycle.
         let state_table = StateTableBuilder::new(table_catalog, store, vnodes)
             .with_op_consistency_level(op_consistency_level)
             .enable_preload_all_rows_by_config(&actor_context.config)
+            .enable_vnode_key_pruning(true)
+            .with_metrics(state_table_metrics)
             .build()
             .await;
 
@@ -976,11 +984,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             }
         }
 
-        if let Some(Mutation::DropSubscriptions {
-            subscriptions_to_drop,
-        }) = barrier.mutation.as_deref()
-        {
-            for (subscriber_id, upstream_mv_table_id) in subscriptions_to_drop {
+        if let Some(subscriptions_to_drop) = barrier.as_subscriptions_to_drop() {
+            for SubscriptionUpstreamInfo {
+                subscriber_id,
+                upstream_mv_table_id,
+            } in subscriptions_to_drop
+            {
                 if *upstream_mv_table_id == mv_table_id
                     && !depended_subscriptions.remove(subscriber_id)
                 {

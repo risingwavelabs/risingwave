@@ -23,14 +23,16 @@ use parking_lot::Mutex;
 
 pub type Count = Arc<AtomicU64>;
 
-pub struct GuardedCount {
-    id: u64,
+pub trait CountMapIdTrait = Copy + std::hash::Hash + Eq;
+
+pub struct GuardedCount<I: CountMapIdTrait> {
+    id: I,
     pub count: Count,
-    parent: Weak<Mutex<InnerCountMap>>,
+    parent: Weak<Mutex<InnerCountMap<I>>>,
 }
 
-impl GuardedCount {
-    pub fn new(id: u64, parent: &Arc<Mutex<InnerCountMap>>) -> (Count, Self) {
+impl<I: CountMapIdTrait> GuardedCount<I> {
+    pub fn new(id: I, parent: &Arc<Mutex<InnerCountMap<I>>>) -> (Count, Self) {
         let guard = GuardedCount {
             id,
             count: Arc::new(AtomicU64::new(0)),
@@ -40,7 +42,7 @@ impl GuardedCount {
     }
 }
 
-impl Drop for GuardedCount {
+impl<I: CountMapIdTrait> Drop for GuardedCount<I> {
     fn drop(&mut self) {
         if let Some(parent) = self.parent.upgrade() {
             let mut map = parent.lock();
@@ -49,14 +51,14 @@ impl Drop for GuardedCount {
     }
 }
 
-pub struct InnerCountMap {
-    inner: HashMap<u64, Count>,
+pub struct InnerCountMap<I: CountMapIdTrait> {
+    inner: HashMap<I, Count>,
 }
 
 #[derive(Clone)]
-pub struct CountMap(Arc<Mutex<InnerCountMap>>);
+pub struct CountMap<I: CountMapIdTrait>(Arc<Mutex<InnerCountMap<I>>>);
 
-impl CountMap {
+impl<I: CountMapIdTrait> CountMap<I> {
     pub fn new() -> Self {
         let inner = Arc::new(Mutex::new(InnerCountMap {
             inner: HashMap::new(),
@@ -64,7 +66,7 @@ impl CountMap {
         CountMap(inner)
     }
 
-    pub fn new_count(&self, id: u64) -> GuardedCount {
+    pub fn new_count(&self, id: I) -> GuardedCount<I> {
         let inner = &self.0;
         let (count, guarded_count) = GuardedCount::new(id, inner);
         let mut map = inner.lock();
@@ -72,7 +74,7 @@ impl CountMap {
         guarded_count
     }
 
-    pub fn collect(&self, ids: &[u64]) -> HashMap<u64, u64> {
+    pub fn collect(&self, ids: &[I]) -> HashMap<I, u64> {
         let map = self.0.lock();
         ids.iter()
             .filter_map(|id| {
@@ -90,7 +92,7 @@ mod tests {
 
     #[test]
     fn test_count_map() {
-        let count_map = CountMap::new();
+        let count_map = CountMap::<u64>::new();
         let count1 = count_map.new_count(1);
         let count2 = count_map.new_count(2);
         count1
@@ -106,7 +108,7 @@ mod tests {
 
     #[test]
     fn test_count_map_drop() {
-        let count_map = CountMap::new();
+        let count_map = CountMap::<u64>::new();
         let count1 = count_map.new_count(1);
         let count2 = count_map.new_count(2);
         count1

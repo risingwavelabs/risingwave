@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,7 +47,8 @@ pub type SessionId = (ProcessId, SecretKey);
 /// The interface for a database system behind pgwire protocol.
 /// We can mock it for testing purpose.
 pub trait SessionManager: Send + Sync + 'static {
-    type Session: Session;
+    type Error: Into<BoxedError>;
+    type Session: Session<Error = Self::Error>;
 
     /// In the process of auto schema change, we need a dummy session to access
     /// catalog information in frontend and build a replace plan for the table.
@@ -55,14 +56,14 @@ pub trait SessionManager: Send + Sync + 'static {
         &self,
         database_id: DatabaseId,
         user_id: u32,
-    ) -> Result<Arc<Self::Session>, BoxedError>;
+    ) -> Result<Arc<Self::Session>, Self::Error>;
 
     fn connect(
         &self,
         database: &str,
         user_name: &str,
         peer_addr: AddressRef,
-    ) -> Result<Arc<Self::Session>, BoxedError>;
+    ) -> Result<Arc<Self::Session>, Self::Error>;
 
     fn cancel_queries_in_session(&self, session_id: SessionId);
 
@@ -79,6 +80,7 @@ pub trait SessionManager: Send + Sync + 'static {
 /// A psql connection. Each connection binds with a database. Switching database will need to
 /// recreate another connection.
 pub trait Session: Send + Sync {
+    type Error: Into<BoxedError>;
     type ValuesStream: ValuesStream;
     type PreparedStatement: Send + Clone + 'static;
     type Portal: Send + Clone + std::fmt::Display + 'static;
@@ -89,13 +91,13 @@ pub trait Session: Send + Sync {
         self: Arc<Self>,
         stmt: Statement,
         format: Format,
-    ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
+    ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, Self::Error>> + Send;
 
     fn parse(
         self: Arc<Self>,
         sql: Option<Statement>,
         params_types: Vec<Option<DataType>>,
-    ) -> impl Future<Output = Result<Self::PreparedStatement, BoxedError>> + Send;
+    ) -> impl Future<Output = Result<Self::PreparedStatement, Self::Error>> + Send;
 
     /// Receive the next notice message to send to the client.
     ///
@@ -108,30 +110,30 @@ pub trait Session: Send + Sync {
         params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
-    ) -> Result<Self::Portal, BoxedError>;
+    ) -> Result<Self::Portal, Self::Error>;
 
     fn execute(
         self: Arc<Self>,
         portal: Self::Portal,
-    ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, BoxedError>> + Send;
+    ) -> impl Future<Output = Result<PgResponse<Self::ValuesStream>, Self::Error>> + Send;
 
     fn describe_statement(
         self: Arc<Self>,
         prepare_statement: Self::PreparedStatement,
-    ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError>;
+    ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), Self::Error>;
 
     fn describe_portal(
         self: Arc<Self>,
         portal: Self::Portal,
-    ) -> Result<Vec<PgFieldDescriptor>, BoxedError>;
+    ) -> Result<Vec<PgFieldDescriptor>, Self::Error>;
 
     fn user_authenticator(&self) -> &UserAuthenticator;
 
     fn id(&self) -> SessionId;
 
-    fn get_config(&self, key: &str) -> Result<String, BoxedError>;
+    fn get_config(&self, key: &str) -> Result<String, Self::Error>;
 
-    fn set_config(&self, key: &str, value: String) -> Result<String, BoxedError>;
+    fn set_config(&self, key: &str, value: String) -> Result<String, Self::Error>;
 
     fn transaction_status(&self) -> TransactionStatus;
 
@@ -371,7 +373,6 @@ pub async fn handle_connection<S, SM>(
 }
 #[cfg(test)]
 mod tests {
-    use std::error::Error;
     use std::sync::Arc;
     use std::time::Instant;
 
@@ -401,13 +402,14 @@ mod tests {
     struct MockSession {}
 
     impl SessionManager for MockSessionManager {
+        type Error = BoxedError;
         type Session = MockSession;
 
         fn create_dummy_session(
             &self,
             _database_id: DatabaseId,
             _user_name: u32,
-        ) -> Result<Arc<Self::Session>, BoxedError> {
+        ) -> Result<Arc<Self::Session>, Self::Error> {
             unimplemented!()
         }
 
@@ -416,7 +418,7 @@ mod tests {
             _database: &str,
             _user_name: &str,
             _peer_addr: crate::net::AddressRef,
-        ) -> Result<Arc<Self::Session>, Box<dyn Error + Send + Sync>> {
+        ) -> Result<Arc<Self::Session>, Self::Error> {
             Ok(Arc::new(MockSession {}))
         }
 
@@ -432,6 +434,7 @@ mod tests {
     }
 
     impl Session for MockSession {
+        type Error = BoxedError;
         type Portal = String;
         type PreparedStatement = String;
         type ValuesStream = BoxStream<'static, RowSetResult>;
@@ -440,7 +443,7 @@ mod tests {
             self: Arc<Self>,
             _stmt: Statement,
             _format: types::Format,
-        ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
+        ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, Self::Error> {
             Ok(PgResponse::builder(StatementType::SELECT)
                 .values(
                     futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])])
@@ -459,7 +462,7 @@ mod tests {
             self: Arc<Self>,
             _sql: Option<Statement>,
             _params_types: Vec<Option<DataType>>,
-        ) -> Result<String, BoxedError> {
+        ) -> Result<String, Self::Error> {
             Ok(String::new())
         }
 
@@ -469,14 +472,14 @@ mod tests {
             _params: Vec<Option<Bytes>>,
             _param_formats: Vec<types::Format>,
             _result_formats: Vec<types::Format>,
-        ) -> Result<String, BoxedError> {
+        ) -> Result<String, Self::Error> {
             Ok(String::new())
         }
 
         async fn execute(
             self: Arc<Self>,
             _portal: String,
-        ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, BoxedError> {
+        ) -> Result<PgResponse<BoxStream<'static, RowSetResult>>, Self::Error> {
             Ok(PgResponse::builder(StatementType::SELECT)
                 .values(
                     futures::stream::iter(vec![Ok(vec![Row::new(vec![Some(Bytes::new())])])])
@@ -494,7 +497,7 @@ mod tests {
         fn describe_statement(
             self: Arc<Self>,
             _statement: String,
-        ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
+        ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>), Self::Error> {
             Ok((
                 vec![],
                 vec![PgFieldDescriptor::new("".to_owned(), 1043, -1)],
@@ -504,7 +507,7 @@ mod tests {
         fn describe_portal(
             self: Arc<Self>,
             _portal: String,
-        ) -> Result<Vec<PgFieldDescriptor>, BoxedError> {
+        ) -> Result<Vec<PgFieldDescriptor>, Self::Error> {
             Ok(vec![PgFieldDescriptor::new("".to_owned(), 1043, -1)])
         }
 
@@ -516,14 +519,14 @@ mod tests {
             (0, 0)
         }
 
-        fn get_config(&self, key: &str) -> Result<String, BoxedError> {
+        fn get_config(&self, key: &str) -> Result<String, Self::Error> {
             match key {
                 "timezone" => Ok("UTC".to_owned()),
                 _ => Err(format!("Unknown config key: {key}").into()),
             }
         }
 
-        fn set_config(&self, _key: &str, _value: String) -> Result<String, BoxedError> {
+        fn set_config(&self, _key: &str, _value: String) -> Result<String, Self::Error> {
             Ok("".to_owned())
         }
 

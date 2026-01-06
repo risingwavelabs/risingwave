@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -714,6 +714,7 @@ impl CatalogController {
                 .map(|(_, fragment)| fragment.actors.len() as u64)
                 .sum::<u64>()
         };
+        let database_num = Database::find().count(&inner.db).await?;
 
         Ok(CatalogStats {
             table_num: table_num_map.remove(&TableType::Table).unwrap_or(0),
@@ -726,6 +727,7 @@ impl CatalogController {
             function_num,
             streaming_job_num,
             actor_num,
+            database_num,
         })
     }
 
@@ -821,6 +823,7 @@ pub struct CatalogStats {
     pub function_num: u64,
     pub streaming_job_num: u64,
     pub actor_num: u64,
+    pub database_num: u64,
 }
 
 impl CatalogControllerInner {

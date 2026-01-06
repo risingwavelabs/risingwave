@@ -2908,7 +2908,12 @@ impl Parser<'_> {
             let column = self.parse_identifier_non_reserved()?;
             self.expect_keyword(Keyword::AS)?;
             let expr = self.parse_expr()?;
-            Ok(Some(SourceWatermark { column, expr }))
+            let with_ttl = self.parse_keywords(&[Keyword::WITH, Keyword::TTL]);
+            Ok(Some(SourceWatermark {
+                column,
+                expr,
+                with_ttl,
+            }))
         } else {
             Ok(None)
         }

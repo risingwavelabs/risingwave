@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -146,8 +146,8 @@ pub fn new_user_defined(prost: &PbTableFunction, chunk_size: usize) -> Result<Bo
         return_type: &return_type,
         always_retry_on_network_error: false,
         language,
-        is_async: None,
-        is_batched: None,
+        is_async: udf.is_async,
+        is_batched: udf.is_batched,
     })
     .context("failed to build UDF runtime")?;
 

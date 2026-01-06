@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -101,6 +101,7 @@ impl StreamFragmentGraph {
             table_ids_cnt: 0,
             parallelism: None,
             max_parallelism: 0,
+            backfill_parallelism: None,
             backfill_order: Default::default(),
         }
     }

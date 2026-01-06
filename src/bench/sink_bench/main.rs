@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
@@ -109,7 +110,7 @@ impl LogReader for MockRangeLogReader {
                                 is_checkpoint: true,
                                 new_vnode_bitmap: None,
                                 is_stop: false,
-                                add_columns: None,
+                                schema_change: None,
                             },
                         ))
                     }
@@ -545,6 +546,7 @@ async fn main() {
             columns: table_schema.get_sink_schema(),
             downstream_pk: table_schema.pk_indices,
             sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
             format_desc,
             db_name: "not_need_set".to_owned(),
             sink_from_name: "not_need_set".to_owned(),

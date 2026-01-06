@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -696,18 +696,15 @@ impl DatabaseCheckpointControl {
     ) -> HashMap<JobId, (u64, HashSet<TableId>)> {
         self.creating_streaming_job_controls
             .iter()
-            .filter_map(|(job_id, creating_job)| {
-                creating_job
-                    .pinned_upstream_log_epoch()
-                    .map(|progress_epoch| {
-                        (
-                            *job_id,
-                            (
-                                progress_epoch,
-                                creating_job.snapshot_backfill_upstream_tables.clone(),
-                            ),
-                        )
-                    })
+            .map(|(job_id, creating_job)| {
+                let progress_epoch = creating_job.pinned_upstream_log_epoch();
+                (
+                    *job_id,
+                    (
+                        progress_epoch,
+                        creating_job.snapshot_backfill_upstream_tables.clone(),
+                    ),
+                )
             })
             .collect()
     }
@@ -1039,9 +1036,9 @@ impl DatabaseCheckpointControl {
         let barrier_info = self.state.next_barrier_info(checkpoint, curr_epoch);
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
-                tracing::info!(target: "rw_tracing", epoch = barrier_info.curr_epoch.value().0, "new barrier enqueued");
+                tracing::info!(target: "rw_tracing", epoch = barrier_info.curr_epoch(), "new barrier enqueued");
             });
-        span.record("epoch", barrier_info.curr_epoch.value().0);
+        span.record("epoch", barrier_info.curr_epoch());
 
         let ApplyCommandInfo {
             mv_subscription_max_retention,
