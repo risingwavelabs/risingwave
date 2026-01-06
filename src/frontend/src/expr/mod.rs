@@ -81,7 +81,7 @@ pub(crate) fn reject_impure(expr: impl Into<ExprImpl>, context: &str) -> RwResul
     if current::config()
         .is_some_and(|c| c.read().streaming_unsafe_allow_unmaterialized_impure_expr())
     {
-        return Ok(());
+        Ok(())
     } else if let Some(impure_expr_desc) = impure_expr_desc(&expr.into()) {
         Err(ErrorCode::NotSupported(
             format!(
