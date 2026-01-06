@@ -26,14 +26,15 @@ use super::stream::prelude::*;
 use super::stream_join_common::StreamJoinCommon;
 use super::utils::{Distill, childless_record, plan_node_name, watermark_pretty};
 use super::{
-    ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamDeltaJoin, StreamNode,
-    StreamPlanRef as PlanRef, generic,
+    ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamDeltaJoin, StreamPlanRef as PlanRef,
+    TryToStreamPb, generic,
 };
 use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprVisitor, InequalityInputPair};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamHashJoin`] implements [`super::LogicalJoin`] with hash table. It builds a hash table
@@ -324,12 +325,17 @@ impl PlanTreeNodeBinary<Stream> for StreamHashJoin {
 
 impl_plan_tree_node_for_binary! { Stream, StreamHashJoin }
 
-impl StreamNode for StreamHashJoin {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
+impl TryToStreamPb for StreamHashJoin {
+    fn try_to_stream_prost_body(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<NodeBody> {
         let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
         let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
         let left_jk_indices_prost = left_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
         let right_jk_indices_prost = right_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
+
+        let append_only = self.left().append_only() && self.right().append_only();
 
         let dk_indices_in_jk = self.derive_dist_key_in_join_key();
 
@@ -367,18 +373,15 @@ impl StreamNode for StreamHashJoin {
 
         let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
 
-        NodeBody::HashJoin(Box::new(HashJoinNode {
-            join_type: self.core.join_type as i32,
-            left_key: left_jk_indices_prost,
-            right_key: right_jk_indices_prost,
-            null_safe: null_safe_prost,
-            condition: self
-                .eq_join_predicate
-                .other_cond()
-                .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
-            inequality_pairs: self
-                .inequality_pairs
+        let condition = self
+            .eq_join_predicate
+            .other_cond()
+            .as_expr_unless_true()
+            .map(|expr| expr.to_expr_proto_checked_pure(append_only, "JOIN condition"))
+            .transpose()?;
+
+        let inequality_pairs =
+            self.inequality_pairs
                 .iter()
                 .map(
                     |(
@@ -388,21 +391,37 @@ impl StreamNode for StreamHashJoin {
                             key_required_smaller,
                             delta_expression,
                         },
-                    )| {
-                        PbInequalityPair {
+                    )|
+                     -> SchedulerResult<PbInequalityPair> {
+                        let delta_expression = delta_expression
+                            .as_ref()
+                            .map(|(delta_type, delta)| -> SchedulerResult<DeltaExpression> {
+                                Ok(DeltaExpression {
+                                    delta_type: *delta_type as i32,
+                                    delta: Some(delta.to_expr_proto_checked_pure(
+                                        append_only,
+                                        "JOIN condition",
+                                    )?),
+                                })
+                            })
+                            .transpose()?;
+                        Ok(PbInequalityPair {
                             key_required_larger: *key_required_larger as u32,
                             key_required_smaller: *key_required_smaller as u32,
                             clean_state: *do_state_clean,
-                            delta_expression: delta_expression.as_ref().map(
-                                |(delta_type, delta)| DeltaExpression {
-                                    delta_type: *delta_type as i32,
-                                    delta: Some(delta.to_expr_proto()),
-                                },
-                            ),
-                        }
+                            delta_expression,
+                        })
                     },
                 )
-                .collect_vec(),
+                .try_collect()?;
+
+        Ok(NodeBody::HashJoin(Box::new(HashJoinNode {
+            join_type: self.core.join_type as i32,
+            left_key: left_jk_indices_prost,
+            right_key: right_jk_indices_prost,
+            null_safe: null_safe_prost,
+            condition,
+            inequality_pairs,
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
             left_degree_table: Some(left_degree_table.to_internal_table_prost()),
@@ -414,7 +433,7 @@ impl StreamNode for StreamHashJoin {
             // Join encoding type should now be read from per-job config override.
             #[allow(deprecated)]
             join_encoding_type: PbJoinEncodingType::Unspecified as _,
-        }))
+        })))
     }
 }
 

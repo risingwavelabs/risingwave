@@ -18,7 +18,7 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use super::generic::GenericPlanNode;
 use super::utils::TableCatalogBuilder;
 use super::{
-    ExprRewritable, ExprVisitable, PlanBase, PlanRef, PlanTreeNodeUnary, Stream, StreamNode,
+    ExprRewritable, ExprVisitable, PlanBase, PlanRef, PlanTreeNodeUnary, Stream, TryToStreamPb,
     generic,
 };
 use crate::TableCatalog;
@@ -27,6 +27,7 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor, InputRef};
 use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
 use crate::optimizer::plan_node::utils::impl_distill_by_unit;
 use crate::optimizer::property::Distribution;
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamEowcGapFill` implements [`super::Stream`] to represent a gap-filling operation on a time
@@ -127,8 +128,11 @@ impl PlanTreeNodeUnary<Stream> for StreamEowcGapFill {
 impl_plan_tree_node_for_unary! { Stream, StreamEowcGapFill }
 impl_distill_by_unit!(StreamEowcGapFill, core, "StreamEowcGapFill");
 
-impl StreamNode for StreamEowcGapFill {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
+impl TryToStreamPb for StreamEowcGapFill {
+    fn try_to_stream_prost_body(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<NodeBody> {
         use risingwave_pb::stream_plan::*;
 
         let fill_strategies: Vec<String> = self
@@ -151,9 +155,14 @@ impl StreamNode for StreamEowcGapFill {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
-        NodeBody::EowcGapFill(Box::new(EowcGapFillNode {
+        let append_only = self.input().append_only();
+
+        Ok(NodeBody::EowcGapFill(Box::new(EowcGapFillNode {
             time_column_index: self.time_col().index() as u32,
-            interval: Some(self.interval().to_expr_proto()),
+            interval: Some(
+                self.interval()
+                    .to_expr_proto_checked_pure(append_only, "gap filling interval")?,
+            ),
             fill_columns: self
                 .fill_strategies()
                 .iter()
@@ -162,7 +171,7 @@ impl StreamNode for StreamEowcGapFill {
             fill_strategies,
             buffer_table: Some(buffer_table),
             prev_row_table: Some(prev_row_table),
-        }))
+        })))
     }
 }
 

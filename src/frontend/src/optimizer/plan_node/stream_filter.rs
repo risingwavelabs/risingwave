@@ -18,12 +18,13 @@ use risingwave_pb::stream_plan::FilterNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::{ExprRewritable, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic};
+use super::{ExprRewritable, PlanTreeNodeUnary, StreamPlanRef as PlanRef, generic};
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
-use crate::optimizer::plan_node::PlanBase;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::DistillUnit as _;
 use crate::optimizer::plan_node::utils::{Distill, plan_node_name};
+use crate::optimizer::plan_node::{PlanBase, TryToStreamPb};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::Condition;
 
@@ -93,11 +94,18 @@ impl Distill for StreamFilter {
     }
 }
 
-impl StreamNode for StreamFilter {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::Filter(Box::new(FilterNode {
-            search_condition: Some(ExprImpl::from(self.predicate().clone()).to_expr_proto()),
-        }))
+impl TryToStreamPb for StreamFilter {
+    fn try_to_stream_prost_body(
+        &self,
+        _state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbNodeBody> {
+        let append_only = self.input().append_only();
+        Ok(PbNodeBody::Filter(Box::new(FilterNode {
+            search_condition: Some(
+                ExprImpl::from(self.predicate().clone())
+                    .to_expr_proto_checked_pure(append_only, "WHERE or HAVING condition")?,
+            ),
+        })))
     }
 }
 

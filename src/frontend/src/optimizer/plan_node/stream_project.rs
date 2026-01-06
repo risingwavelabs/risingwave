@@ -19,7 +19,7 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, watermark_pretty};
 use super::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamPlanRef as PlanRef, TryToStreamPb, generic,
 };
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -27,6 +27,7 @@ use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::property::{
     MonotonicityMap, WatermarkColumns, analyze_monotonicity, monotonicity_variants,
 };
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -161,20 +162,30 @@ impl PlanTreeNodeUnary<Stream> for StreamProject {
 }
 impl_plan_tree_node_for_unary! { Stream, StreamProject}
 
-impl StreamNode for StreamProject {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+impl TryToStreamPb for StreamProject {
+    fn try_to_stream_prost_body(
+        &self,
+        _state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbNodeBody> {
         let (watermark_input_cols, watermark_output_cols) = self
             .watermark_derivations
             .iter()
             .map(|(i, o)| (*i as u32, *o as u32))
             .unzip();
-        PbNodeBody::Project(Box::new(ProjectNode {
-            select_list: self.core.exprs.iter().map(|x| x.to_expr_proto()).collect(),
+        let append_only = self.input().append_only();
+        let select_list = self
+            .core
+            .exprs
+            .iter()
+            .map(|expr| expr.to_expr_proto_checked_pure(append_only, "SELECT list"))
+            .collect::<crate::error::Result<Vec<_>>>()?;
+        Ok(PbNodeBody::Project(Box::new(ProjectNode {
+            select_list,
             watermark_input_cols,
             watermark_output_cols,
             nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
             noop_update_hint: self.noop_update_hint,
-        }))
+        })))
     }
 }
 
