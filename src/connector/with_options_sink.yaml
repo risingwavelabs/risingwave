@@ -1365,12 +1365,12 @@ RedShiftConfig:
   - name: schema
     field_type: String
     required: false
-  - name: table.name
-    field_type: String
-    required: true
   - name: intermediate.schema.name
     field_type: String
     required: false
+  - name: table.name
+    field_type: String
+    required: true
   - name: intermediate.table.name
     field_type: String
     required: false
