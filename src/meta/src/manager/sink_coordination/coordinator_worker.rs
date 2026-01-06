@@ -27,7 +27,6 @@ use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::connector_common::IcebergSinkCompactionUpdate;
 use risingwave_connector::dispatch_sink;
-use risingwave_connector::sink::boxed::BoxTwoPhaseCoordinator;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::{
     Sink, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkError, SinkParam, build_sink,
@@ -121,8 +120,8 @@ struct TwoPhaseCommitHandler {
     curr_hummock_committed_epoch: u64,
     job_committed_epoch_rx: UnboundedReceiver<u64>,
     last_committed_epoch: Option<u64>,
-    pending_epochs: VecDeque<(u64, Vec<u8>, Option<PbSinkSchemaChange>)>,
-    prepared_epochs: VecDeque<(u64, Vec<u8>, Option<PbSinkSchemaChange>)>,
+    pending_epochs: VecDeque<(u64, Option<Vec<u8>>, Option<PbSinkSchemaChange>)>,
+    prepared_epochs: VecDeque<(u64, Option<Vec<u8>>, Option<PbSinkSchemaChange>)>,
     backoff_state: Option<(RetryBackoffFuture, RetryBackoffStrategy)>,
 }
 
@@ -156,7 +155,7 @@ impl TwoPhaseCommitHandler {
 
     async fn next_to_commit(
         &mut self,
-    ) -> anyhow::Result<(u64, Vec<u8>, Option<PbSinkSchemaChange>)> {
+    ) -> anyhow::Result<(u64, Option<Vec<u8>>, Option<PbSinkSchemaChange>)> {
         loop {
             let wait_backoff = async {
                 if self.prepared_epochs.is_empty() {
@@ -193,7 +192,7 @@ impl TwoPhaseCommitHandler {
     fn push_new_item(
         &mut self,
         epoch: u64,
-        metadata: Vec<u8>,
+        metadata: Option<Vec<u8>>,
         schema_change: Option<PbSinkSchemaChange>,
     ) {
         if epoch > self.curr_hummock_committed_epoch {
@@ -496,7 +495,7 @@ pub struct CoordinatorWorker {
 
 enum CoordinatorWorkerEvent {
     HandleManagerEvent(HandleId, CoordinationHandleManagerEvent),
-    ReadyToCommit(u64, Vec<u8>, Option<PbSinkSchemaChange>),
+    ReadyToCommit(u64, Option<Vec<u8>>, Option<PbSinkSchemaChange>),
 }
 
 impl CoordinatorWorker {
@@ -569,12 +568,10 @@ impl CoordinatorWorker {
     async fn try_handle_init_requests(
         &mut self,
         pending_handle_ids: &HashSet<HandleId>,
-        two_phase_handler: Option<&mut TwoPhaseCommitHandler>,
+        two_phase_handler: &mut TwoPhaseCommitHandler,
     ) -> anyhow::Result<()> {
         assert!(matches!(self.curr_state, CoordinatorWorkerState::Running));
-        if let Some(two_phase_handler) = two_phase_handler
-            && !two_phase_handler.is_empty()
-        {
+        if !two_phase_handler.is_empty() {
             // Delay handling init requests until all pending epochs are flushed.
             self.curr_state = CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids.clone());
         } else {
@@ -621,34 +618,23 @@ impl CoordinatorWorker {
 
     async fn next_event(
         &mut self,
-        mut two_phase_handler: Option<&mut TwoPhaseCommitHandler>,
+        two_phase_handler: &mut TwoPhaseCommitHandler,
     ) -> anyhow::Result<CoordinatorWorkerEvent> {
-        if let CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids) = &self.curr_state {
-            let handler = two_phase_handler
-                .as_mut()
-                .expect("two-phase handler should exist when waiting for flush");
-            if handler.is_empty() {
-                let pending_handle_ids = pending_handle_ids.clone();
-                self.handle_init_requests_impl(pending_handle_ids).await?;
-                self.curr_state = CoordinatorWorkerState::Running;
-            }
+        if let CoordinatorWorkerState::WaitingForFlushed(pending_handle_ids) = &self.curr_state
+            && two_phase_handler.is_empty()
+        {
+            let pending_handle_ids = pending_handle_ids.clone();
+            self.handle_init_requests_impl(pending_handle_ids).await?;
+            self.curr_state = CoordinatorWorkerState::Running;
         }
 
-        // For single-phase coordinator, there is no need to wait.
-        let two_phase_next_fut = async {
-            if let Some(handler) = two_phase_handler {
-                handler.next_to_commit().await
-            } else {
-                pending().await
-            }
-        };
         select! {
             next_handle_event = self.handle_manager.next_event() => {
                 let (handle_id, event) = next_handle_event?;
                 Ok(CoordinatorWorkerEvent::HandleManagerEvent(handle_id, event))
             }
 
-            next_item_to_commit = two_phase_next_fut => {
+            next_item_to_commit = two_phase_handler.next_to_commit() => {
                 let (epoch, metadata, schema_change) = next_item_to_commit?;
                 Ok(CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change))
             }
@@ -663,28 +649,22 @@ impl CoordinatorWorker {
     ) -> anyhow::Result<()> {
         let sink_id = self.handle_manager.param.sink_id;
 
-        let mut two_phase_handler = match &mut coordinator {
-            SinkCommitCoordinator::SinglePhase(coordinator) => {
-                coordinator.init().await?;
-                None
-            }
-            SinkCommitCoordinator::TwoPhase(coordinator) => {
-                let two_phase_handler = self
-                    .init_state_from_store(&db, sink_id, subscriber, coordinator)
-                    .await?;
-                coordinator.init().await?;
-                Some(two_phase_handler)
-            }
-        };
+        let mut two_phase_handler = self
+            .init_state_from_store(&db, sink_id, subscriber, &mut coordinator)
+            .await?;
+        match &mut coordinator {
+            SinkCommitCoordinator::SinglePhase(coordinator) => coordinator.init().await?,
+            SinkCommitCoordinator::TwoPhase(coordinator) => coordinator.init().await?,
+        }
 
         let mut running_handles = self.handle_manager.wait_init_handles().await?;
-        self.try_handle_init_requests(&running_handles, two_phase_handler.as_mut())
+        self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
             .await?;
 
         let mut pending_epochs: BTreeMap<u64, AligningRequests<_>> = BTreeMap::new();
         let mut pending_new_handles = vec![];
         loop {
-            let event = self.next_event(two_phase_handler.as_mut()).await?;
+            let event = self.next_event(&mut two_phase_handler).await?;
             let (handle_id, epoch, commit_request) = match event {
                 CoordinatorWorkerEvent::HandleManagerEvent(handle_id, event) => match event {
                     CoordinationHandleManagerEvent::NewHandle => {
@@ -696,7 +676,7 @@ impl CoordinatorWorker {
                             .handle_manager
                             .alter_parallelisms(pending_new_handles.drain(..).chain([handle_id]))
                             .await?;
-                        self.try_handle_init_requests(&running_handles, two_phase_handler.as_mut())
+                        self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
                             .await?;
                         continue;
                     }
@@ -706,7 +686,7 @@ impl CoordinatorWorker {
                             .handle_manager
                             .alter_parallelisms(pending_new_handles.drain(..))
                             .await?;
-                        self.try_handle_init_requests(&running_handles, two_phase_handler.as_mut())
+                        self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
                             .await?;
 
                         continue;
@@ -721,23 +701,39 @@ impl CoordinatorWorker {
                     }
                 },
                 CoordinatorWorkerEvent::ReadyToCommit(epoch, metadata, schema_change) => {
-                    let SinkCommitCoordinator::TwoPhase(coordinator) = &mut coordinator else {
-                        unreachable!("should be two-phase commit coordinator");
-                    };
-                    let two_phase_handler = two_phase_handler.as_mut().expect("should exist");
                     let start_time = Instant::now();
-                    let commit_res = run_future_with_periodic_fn(
-                        coordinator.commit(epoch, metadata, schema_change),
-                        Duration::from_secs(5),
-                        || {
+                    let commit_fut = async {
+                        match &mut coordinator {
+                            SinkCommitCoordinator::SinglePhase(coordinator) => {
+                                assert!(metadata.is_none());
+                                if let Some(schema_change) = schema_change {
+                                    coordinator
+                                        .commit_schema_change(epoch, schema_change)
+                                        .await?;
+                                }
+                            }
+                            SinkCommitCoordinator::TwoPhase(coordinator) => {
+                                if let Some(metadata) = metadata {
+                                    coordinator.commit_data(epoch, metadata).await?;
+                                }
+                                if let Some(schema_change) = schema_change {
+                                    coordinator
+                                        .commit_schema_change(epoch, schema_change)
+                                        .await?;
+                                }
+                            }
+                        }
+                        Ok(())
+                    };
+                    let commit_res =
+                        run_future_with_periodic_fn(commit_fut, Duration::from_secs(5), || {
                             warn!(
                                 elapsed = ?start_time.elapsed(),
                                 %sink_id,
                                 "committing"
                             );
-                        },
-                    )
-                    .await;
+                        })
+                        .await;
 
                     match commit_res {
                         Ok(_) => {
@@ -788,47 +784,63 @@ impl CoordinatorWorker {
 
                 match &mut coordinator {
                     SinkCommitCoordinator::SinglePhase(coordinator) => {
-                        let start_time = Instant::now();
-                        run_future_with_periodic_fn(
-                            coordinator.commit(epoch, metadatas, first_schema_change),
-                            Duration::from_secs(5),
-                            || {
-                                warn!(
-                                    elapsed = ?start_time.elapsed(),
-                                    %sink_id,
-                                    "committing"
-                                );
-                            },
-                        )
-                        .await
-                        .map_err(|e| anyhow!(e))?;
-                        self.handle_manager
-                            .ack_commit(epoch, commit_requests.handle_ids)?;
-                        self.prev_committed_epoch = Some(epoch);
+                        if !metadatas.is_empty() {
+                            let start_time = Instant::now();
+                            run_future_with_periodic_fn(
+                                coordinator.commit_data(epoch, metadatas),
+                                Duration::from_secs(5),
+                                || {
+                                    warn!(
+                                        elapsed = ?start_time.elapsed(),
+                                        %sink_id,
+                                        "committing"
+                                    );
+                                },
+                            )
+                            .await
+                            .map_err(|e| anyhow!(e))?;
+                        }
+                        if first_schema_change.is_some() {
+                            persist_pre_commit_metadata(
+                                &db,
+                                sink_id as _,
+                                epoch,
+                                None,
+                                first_schema_change.as_ref(),
+                            )
+                            .await?;
+                            two_phase_handler.push_new_item(epoch, None, first_schema_change);
+                        } else {
+                            self.prev_committed_epoch = Some(epoch);
+                        }
                     }
                     SinkCommitCoordinator::TwoPhase(coordinator) => {
                         let commit_metadata = coordinator
                             .pre_commit(epoch, metadatas, first_schema_change.clone())
                             .await?;
-                        persist_pre_commit_metadata(
-                            &db,
-                            sink_id as _,
-                            epoch,
-                            commit_metadata.clone(),
-                            first_schema_change.as_ref(),
-                        )
-                        .await?;
-                        self.handle_manager
-                            .ack_commit(epoch, commit_requests.handle_ids)?;
-
-                        let two_phase_handler = two_phase_handler.as_mut().expect("should exist");
-                        two_phase_handler.push_new_item(
-                            epoch,
-                            commit_metadata,
-                            first_schema_change,
-                        );
+                        if commit_metadata.is_some() || first_schema_change.is_some() {
+                            persist_pre_commit_metadata(
+                                &db,
+                                sink_id as _,
+                                epoch,
+                                commit_metadata.clone(),
+                                first_schema_change.as_ref(),
+                            )
+                            .await?;
+                            two_phase_handler.push_new_item(
+                                epoch,
+                                commit_metadata,
+                                first_schema_change,
+                            );
+                        } else {
+                            // No data to commit and no schema change.
+                            self.prev_committed_epoch = Some(epoch);
+                        }
                     }
                 }
+
+                self.handle_manager
+                    .ack_commit(epoch, commit_requests.handle_ids)?;
             }
         }
     }
@@ -839,7 +851,7 @@ impl CoordinatorWorker {
         db: &DatabaseConnection,
         sink_id: SinkId,
         subscriber: SinkCommittedEpochSubscriber,
-        coordinator: &mut BoxTwoPhaseCoordinator,
+        coordinator: &mut SinkCommitCoordinator,
     ) -> anyhow::Result<TwoPhaseCommitHandler> {
         let ordered_metadata = list_sink_states_ordered_by_epoch(db, sink_id as _).await?;
 
@@ -859,7 +871,11 @@ impl CoordinatorWorker {
         for (epoch, state, metadata, _) in metadata_iter {
             match state {
                 SinkState::Aborted => {
-                    coordinator.abort(epoch, metadata).await;
+                    if let Some(metadata) = metadata
+                        && let SinkCommitCoordinator::TwoPhase(coordinator) = coordinator
+                    {
+                        coordinator.abort(epoch, metadata).await;
+                    }
                     aborted_epochs.push(epoch);
                 }
                 other => {

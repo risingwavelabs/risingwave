@@ -248,6 +248,8 @@ pub struct SinkParam {
     /// User-defined primary key indices for upsert sink, if any.
     pub downstream_pk: Option<Vec<usize>>,
     pub sink_type: SinkType,
+    /// Whether to drop DELETE and convert UPDATE to INSERT in the sink executor.
+    pub ignore_delete: bool,
     pub format_desc: Option<SinkFormatDesc>,
     pub db_name: String,
 
@@ -261,6 +263,7 @@ pub struct SinkParam {
 
 impl SinkParam {
     pub fn from_proto(pb_param: PbSinkParam) -> Self {
+        let ignore_delete = pb_param.ignore_delete();
         let table_schema = pb_param.table_schema.expect("should contain table schema");
         let format_desc = match pb_param.format_desc {
             Some(f) => f.try_into().ok(),
@@ -290,6 +293,7 @@ impl SinkParam {
             sink_type: SinkType::from_proto(
                 PbSinkType::try_from(pb_param.sink_type).expect("should be able to convert"),
             ),
+            ignore_delete,
             format_desc,
             db_name: pb_param.db_name,
             sink_from_name: pb_param.sink_from_name,
@@ -310,6 +314,7 @@ impl SinkParam {
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
+            raw_ignore_delete: self.ignore_delete,
         }
     }
 
@@ -359,6 +364,7 @@ impl SinkParam {
             columns,
             downstream_pk: sink_catalog.downstream_pk,
             sink_type: sink_catalog.sink_type,
+            ignore_delete: sink_catalog.ignore_delete,
             format_desc: format_desc_with_secret,
             db_name: sink_catalog.db_name,
             sink_from_name: sink_catalog.sink_from_name,
@@ -823,13 +829,21 @@ pub trait SinglePhaseCommitCoordinator {
     /// Initialize the sink committer coordinator.
     async fn init(&mut self) -> Result<()>;
 
-    /// Commit directly using single-phase strategy.
-    async fn commit(
+    /// Commit data directly using single-phase strategy.
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+
+    /// Idempotent implementation is required, because `commit_schema_change` in the same epoch could be called multiple
+    /// times.
+    async fn commit_schema_change(
         &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<()>;
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        Err(SinkError::Coordinator(anyhow!(
+            "Schema change is not implemented for single-phase commit coordinator {}",
+            std::any::type_name::<Self>()
+        )))
+    }
 }
 
 #[async_trait]
@@ -843,15 +857,23 @@ pub trait TwoPhaseCommitCoordinator {
         epoch: u64,
         metadata: Vec<SinkMetadata>,
         schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<Vec<u8>>;
+    ) -> Result<Option<Vec<u8>>>;
 
-    /// Idempotent implementation is required, because `commit` in the same epoch could be called multiple times.
-    async fn commit(
+    /// Idempotent implementation is required, because `commit_data` in the same epoch could be called multiple times.
+    async fn commit_data(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()>;
+
+    /// Idempotent implementation is required, because `commit_schema_change` in the same epoch could be called multiple
+    /// times.
+    async fn commit_schema_change(
         &mut self,
-        epoch: u64,
-        commit_metadata: Vec<u8>,
-        schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<()>;
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        Err(SinkError::Coordinator(anyhow!(
+            "Schema change is not implemented for two-phase commit coordinator {}",
+            std::any::type_name::<Self>()
+        )))
+    }
 
     /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>);

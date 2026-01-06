@@ -27,7 +27,7 @@ pub async fn persist_pre_commit_metadata(
     db: &DatabaseConnection,
     sink_id: SinkId,
     epoch: u64,
-    commit_metadata: Vec<u8>,
+    commit_metadata: Option<Vec<u8>>,
     schema_change: Option<&PbSinkSchemaChange>,
 ) -> anyhow::Result<()> {
     let schema_change = schema_change.map(Into::into);
@@ -114,6 +114,13 @@ pub async fn clean_aborted_records(
     }
 }
 
+type PendingSinkStateRow = (
+    Epoch,
+    pending_sink_state::SinkState,
+    Option<Vec<u8>>,
+    Option<SinkSchemachange>,
+);
+
 pub async fn list_sink_states_ordered_by_epoch(
     db: &DatabaseConnection,
     sink_id: SinkId,
@@ -121,16 +128,11 @@ pub async fn list_sink_states_ordered_by_epoch(
     Vec<(
         u64,
         pending_sink_state::SinkState,
-        Vec<u8>,
+        Option<Vec<u8>>,
         Option<PbSinkSchemaChange>,
     )>,
 > {
-    let rows: Vec<(
-        Epoch,
-        pending_sink_state::SinkState,
-        Vec<u8>,
-        Option<SinkSchemachange>,
-    )> = match pending_sink_state::Entity::find()
+    let rows: Vec<PendingSinkStateRow> = match pending_sink_state::Entity::find()
         .select_only()
         .columns([
             pending_sink_state::Column::Epoch,

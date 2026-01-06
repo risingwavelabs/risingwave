@@ -338,6 +338,10 @@ message SinkDesc {
   optional uint32 target_table = 14;
   optional uint64 extra_partition_col_idx = 15;
   map<string, secret.SecretRef> secret_refs = 16;
+  // Backward-compatible replacement for `SINK_TYPE_FORCE_APPEND_ONLY`.
+  //
+  // Should not directly access this field. Use method `ignore_delete()` instead.
+  bool raw_ignore_delete = 17;
 }
 
 enum SinkLogStoreType {
@@ -631,6 +635,8 @@ message DynamicFilterNode {
   // If this is false, we need to store RHS records which match the condition in the internal table.
   // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
   bool condition_always_relax = 5 [deprecated = true];
+  // Whether the dynamic filter can clean its left state table by watermark.
+  bool cleaned_by_watermark = 6;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta

@@ -419,6 +419,21 @@ static CONVERT_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     )
 });
 
+// DataFusion cannot apply `OverWindowToTopNRule`
+static CONVERT_OVER_WINDOW_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Convert Over Window",
+        vec![
+            ProjectMergeRule::create(),
+            ProjectEliminateRule::create(),
+            TrivialProjectToValuesRule::create(),
+            UnionInputValuesMergeRule::create(),
+            OverWindowToAggAndJoinRule::create(),
+        ],
+        ApplyOrder::TopDown,
+    )
+});
+
 static MERGE_OVER_WINDOW: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "Merge Over Window",
@@ -438,7 +453,19 @@ static REWRITE_LIKE_EXPR: LazyLock<OptimizationStage> = LazyLock::new(|| {
 static TOP_N_AGG_ON_INDEX: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "TopN/SimpleAgg on Index",
-        vec![TopNOnIndexRule::create(), MinMaxOnIndexRule::create()],
+        vec![
+            TopNProjectTransposeRule::create(),
+            TopNOnIndexRule::create(),
+            MinMaxOnIndexRule::create(),
+        ],
+        ApplyOrder::TopDown,
+    )
+});
+
+static PROJECT_TOP_N_TRANSPOSE: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Project TopN Transpose",
+        vec![ProjectTopNTransposeRule::create()],
         ApplyOrder::TopDown,
     )
 });
@@ -844,7 +871,7 @@ impl LogicalOptimizer {
             last_total_rule_applied_before_predicate_pushdown = ctx.total_rule_applied();
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
-        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW)?;
+        plan = plan.optimize_by_rules(&CONVERT_OVER_WINDOW_FOR_BATCH)?;
         plan = plan.optimize_by_rules(&MERGE_OVER_WINDOW)?;
 
         // Convert distinct aggregates.
@@ -872,6 +899,8 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PULL_UP_HOP)?;
 
         plan = plan.optimize_by_rules(&TOP_N_AGG_ON_INDEX)?;
+
+        plan = plan.optimize_by_rules(&PROJECT_TOP_N_TRANSPOSE)?;
 
         plan = plan.optimize_by_rules(&LIMIT_PUSH_DOWN)?;
 

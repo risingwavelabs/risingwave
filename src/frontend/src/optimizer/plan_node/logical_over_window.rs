@@ -631,17 +631,6 @@ impl ToBatch for LogicalOverWindow {
             "must apply OverWindowSplitRule before generating physical plan"
         );
 
-        // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
-        // empty PARTITION BY by simply removing the following check.
-        let partition_key_indices = self.window_functions()[0]
-            .partition_by
-            .iter()
-            .map(|e| e.index())
-            .collect_vec();
-        if partition_key_indices.is_empty() {
-            empty_partition_by_not_implemented!();
-        }
-
         let input = self.input().to_batch()?;
         let core = self.core.clone_with_input(input);
         Ok(BatchOverWindow::new(core).into())
