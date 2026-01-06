@@ -78,25 +78,27 @@ pub(crate) const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicate
 Consider simplifying or splitting the query if you encounter any issues.";
 
 pub(crate) fn reject_impure(expr: impl Into<ExprImpl>, context: &str) -> RwResult<()> {
-    if current::config()
-        .is_some_and(|c| c.read().streaming_unsafe_allow_unmaterialized_impure_expr())
-    {
-        Ok(())
-    } else if let Some(impure_expr_desc) = impure_expr_desc(&expr.into()) {
-        Err(ErrorCode::NotSupported(
-            format!(
-                "using an impure expression ({impure_expr_desc}) in {context} \
-                 on a retract stream may lead to inconsistent results"
-            ),
-            "rewrite the query to extract the impure expression into the select list, \
-             or setting `streaming_unsafe_allow_unmaterialized_impure_expr` to allow \
-             the behavior at the risk of inconsistent results or panics during execution"
-                .into(),
-        )
-        .into())
-    } else {
-        Ok(())
+    if let Some(impure_expr_desc) = impure_expr_desc(&expr.into()) {
+        let msg = format!(
+            "using an impure expression ({impure_expr_desc}) in {context} \
+             on a retract stream may lead to inconsistent results"
+        );
+        if current::config()
+            .is_some_and(|c| c.read().streaming_unsafe_allow_unmaterialized_impure_expr())
+        {
+            current::notice_to_user(msg);
+        } else {
+            return Err(ErrorCode::NotSupported(
+                msg,
+                "rewrite the query to extract the impure expression into the select list, \
+                 or setting `streaming_unsafe_allow_unmaterialized_impure_expr` to allow \
+                 the behavior at the risk of inconsistent results or panics during execution"
+                    .into(),
+            )
+            .into());
+        }
     }
+    Ok(())
 }
 
 /// the trait of bound expressions

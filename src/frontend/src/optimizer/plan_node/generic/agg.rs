@@ -847,7 +847,7 @@ impl PlanAggCall {
             filter: self
                 .filter
                 .as_expr_unless_true()
-                .map(|x| x.to_expr_proto_checked_pure(retract, "AGGREGATE filter"))
+                .map(|x| x.to_expr_proto_checked_pure(retract, "AGGREGATE FILTER condition"))
                 .transpose()?,
             direct_args: self
                 .direct_args
