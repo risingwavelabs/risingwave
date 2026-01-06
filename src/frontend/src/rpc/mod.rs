@@ -133,7 +133,7 @@ async fn get_new_table_plan(
         table_catalog.create_sql_ast_purified()?
     };
 
-    let (source, mut table, graph, job_type) = get_replace_table_plan(
+    let (mut source, mut table, graph, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
@@ -145,6 +145,9 @@ async fn get_new_table_plan(
     // The dummy session may be created with a fixed super user, which can cause the generated
     // plan to carry an incorrect table owner. Restore it to the original owner.
     table.owner = original_owner;
+    if let Some(source) = &mut source {
+        source.owner = original_owner;
+    }
 
     Ok(ReplaceJobPlan {
         replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
