@@ -331,9 +331,19 @@ fn gen_batch_query_plan(
     {
         use crate::optimizer::DataFusionExecuteCheckerExt;
 
-        if session.config().enable_datafusion_engine()
-            && optimized_logical.plan.able_to_run_by_datafusion()
-        {
+        let execute_by_datafusion = if session.config().enable_datafusion_engine() {
+            let check_result = optimized_logical.plan.check_for_datafusion();
+            if !check_result.supported && check_result.have_iceberg_scan {
+                tracing::warn!(
+                    "DataFusion execution disabled because of unsupported plan nodes in the logical plan. The performance may be degraded."
+                );
+            }
+            check_result.supported && check_result.have_iceberg_scan
+        } else {
+            false
+        };
+
+        if execute_by_datafusion {
             let plan = optimized_logical.gen_datafusion_logical_plan()?;
             return Ok(BatchPlanChoice::Df(DfBatchQueryPlanResult {
                 plan,
