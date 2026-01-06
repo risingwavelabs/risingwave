@@ -829,13 +829,21 @@ pub trait SinglePhaseCommitCoordinator {
     /// Initialize the sink committer coordinator.
     async fn init(&mut self) -> Result<()>;
 
-    /// Commit directly using single-phase strategy.
-    async fn commit(
+    /// Commit data directly using single-phase strategy.
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()>;
+
+    /// Idempotent implementation is required, because `commit_schema_change` in the same epoch could be called multiple
+    /// times.
+    async fn commit_schema_change(
         &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<()>;
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        Err(SinkError::Coordinator(anyhow!(
+            "Schema change is not implemented for single-phase commit coordinator {}",
+            std::any::type_name::<Self>()
+        )))
+    }
 }
 
 #[async_trait]
@@ -849,15 +857,23 @@ pub trait TwoPhaseCommitCoordinator {
         epoch: u64,
         metadata: Vec<SinkMetadata>,
         schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<Vec<u8>>;
+    ) -> Result<Option<Vec<u8>>>;
 
-    /// Idempotent implementation is required, because `commit` in the same epoch could be called multiple times.
-    async fn commit(
+    /// Idempotent implementation is required, because `commit_data` in the same epoch could be called multiple times.
+    async fn commit_data(&mut self, epoch: u64, commit_metadata: Vec<u8>) -> Result<()>;
+
+    /// Idempotent implementation is required, because `commit_schema_change` in the same epoch could be called multiple
+    /// times.
+    async fn commit_schema_change(
         &mut self,
-        epoch: u64,
-        commit_metadata: Vec<u8>,
-        schema_change: Option<PbSinkSchemaChange>,
-    ) -> Result<()>;
+        _epoch: u64,
+        _schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        Err(SinkError::Coordinator(anyhow!(
+            "Schema change is not implemented for two-phase commit coordinator {}",
+            std::any::type_name::<Self>()
+        )))
+    }
 
     /// Idempotent implementation is required, because `abort` in the same epoch could be called multiple times.
     async fn abort(&mut self, epoch: u64, commit_metadata: Vec<u8>);

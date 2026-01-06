@@ -19,7 +19,7 @@ use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
 use anyhow::anyhow;
-use futures::{FutureExt, TryStreamExt};
+use futures::FutureExt;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -31,7 +31,9 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
 use smallvec::{SmallVec, smallvec};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::task::consume_budget;
 use tokio::time::Instant;
 use tokio_stream::StreamExt;
 use tokio_stream::adapters::Peekable;
@@ -49,6 +51,8 @@ use crate::task::{DispatcherId, NewOutputRequest};
 mod output_mapping;
 pub use output_mapping::DispatchOutputMapping;
 use risingwave_common::id::FragmentId;
+
+use crate::error::StreamError;
 
 /// [`DispatchExecutor`] consumes messages and send them into downstream actors. Usually,
 /// data chunks will be dispatched with some specified policy, while control message
@@ -99,7 +103,7 @@ impl DispatchExecutorMetrics {
                 .with_guarded_label_values(&[
                     self.actor_id_str.as_str(),
                     self.fragment_id_str.as_str(),
-                    dispatcher.dispatcher_id_str(),
+                    dispatcher.dispatcher_id().to_string().as_str(),
                 ]),
             dispatcher,
         }
@@ -157,33 +161,41 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
-        macro_rules! await_with_metrics {
-            ($fut:expr, $metrics:expr) => {{
-                let mut start_time = Instant::now();
-                let interval_duration = Duration::from_secs(15);
-                let mut interval =
-                    tokio::time::interval_at(start_time + interval_duration, interval_duration);
-
-                let mut fut = std::pin::pin!($fut);
-
-                loop {
-                    tokio::select! {
-                        biased;
-                        res = &mut fut => {
-                            res?;
-                            let ns = start_time.elapsed().as_nanos() as u64;
-                            $metrics.inc_by(ns);
-                            break;
-                        }
-                        _ = interval.tick() => {
-                            start_time = Instant::now();
-                            $metrics.inc_by(interval_duration.as_nanos() as u64);
-                        }
-                    };
-                }
-                StreamResult::Ok(())
-            }};
+        if self.dispatchers.is_empty() {
+            // Our dispatcher internal implementation calls tokio method, which already involves cooperative scheduling
+            // with tokio runtime.
+            //
+            // When there is no dispatcher, we should do the cooperative scheduling together.
+            consume_budget().await;
         }
+        async fn await_with_metrics(
+            future: impl Future<Output = ()>,
+            metrics: &LabelGuardedIntCounter,
+        ) {
+            let mut start_time = Instant::now();
+            let interval_duration = Duration::from_secs(15);
+            let mut interval =
+                tokio::time::interval_at(start_time + interval_duration, interval_duration);
+
+            let mut fut = pin!(future);
+
+            loop {
+                tokio::select! {
+                    biased;
+                    _res = &mut fut => {
+                        let ns = start_time.elapsed().as_nanos() as u64;
+                        metrics.inc_by(ns);
+                        break;
+                    }
+                    _ = interval.tick() => {
+                        start_time = Instant::now();
+                        metrics.inc_by(interval_duration.as_nanos() as u64);
+                    }
+                };
+            }
+        }
+
+        use futures::StreamExt;
 
         let limit = self.actor_config.developer.exchange_concurrent_dispatchers;
         // Only barrier can be batched for now.
@@ -196,8 +208,7 @@ impl DispatchExecutorInner {
                 let mutation = barrier_batch[0].mutation.clone();
                 self.pre_mutate_dispatchers(&mutation).await?;
                 futures::stream::iter(self.dispatchers.iter_mut())
-                    .map(Ok)
-                    .try_for_each_concurrent(limit, |dispatcher| async {
+                    .for_each_concurrent(limit, |dispatcher| async {
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_barriers(
@@ -207,38 +218,43 @@ impl DispatchExecutorInner {
                                 .map(|b| b.into_dispatcher())
                                 .collect(),
                         );
-                        await_with_metrics!(std::pin::pin!(fut), metrics)
+                        await_with_metrics(fut, metrics).await;
                     })
-                    .await?;
+                    .await;
                 self.post_mutate_dispatchers(&mutation)?;
             }
             MessageBatch::Watermark(watermark) => {
                 futures::stream::iter(self.dispatchers.iter_mut())
-                    .map(Ok)
-                    .try_for_each_concurrent(limit, |dispatcher| async {
+                    .for_each_concurrent(limit, |dispatcher| async {
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_watermark(watermark.clone());
-                        await_with_metrics!(std::pin::pin!(fut), metrics)
+                        await_with_metrics(fut, metrics).await;
                     })
-                    .await?;
+                    .await;
             }
             MessageBatch::Chunk(chunk) => {
                 futures::stream::iter(self.dispatchers.iter_mut())
-                    .map(Ok)
-                    .try_for_each_concurrent(limit, |dispatcher| async {
+                    .for_each_concurrent(limit, |dispatcher| async {
                         let metrics = &dispatcher.actor_output_buffer_blocking_duration_ns;
                         let dispatcher_output = &mut dispatcher.dispatcher;
                         let fut = dispatcher_output.dispatch_data(chunk.clone());
-                        await_with_metrics!(std::pin::pin!(fut), metrics)
+                        await_with_metrics(fut, metrics).await;
                     })
-                    .await?;
+                    .await;
 
                 self.metrics
                     .actor_out_record_cnt
                     .inc_by(chunk.cardinality() as _);
             }
         }
+        self.dispatchers.retain(|dispatcher| match &**dispatcher {
+            DispatcherImpl::Failed(dispatcher_id, e) => {
+                warn!(%dispatcher_id, err = %e.as_report(), actor_id = %self.actor_id, "dispatch fail");
+                false
+            }
+            _ => true,
+        });
         Ok(())
     }
 
@@ -268,11 +284,11 @@ impl DispatchExecutorInner {
         Ok(())
     }
 
-    fn find_dispatcher(&mut self, dispatcher_id: DispatcherId) -> &mut DispatcherImpl {
+    fn find_dispatcher(&mut self, dispatcher_id: DispatcherId) -> Option<&mut DispatcherImpl> {
         self.dispatchers
             .iter_mut()
             .find(|d| d.dispatcher_id() == dispatcher_id)
-            .unwrap_or_else(|| panic!("dispatcher {}:{} not found", self.actor_id, dispatcher_id))
+            .map(DerefMut::deref_mut)
     }
 
     /// Update the dispatcher BEFORE we actually dispatch this barrier. We'll only add the new
@@ -282,7 +298,10 @@ impl DispatchExecutorInner {
             .collect_outputs(&update.added_downstream_actor_id)
             .await?;
 
-        let dispatcher = self.find_dispatcher(update.dispatcher_id);
+        let Some(dispatcher) = self.find_dispatcher(update.dispatcher_id) else {
+            warn!(dispatcher_id = %update.dispatcher_id, added = ?update.added_downstream_actor_id, removed = ?update.removed_downstream_actor_id, actor_id = %self.actor_id, "ignore dispatcher update");
+            return Ok(());
+        };
         dispatcher.add_outputs(outputs);
 
         Ok(())
@@ -293,7 +312,10 @@ impl DispatchExecutorInner {
     fn post_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
         let ids = update.removed_downstream_actor_id.iter().copied().collect();
 
-        let dispatcher = self.find_dispatcher(update.dispatcher_id);
+        let Some(dispatcher) = self.find_dispatcher(update.dispatcher_id) else {
+            warn!(dispatcher_id = %update.dispatcher_id, added = ?update.added_downstream_actor_id, removed = ?update.removed_downstream_actor_id, actor_id = %self.actor_id, "ignore dispatcher update");
+            return Ok(());
+        };
         dispatcher.remove_outputs(&ids);
 
         // The hash mapping is only used by the hash dispatcher.
@@ -602,11 +624,15 @@ async fn try_batch_barriers(
 }
 
 #[derive(Debug)]
-pub enum DispatcherImpl {
+pub(crate) enum DispatcherImpl {
     Hash(HashDataDispatcher),
     Broadcast(BroadcastDispatcher),
     Simple(SimpleDispatcher),
+    #[cfg_attr(not(test), expect(dead_code))]
     RoundRobin(RoundRobinDataDispatcher),
+    /// The dispatcher has failed to dispatch to downstream and gets pending
+    /// Should be clean up later.
+    Failed(DispatcherId, StreamError),
 }
 
 impl DispatcherImpl {
@@ -658,51 +684,58 @@ impl DispatcherImpl {
 macro_rules! impl_dispatcher {
     ($( { $variant_name:ident } ),*) => {
         impl DispatcherImpl {
-            pub async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-                match self {
+            pub async fn dispatch_data(&mut self, chunk: StreamChunk) {
+                if let Err(e) = match self {
                     $( Self::$variant_name(inner) => inner.dispatch_data(chunk).await, )*
+                    Self::Failed(..) => unreachable!(),
+                } {
+                    *self = Self::Failed(self.dispatcher_id(), e);
                 }
             }
 
-            pub async fn dispatch_barriers(&mut self, barriers: DispatcherBarriers) -> StreamResult<()> {
-                match self {
+            pub async fn dispatch_barriers(&mut self, barriers: DispatcherBarriers) {
+                if let Err(e) = match self {
                     $( Self::$variant_name(inner) => inner.dispatch_barriers(barriers).await, )*
+                    Self::Failed(..) => unreachable!(),
+                } {
+                    *self = Self::Failed(self.dispatcher_id(), e);
                 }
             }
 
-            pub async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
-                match self {
+            pub async fn dispatch_watermark(&mut self, watermark: Watermark) {
+                if let Err(e) = match self {
                     $( Self::$variant_name(inner) => inner.dispatch_watermark(watermark).await, )*
+                    Self::Failed(..) => unreachable!(),
+                } {
+                    *self = Self::Failed(self.dispatcher_id(), e);
                 }
             }
 
             pub fn add_outputs(&mut self, outputs: impl IntoIterator<Item = Output>) {
                 match self {
                     $(Self::$variant_name(inner) => inner.add_outputs(outputs), )*
+                    Self::Failed(..) => {},
                 }
             }
 
             pub fn remove_outputs(&mut self, actor_ids: &HashSet<ActorId>) {
                 match self {
                     $(Self::$variant_name(inner) => inner.remove_outputs(actor_ids), )*
+                    Self::Failed(..) => {},
                 }
             }
 
             pub fn dispatcher_id(&self) -> DispatcherId {
                 match self {
                     $(Self::$variant_name(inner) => inner.dispatcher_id(), )*
-                }
-            }
-
-            pub fn dispatcher_id_str(&self) -> &str {
-                match self {
-                    $(Self::$variant_name(inner) => inner.dispatcher_id_str(), )*
+                    Self::Failed(dispatcher_id, ..) => *dispatcher_id,
                 }
             }
 
             pub fn is_empty(&self) -> bool {
                 match self {
                     $(Self::$variant_name(inner) => inner.is_empty(), )*
+                    Self::Failed(..) => true,
                 }
             }
         }
@@ -724,7 +757,7 @@ for_all_dispatcher_variants! { impl_dispatcher }
 
 pub trait DispatchFuture<'a> = Future<Output = StreamResult<()>> + Send;
 
-pub trait Dispatcher: Debug + 'static {
+trait Dispatcher: Debug + 'static {
     /// Dispatch a data chunk to downstream actors.
     fn dispatch_data(&mut self, chunk: StreamChunk) -> impl DispatchFuture<'_>;
     /// Dispatch barriers to downstream actors, generally by broadcasting it.
@@ -743,9 +776,6 @@ pub trait Dispatcher: Debug + 'static {
     /// Note that the dispatcher id is always equal to the downstream fragment id.
     /// See also `proto/stream_plan.proto`.
     fn dispatcher_id(&self) -> DispatcherId;
-
-    /// Dispatcher id in string. See [`Dispatcher::dispatcher_id`].
-    fn dispatcher_id_str(&self) -> &str;
 
     /// Whether the dispatcher has no outputs. If so, it'll be cleaned up from the
     /// [`DispatchExecutor`].
@@ -775,10 +805,10 @@ pub struct RoundRobinDataDispatcher {
     output_mapping: DispatchOutputMapping,
     cur: usize,
     dispatcher_id: DispatcherId,
-    dispatcher_id_str: String,
 }
 
 impl RoundRobinDataDispatcher {
+    #[cfg_attr(not(test), expect(dead_code))]
     pub fn new(
         outputs: Vec<Output>,
         output_mapping: DispatchOutputMapping,
@@ -789,7 +819,6 @@ impl RoundRobinDataDispatcher {
             output_mapping,
             cur: 0,
             dispatcher_id,
-            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 }
@@ -842,10 +871,6 @@ impl Dispatcher for RoundRobinDataDispatcher {
         self.dispatcher_id
     }
 
-    fn dispatcher_id_str(&self) -> &str {
-        &self.dispatcher_id_str
-    }
-
     fn is_empty(&self) -> bool {
         self.outputs.is_empty()
     }
@@ -859,7 +884,6 @@ pub struct HashDataDispatcher {
     /// different downstream actors.
     hash_mapping: ExpandedActorMapping,
     dispatcher_id: DispatcherId,
-    dispatcher_id_str: String,
 }
 
 impl Debug for HashDataDispatcher {
@@ -886,7 +910,6 @@ impl HashDataDispatcher {
             output_mapping,
             hash_mapping,
             dispatcher_id,
-            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 }
@@ -1026,10 +1049,6 @@ impl Dispatcher for HashDataDispatcher {
         self.dispatcher_id
     }
 
-    fn dispatcher_id_str(&self) -> &str {
-        &self.dispatcher_id_str
-    }
-
     fn is_empty(&self) -> bool {
         self.outputs.is_empty()
     }
@@ -1041,7 +1060,6 @@ pub struct BroadcastDispatcher {
     outputs: HashMap<ActorId, Output>,
     output_mapping: DispatchOutputMapping,
     dispatcher_id: DispatcherId,
-    dispatcher_id_str: String,
 }
 
 impl BroadcastDispatcher {
@@ -1054,7 +1072,6 @@ impl BroadcastDispatcher {
             outputs: Self::into_pairs(outputs).collect(),
             output_mapping,
             dispatcher_id,
-            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 
@@ -1112,10 +1129,6 @@ impl Dispatcher for BroadcastDispatcher {
         self.dispatcher_id
     }
 
-    fn dispatcher_id_str(&self) -> &str {
-        &self.dispatcher_id_str
-    }
-
     fn is_empty(&self) -> bool {
         self.outputs.is_empty()
     }
@@ -1140,7 +1153,6 @@ pub struct SimpleDispatcher {
     output: SmallVec<[Output; 2]>,
     output_mapping: DispatchOutputMapping,
     dispatcher_id: DispatcherId,
-    dispatcher_id_str: String,
 }
 
 impl SimpleDispatcher {
@@ -1153,7 +1165,6 @@ impl SimpleDispatcher {
             output: smallvec![output],
             output_mapping,
             dispatcher_id,
-            dispatcher_id_str: dispatcher_id.to_string(),
         }
     }
 }
@@ -1207,10 +1218,6 @@ impl Dispatcher for SimpleDispatcher {
 
     fn dispatcher_id(&self) -> DispatcherId {
         self.dispatcher_id
-    }
-
-    fn dispatcher_id_str(&self) -> &str {
-        &self.dispatcher_id_str
     }
 
     fn is_empty(&self) -> bool {
