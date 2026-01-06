@@ -645,7 +645,7 @@ impl DatabaseCheckpointControl {
         match creating_job_id {
             None => {
                 if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
-                    assert!(node.state.node_to_collect.remove(&worker_id).is_some());
+                    assert!(node.state.node_to_collect.remove(&worker_id));
                     node.state.resps.push(resp);
                 } else {
                     panic!(
@@ -678,13 +678,12 @@ impl DatabaseCheckpointControl {
     }
 
     /// Return whether the database can still work after worker failure
-    pub(crate) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
-        for epoch_node in self.command_ctx_queue.values_mut() {
-            if !is_valid_after_worker_err(&mut epoch_node.state.node_to_collect, worker_id) {
+    pub(crate) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
+        for epoch_node in self.command_ctx_queue.values() {
+            if !is_valid_after_worker_err(&epoch_node.state.node_to_collect, worker_id) {
                 return false;
             }
         }
-        // TODO: include barrier in creating jobs
         true
     }
 }

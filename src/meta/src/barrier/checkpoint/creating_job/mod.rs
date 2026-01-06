@@ -499,13 +499,13 @@ impl CreatingStreamingJobControl {
         self.barrier_control.is_empty()
     }
 
-    pub(crate) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
+    pub(crate) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
         self.barrier_control.is_valid_after_worker_err(worker_id)
             && self
                 .status
                 .fragment_infos()
                 .map(|fragment_infos| {
-                    InflightFragmentInfo::contains_worker(fragment_infos.values(), worker_id)
+                    !InflightFragmentInfo::contains_worker(fragment_infos.values(), worker_id)
                 })
                 .unwrap_or(true)
     }
@@ -568,6 +568,12 @@ impl CreatingStreamingJobControl {
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
     ) -> MetaResult<()> {
+        let (state_table_ids, nodes_to_sync_table) = if let Some(state_table_ids) = state_table_ids
+        {
+            (Some(state_table_ids), Some(node_actors.keys().copied()))
+        } else {
+            (None, None)
+        };
         let node_to_collect = control_stream_manager.inject_barrier(
             database_id,
             Some(job_id),
@@ -575,6 +581,7 @@ impl CreatingStreamingJobControl {
             &barrier_info,
             node_actors,
             state_table_ids.into_iter().flatten().copied(),
+            nodes_to_sync_table.into_iter().flatten(),
             new_actors,
         )?;
         barrier_control.enqueue_epoch(
