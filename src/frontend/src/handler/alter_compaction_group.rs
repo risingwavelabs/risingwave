@@ -247,18 +247,13 @@ fn parse_compression_algorithm_with_level(
 
     let level: u32 = parts[0].parse().map_err(|_| {
         ErrorCode::InvalidInputSyntax(format!(
-            "invalid level for {}: '{}', expected 0-6",
+            "invalid level for {}: '{}', expected a non-negative integer",
             name, parts[0]
         ))
     })?;
 
-    if level > 6 {
-        return Err(ErrorCode::InvalidInputSyntax(format!(
-            "level for {} must be 0-6, got {}",
-            name, level
-        ))
-        .into());
-    }
+    // Note: level validation (whether it exceeds max_level) is done by meta service
+    // since max_level is per-compaction-group configuration
 
     let algo_name = match parts[1] {
         "none" => "None",
