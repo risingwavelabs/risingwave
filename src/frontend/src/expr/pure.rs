@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use expr_node::Type;
 use risingwave_pb::expr::expr_node;
 
@@ -20,7 +22,7 @@ use crate::expr::FunctionCall;
 
 #[derive(Default)]
 pub(crate) struct ImpureAnalyzer {
-    impure: Option<&'static str>,
+    impure: Option<Cow<'static, str>>,
 }
 
 impl ImpureAnalyzer {
@@ -35,14 +37,15 @@ impl ImpureAnalyzer {
     /// `None` if the expression is pure.
     ///
     /// Only call this method after visiting the expression.
-    pub fn impure_expr_desc(&self) -> Option<&'static str> {
-        self.impure
+    pub fn impure_expr_desc(&self) -> Option<&str> {
+        self.impure.as_deref()
     }
 }
 
 impl ExprVisitor for ImpureAnalyzer {
-    fn visit_user_defined_function(&mut self, _func_call: &super::UserDefinedFunction) {
-        self.impure = Some("user-defined function");
+    fn visit_user_defined_function(&mut self, func_call: &super::UserDefinedFunction) {
+        let name = &func_call.catalog.name;
+        self.impure = Some(format!("user-defined function `{name}`").into());
     }
 
     fn visit_table_function(&mut self, func_call: &super::TableFunction) {
@@ -69,7 +72,7 @@ impl ExprVisitor for ImpureAnalyzer {
                 func_call.args.iter().for_each(|expr| self.visit_expr(expr));
             }
 
-            // undeterministic
+            // indeterministic
             Type::FileScan
             | Type::PostgresQuery
             | Type::MysqlQuery
@@ -77,14 +80,17 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::InternalSourceBackfillProgress
             | Type::InternalGetChannelDeltaStats
             | Type::PgGetKeywords => {
-                self.impure = Some(func_type.as_str_name());
+                self.impure = Some(func_type.as_str_name().into());
             }
-            Type::UserDefined => self.impure = Some("user-defined table function"),
+            Type::UserDefined => {
+                let name = &func_call.user_defined.as_ref().unwrap().name;
+                self.impure = Some(format!("user-defined table function `{name}`").into());
+            }
         }
     }
 
     fn visit_now(&mut self, _: &super::Now) {
-        self.impure = Some("NOW or PROCTIME");
+        self.impure = Some("NOW or PROCTIME".into());
     }
 
     fn visit_function_call(&mut self, func_call: &super::FunctionCall) {
@@ -341,6 +347,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::L2Norm
             | Type::L2Normalize
             | Type::Subvector
+            // TODO: `rw_vnode` is more like STABLE instead of IMMUTABLE, because even its result is
+            // deterministic, it needs to read the total vnode count from the context, which means that
+            // it cannot be evaluated constantly. We have to treat it pure here so it can be used
+            // internally without materialization.
             | Type::Vnode
             | Type::VnodeUser
             | Type::RwEpochToTs
@@ -382,7 +392,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding
             | Type::HasDatabasePrivilege
-            | Type::Random => self.impure = Some(func_type.as_str_name()),
+            | Type::Random => self.impure = Some(func_type.as_str_name().into()),
         }
     }
 }
@@ -405,10 +415,10 @@ pub fn is_impure_func_call(func_call: &FunctionCall) -> bool {
 
 /// Returns the description of the impure expression if it is impure, for error reporting.
 /// `None` if the expression is pure.
-pub fn impure_expr_desc(expr: &ExprImpl) -> Option<&'static str> {
+pub fn impure_expr_desc(expr: &ExprImpl) -> Option<String> {
     let mut a = ImpureAnalyzer::default();
     a.visit_expr(expr);
-    a.impure_expr_desc()
+    a.impure_expr_desc().map(|s| s.to_owned())
 }
 
 #[cfg(test)]
