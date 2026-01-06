@@ -161,6 +161,13 @@ impl DispatchExecutorInner {
     }
 
     async fn dispatch(&mut self, msg: MessageBatch) -> StreamResult<()> {
+        if self.dispatchers.is_empty() {
+            // Our dispatcher internal implementation calls tokio method, which already involves cooperative scheduling
+            // with tokio runtime.
+            //
+            // When there is no dispatcher, we should do the cooperative scheduling together.
+            consume_budget().await;
+        }
         async fn await_with_metrics(
             future: impl Future<Output = ()>,
             metrics: &LabelGuardedIntCounter,
@@ -243,7 +250,7 @@ impl DispatchExecutorInner {
         }
         self.dispatchers.retain(|dispatcher| match &**dispatcher {
             DispatcherImpl::Failed(dispatcher_id, e) => {
-                warn!(%dispatcher_id, e = %e.as_report(), actor_id = %self.actor_id, "dispatch fail");
+                warn!(%dispatcher_id, err = %e.as_report(), actor_id = %self.actor_id, "dispatch fail");
                 false
             }
             _ => true,
@@ -554,7 +561,6 @@ impl StreamConsumer for DispatchExecutor {
                             .await?;
                     }
                 }
-                consume_budget().await;
             }
         }
     }
@@ -624,6 +630,8 @@ pub(crate) enum DispatcherImpl {
     Simple(SimpleDispatcher),
     #[cfg_attr(not(test), expect(dead_code))]
     RoundRobin(RoundRobinDataDispatcher),
+    /// The dispatcher has failed to dispatch to downstream and gets pending
+    /// Should be clean up later.
     Failed(DispatcherId, StreamError),
 }
 
