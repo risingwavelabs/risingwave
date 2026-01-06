@@ -1032,6 +1032,10 @@ impl LogicalJoin {
         }
     }
 
+    pub fn should_be_temporal_join(&self) -> bool {
+        self.temporal_join_on().is_some()
+    }
+
     fn temporal_join_on(&self) -> Option<TemporalJoinScan<'_>> {
         if let Some(logical_scan) = self.core.right.as_logical_scan() {
             matches!(logical_scan.as_of(), Some(AsOf::ProcessTime))
