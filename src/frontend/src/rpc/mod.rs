@@ -110,6 +110,7 @@ async fn get_new_table_plan(
         let reader = session.env().catalog_reader().read_guard();
         reader.get_any_table_by_id(table_id)?.clone()
     };
+    let original_owner = table_catalog.owner;
 
     let schema_name = {
         let reader = session.env().catalog_reader().read_guard();
@@ -132,7 +133,7 @@ async fn get_new_table_plan(
         table_catalog.create_sql_ast_purified()?
     };
 
-    let (source, table, graph, job_type) = get_replace_table_plan(
+    let (source, mut table, graph, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
@@ -140,6 +141,10 @@ async fn get_new_table_plan(
         SqlColumnStrategy::FollowUnchecked,
     )
     .await?;
+
+    // The dummy session may be created with a fixed super user, which can cause the generated
+    // plan to carry an incorrect table owner. Restore it to the original owner.
+    table.owner = original_owner;
 
     Ok(ReplaceJobPlan {
         replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(
