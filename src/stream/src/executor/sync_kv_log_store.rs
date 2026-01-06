@@ -327,7 +327,7 @@ pub mod metrics {
     }
 }
 
-type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
+pub type ReadFlushedChunkFuture = BoxFuture<'static, LogStoreResult<(ChunkId, StreamChunk, Epoch)>>;
 
 pub struct SyncedKvLogStoreExecutor<S: StateStore> {
     actor_context: ActorContextRef,
@@ -379,12 +379,12 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     }
 }
 
-struct FlushedChunkInfo {
-    epoch: u64,
-    start_seq_id: SeqId,
-    end_seq_id: SeqId,
-    flush_info: FlushInfo,
-    vnode_bitmap: Bitmap,
+pub(crate) struct FlushedChunkInfo {
+    pub epoch: u64,
+    pub start_seq_id: SeqId,
+    pub end_seq_id: SeqId,
+    pub flush_info: FlushInfo,
+    pub vnode_bitmap: Bitmap,
 }
 
 enum WriteFuture<S: LocalStateStore> {
@@ -869,7 +869,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 
 type PersistedStream<S> = Peekable<Pin<Box<LogStoreItemMergeStream<TimeoutAutoRebuildIter<S>>>>>;
 
-enum ReadFuture<S: StateStoreRead> {
+pub(crate) enum ReadFuture<S: StateStoreRead> {
     ReadingPersistedStream(PersistedStream<S>),
     ReadingFlushedChunk {
         future: ReadFlushedChunkFuture,
@@ -880,7 +880,7 @@ enum ReadFuture<S: StateStoreRead> {
 
 // Read methods
 impl<S: StateStoreRead> ReadFuture<S> {
-    async fn next_chunk(
+    pub async fn next_chunk(
         &mut self,
         progress: &mut LogStoreVnodeProgress,
         read_state: &LogStoreReadState<S>,
@@ -994,7 +994,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
 
 // Write methods
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
-    async fn write_barrier<'a>(
+    pub(crate) async fn write_barrier<'a>(
         actor_id: ActorId,
         write_state: &'a mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
@@ -1059,7 +1059,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
     }
 }
 
-struct SyncedLogStoreBuffer {
+pub(crate) struct SyncedLogStoreBuffer {
     buffer: VecDeque<(u64, LogStoreBufferItem)>,
     current_size: usize,
     max_size: usize,
