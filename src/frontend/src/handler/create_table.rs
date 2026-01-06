@@ -98,10 +98,11 @@ use risingwave_connector::sink::iceberg::{
     COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
     COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
     COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, CompactionType, ENABLE_COMPACTION,
-    ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ,
-    IcebergSink, IcebergWriteMode, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
-    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
+    ENABLE_SNAPSHOT_EXPIRATION, FORMAT_VERSION, ICEBERG_WRITE_MODE_COPY_ON_WRITE,
+    ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink, IcebergWriteMode,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
+    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
+    parse_partition_by_exprs,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -1920,6 +1921,24 @@ pub async fn create_iceberg_engine_table(
                     .remove(SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA)
             });
         }
+    }
+
+    if let Some(format_version) = handler_args.with_options.get(FORMAT_VERSION) {
+        let format_version = format_version.parse::<u8>().map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "format_version must be 1, 2 or 3: {}",
+                format_version
+            ))
+        })?;
+        if format_version != 1 && format_version != 2 && format_version != 3 {
+            bail!("format_version must be 1, 2 or 3");
+        }
+        sink_with.insert(FORMAT_VERSION.to_owned(), format_version.to_string());
+
+        // remove format_version from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(FORMAT_VERSION));
     }
 
     if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
