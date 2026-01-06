@@ -78,7 +78,9 @@ pub(crate) const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicate
 Consider simplifying or splitting the query if you encounter any issues.";
 
 pub(crate) fn reject_impure(expr: impl Into<ExprImpl>, context: &str) -> RwResult<()> {
-    if current::config().is_some_and(|_c| false) {
+    if current::config()
+        .is_some_and(|c| c.read().streaming_unsafe_allow_unmaterialized_impure_expr())
+    {
         return Ok(());
     } else if let Some(impure_expr_desc) = impure_expr_desc(&expr.into()) {
         Err(ErrorCode::NotSupported(
@@ -87,7 +89,8 @@ pub(crate) fn reject_impure(expr: impl Into<ExprImpl>, context: &str) -> RwResul
                  on a non-append-only stream may lead to inconsistent results"
             ),
             "rewrite the query to extract the impure expression into the select list, \
-             or setting .. to allow the bahavior at your own risk"
+             or setting `streaming_unsafe_allow_unmaterialized_impure_expr` to allow \
+             the behavior at the risk of inconsistent results or panics during execution"
                 .into(),
         )
         .into())
