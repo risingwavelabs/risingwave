@@ -49,13 +49,8 @@ impl FrontendService for FrontendServiceImpl {
     ) -> Result<RpcResponse<GetTableReplacePlanResponse>, Status> {
         let req = request.into_inner();
 
-        let replace_plan = get_new_table_plan(
-            req.table_id,
-            req.database_id,
-            req.owner,
-            req.cdc_table_change,
-        )
-        .await?;
+        let replace_plan =
+            get_new_table_plan(req.table_id, req.database_id, req.cdc_table_change).await?;
 
         Ok(RpcResponse::new(GetTableReplacePlanResponse {
             replace_plan: Some(replace_plan),
@@ -96,7 +91,6 @@ impl FrontendService for FrontendServiceImpl {
 async fn get_new_table_plan(
     table_id: TableId,
     database_id: DatabaseId,
-    owner: u32,
     cdc_table_change: Option<TableSchemaChange>,
 ) -> Result<ReplaceJobPlan, RwError> {
     tracing::info!("get_new_table_plan for table {}", table_id);
@@ -106,7 +100,7 @@ async fn get_new_table_plan(
         .expect("session manager has been initialized");
 
     // get a session object for the corresponding user and database
-    let session = session_mgr.create_dummy_session(database_id, owner)?;
+    let session = session_mgr.create_dummy_session(database_id)?;
 
     let _guard = scopeguard::guard((), |_| {
         session_mgr.end_session(&session);
