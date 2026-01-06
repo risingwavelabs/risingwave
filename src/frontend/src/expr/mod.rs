@@ -77,6 +77,25 @@ pub(crate) const EXPR_DEPTH_THRESHOLD: usize = 30;
 pub(crate) const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicated. \
 Consider simplifying or splitting the query if you encounter any issues.";
 
+pub(crate) fn reject_impure(expr: impl Into<ExprImpl>, context: &str) -> RwResult<()> {
+    if current::config().is_some_and(|_c| false) {
+        return Ok(());
+    } else if let Some(impure_expr_desc) = impure_expr_desc(&expr.into()) {
+        Err(ErrorCode::NotSupported(
+            format!(
+                "using an impure expression ({impure_expr_desc}) in {context} \
+                 on a non-append-only stream may lead to inconsistent results"
+            ),
+            "rewrite the query to extract the impure expression into the select list, \
+             or setting .. to allow the bahavior at your own risk"
+                .into(),
+        )
+        .into())
+    } else {
+        Ok(())
+    }
+}
+
 /// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {
     /// Get the return type of the expr
@@ -101,22 +120,11 @@ pub trait Expr: Into<ExprImpl> {
     where
         Self: Clone,
     {
-        if append_only || current::config().is_some_and(|_c| false) {
-            Ok(self.to_expr_proto())
-        } else if let Some(impure_expr_desc) = impure_expr_desc(&self.clone().into()) {
-            Err(ErrorCode::NotSupported(
-                format!(
-                    "using an impure expression ({impure_expr_desc}) in {context} \
-                     on a non-append-only stream may lead to inconsistent results"
-                ),
-                "rewrite the query to extract the impure expression into the select list, \
-                 or setting .. to allow the bahavior at your own risk"
-                    .into(),
-            )
-            .into())
-        } else {
-            Ok(self.to_expr_proto())
+        if !append_only {
+            reject_impure(self.clone(), context)?;
         }
+        self.try_to_expr_proto()
+            .map_err(|e| ErrorCode::InternalError(e).into())
     }
 }
 
@@ -977,6 +985,24 @@ impl ExprImpl {
                 expr => Expr(expr.to_expr_proto()),
             }),
         }
+    }
+
+    /// Serialize the expression. Returns an error if this will result in an impure expression on a
+    /// non-append-only stream, which may lead to inconsistent results.
+    pub fn to_project_set_select_item_proto_checked_pure(
+        &self,
+        append_only: bool,
+    ) -> crate::error::Result<ProjectSetSelectItem> {
+        use risingwave_pb::expr::project_set_select_item::SelectItem::*;
+
+        Ok(ProjectSetSelectItem {
+            select_item: Some(match self {
+                ExprImpl::TableFunction(tf) => {
+                    TableFunction(tf.to_protobuf_checked_pure(append_only)?)
+                }
+                expr => Expr(expr.to_expr_proto_checked_pure(append_only, "SELECT list")?),
+            }),
+        })
     }
 
     pub fn from_expr_proto(proto: &ExprNode) -> RwResult<Self> {

@@ -45,6 +45,44 @@ impl ExprVisitor for ImpureAnalyzer {
         self.impure = Some("user-defined function");
     }
 
+    fn visit_table_function(&mut self, func_call: &super::TableFunction) {
+        use crate::expr::table_function::TableFunctionType as Type;
+        let func_type = func_call.function_type;
+        match func_type {
+            Type::Unspecified => unreachable!(),
+
+            // deterministic
+            Type::GenerateSeries
+            | Type::Unnest
+            | Type::RegexpMatches
+            | Type::Range
+            | Type::GenerateSubscripts
+            | Type::PgExpandarray
+            | Type::JsonbArrayElements
+            | Type::JsonbArrayElementsText
+            | Type::JsonbEach
+            | Type::JsonbEachText
+            | Type::JsonbObjectKeys
+            | Type::JsonbPathQuery
+            | Type::JsonbPopulateRecordset
+            | Type::JsonbToRecordset => {
+                func_call.args.iter().for_each(|expr| self.visit_expr(expr));
+            }
+
+            // undeterministic
+            Type::FileScan
+            | Type::PostgresQuery
+            | Type::MysqlQuery
+            | Type::InternalBackfillProgress
+            | Type::InternalSourceBackfillProgress
+            | Type::InternalGetChannelDeltaStats
+            | Type::PgGetKeywords => {
+                self.impure = Some(func_type.as_str_name());
+            }
+            Type::UserDefined => self.impure = Some("user-defined table function"),
+        }
+    }
+
     fn visit_now(&mut self, _: &super::Now) {
         self.impure = Some("NOW or PROCTIME");
     }
