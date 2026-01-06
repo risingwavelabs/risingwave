@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -364,7 +364,7 @@ pub enum Mutation {
     SourceChangeSplit(SplitAssignments),
     Pause,
     Resume,
-    Throttle(HashMap<ActorId, Option<u32>>),
+    Throttle(HashMap<FragmentId, Option<u32>>),
     ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
@@ -873,9 +873,9 @@ impl Mutation {
             Mutation::Pause => PbMutation::Pause(PbPauseMutation {}),
             Mutation::Resume => PbMutation::Resume(PbResumeMutation {}),
             Mutation::Throttle(changes) => PbMutation::Throttle(PbThrottleMutation {
-                actor_throttle: changes
+                fragment_throttle: changes
                     .iter()
-                    .map(|(actor_id, limit)| (*actor_id, RateLimit { rate_limit: *limit }))
+                    .map(|(fragment_id, limit)| (*fragment_id, RateLimit { rate_limit: *limit }))
                     .collect(),
             }),
             Mutation::DropSubscriptions {
@@ -1053,9 +1053,9 @@ impl Mutation {
             PbMutation::Resume(_) => Mutation::Resume,
             PbMutation::Throttle(changes) => Mutation::Throttle(
                 changes
-                    .actor_throttle
+                    .fragment_throttle
                     .iter()
-                    .map(|(actor_id, limit)| (*actor_id, limit.rate_limit))
+                    .map(|(fragment_id, limit)| (*fragment_id, limit.rate_limit))
                     .collect(),
             ),
             PbMutation::DropSubscriptions(drop) => Mutation::DropSubscriptions {

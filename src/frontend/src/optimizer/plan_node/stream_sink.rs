@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -181,14 +181,15 @@ impl StreamSink {
         let input_kind = input.stream_kind();
         let kind = match sink_desc.sink_type {
             SinkType::AppendOnly => {
-                assert_eq!(
-                    input_kind,
-                    StreamKind::AppendOnly,
-                    "{input_kind} stream cannot be used as input of append-only sink",
-                );
+                if !sink_desc.ignore_delete {
+                    assert_eq!(
+                        input_kind,
+                        StreamKind::AppendOnly,
+                        "{input_kind} stream cannot be used as input of append-only sink",
+                    );
+                }
                 StreamKind::AppendOnly
             }
-            SinkType::ForceAppendOnly => StreamKind::AppendOnly,
             SinkType::Upsert => StreamKind::Upsert,
             SinkType::Retract => {
                 assert_ne!(
@@ -284,7 +285,7 @@ impl StreamSink {
         partition_info: Option<PartitionComputeInfo>,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
     ) -> Result<Self> {
-        let sink_type =
+        let (sink_type, ignore_delete) =
             Self::derive_sink_type(input.stream_kind(), &properties, format_desc.as_ref())?;
 
         let columns = derive_columns(input.schema(), out_names, &user_cols)?;
@@ -472,6 +473,7 @@ impl StreamSink {
             properties,
             secret_refs,
             sink_type,
+            ignore_delete,
             format_desc,
             target_table: target_table.as_ref().map(|catalog| catalog.id()),
             extra_partition_col_idx,
@@ -538,29 +540,17 @@ impl StreamSink {
                 .into());
             }
 
-            let is_exactly_once = match sink_desc.is_exactly_once {
-                Some(v) => v,
-                None => {
-                    if let Some(connector) = sink_desc.properties.get(CONNECTOR_TYPE_KEY) {
-                        let connector_type = connector.to_lowercase();
-                        if connector_type == ICEBERG_SINK {
-                            // iceberg sink defaults to exactly once
-                            // However, when sink_decouple is disabled, we enforce it to false.
-                            sink_desc
-                                .properties
-                                .insert("is_exactly_once".to_owned(), "false".to_owned());
-                        }
-                    }
-                    false
+            if sink_desc.is_exactly_once.is_none()
+                && let Some(connector) = sink_desc.properties.get(CONNECTOR_TYPE_KEY)
+            {
+                let connector_type = connector.to_lowercase();
+                if connector_type == ICEBERG_SINK {
+                    // iceberg sink defaults to exactly once
+                    // However, when sink_decouple is disabled, we enforce it to false.
+                    sink_desc
+                        .properties
+                        .insert("is_exactly_once".to_owned(), "false".to_owned());
                 }
-            };
-
-            if is_exactly_once {
-                return Err(ErrorCode::NotSupported(
-                    "Exactly once sink can only be created with sink_decouple enabled.".to_owned(),
-                    hint_string(true),
-                )
-                .into());
             }
         }
         let log_store_type = if sink_decouple {
@@ -628,11 +618,13 @@ impl StreamSink {
     /// - the derived stream kind of the plan, from the optimizer
     /// - sink format required by [`SinkFormatDesc`], if any
     /// - user-specified sink type or `force_append_only` in WITH options, if any
+    ///
+    /// Returns the `sink_type` and `ignore_delete`.
     fn derive_sink_type(
         derived_stream_kind: StreamKind,
         properties: &WithOptionsSecResolved,
         format_desc: Option<&SinkFormatDesc>,
-    ) -> Result<SinkType> {
+    ) -> Result<(SinkType, bool)> {
         let (user_defined_sink_type, user_force_append_only, syntax_legacy) = match format_desc {
             Some(f) => (
                 Some(match f.format {
@@ -652,6 +644,7 @@ impl StreamSink {
             ),
         };
 
+        // TODO: allow `ignore_delete` on sink type other than `append-only`
         if user_force_append_only
             && user_defined_sink_type.is_some()
             && user_defined_sink_type != Some(SinkType::AppendOnly)
@@ -662,12 +655,12 @@ impl StreamSink {
             .into());
         }
 
-        let user_force_append_only =
-            if user_force_append_only && derived_stream_kind.is_append_only() {
-                false
-            } else {
-                user_force_append_only
-            };
+        // If the stream is derived to be append-only, act as if user didn't specify `force_append_only`.
+        let user_force_append_only = if derived_stream_kind.is_append_only() {
+            false
+        } else {
+            user_force_append_only
+        };
 
         if user_force_append_only && user_defined_sink_type != Some(SinkType::AppendOnly) {
             return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -685,7 +678,7 @@ impl StreamSink {
             match user_defined_sink_type {
                 SinkType::AppendOnly => {
                     if user_force_append_only {
-                        return Ok(SinkType::ForceAppendOnly);
+                        return Ok((SinkType::AppendOnly, true));
                     }
                     if derived_stream_kind != StreamKind::AppendOnly {
                         return Err(ErrorCode::InvalidInputSyntax(format!(
@@ -697,7 +690,6 @@ impl StreamSink {
                         .into());
                     }
                 }
-                SinkType::ForceAppendOnly => unreachable!(),
                 SinkType::Upsert => { /* always qualified */ }
                 SinkType::Retract => {
                     if derived_stream_kind == StreamKind::Upsert {
@@ -708,16 +700,19 @@ impl StreamSink {
                     }
                 }
             }
-            Ok(user_defined_sink_type)
+            // TODO: follow user specified `ignore_delete` here
+            Ok((user_defined_sink_type, false))
         } else {
             // No specification at all, follow the optimizer's derivation.
             // This is also the case for sink-into-table.
-            Ok(match derived_stream_kind {
+            let sink_type = match derived_stream_kind {
                 // We downgrade `Retract` to `Upsert` unless explicitly specified the type in options,
                 // as it is well supported by most sinks and reduces the amount of data written.
                 StreamKind::Retract | StreamKind::Upsert => SinkType::Upsert,
                 StreamKind::AppendOnly => SinkType::AppendOnly,
-            })
+            };
+            // TODO: follow user specified `ignore_delete` here
+            Ok((sink_type, false))
         }
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -385,7 +385,6 @@ impl StreamMaterialize {
             cardinality,
             created_at_epoch: None,
             initialized_at_epoch: None,
-            cleaned_by_watermark: !ttl_watermark_indices.is_empty(),
             create_type,
             stream_job_status: StreamJobStatus::Creating,
             description: None,
@@ -445,7 +444,6 @@ impl StreamMaterialize {
             dist_key_in_pk,
             created_at_epoch,
             initialized_at_epoch,
-            cleaned_by_watermark,
             create_type,
             stream_job_status,
             description,
@@ -515,7 +513,6 @@ impl StreamMaterialize {
             version,
             created_at_epoch,
             initialized_at_epoch,
-            cleaned_by_watermark,
             create_type,
             stream_job_status,
             description,

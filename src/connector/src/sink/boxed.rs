@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -107,14 +107,21 @@ impl SinglePhaseCommitCoordinator for BoxSinglePhaseCoordinator {
         self.deref_mut().init().await
     }
 
-    async fn commit(
+    async fn commit_data(
         &mut self,
         epoch: u64,
         metadata: Vec<SinkMetadata>,
-        schema_change: Option<PbSinkSchemaChange>,
+    ) -> crate::sink::Result<()> {
+        self.deref_mut().commit_data(epoch, metadata).await
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        epoch: u64,
+        schema_change: PbSinkSchemaChange,
     ) -> crate::sink::Result<()> {
         self.deref_mut()
-            .commit(epoch, metadata, schema_change)
+            .commit_schema_change(epoch, schema_change)
             .await
     }
 }
@@ -130,20 +137,27 @@ impl TwoPhaseCommitCoordinator for BoxTwoPhaseCoordinator {
         epoch: u64,
         metadata: Vec<SinkMetadata>,
         schema_change: Option<PbSinkSchemaChange>,
-    ) -> crate::sink::Result<Vec<u8>> {
+    ) -> crate::sink::Result<Option<Vec<u8>>> {
         self.deref_mut()
             .pre_commit(epoch, metadata, schema_change)
             .await
     }
 
-    async fn commit(
+    async fn commit_data(
         &mut self,
         epoch: u64,
         commit_metadata: Vec<u8>,
-        schema_change: Option<PbSinkSchemaChange>,
+    ) -> crate::sink::Result<()> {
+        self.deref_mut().commit_data(epoch, commit_metadata).await
+    }
+
+    async fn commit_schema_change(
+        &mut self,
+        epoch: u64,
+        schema_change: PbSinkSchemaChange,
     ) -> crate::sink::Result<()> {
         self.deref_mut()
-            .commit(epoch, commit_metadata, schema_change)
+            .commit_schema_change(epoch, schema_change)
             .await
     }
 

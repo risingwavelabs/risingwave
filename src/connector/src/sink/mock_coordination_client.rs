@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -169,8 +169,13 @@ impl MockSinkCoordinationRpcClient {
                                 SinkCommitCoordinator::SinglePhase(coordinator) => {
                                     coordinator.init().await?;
                                     coordinator
-                                        .commit(epoch, vec![metadata.unwrap()], schema_change)
+                                        .commit_data(epoch, vec![metadata.unwrap()])
                                         .await?;
+                                    if let Some(schema_change) = schema_change {
+                                        coordinator
+                                            .commit_schema_change(epoch, schema_change)
+                                            .await?;
+                                    }
                                 }
                                 SinkCommitCoordinator::TwoPhase(coordinator) => {
                                     coordinator.init().await?;
@@ -181,7 +186,14 @@ impl MockSinkCoordinationRpcClient {
                                             schema_change.clone(),
                                         )
                                         .await?;
-                                    coordinator.commit(epoch, metadata, schema_change).await?;
+                                    if let Some(metadata) = metadata {
+                                        coordinator.commit_data(epoch, metadata).await?;
+                                    }
+                                    if let Some(schema_change) = schema_change {
+                                        coordinator
+                                            .commit_schema_change(epoch, schema_change)
+                                            .await?;
+                                    }
                                 }
                             }
                         };

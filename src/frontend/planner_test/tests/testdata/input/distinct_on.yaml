@@ -10,6 +10,13 @@
   expected_outputs:
     - stream_plan
     - batch_plan
+- name: distinct on order by uses original column name
+  sql: |
+    create table t (a int, b int);
+    select distinct on (a) a as x, b from t order by a, b;
+  expected_outputs:
+    - stream_plan
+    - batch_plan
 - sql: |
     create table t (a int, b int, c int);
     select distinct on (foo, b) a as foo, b from t;

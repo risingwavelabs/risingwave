@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -630,17 +630,6 @@ impl ToBatch for LogicalOverWindow {
             self.core.funcs_have_same_partition_and_order(),
             "must apply OverWindowSplitRule before generating physical plan"
         );
-
-        // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
-        // empty PARTITION BY by simply removing the following check.
-        let partition_key_indices = self.window_functions()[0]
-            .partition_by
-            .iter()
-            .map(|e| e.index())
-            .collect_vec();
-        if partition_key_indices.is_empty() {
-            empty_partition_by_not_implemented!();
-        }
 
         let input = self.input().to_batch()?;
         let core = self.core.clone_with_input(input);

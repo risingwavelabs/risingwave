@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,9 +42,6 @@ pub enum SinkType {
     /// The data written into the sink connector can only be INSERT. No UPDATE or DELETE is
     /// allowed.
     AppendOnly,
-    /// The input of the sink operator can be INSERT, UPDATE, or DELETE, but it must drop any
-    /// UPDATE or DELETE and write only INSERT into the sink connector.
-    ForceAppendOnly,
     /// The data written into the sink connector can be INSERT or DELETE.
     /// When updating a row, an INSERT with new value will be written.
     Upsert,
@@ -56,15 +53,15 @@ pub enum SinkType {
 }
 
 impl SinkType {
-    /// Whether the sink type is `AppendOnly` or `ForceAppendOnly`.
+    /// Whether the sink type is `AppendOnly`.
     pub fn is_append_only(self) -> bool {
-        self == Self::AppendOnly || self == Self::ForceAppendOnly
+        self == Self::AppendOnly
     }
 
     /// Convert to the string specified in `type = '...'` within the WITH options.
     pub fn type_str(self) -> &'static str {
         match self {
-            SinkType::AppendOnly | SinkType::ForceAppendOnly => "append-only",
+            SinkType::AppendOnly => "append-only",
             SinkType::Upsert => "upsert",
             SinkType::Retract => "retract",
         }
@@ -73,7 +70,6 @@ impl SinkType {
     pub fn to_proto(self) -> PbSinkType {
         match self {
             SinkType::AppendOnly => PbSinkType::AppendOnly,
-            SinkType::ForceAppendOnly => PbSinkType::ForceAppendOnly,
             SinkType::Upsert => PbSinkType::Upsert,
             SinkType::Retract => PbSinkType::Retract,
         }
@@ -82,7 +78,9 @@ impl SinkType {
     pub fn from_proto(pb: PbSinkType) -> Self {
         match pb {
             PbSinkType::AppendOnly => SinkType::AppendOnly,
-            PbSinkType::ForceAppendOnly => SinkType::ForceAppendOnly,
+            // Backward compatibility: normalize force-append-only to append-only. The associated
+            // behavior is now represented by another field `ignore_delete`.
+            PbSinkType::ForceAppendOnly => SinkType::AppendOnly,
             PbSinkType::Upsert => SinkType::Upsert,
             PbSinkType::Retract => SinkType::Retract,
             PbSinkType::Unspecified => unreachable!(),
@@ -329,6 +327,8 @@ pub struct SinkCatalog {
     // based on both its own derivation on the append-only attribute and other user-specified
     // options in `properties`.
     pub sink_type: SinkType,
+    /// Whether to drop DELETE and convert UPDATE to INSERT in the sink executor.
+    pub ignore_delete: bool,
 
     // The format and encode of the sink.
     pub format_desc: Option<SinkFormatDesc>,
@@ -384,6 +384,7 @@ impl SinkCatalog {
             owner: self.owner.into(),
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
+            raw_ignore_delete: self.ignore_delete,
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
             connection_id: self.connection_id,
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
@@ -448,6 +449,7 @@ impl SinkCatalog {
 impl From<PbSink> for SinkCatalog {
     fn from(pb: PbSink) -> Self {
         let sink_type = pb.get_sink_type().unwrap();
+        let ignore_delete = pb.ignore_delete();
         let create_type = pb.get_create_type().unwrap_or(PbCreateType::Foreground);
         let stream_job_status = pb
             .get_stream_job_status()
@@ -496,6 +498,7 @@ impl From<PbSink> for SinkCatalog {
             properties: pb.properties,
             owner: pb.owner.into(),
             sink_type: SinkType::from_proto(sink_type),
+            ignore_delete,
             format_desc,
             connection_id: pb.connection_id,
             created_at_epoch: pb.created_at_epoch.map(Epoch::from),
