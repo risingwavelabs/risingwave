@@ -257,7 +257,13 @@ impl TryToStreamPb for StreamTemporalJoin {
                 .eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|expr| expr.to_expr_proto_checked_pure(self.append_only, "JOIN condition"))
+                .map(|expr| {
+                    expr.to_expr_proto_checked_pure(
+                        self.left().stream_kind().is_retract()
+                            || self.right().stream_kind().is_retract(),
+                        "JOIN condition",
+                    )
+                })
                 .transpose()?,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             table_desc: Some(scan.core().table_catalog.table_desc().try_to_protobuf()?),

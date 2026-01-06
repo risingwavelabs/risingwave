@@ -335,7 +335,8 @@ impl TryToStreamPb for StreamHashJoin {
         let left_jk_indices_prost = left_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
         let right_jk_indices_prost = right_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
 
-        let append_only = self.left().append_only() && self.right().append_only();
+        let retract =
+            self.left().stream_kind().is_retract() || self.right().stream_kind().is_retract();
 
         let dk_indices_in_jk = self.derive_dist_key_in_join_key();
 
@@ -377,43 +378,42 @@ impl TryToStreamPb for StreamHashJoin {
             .eq_join_predicate
             .other_cond()
             .as_expr_unless_true()
-            .map(|expr| expr.to_expr_proto_checked_pure(append_only, "JOIN condition"))
+            .map(|expr| expr.to_expr_proto_checked_pure(retract, "JOIN condition"))
             .transpose()?;
 
-        let inequality_pairs =
-            self.inequality_pairs
-                .iter()
-                .map(
-                    |(
-                        do_state_clean,
-                        InequalityInputPair {
-                            key_required_larger,
-                            key_required_smaller,
-                            delta_expression,
-                        },
-                    )|
-                     -> SchedulerResult<PbInequalityPair> {
-                        let delta_expression = delta_expression
-                            .as_ref()
-                            .map(|(delta_type, delta)| -> SchedulerResult<DeltaExpression> {
-                                Ok(DeltaExpression {
-                                    delta_type: *delta_type as i32,
-                                    delta: Some(delta.to_expr_proto_checked_pure(
-                                        append_only,
-                                        "JOIN condition",
-                                    )?),
-                                })
-                            })
-                            .transpose()?;
-                        Ok(PbInequalityPair {
-                            key_required_larger: *key_required_larger as u32,
-                            key_required_smaller: *key_required_smaller as u32,
-                            clean_state: *do_state_clean,
-                            delta_expression,
-                        })
+        let inequality_pairs = self
+            .inequality_pairs
+            .iter()
+            .map(
+                |(
+                    do_state_clean,
+                    InequalityInputPair {
+                        key_required_larger,
+                        key_required_smaller,
+                        delta_expression,
                     },
-                )
-                .try_collect()?;
+                )|
+                 -> SchedulerResult<PbInequalityPair> {
+                    let delta_expression = delta_expression
+                        .as_ref()
+                        .map(|(delta_type, delta)| -> SchedulerResult<DeltaExpression> {
+                            Ok(DeltaExpression {
+                                delta_type: *delta_type as i32,
+                                delta: Some(
+                                    delta.to_expr_proto_checked_pure(retract, "JOIN condition")?,
+                                ),
+                            })
+                        })
+                        .transpose()?;
+                    Ok(PbInequalityPair {
+                        key_required_larger: *key_required_larger as u32,
+                        key_required_smaller: *key_required_smaller as u32,
+                        clean_state: *do_state_clean,
+                        delta_expression,
+                    })
+                },
+            )
+            .try_collect()?;
 
         Ok(NodeBody::HashJoin(Box::new(HashJoinNode {
             join_type: self.core.join_type as i32,

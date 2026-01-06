@@ -86,7 +86,7 @@ pub(crate) fn reject_impure(expr: impl Into<ExprImpl>, context: &str) -> RwResul
         Err(ErrorCode::NotSupported(
             format!(
                 "using an impure expression ({impure_expr_desc}) in {context} \
-                 on a non-append-only stream may lead to inconsistent results"
+                 on a retract stream may lead to inconsistent results"
             ),
             "rewrite the query to extract the impure expression into the select list, \
              or setting `streaming_unsafe_allow_unmaterialized_impure_expr` to allow \
@@ -114,16 +114,16 @@ pub trait Expr: Into<ExprImpl> {
     }
 
     /// Serialize the expression. Returns an error if this will result in an impure expression on a
-    /// non-append-only stream, which may lead to inconsistent results.
+    /// retract stream, which may lead to inconsistent results.
     fn to_expr_proto_checked_pure(
         &self,
-        append_only: bool,
+        retract: bool,
         context: &str,
     ) -> crate::error::Result<ExprNode>
     where
         Self: Clone,
     {
-        if !append_only {
+        if retract {
             reject_impure(self.clone(), context)?;
         }
         self.try_to_expr_proto()
@@ -991,19 +991,17 @@ impl ExprImpl {
     }
 
     /// Serialize the expression. Returns an error if this will result in an impure expression on a
-    /// non-append-only stream, which may lead to inconsistent results.
+    /// retract stream, which may lead to inconsistent results.
     pub fn to_project_set_select_item_proto_checked_pure(
         &self,
-        append_only: bool,
+        retract: bool,
     ) -> crate::error::Result<ProjectSetSelectItem> {
         use risingwave_pb::expr::project_set_select_item::SelectItem::*;
 
         Ok(ProjectSetSelectItem {
             select_item: Some(match self {
-                ExprImpl::TableFunction(tf) => {
-                    TableFunction(tf.to_protobuf_checked_pure(append_only)?)
-                }
-                expr => Expr(expr.to_expr_proto_checked_pure(append_only, "SELECT list")?),
+                ExprImpl::TableFunction(tf) => TableFunction(tf.to_protobuf_checked_pure(retract)?),
+                expr => Expr(expr.to_expr_proto_checked_pure(retract, "SELECT list")?),
             }),
         })
     }

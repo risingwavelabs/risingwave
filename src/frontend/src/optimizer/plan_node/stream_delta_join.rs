@@ -155,7 +155,7 @@ impl TryToStreamPb for StreamDeltaJoin {
     ) -> SchedulerResult<NodeBody> {
         let left = self.left();
         let right = self.right();
-        let append_only = left.append_only() && right.append_only();
+        let retract = left.stream_kind().is_retract() || right.stream_kind().is_retract();
 
         let left_table = if let Some(stream_table_scan) = left.as_stream_table_scan() {
             stream_table_scan.core()
@@ -188,7 +188,7 @@ impl TryToStreamPb for StreamDeltaJoin {
             condition: eq_join_predicate
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|expr| expr.to_expr_proto_checked_pure(append_only, "JOIN condition"))
+                .map(|expr| expr.to_expr_proto_checked_pure(retract, "JOIN condition"))
                 .transpose()?,
             left_table_id: left_table_catalog.id,
             right_table_id: right_table_catalog.id,

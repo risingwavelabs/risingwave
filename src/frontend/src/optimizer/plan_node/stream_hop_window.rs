@@ -108,18 +108,18 @@ impl TryToStreamPb for StreamHopWindow {
         &self,
         _state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<PbNodeBody> {
-        let append_only = self.input().append_only();
+        let retract = self.input().stream_kind().is_retract();
         let window_start_exprs = self
             .window_start_exprs
             .clone()
             .iter()
-            .map(|expr| expr.to_expr_proto_checked_pure(append_only, "HOP window start"))
+            .map(|expr| expr.to_expr_proto_checked_pure(retract, "HOP window start"))
             .collect::<crate::error::Result<Vec<_>>>()?;
         let window_end_exprs = self
             .window_end_exprs
             .clone()
             .iter()
-            .map(|expr| expr.to_expr_proto_checked_pure(append_only, "HOP window end"))
+            .map(|expr| expr.to_expr_proto_checked_pure(retract, "HOP window end"))
             .collect::<crate::error::Result<Vec<_>>>()?;
         Ok(PbNodeBody::HopWindow(Box::new(HopWindowNode {
             time_col: self.core.time_col.index() as _,

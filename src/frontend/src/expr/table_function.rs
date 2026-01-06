@@ -652,19 +652,19 @@ impl TableFunction {
     }
 
     /// Serialize the table function. Returns an error if this will result in an impure table
-    /// function on a non-append-only stream, which may lead to inconsistent results.
+    /// function on a retract stream, which may lead to inconsistent results.
     pub fn to_protobuf_checked_pure(
         &self,
-        append_only: bool,
+        retract: bool,
     ) -> crate::error::Result<PbTableFunction> {
-        if !append_only {
+        if retract {
             reject_impure(self.clone(), "table function")?;
         }
 
         let args = self
             .args
             .iter()
-            .map(|arg| arg.to_expr_proto_checked_pure(append_only, "table function argument"))
+            .map(|arg| arg.to_expr_proto_checked_pure(retract, "table function argument"))
             .collect::<crate::error::Result<Vec<_>>>()?;
 
         Ok(PbTableFunction {

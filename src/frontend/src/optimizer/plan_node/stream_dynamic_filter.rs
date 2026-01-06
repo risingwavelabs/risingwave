@@ -180,12 +180,13 @@ impl TryToStreamPb for StreamDynamicFilter {
     ) -> SchedulerResult<NodeBody> {
         use generic::dynamic_filter::*;
         let cleaned_by_watermark = self.cleaned_by_watermark;
-        let append_only = self.left().append_only() && self.right().append_only();
+        let retract =
+            self.left().stream_kind().is_retract() || self.right().stream_kind().is_retract();
         let condition = self
             .core
             .predicate()
             .as_expr_unless_true()
-            .map(|expr| expr.to_expr_proto_checked_pure(append_only, "dynamic filter condition"))
+            .map(|expr| expr.to_expr_proto_checked_pure(retract, "dynamic filter condition"))
             .transpose()?;
         let left_index = self.core.left_index();
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)

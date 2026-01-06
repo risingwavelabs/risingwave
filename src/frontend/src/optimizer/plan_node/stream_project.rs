@@ -172,12 +172,16 @@ impl TryToStreamPb for StreamProject {
             .iter()
             .map(|(i, o)| (*i as u32, *o as u32))
             .unzip();
-        let append_only = self.input().append_only();
         let select_list = self
             .core
             .exprs
             .iter()
-            .map(|expr| expr.to_expr_proto_checked_pure(append_only, "SELECT list"))
+            .map(|expr| {
+                expr.to_expr_proto_checked_pure(
+                    self.input().stream_kind().is_retract(),
+                    "SELECT list",
+                )
+            })
             .collect::<crate::error::Result<Vec<_>>>()?;
         Ok(PbNodeBody::Project(Box::new(ProjectNode {
             select_list,

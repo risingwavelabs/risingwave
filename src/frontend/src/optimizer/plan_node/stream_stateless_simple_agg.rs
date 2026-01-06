@@ -96,7 +96,7 @@ impl TryToStreamPb for StreamStatelessSimpleAgg {
         let agg_calls = self
             .agg_calls()
             .iter()
-            .map(|call| call.to_protobuf_checked_pure(append_only))
+            .map(|call| call.to_protobuf_checked_pure(self.input().stream_kind().is_retract()))
             .collect::<crate::error::Result<Vec<_>>>()?;
         Ok(PbNodeBody::StatelessSimpleAgg(Box::new(SimpleAggNode {
             agg_calls,

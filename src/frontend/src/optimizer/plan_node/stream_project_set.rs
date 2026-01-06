@@ -122,13 +122,14 @@ impl TryToStreamPb for StreamProjectSet {
             .iter()
             .map(|(i, o)| (*i as u32, *o as u32))
             .unzip();
-        let append_only = self.input().append_only();
         let select_list = self
             .core
             .select_list
             .iter()
             .map(|select_item| {
-                select_item.to_project_set_select_item_proto_checked_pure(append_only)
+                select_item.to_project_set_select_item_proto_checked_pure(
+                    self.input().stream_kind().is_retract(),
+                )
             })
             .collect::<crate::error::Result<Vec<_>>>()?;
         Ok(PbNodeBody::ProjectSet(Box::new(ProjectSetNode {

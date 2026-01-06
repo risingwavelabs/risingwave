@@ -99,11 +99,12 @@ impl TryToStreamPb for StreamFilter {
         &self,
         _state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<PbNodeBody> {
-        let append_only = self.input().append_only();
         Ok(PbNodeBody::Filter(Box::new(FilterNode {
             search_condition: Some(
-                ExprImpl::from(self.predicate().clone())
-                    .to_expr_proto_checked_pure(append_only, "WHERE or HAVING condition")?,
+                ExprImpl::from(self.predicate().clone()).to_expr_proto_checked_pure(
+                    self.stream_kind().is_retract(),
+                    "WHERE or HAVING condition",
+                )?,
             ),
         })))
     }

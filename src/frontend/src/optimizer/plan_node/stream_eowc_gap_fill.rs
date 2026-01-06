@@ -155,14 +155,12 @@ impl TryToStreamPb for StreamEowcGapFill {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
-        let append_only = self.input().append_only();
-
         Ok(NodeBody::EowcGapFill(Box::new(EowcGapFillNode {
             time_column_index: self.time_col().index() as u32,
-            interval: Some(
-                self.interval()
-                    .to_expr_proto_checked_pure(append_only, "gap filling interval")?,
-            ),
+            interval: Some(self.interval().to_expr_proto_checked_pure(
+                self.stream_kind().is_retract(),
+                "gap filling interval",
+            )?),
             fill_columns: self
                 .fill_strategies()
                 .iter()

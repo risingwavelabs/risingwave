@@ -197,18 +197,17 @@ impl TryToStreamPb for StreamHashAgg {
             self.core
                 .infer_tables(&self.base, self.vnode_col_idx, self.window_col_idx);
 
-        let append_only = self.input().append_only();
         let agg_calls = self
             .agg_calls()
             .iter()
-            .map(|call| call.to_protobuf_checked_pure(append_only))
+            .map(|call| call.to_protobuf_checked_pure(self.input().stream_kind().is_retract()))
             .collect::<crate::error::Result<Vec<_>>>()?;
 
         Ok(PbNodeBody::HashAgg(Box::new(HashAggNode {
             group_key: self.group_key().to_vec_as_u32(),
             agg_calls,
 
-            is_append_only: append_only,
+            is_append_only: self.input().append_only(),
             agg_call_states: agg_states
                 .into_iter()
                 .map(|s| s.into_prost(state))
