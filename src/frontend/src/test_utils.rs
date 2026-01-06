@@ -103,7 +103,6 @@ impl SessionManager for LocalFrontend {
     fn create_dummy_session(
         &self,
         _database_id: DatabaseId,
-        _user_name: u32,
     ) -> std::result::Result<Arc<Self::Session>, Self::Error> {
         unreachable!()
     }
