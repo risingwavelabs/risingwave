@@ -653,10 +653,7 @@ impl TableFunction {
 
     /// Serialize the table function. Returns an error if this will result in an impure table
     /// function on a retract stream, which may lead to inconsistent results.
-    pub fn to_protobuf_checked_pure(
-        &self,
-        retract: bool,
-    ) -> crate::error::Result<PbTableFunction> {
+    pub fn to_protobuf_checked_pure(&self, retract: bool) -> crate::error::Result<PbTableFunction> {
         if retract {
             reject_impure(self.clone(), "table function")?;
         }
