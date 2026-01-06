@@ -72,6 +72,19 @@ public class TracingSlf4jAdapter extends LegacyAbstractLogger {
             String messagePattern,
             Object[] arguments,
             Throwable throwable) {
+        // Filter out noisy Debezium TypeRegistry warnings like:
+        // "Type [oid:13618, name:_pg_user_mappings] is already mapped"
+        // They are harmless (caused by duplicate type registrations) but very verbose in logs.
+        // Performance: Most logs fail the first check (level != WARN), so overhead is minimal.
+        // For TypeRegistry WARN logs, we avoid expensive message formatting and JNI calls.
+        if (level == Level.WARN
+                && name != null
+                && name.equals("io.debezium.connector.postgresql.TypeRegistry")
+                && messagePattern != null
+                && messagePattern.contains("is already mapped")) {
+            return;
+        }
+
         var pm = new ParameterizedMessage(messagePattern, arguments, throwable);
         var message = pm.getFormattedMessage();
 
