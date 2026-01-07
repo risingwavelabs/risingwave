@@ -69,7 +69,7 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 use tracing::Instrument;
 
-use crate::barrier::BarrierManagerRef;
+use crate::barrier::{BarrierManagerRef, Command};
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
@@ -155,6 +155,7 @@ pub enum DdlCommand {
     DropSchema(SchemaId, DropMode),
     CreateNonSharedSource(Source),
     DropSource(SourceId, DropMode),
+    ResetSource(SourceId),
     CreateFunction(Function),
     DropFunction(FunctionId, DropMode),
     CreateView(View, HashSet<ObjectId>),
@@ -199,6 +200,7 @@ impl DdlCommand {
             DdlCommand::DropSchema(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
             DdlCommand::DropSource(id, _) => Right(id.as_object_id()),
+            DdlCommand::ResetSource(id) => Right(id.as_object_id()),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
             DdlCommand::DropFunction(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateView(view, _) => Left(view.name.clone()),
@@ -253,6 +255,7 @@ impl DdlCommand {
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
             | DdlCommand::AlterNonSharedSource(_)
+            | DdlCommand::ResetSource(_)
             | DdlCommand::CreateSubscription(_) => false,
         }
     }
@@ -394,6 +397,7 @@ impl DdlController {
                 DdlCommand::DropSource(source_id, drop_mode) => {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
+                DdlCommand::ResetSource(source_id) => ctrl.reset_source(source_id).await,
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
                 DdlCommand::DropFunction(function_id, drop_mode) => {
                     ctrl.drop_function(function_id, drop_mode).await
@@ -592,6 +596,41 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         self.drop_object(ObjectType::Source, source_id, drop_mode)
             .await
+    }
+
+    async fn reset_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
+        tracing::info!(source_id = %source_id, "resetting CDC source offset to latest");
+
+        // Note: CDC source validation is already done in frontend handler
+
+        // Get database_id for the source
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(source_id)
+            .await?;
+
+        // Send Command::ResetSource via barrier
+        // This will trigger source executors to:
+        // 1. Clear state table offset (set to None)
+        // 2. Wait for Debezium to send latest offset
+        // 3. Persist the new offset
+        // 4. Pause the source
+        //
+        // TODO: The actual state table clearing logic needs to be implemented in stream executors
+
+        self.stream_manager
+            .barrier_scheduler
+            .run_command(database_id, Command::ResetSource { source_id })
+            .await?;
+
+        // RESET SOURCE doesn't modify catalog, so return the current catalog version
+        let version = self
+            .metadata_manager
+            .catalog_controller
+            .current_notification_version()
+            .await;
+        Ok(version)
     }
 
     /// This replaces the source in the catalog.

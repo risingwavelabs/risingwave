@@ -413,33 +413,19 @@ impl DdlService for DdlServiceImpl {
 
         tracing::info!(
             source_id = %source_id,
-            "Received RESET SOURCE request from frontend - the call chain is working!"
+            "Received RESET SOURCE request, routing to DDL controller"
         );
 
-        // TODO: Implement the actual reset logic
-        // This should:
-        // 1. Validate the source is a CDC source (MySQL/MongoDB)
-        // 2. Create a Command::ResetSource and send it via barrier
-        // 3. The barrier will trigger source executors to clear state table offset
-        // 4. Wait for the new offset from Debezium
-        // 5. Pause the source
-        // 6. Return success
+        // Route to DDL controller
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::ResetSource(source_id))
+            .await?;
 
-        return Err(Status::unimplemented(
-            "RESET SOURCE backend logic is not yet implemented. \
-            But the frontend->meta call chain is working! Check the logs for confirmation.",
-        ));
-
-        // Placeholder for future implementation:
-        // let version = self
-        //     .ddl_controller
-        //     .run_command(DdlCommand::ResetSource(source_id))
-        //     .await?;
-        //
-        // Ok(Response::new(ResetSourceResponse {
-        //     status: None,
-        //     version,
-        // }))
+        Ok(Response::new(ResetSourceResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn create_sink(
