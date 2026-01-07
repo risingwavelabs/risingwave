@@ -49,13 +49,8 @@ impl FrontendService for FrontendServiceImpl {
     ) -> Result<RpcResponse<GetTableReplacePlanResponse>, Status> {
         let req = request.into_inner();
 
-        let replace_plan = get_new_table_plan(
-            req.table_id,
-            req.database_id,
-            req.owner,
-            req.cdc_table_change,
-        )
-        .await?;
+        let replace_plan =
+            get_new_table_plan(req.table_id, req.database_id, req.cdc_table_change).await?;
 
         Ok(RpcResponse::new(GetTableReplacePlanResponse {
             replace_plan: Some(replace_plan),
@@ -96,7 +91,6 @@ impl FrontendService for FrontendServiceImpl {
 async fn get_new_table_plan(
     table_id: TableId,
     database_id: DatabaseId,
-    owner: u32,
     cdc_table_change: Option<TableSchemaChange>,
 ) -> Result<ReplaceJobPlan, RwError> {
     tracing::info!("get_new_table_plan for table {}", table_id);
@@ -106,13 +100,23 @@ async fn get_new_table_plan(
         .expect("session manager has been initialized");
 
     // get a session object for the corresponding user and database
-    let session = session_mgr.create_dummy_session(database_id, owner)?;
+    let session = session_mgr.create_dummy_session(database_id)?;
 
     let table_catalog = {
         let reader = session.env().catalog_reader().read_guard();
         reader.get_any_table_by_id(table_id)?.clone()
     };
-    let table_name = ObjectName::from(vec![table_catalog.name.as_str().into()]);
+    let original_owner = table_catalog.owner;
+
+    let schema_name = {
+        let reader = session.env().catalog_reader().read_guard();
+        let schema = reader.get_schema_by_id(table_catalog.database_id, table_catalog.schema_id)?;
+        schema.name.clone()
+    };
+    let table_name = ObjectName::from(vec![
+        schema_name.as_str().into(),
+        table_catalog.name.as_str().into(),
+    ]);
 
     let definition = if let Some(cdc_table_change) = cdc_table_change {
         let new_version_columns = cdc_table_change
@@ -125,7 +129,7 @@ async fn get_new_table_plan(
         table_catalog.create_sql_ast_purified()?
     };
 
-    let (source, table, graph, job_type) = get_replace_table_plan(
+    let (mut source, mut table, graph, job_type) = get_replace_table_plan(
         &session,
         table_name,
         definition,
@@ -133,6 +137,13 @@ async fn get_new_table_plan(
         SqlColumnStrategy::FollowUnchecked,
     )
     .await?;
+
+    // The dummy session may be created with a fixed super user, which can cause the generated
+    // plan to carry an incorrect table owner. Restore it to the original owner.
+    table.owner = original_owner;
+    if let Some(source) = &mut source {
+        source.owner = original_owner;
+    }
 
     Ok(ReplaceJobPlan {
         replace_job: Some(replace_job_plan::ReplaceJob::ReplaceTable(

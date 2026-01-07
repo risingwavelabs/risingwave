@@ -176,7 +176,6 @@ impl DdlServiceImpl {
                     let start = tokio::time::Instant::now();
                     let req = GetTableReplacePlanRequest {
                         database_id: table.database_id,
-                        owner: table.owner,
                         table_id: table.id,
                         cdc_table_change: None,
                     };
@@ -1210,7 +1209,6 @@ impl DdlService for DdlServiceImpl {
                 let resp = client
                     .get_table_replace_plan(GetTableReplacePlanRequest {
                         database_id: table.database_id,
-                        owner: table.owner,
                         table_id: table.id,
                         cdc_table_change: Some(table_change.clone()),
                     })
