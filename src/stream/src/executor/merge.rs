@@ -451,8 +451,12 @@ where
                 }
 
                 Poll::Ready(None) => {
-                    // See also the comments in `DynamicReceivers::poll_next`.
-                    unreachable!("Merge should always have upstream inputs");
+                    // This can happen when all upstream dispatchers fail and are removed
+                    // (e.g., due to exchange channel closure during recovery).
+                    // Return an error to trigger proper recovery handling.
+                    return Poll::Ready(Some(Err(StreamExecutorError::channel_closed(
+                        "all upstream inputs closed unexpectedly".to_owned(),
+                    ))));
                 }
             }
         }
