@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+#[cfg(feature = "datafusion")]
+use datafusion::physical_plan::{ExecutionPlan, displayable};
 use petgraph::dot::Dot;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
@@ -30,7 +32,9 @@ use super::util::SourceSchemaCompatExt;
 use super::{RwPgResponse, RwPgResponseBuilderExt};
 use crate::OptimizerContextRef;
 #[cfg(feature = "datafusion")]
-use crate::datafusion::DfBatchQueryPlanResult;
+use crate::datafusion::{
+    DfBatchQueryPlanResult, build_datafusion_physical_plan, create_datafusion_context,
+};
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 use crate::handler::create_table::handle_create_table_plan;
@@ -51,6 +55,12 @@ pub async fn do_handle_explain(
     // Workaround to avoid `Rc` across `await` point.
     let mut batch_plan_fragmenter = None;
     let mut batch_plan_fragmenter_fmt = ExplainFormat::Json;
+    #[cfg(feature = "datafusion")]
+    let mut datafusion_physical_plan_request: Option<(
+        DfBatchQueryPlanResult,
+        ExplainFormat,
+        bool,
+    )> = None;
 
     let session = handler_args.session.clone();
 
@@ -335,7 +345,8 @@ pub async fn do_handle_explain(
                         }
                         #[cfg(feature = "datafusion")]
                         PlanToExplain::Df(plan) => {
-                            explain_datafusion_plan(plan, explain_format, explain_verbose, blocks)?
+                            datafusion_physical_plan_request =
+                                Some((plan.clone(), explain_format, explain_verbose));
                         }
                     }
                 }
@@ -355,6 +366,19 @@ pub async fn do_handle_explain(
         plan?;
     }
 
+    // Use explain_datafusion_plan here to avoid `Rc` across `await` point.
+    #[cfg(feature = "datafusion")]
+    if let Some((plan, explain_format, explain_verbose)) = datafusion_physical_plan_request {
+        let df_ctx = create_datafusion_context(session.as_ref());
+        let physical_plan = build_datafusion_physical_plan(&df_ctx, &plan).await?;
+        explain_datafusion_plan(
+            physical_plan.as_ref(),
+            explain_format,
+            explain_verbose,
+            blocks,
+        )?;
+    }
+
     if let Some(fragmenter) = batch_plan_fragmenter {
         let query = fragmenter.generate_complete_query().await?;
         let stage_graph = if batch_plan_fragmenter_fmt == ExplainFormat::Dot {
@@ -372,19 +396,13 @@ pub async fn do_handle_explain(
 
 #[cfg(feature = "datafusion")]
 fn explain_datafusion_plan(
-    plan: &DfBatchQueryPlanResult,
+    plan: &dyn ExecutionPlan,
     explain_format: ExplainFormat,
     verbose: bool,
     blocks: &mut Vec<String>,
 ) -> Result<()> {
     let output = match explain_format {
-        ExplainFormat::Text => {
-            if verbose {
-                plan.plan.display_indent_schema().to_string()
-            } else {
-                plan.plan.display_indent().to_string()
-            }
-        }
+        ExplainFormat::Text => displayable(plan).indent(verbose).to_string(),
         unsupported => {
             return Err(ErrorCode::NotSupported(
                 format!("EXPLAIN ... {:?} for DataFusion plan", unsupported),
