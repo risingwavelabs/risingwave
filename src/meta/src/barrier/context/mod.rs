@@ -35,12 +35,20 @@ use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
     BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot,
-    DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
+    CreateStreamingJobCommandInfo, DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
+    SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
+
+#[derive(Debug)]
+pub(super) struct CreateSnapshotBackfillJobInfo {
+    pub info: CreateStreamingJobCommandInfo,
+    pub snapshot_backfill_info: SnapshotBackfillInfo,
+    pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
+}
 
 pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn commit_epoch(
@@ -59,6 +67,11 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn post_collect_command<'a>(
         &'a self,
         command: &'a CommandContext,
+    ) -> impl Future<Output = MetaResult<()>> + Send + 'a;
+
+    fn post_collect_create_snapshot_backfill<'a>(
+        &'a self,
+        info: &'a CreateSnapshotBackfillJobInfo,
     ) -> impl Future<Output = MetaResult<()>> + Send + 'a;
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String);
