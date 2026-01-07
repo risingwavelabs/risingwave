@@ -212,7 +212,6 @@ pub struct StreamingMetrics {
     materialize_data_exist_count: RelabeledGuardedIntCounterVec,
     materialize_cache_total_count: RelabeledGuardedIntCounterVec,
     materialize_input_row_count: RelabeledGuardedIntCounterVec,
-    materialize_cache_prune_count: RelabeledGuardedIntCounterVec,
     pub materialize_current_epoch: RelabeledGuardedIntGaugeVec,
 }
 
@@ -1178,15 +1177,6 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
-        let materialize_cache_prune_count = register_guarded_int_counter_vec_with_registry!(
-            "stream_materialize_cache_prune_count",
-            "Materialize executor cache prune count (by vnode max key)",
-            &["actor_id", "table_id", "fragment_id"],
-            registry
-        )
-        .unwrap()
-        .relabel_debug_1(level);
-
         let stream_memory_usage = register_guarded_int_gauge_vec_with_registry!(
             "stream_memory_usage",
             "Memory usage for stream executors",
@@ -1314,7 +1304,6 @@ impl StreamingMetrics {
             materialize_cache_total_count,
             materialize_input_row_count,
             materialize_current_epoch,
-            materialize_cache_prune_count,
         }
     }
 
@@ -1681,9 +1670,6 @@ impl StreamingMetrics {
             materialize_current_epoch: self
                 .materialize_current_epoch
                 .with_guarded_label_values(label_list),
-            materialize_cache_prune_count: self
-                .materialize_cache_prune_count
-                .with_guarded_label_values(label_list),
         }
     }
 }
@@ -1720,7 +1706,6 @@ pub struct MaterializeMetrics {
     pub materialize_cache_total_count: LabelGuardedIntCounter,
     pub materialize_input_row_count: LabelGuardedIntCounter,
     pub materialize_current_epoch: LabelGuardedIntGauge,
-    pub materialize_cache_prune_count: LabelGuardedIntCounter,
 }
 
 pub struct GroupTopNMetrics {
