@@ -383,6 +383,9 @@ pub enum Mutation {
     LoadFinish {
         associated_source_id: SourceId,
     },
+    ResetSource {
+        source_id: SourceId,
+    },
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -561,7 +564,8 @@ impl Barrier {
             | Mutation::StartFragmentBackfill { .. }
             | Mutation::RefreshStart { .. }
             | Mutation::ListFinish { .. }
-            | Mutation::LoadFinish { .. } => false,
+            | Mutation::LoadFinish { .. }
+            | Mutation::ResetSource { .. } => false,
         }
     }
 
@@ -923,6 +927,11 @@ impl Mutation {
             } => PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
                 associated_source_id: *associated_source_id,
             }),
+            Mutation::ResetSource { source_id } => {
+                PbMutation::ResetSource(risingwave_pb::stream_plan::ResetSourceMutation {
+                    source_id: source_id.as_raw_id(),
+                })
+            }
         }
     }
 
@@ -1097,6 +1106,9 @@ impl Mutation {
             },
             PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
                 associated_source_id: load_finish.associated_source_id,
+            },
+            PbMutation::ResetSource(reset_source) => Mutation::ResetSource {
+                source_id: SourceId::from(reset_source.source_id),
             },
         };
         Ok(mutation)
