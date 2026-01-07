@@ -367,7 +367,7 @@ pub fn check_subset_preserve_order<T: Eq>(
     true
 }
 
-static SANITY_CHECK_ENABLED: AtomicBool = AtomicBool::new(cfg!(debug_assertions));
+static SANITY_CHECK_ENABLED: AtomicBool = AtomicBool::new(true);
 
 /// This function is intended to be called during compute node initialization if the storage
 /// sanity check is not desired. This controls a global flag so only need to be called once
