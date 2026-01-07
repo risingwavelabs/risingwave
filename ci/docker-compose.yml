@@ -18,9 +18,9 @@ services:
     volumes:
       - ./postgres-conf/00-setup-ssl-user.sh:/docker-entrypoint-initdb.d/00-setup-ssl-user.sh
       - ./postgres-conf/server.crt:/etc/postgresql/server.crt
-      - ./postgres-conf/server.key:/etc/postgresql/server.key
+      - ./postgres-conf/server.key:/etc/postgresql/server.key.mount
     command:
-      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=50", "-c", "max_wal_senders=20", "-c", "ssl=on", "-c", "ssl_cert_file=/etc/postgresql/server.crt", "-c", "ssl_key_file=/etc/postgresql/server.key"]
+      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=50", "-c", "max_wal_senders=20", "-c", "ssl=on", "-c", "ssl_cert_file=/etc/postgresql/server.crt", "-c", "ssl_key_file=/var/lib/postgresql/data/server.key"]
 
   mysql:
     image: mysql:8.0
