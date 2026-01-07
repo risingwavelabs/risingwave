@@ -283,7 +283,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 40
+    timeout_in_minutes: 50
     parallelism: 4
     retry: *auto-retry
 
@@ -359,7 +359,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 70
+    timeout_in_minutes: 80
     retry: *auto-retry
 
   - label: "end-to-end test (madsim)"

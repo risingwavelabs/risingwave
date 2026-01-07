@@ -1,9 +1,6 @@
 # test auto schema change on table without specified pk
 
 statement ok
-set streaming_use_snapshot_backfill = false;
-
-statement ok
 create table t(id int, name string);
 
 statement error sink with auto schema change should have same pk as upstream table

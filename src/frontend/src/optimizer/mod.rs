@@ -1024,7 +1024,7 @@ impl LogicalPlanRoot {
                 "Refreshable tables must have a PRIMARY KEY. Please define a primary key for the table."
                     .to_owned(),
             )
-            .into());
+                .into());
         }
 
         StreamMaterialize::create_for_table(
@@ -1121,7 +1121,7 @@ impl LogicalPlanRoot {
     }
 
     /// Optimize and generate a create sink plan.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn gen_sink_plan(
         self,
         sink_name: String,
@@ -1136,10 +1136,25 @@ impl LogicalPlanRoot {
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
+        allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
         let backfill_type = if without_backfill {
             BackfillType::UpstreamOnly
-        } else if target_table.is_none() && self.should_use_snapshot_backfill() {
+        } else if allow_snapshot_backfill
+            && self.should_use_snapshot_backfill()
+            && {
+                if auto_refresh_schema_from_table.is_some() {
+                    self.plan.ctx().session_ctx().notice_to_user("Auto schema change only support for ArrangementBackfill. Switched to use ArrangementBackfill");
+                    false
+                } else {
+                    true
+                }
+            }
+        {
+            assert!(
+                target_table.is_none(),
+                "should not allow snapshot backfill for sink-into-table"
+            );
             // Snapshot backfill on sink-into-table is not allowed
             BackfillType::SnapshotBackfill
         } else if self.should_use_arrangement_backfill() {
