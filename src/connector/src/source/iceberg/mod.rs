@@ -263,6 +263,7 @@ pub struct IcebergDeleteParameters {
     pub equality_delete_columns: Vec<String>,
     pub has_position_delete: bool,
     pub snapshot_id: Option<i64>,
+    pub format_version: u8,
 }
 
 #[async_trait]
@@ -569,12 +570,14 @@ impl IcebergSplitEnumerator {
                     equality_delete_columns: delete_columns,
                     has_position_delete: have_position_delete,
                     snapshot_id: Some(snapshot_id),
+                    format_version: table.metadata().format_version() as u8,
                 })
             }
             None => Ok(IcebergDeleteParameters {
                 equality_delete_columns: vec![],
                 has_position_delete: false,
                 snapshot_id: None,
+                format_version: table.metadata().format_version() as u8,
             }),
         }
     }

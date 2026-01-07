@@ -248,9 +248,18 @@ impl IcebergScanInner {
             scan_builder = scan_builder.snapshot_id(snapshot_id);
         }
         let scan = scan_builder.build().map_err(to_datafusion_error)?;
+        let use_reader_delete_filter = self.table.metadata().format_version() as u8 >= 3;
 
         let mut position_delete_files_set = HashSet::new();
         let mut equality_delete_files_set = HashSet::new();
+
+        if use_reader_delete_filter && !matches!(self.iceberg_scan_type, IcebergScanType::DataScan)
+        {
+            return not_impl_err!(
+                "Iceberg delete scan type {:?} is not supported for format version >= 3",
+                self.iceberg_scan_type
+            );
+        }
 
         #[for_await]
         for scan_task in scan.plan_files().await.map_err(to_datafusion_error)? {
@@ -263,8 +272,10 @@ impl IcebergScanInner {
                             scan_task.data_file_content
                         );
                     }
-                    // Delete files are handled by dedicated scans; clear them for data scan tasks.
-                    scan_task.deletes.clear();
+                    if !use_reader_delete_filter {
+                        // Delete files are handled by dedicated scans; clear them for data scan tasks.
+                        scan_task.deletes.clear();
+                    }
                     yield scan_task;
                 }
                 IcebergScanType::EqualityDeleteScan => {
