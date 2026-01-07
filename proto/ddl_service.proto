@@ -85,6 +85,16 @@ message AlterSourceResponse {
   WaitVersion version = 2;
 }
 
+// Reset CDC source offset to latest (for handling expired binlog/oplog)
+message ResetSourceRequest {
+  uint32 source_id = 1;
+}
+
+message ResetSourceResponse {
+  common.Status status = 1;
+  WaitVersion version = 2;
+}
+
 message CreateSinkRequest {
   catalog.Sink sink = 1;
   stream_plan.StreamFragmentGraph fragment_graph = 2;
@@ -651,6 +661,7 @@ service DdlService {
   rpc AlterSecret(AlterSecretRequest) returns (AlterSecretResponse);
   rpc AlterName(AlterNameRequest) returns (AlterNameResponse);
   rpc AlterSource(AlterSourceRequest) returns (AlterSourceResponse);
+  rpc ResetSource(ResetSourceRequest) returns (ResetSourceResponse);
   rpc AlterOwner(AlterOwnerRequest) returns (AlterOwnerResponse);
   rpc AlterSetSchema(AlterSetSchemaRequest) returns (AlterSetSchemaResponse);
   rpc AlterParallelism(AlterParallelismRequest) returns (AlterParallelismResponse);

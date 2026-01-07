@@ -835,6 +835,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
+    pub async fn reset_source(&self, source_id: SourceId) -> Result<WaitVersion> {
+        let request = ResetSourceRequest { source_id };
+        let resp = self.inner.reset_source(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
     pub async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<WaitVersion> {
         let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
@@ -2496,6 +2504,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+            ,{ ddl_client, reset_source, ResetSourceRequest, ResetSourceResponse }
             ,{ ddl_client, drop_secret, DropSecretRequest, DropSecretResponse}
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }

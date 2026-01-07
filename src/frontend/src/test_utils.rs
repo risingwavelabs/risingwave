@@ -517,6 +517,10 @@ impl CatalogWriter for MockCatalogWriter {
         Ok(())
     }
 
+    async fn reset_source(&self, _source_id: SourceId) -> Result<()> {
+        Ok(())
+    }
+
     async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(

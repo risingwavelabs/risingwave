@@ -241,6 +241,16 @@ pub enum AlterSourceOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET CONFIG (key = value, ...)`
+    SetConfig {
+        entries: Vec<SqlOption>,
+    },
+    /// `RESET CONFIG (key, ...)`
+    ResetConfig {
+        keys: Vec<ObjectName>,
+    },
+    /// `RESET` - Reset CDC source offset to latest
+    ResetSource,
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -570,6 +580,15 @@ impl fmt::Display for AlterSourceOperation {
                     parallelism,
                     if *deferred { " DEFERRED" } else { "" }
                 )
+            }
+            AlterSourceOperation::SetConfig { entries } => {
+                write!(f, "SET CONFIG ({})", display_comma_separated(entries))
+            }
+            AlterSourceOperation::ResetConfig { keys } => {
+                write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
+            }
+            AlterSourceOperation::ResetSource => {
+                write!(f, "RESET")
             }
             AlterSourceOperation::AlterConnectorProps { alter_props } => {
                 write!(

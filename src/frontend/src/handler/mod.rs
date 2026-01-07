@@ -110,6 +110,7 @@ pub mod privilege;
 pub mod query;
 mod recover;
 mod refresh;
+mod reset_source;
 pub mod show;
 mod transaction;
 mod use_db;
@@ -1206,6 +1207,27 @@ pub async fn handle(
                     deferred,
                 )
                 .await
+            }
+            AlterSourceOperation::SetConfig { entries } => {
+                alter_streaming_config::handle_alter_streaming_set_config(
+                    handler_args,
+                    name,
+                    entries,
+                    StatementType::ALTER_SOURCE,
+                )
+                .await
+            }
+            AlterSourceOperation::ResetConfig { keys } => {
+                alter_streaming_config::handle_alter_streaming_reset_config(
+                    handler_args,
+                    name,
+                    keys,
+                    StatementType::ALTER_SOURCE,
+                )
+                .await
+            }
+            AlterSourceOperation::ResetSource => {
+                reset_source::handle_reset_source(handler_args, name).await
             }
         },
         Statement::AlterFunction {

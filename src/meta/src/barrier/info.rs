@@ -915,6 +915,7 @@ impl InflightDatabaseInfo {
                     (Some(info), None, new_upstream_sink)
                 }
                 Command::ReplaceStreamJob(replace_job) => (None, Some(replace_job), None),
+                Command::ResetSource { .. } => (None, None, None),
             },
         };
         // `existing_fragment_ids` consists of
