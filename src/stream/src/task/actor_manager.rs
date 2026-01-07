@@ -12,11 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
 use core::time::Duration;
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use anyhow::anyhow;
 use async_recursion::async_recursion;
 use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
@@ -47,8 +47,7 @@ use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, AnyDispatchExecutor, DispatchExecutor, Execute, Executor,
     ExecutorInfo, SnapshotBackfillExecutor, StreamExecutorError, SyncLogStoreDispatchConfig,
-    SyncedKvLogStoreMetrics,
-    SyncLogStoreDispatchExecutor, TroublemakerExecutor, WrapperExecutor,
+    SyncLogStoreDispatchExecutor, SyncedKvLogStoreMetrics, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -459,12 +458,18 @@ impl StreamActorManager {
                 };
                 let input = input.clone();
 
-                let table = sync.log_store_table.as_ref().ok_or_else(|| anyhow!("missing log_store_table in SyncLogStoreNode"))?
-                .clone();
+                let table = sync
+                    .log_store_table
+                    .as_ref()
+                    .ok_or_else(|| anyhow!("missing log_store_table in SyncLogStoreNode"))?
+                    .clone();
 
                 #[allow(deprecated)]
                 let pause_duration_ms = sync.pause_duration_ms.map_or(
-                    actor_context.config.developer.sync_log_store_pause_duration_ms,
+                    actor_context
+                        .config
+                        .developer
+                        .sync_log_store_pause_duration_ms,
                     |v| v as usize,
                 );
 
@@ -476,7 +481,7 @@ impl StreamActorManager {
 
                 let serde = LogStoreRowSerde::new(
                     &table,
-                    vnode_bitmap.clone().map(|b:Bitmap| b.into()),
+                    vnode_bitmap.clone().map(|b: Bitmap| b.into()),
                     &KV_LOG_STORE_V2_INFO,
                 );
 
@@ -491,8 +496,8 @@ impl StreamActorManager {
                         chunk_size,
                     )),
                 )
-            },
-            _ => (node.clone(), None)
+            }
+            _ => (node.clone(), None),
         };
 
         let (executor, subtasks) = self
@@ -505,7 +510,7 @@ impl StreamActorManager {
                 &local_barrier_manager,
             )
             .await?;
-        
+
         let dispatcher = match sync_log_store_args {
             Some((table_id, serde, max_buffer_size, pause_duration_ms, aligned, chunk_size)) => {
                 match self.env.state_store() {

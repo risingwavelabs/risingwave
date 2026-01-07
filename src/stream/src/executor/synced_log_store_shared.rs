@@ -3,14 +3,15 @@ use std::collections::VecDeque;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_connector::sink::log_store::ChunkId;
+use risingwave_pb::id::ActorId;
+use risingwave_storage::store::LocalStateStore;
 
+use crate::common::log_store_impl::kv_log_store::SeqId;
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferItem;
 use crate::common::log_store_impl::kv_log_store::state::{
-    LogStorePostSealCurrentEpoch, LogStoreReadState, LogStoreVnodeProgress, LogStoreWriteState,
-};
-use crate::common::log_store_impl::kv_log_store::SeqId;
+    LogStorePostSealCurrentEpoch, LogStoreWriteState,};
+use crate::common::log_store_impl::kv_log_store::LogStoreVnodeProgress;
 use crate::executor::{Barrier, StreamExecutorResult, SyncedKvLogStoreMetrics};
-use risingwave_storage::store::LocalStateStore;
 
 /// Buffer used by the synced log-store executors to coordinate write/read.
 pub(crate) struct SyncedLogStoreBuffer {
@@ -186,7 +187,7 @@ impl SyncedLogStoreBuffer {
 
 /// Write barrier into log-store, flushing pending chunks when needed.
 pub(crate) async fn write_barrier<'a, S: LocalStateStore>(
-    actor_id: u32,
+    actor_id: ActorId,
     write_state: &'a mut LogStoreWriteState<S>,
     barrier: Barrier,
     metrics: &SyncedKvLogStoreMetrics,

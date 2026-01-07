@@ -95,8 +95,8 @@ use crate::common::log_store_impl::kv_log_store::{
     Epoch, FIRST_SEQ_ID, FlushInfo, LogStoreVnodeProgress, SeqId,
 };
 use crate::executor::prelude::*;
-use crate::executor::synced_log_store_shared::{SyncedLogStoreBuffer, write_barrier};
 use crate::executor::sync_kv_log_store::metrics::SyncedKvLogStoreMetrics;
+use crate::executor::synced_log_store_shared::{SyncedLogStoreBuffer, write_barrier};
 use crate::executor::{
     Barrier, BoxedMessageStream, Message, StreamExecutorError, StreamExecutorResult,
 };
@@ -728,16 +728,15 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                                     _ => {}
                                                 }
                                             }
-                                            let write_state_post_write_barrier =
-                                                write_barrier(
-                                                    self.actor_context.id,
-                                                    &mut write_state,
-                                                    barrier.clone(),
-                                                    &self.metrics,
-                                                    progress.take(),
-                                                    &mut buffer,
-                                                )
-                                                .await?;
+                                            let write_state_post_write_barrier = write_barrier(
+                                                self.actor_context.id,
+                                                &mut write_state,
+                                                barrier.clone(),
+                                                &self.metrics,
+                                                progress.take(),
+                                                &mut buffer,
+                                            )
+                                            .await?;
                                             seq_id = FIRST_SEQ_ID;
                                             let update_vnode_bitmap = barrier
                                                 .as_update_vnode_bitmap(self.actor_context.id);
@@ -992,8 +991,6 @@ impl<S: StateStoreRead> ReadFuture<S> {
     }
 }
 
-// Write methods
-impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
 impl<S> Execute for SyncedKvLogStoreExecutor<S>
 where
     S: StateStore,
