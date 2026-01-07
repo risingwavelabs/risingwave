@@ -18,6 +18,7 @@ statement error using an impure expression \(RANDOM\) in AGGREGATE FILTER
 create materialized view mv_impure_agg_filter as
 select sum(a) filter (where random() > 0.5) from t;
 
+skipif madsim
 statement ok
 create function rand_series(n int) returns table (x int) language javascript as $$
 export function* rand_series(n) {
@@ -29,10 +30,12 @@ $$;
 
 # StreamProjectSet: user-defined table function on retract stream should error.
 # TODO: we should extract it and materialize it.
+skipif madsim
 statement error using an impure expression \(user-defined table function `rand_series`\) in table function
 create materialized view mv_impure_udtf_select_list as
 select a, rand_series(a) from t;
 
+skipif madsim
 statement ok
 drop function rand_series(int);
 
