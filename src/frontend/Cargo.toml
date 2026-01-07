@@ -10,6 +10,8 @@ repository = { workspace = true }
 [features]
 default = []
 datafusion = ["dep:datafusion", "dep:datafusion-common"]
+all-sources = ["source-adbc_snowflake"]
+source-adbc_snowflake = ["risingwave_connector/source-adbc_snowflake"]
 
 [dependencies]
 anyhow = "1"
@@ -24,8 +26,10 @@ bk-tree = "0.5.0"
 bytes = "1"
 chrono = { workspace = true }
 clap = { workspace = true }
-datafusion = { version = "50", optional = true }
-datafusion-common = { version = "50", optional = true }
+datafusion = { version = "50", optional = true, features = ["backtrace"] }
+datafusion-common = { version = "50", optional = true, features = [
+    "backtrace",
+] }
 downcast-rs = "2.0"
 dyn-clone = "1.0.14"
 easy-ext = "1"
@@ -66,6 +70,7 @@ quick-xml = { version = "0.38", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_connector = { workspace = true }
@@ -105,9 +110,9 @@ toml = { workspace = true }
 tonic = { workspace = true }
 tower = { version = "0.5", features = ["util", "load-shed"] }
 tower-http = { version = "0.6", features = [
-  "add-extension",
-  "cors",
-  "compression-gzip",
+    "add-extension",
+    "cors",
+    "compression-gzip",
 ] }
 tracing = "0.1"
 url = "2.5.0"

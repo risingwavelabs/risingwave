@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -263,7 +263,7 @@ impl CommandContext {
         match command {
             Command::Flush => {}
 
-            Command::Throttle(_) => {}
+            Command::Throttle { .. } => {}
 
             Command::Pause => {}
 
@@ -305,9 +305,11 @@ impl CommandContext {
                 barrier_manager_context
                     .source_manager
                     .apply_source_change(SourceChange::UpdateSourceProps {
+                        // Only sources are managed in source manager. Convert object IDs to source IDs and let
+                        // source manager ignore unknown/unregistered sources.
                         source_id_map_new_props: obj_id_map_props
                             .iter()
-                            .map(|(source_id, props)| (source_id.as_source_id(), props.clone()))
+                            .map(|(object_id, props)| (object_id.as_source_id(), props.clone()))
                             .collect(),
                     })
                     .await;
@@ -480,9 +482,8 @@ impl CommandContext {
                     .await?
             }
             Command::DropSubscription { .. } => {}
-            Command::MergeSnapshotBackfillStreamingJobs(_) => {}
-            Command::StartFragmentBackfill { .. } => {}
             Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
+            Command::ResetSource { .. } => {}
         }
 
         Ok(())

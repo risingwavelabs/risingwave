@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -65,13 +65,17 @@ use crate::barrier::checkpoint::{
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{
-    BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
+    BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
+    SubscriberType,
 };
 use crate::barrier::progress::CreateMviewProgressTracker;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaSrvEnv;
-use crate::model::{ActorId, FragmentId, StreamActor, StreamJobActorsToCreate, SubscriptionId};
+use crate::model::{
+    ActorId, FragmentDownstreamRelation, FragmentId, StreamActor, StreamJobActorsToCreate,
+    SubscriptionId,
+};
 use crate::stream::cdc::{
     CdcTableSnapshotSplits, is_parallelized_backfill_enabled_cdc_scan_fragment,
 };
@@ -521,6 +525,7 @@ pub(super) struct DatabaseInitialBarrierCollector {
     database_id: DatabaseId,
     node_to_collect: NodeToCollect,
     database_state: BarrierWorkerState,
+    database_info: InflightDatabaseInfo,
     creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl>,
     committed_epoch: u64,
 }
@@ -555,10 +560,14 @@ impl DatabaseInitialBarrierCollector {
     pub(super) fn collect_resp(&mut self, resp: BarrierCompleteResponse) {
         assert_eq!(self.database_id, resp.database_id);
         if let Some(creating_job_id) = from_partial_graph_id(resp.partial_graph_id) {
-            self.creating_streaming_job_controls
-                .get_mut(&creating_job_id)
-                .expect("should exist")
-                .collect(resp);
+            assert!(
+                !self
+                    .creating_streaming_job_controls
+                    .get_mut(&creating_job_id)
+                    .expect("should exist")
+                    .collect(resp),
+                "unlikely to finish backfill since just recovered"
+            );
         } else {
             assert_eq!(resp.epoch, self.committed_epoch);
             assert!(self.node_to_collect.remove(&resp.worker_id).is_some());
@@ -571,6 +580,7 @@ impl DatabaseInitialBarrierCollector {
             self.database_id,
             self.database_state,
             self.committed_epoch,
+            self.database_info,
             self.creating_streaming_job_controls,
         )
     }
@@ -593,6 +603,7 @@ impl ControlStreamManager {
         jobs: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
         state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
+        fragment_relations: &FragmentDownstreamRelation,
         edges: &mut FragmentEdgeBuildResult,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
@@ -937,8 +948,9 @@ impl ControlStreamManager {
                     &database_job_log_epochs,
                     snapshot_epoch,
                     committed_epoch,
-                    barrier_info.curr_epoch.value().0,
+                    &barrier_info,
                     info,
+                    fragment_relations,
                     hummock_version_stats,
                     node_actors,
                     mutation.clone(),
@@ -964,17 +976,17 @@ impl ControlStreamManager {
 
         let committed_epoch = barrier_info.prev_epoch();
         let new_epoch = barrier_info.curr_epoch;
-        let database_state = BarrierWorkerState::recovery(
+        let database_info = InflightDatabaseInfo::recover(
             database_id,
-            self.env.shared_actor_infos().clone(),
-            new_epoch,
             database_jobs.into_values(),
-            is_paused,
+            self.env.shared_actor_infos().clone(),
         );
+        let database_state = BarrierWorkerState::recovery(new_epoch, is_paused);
         Ok(DatabaseInitialBarrierCollector {
             database_id,
             node_to_collect,
             database_state,
+            database_info,
             creating_streaming_job_controls,
             committed_epoch,
         })
@@ -1032,7 +1044,7 @@ impl ControlStreamManager {
                     let mutation = mutation.clone();
                     let barrier = Barrier {
                         epoch: Some(risingwave_pb::data::Epoch {
-                            curr: barrier_info.curr_epoch.value().0,
+                            curr: barrier_info.curr_epoch(),
                             prev: barrier_info.prev_epoch(),
                         }),
                         mutation: mutation.clone().map(|_| BarrierMutation { mutation }),
@@ -1114,7 +1126,7 @@ impl ControlStreamManager {
                 use risingwave_pb::meta::event_log;
                 let event = event_log::EventInjectBarrierFail {
                     prev_epoch: barrier_info.prev_epoch(),
-                    cur_epoch: barrier_info.curr_epoch.value().0,
+                    cur_epoch: barrier_info.curr_epoch(),
                     error: e.to_report_string(),
                 };
                 self.env

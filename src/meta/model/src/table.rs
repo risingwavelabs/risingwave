@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -348,6 +348,7 @@ impl From<PbTable> for ActiveModel {
             dist_key_in_pk: Set(pb_table.dist_key_in_pk.into()),
             dml_fragment_id,
             cardinality: Set(pb_table.cardinality.as_ref().map(|x| x.into())),
+            #[expect(deprecated)]
             cleaned_by_watermark: Set(pb_table.cleaned_by_watermark),
             description: Set(pb_table.description),
             version: Set(pb_table.version.as_ref().map(|v| v.into())),

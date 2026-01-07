@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,9 +30,7 @@ use risingwave_meta::barrier::{BarrierScheduler, Command};
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
-use risingwave_meta::stream::{
-    ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy, ThrottleConfig,
-};
+use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy};
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
@@ -95,6 +93,7 @@ impl DdlServiceImpl {
             stream_manager,
             source_manager,
             barrier_manager,
+            sink_manager.clone(),
         )
         .await;
         Self {
@@ -176,7 +175,6 @@ impl DdlServiceImpl {
                     let start = tokio::time::Instant::now();
                     let req = GetTableReplacePlanRequest {
                         database_id: table.database_id,
-                        owner: table.owner,
                         table_id: table.id,
                         cdc_table_change: None,
                     };
@@ -401,6 +399,30 @@ impl DdlService for DdlServiceImpl {
             .await?;
 
         Ok(Response::new(DropSourceResponse {
+            status: None,
+            version,
+        }))
+    }
+
+    async fn reset_source(
+        &self,
+        request: Request<ResetSourceRequest>,
+    ) -> Result<Response<ResetSourceResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+
+        tracing::info!(
+            source_id = %source_id,
+            "Received RESET SOURCE request, routing to DDL controller"
+        );
+
+        // Route to DDL controller
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::ResetSource(source_id))
+            .await?;
+
+        Ok(Response::new(ResetSourceResponse {
             status: None,
             version,
         }))
@@ -1231,7 +1253,6 @@ impl DdlService for DdlServiceImpl {
                 let resp = client
                     .get_table_replace_plan(GetTableReplacePlanRequest {
                         database_id: table.database_id,
-                        owner: table.owner,
                         table_id: table.id,
                         cdc_table_change: Some(table_change.clone()),
                     })
@@ -1581,25 +1602,22 @@ impl DdlService for DdlServiceImpl {
         {
             let OptionalAssociatedSourceId::AssociatedSourceId(source_id) =
                 table_catalog.optional_associated_source_id.unwrap();
-            let actors_to_apply = self
+            let (jobs, fragments) = self
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
                 .await?;
-            let mutation: ThrottleConfig = actors_to_apply
-                .into_iter()
-                .map(|(fragment_id, actors)| {
-                    (
-                        fragment_id,
-                        actors
-                            .into_iter()
-                            .map(|actor_id| (actor_id, source_rate_limit))
-                            .collect::<HashMap<_, _>>(),
-                    )
-                })
-                .collect();
             let _ = self
                 .barrier_scheduler
-                .run_command(database_id, Command::Throttle(mutation))
+                .run_command(
+                    database_id,
+                    Command::Throttle {
+                        jobs,
+                        config: fragments
+                            .into_iter()
+                            .map(|fragment_id| (fragment_id, source_rate_limit))
+                            .collect(),
+                    },
+                )
                 .await?;
         }
 

@@ -340,9 +340,9 @@
     └─BatchHashJoin { type: LeftSemi, predicate: t1.a IS NOT DISTINCT FROM t1.a, output: all }
       ├─BatchExchange { order: [], dist: HashShard(t1.a) }
       │ └─BatchScan { table: t1, columns: [t1.a], distribution: SomeShard }
-      └─BatchProject { exprs: [t1.a] }
-        └─BatchGroupTopN { order: [t1.a DESC], limit: 90, offset: 0, group_key: [t1.a] }
-          └─BatchExchange { order: [], dist: HashShard(t1.a) }
+      └─BatchExchange { order: [], dist: HashShard(t1.a) }
+        └─BatchProject { exprs: [t1.a] }
+          └─BatchGroupTopN { order: [t1.a DESC], limit: 90, offset: 0, group_key: [t1.a] }
             └─BatchProject { exprs: [t1.a, t1.a] }
               └─BatchHashAgg { group_key: [t1.a], aggs: [] }
                 └─BatchExchange { order: [], dist: HashShard(t1.a) }

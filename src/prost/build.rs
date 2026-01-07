@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -267,6 +267,9 @@ for_all_wrapped_id_fields! (
         GetTablesResponse {
             tables: TableId,
         }
+        ResetSourceRequest {
+            source_id: SourceId,
+        }
     }
     frontend_service {
         GetTableReplacePlanRequest {
@@ -530,11 +533,14 @@ for_all_wrapped_id_fields! (
     }
     monitor_service {
         GetProfileStatsRequest {
+            executor_ids: ExecutorId,
             dispatcher_fragment_ids: FragmentId,
         }
         GetProfileStatsResponse {
             dispatch_fragment_output_row_count: FragmentId,
             dispatch_fragment_output_blocking_duration_ns: FragmentId,
+            stream_node_output_row_count: ExecutorId,
+            stream_node_output_blocking_duration_ns: ExecutorId,
         }
         StackTraceResponse {
             barrier_worker_state: WorkerId,
@@ -591,6 +597,7 @@ for_all_wrapped_id_fields! (
         }
         Dispatcher {
             downstream_actor_id: ActorId,
+            dispatcher_id: FragmentId,
         }
         DmlNode {
             table_id: TableId,
@@ -649,6 +656,9 @@ for_all_wrapped_id_fields! (
             source_id: SourceId,
             associated_table_id: TableId,
         }
+        StreamNode {
+            operator_id: StreamNodeLocalOperatorId,
+        }
         StreamScanNode {
             table_id: TableId,
         }
@@ -661,7 +671,7 @@ for_all_wrapped_id_fields! (
             upstream_mv_table_id: TableId,
         }
         ThrottleMutation {
-            actor_throttle: ActorId,
+            fragment_throttle: FragmentId,
         }
         UpdateMutation {
             dropped_actors: ActorId,
@@ -672,6 +682,7 @@ for_all_wrapped_id_fields! (
         }
         UpdateMutation.DispatcherUpdate {
             actor_id: ActorId,
+            dispatcher_id: FragmentId,
             added_downstream_actor_id: ActorId,
             removed_downstream_actor_id: ActorId,
         }

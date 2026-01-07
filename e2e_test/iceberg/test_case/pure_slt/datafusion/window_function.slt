@@ -1,0 +1,249 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+statement ok
+CREATE TABLE sales (
+    id INT,
+    region VARCHAR,
+    product VARCHAR,
+    amount FLOAT,
+    year INT,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO sales VALUES
+    (1, 'North', 'Laptop', 1200.0, 2023),
+    (2, 'North', 'Mouse', 25.0, 2023),
+    (3, 'North', 'Keyboard', 75.0, 2023),
+    (4, 'South', 'Laptop', 1150.0, 2023),
+    (5, 'South', 'Monitor', 350.0, 2023),
+    (6, 'South', 'Mouse', 30.0, 2023),
+    (7, 'East', 'Keyboard', 80.0, 2023),
+    (8, 'East', 'Laptop', 1100.0, 2023),
+    (9, 'West', 'Monitor', 400.0, 2023),
+    (10, 'West', 'Laptop', 1250.0, 2023),
+    (11, 'North', 'Laptop', 1300.0, 2024),
+    (12, 'North', 'Mouse', 28.0, 2024),
+    (13, 'South', 'Monitor', 380.0, 2024),
+    (14, 'East', 'Laptop', 1180.0, 2024),
+    (15, 'West', 'Keyboard', 85.0, 2024);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+# Test: Top 2 products per region by amount
+query ????
+SELECT region, product, amount, year
+FROM (
+    SELECT region, product, amount, year,
+           ROW_NUMBER() OVER (PARTITION BY region ORDER BY amount DESC) as rn
+    FROM sales WHERE year = 2023
+) t
+WHERE rn <= 2
+ORDER BY region, rn;
+----
+East Laptop 1100 2023
+East Keyboard 80 2023
+North Laptop 1200 2023
+North Keyboard 75 2023
+South Laptop 1150 2023
+South Monitor 350 2023
+West Laptop 1250 2023
+West Monitor 400 2023
+
+# Test: Sum of sales per region, top 2 regions by total sales
+query ???
+SELECT region, SUM(amount) as total, COUNT(*) as cnt
+FROM sales
+WHERE year = 2023
+GROUP BY region
+ORDER BY total DESC
+LIMIT 2;
+----
+West 1650 2
+South 1530 3
+
+# Test: Regional sales ranking with DENSE_RANK
+query ????
+SELECT region, product, amount,
+       DENSE_RANK() OVER (PARTITION BY region ORDER BY amount DESC) as rank
+FROM sales
+WHERE year = 2023
+ORDER BY region, rank;
+----
+East Laptop 1100 1
+East Keyboard 80 2
+North Laptop 1200 1
+North Keyboard 75 2
+North Mouse 25 3
+South Laptop 1150 1
+South Monitor 350 2
+South Mouse 30 3
+West Laptop 1250 1
+West Monitor 400 2
+
+# Test: Cumulative sum per region ordered by amount
+query ?????
+SELECT region, product, amount,
+       SUM(amount) OVER (PARTITION BY region ORDER BY amount DESC) as cumsum,
+       ROW_NUMBER() OVER (PARTITION BY region ORDER BY amount DESC) as rn
+FROM sales
+WHERE year = 2023
+ORDER BY region, rn;
+----
+East Laptop 1100 1100 1
+East Keyboard 80 1180 2
+North Laptop 1200 1200 1
+North Keyboard 75 1275 2
+North Mouse 25 1300 3
+South Laptop 1150 1150 1
+South Monitor 350 1500 2
+South Mouse 30 1530 3
+West Laptop 1250 1250 1
+West Monitor 400 1650 2
+
+# Test: Window frame with ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as running_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1200
+2 25 1225
+3 75 1300
+
+# Test: Window frame with ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING) as total_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1300
+2 25 1300
+3 75 1300
+
+# Test: Window frame with ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND UNBOUNDED FOLLOWING) as remaining_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1300
+2 25 100
+3 75 75
+
+# Test: Window frame with ROWS BETWEEN <expr> PRECEDING AND CURRENT ROW
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND CURRENT ROW) as sliding_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1200
+2 25 1225
+3 75 100
+
+# Test: Window frame with ROWS BETWEEN CURRENT ROW AND <expr> FOLLOWING
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN CURRENT ROW AND 1 FOLLOWING) as forward_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1225
+2 25 100
+3 75 75
+
+# Test: Window frame with ROWS BETWEEN <expr> PRECEDING AND <expr> FOLLOWING
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 PRECEDING AND 1 FOLLOWING) as centered_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 1225
+2 25 1300
+3 75 100
+
+# Test: Window frame with ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING (look-back only)
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN 2 PRECEDING AND 1 PRECEDING) as prev_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 NULL
+2 25 1200
+3 75 1225
+
+# Test: Window frame with ROWS BETWEEN 1 FOLLOWING AND 2 FOLLOWING (look-ahead only)
+query ???
+SELECT id, amount,
+       SUM(amount) OVER (ORDER BY id ROWS BETWEEN 1 FOLLOWING AND 2 FOLLOWING) as next_sum
+FROM sales
+WHERE region = 'North' AND year = 2023
+ORDER BY id;
+----
+1 1200 100
+2 25 75
+3 75 NULL
+
+# Test: Window frame with partitioning and various bounds
+query ????
+SELECT region, id, amount,
+       AVG(amount) OVER (PARTITION BY region ORDER BY id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW) as running_avg
+FROM sales
+WHERE year = 2023
+ORDER BY region, id;
+----
+East 7 80 80
+East 8 1100 590
+North 1 1200 1200
+North 2 25 612.5
+North 3 75 433.3333333333333
+South 4 1150 1150
+South 5 350 750
+South 6 30 510
+West 9 400 400
+West 10 1250 825
+
+statement ok
+DROP TABLE sales;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

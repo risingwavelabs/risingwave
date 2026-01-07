@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,7 +38,7 @@ impl LoaderV2 {
 #[async_trait::async_trait]
 impl Loader<MetadataV2> for LoaderV2 {
     async fn load(&self, target_id: MetaSnapshotId) -> BackupResult<MetaSnapshot<MetadataV2>> {
-        let snapshot_list = &self.backup_store.manifest().snapshot_metadata;
+        let snapshot_list = &self.backup_store.manifest().await.snapshot_metadata;
         let mut target_snapshot: MetaSnapshotV2 = self.backup_store.get(target_id).await?;
         tracing::debug!(
             "snapshot {} before rewrite:\n{}",
@@ -161,6 +161,8 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.user_default_privilege.clone(), db).await?;
         insert_models(metadata.fragment_splits.clone(), db).await?;
         insert_models(metadata.pending_sink_state.clone(), db).await?;
+        insert_models(metadata.refresh_jobs.clone(), db).await?;
+        insert_models(metadata.cdc_table_snapshot_splits.clone(), db).await?;
         // update_auto_inc must be called last.
         update_auto_inc(&metadata, db).await?;
         Ok(())

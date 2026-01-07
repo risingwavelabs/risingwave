@@ -16,7 +16,7 @@ use std::any::Any;
 use std::collections::HashSet;
 use std::sync::Arc;
 
-use datafusion::arrow::array::{Int64Array, RecordBatch, StringArray};
+use datafusion::arrow::array::{Int64Array, RecordBatch, RecordBatchOptions, StringArray};
 use datafusion::arrow::datatypes::{DataType, Field, Schema, SchemaRef};
 use datafusion::catalog::TableProvider;
 use datafusion::error::Result as DFResult;
@@ -24,9 +24,12 @@ use datafusion::execution::{SendableRecordBatchStream, TaskContext};
 use datafusion::physical_expr::EquivalenceProperties;
 use datafusion::physical_plan::execution_plan::{Boundedness, EmissionType};
 use datafusion::physical_plan::stream::RecordBatchStreamAdapter;
-use datafusion::physical_plan::{DisplayAs, ExecutionPlan, Partitioning, PlanProperties};
+use datafusion::physical_plan::{
+    DisplayAs, DisplayFormatType, ExecutionPlan, Partitioning, PlanProperties,
+};
 use datafusion::prelude::Expr;
-use datafusion_common::{DataFusionError, internal_err, not_impl_err};
+use datafusion_common::stats::Precision;
+use datafusion_common::{DataFusionError, Statistics, exec_err, internal_err, not_impl_err};
 use futures::{StreamExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use iceberg::scan::FileScanTask;
@@ -56,22 +59,38 @@ struct IcebergScanInner {
     table: Table,
     snapshot_id: Option<i64>,
     tasks: Vec<Vec<FileScanTask>>,
+    statistics: Vec<Statistics>,
+    total_statistics: Statistics,
     iceberg_scan_type: IcebergScanType,
     arrow_schema: SchemaRef,
-    column_names: Vec<String>,
+    scan_column_names: Vec<String>,
     need_seq_num: bool,
     need_file_path_and_pos: bool,
     plan_properties: PlanProperties,
+    projection: Option<Vec<usize>>,
 }
 
 impl DisplayAs for IcebergScan {
     fn fmt_as(
         &self,
-        _: datafusion::physical_plan::DisplayFormatType,
+        format_type: DisplayFormatType,
         f: &mut std::fmt::Formatter<'_>,
     ) -> std::fmt::Result {
-        // TODO: improve the display format
-        write!(f, "{:?}", self)
+        let scan_type = self.inner.iceberg_scan_type.as_str_name();
+        if format_type == DisplayFormatType::TreeRender {
+            writeln!(f, "{}", self.inner.table.identifier())?;
+            writeln!(f, "iceberg_scan_type={}", scan_type)?;
+            return Ok(());
+        }
+
+        write!(f, "IcebergScan: ")?;
+        write!(f, "iceberg_scan_type={}", scan_type)?;
+        write!(f, ", table={}", self.inner.table.identifier())?;
+        if format_type == DisplayFormatType::Verbose {
+            write!(f, ", snapshot_id={:?}", self.inner.snapshot_id)?;
+            write!(f, ", scan_column_names={:?}", self.inner.scan_column_names)?;
+        }
+        Ok(())
     }
 }
 
@@ -105,9 +124,7 @@ impl ExecutionPlan for IcebergScan {
         context: Arc<TaskContext>,
     ) -> datafusion_common::Result<SendableRecordBatchStream> {
         if partition >= self.inner.tasks.len() {
-            return Err(DataFusionError::Internal(
-                "IcebergScan: partition out of bounds".to_owned(),
-            ));
+            return exec_err!("IcebergScan: partition out of bounds");
         }
 
         let chunk_size = context.session_config().batch_size();
@@ -117,25 +134,48 @@ impl ExecutionPlan for IcebergScan {
             stream,
         )))
     }
+
+    fn statistics(&self) -> DFResult<Statistics> {
+        self.partition_statistics(None)
+    }
+
+    fn partition_statistics(&self, partition: Option<usize>) -> DFResult<Statistics> {
+        if let Some(partition) = partition {
+            if partition >= self.inner.statistics.len() {
+                return exec_err!("IcebergScan: partition out of bounds");
+            }
+            Ok(self.inner.statistics[partition].clone())
+        } else {
+            Ok(self.inner.total_statistics.clone())
+        }
+    }
 }
 
 impl IcebergScan {
     pub async fn new(
         provider: &IcebergTableProvider,
-        // TODO: handle these params
-        _projection: Option<&Vec<usize>>,
+        projection: Option<&Vec<usize>>,
+        // TODO: support filter pushdown and limit pushdown
         _filters: &[Expr],
         _limit: Option<usize>,
         batch_parallelism: usize,
     ) -> DFResult<Self> {
+        let mut arrow_schema = provider.schema();
+        if let Some(projection) = projection {
+            let fields: Vec<Field> = projection
+                .iter()
+                .map(|i| arrow_schema.field(*i).clone())
+                .collect();
+            arrow_schema = Arc::new(Schema::new(fields));
+        }
         let plan_properties = PlanProperties::new(
-            EquivalenceProperties::new(provider.schema()),
+            EquivalenceProperties::new(arrow_schema.clone()),
             // TODO: determine partitioning
             Partitioning::UnknownPartitioning(1),
             EmissionType::Incremental,
             Boundedness::Bounded,
         );
-        let mut column_names: Vec<String> = provider
+        let mut scan_column_names: Vec<String> = provider
             .arrow_schema
             .fields()
             .iter()
@@ -146,14 +186,14 @@ impl IcebergScan {
             .load_table()
             .await
             .map_err(to_datafusion_error)?;
-        let need_seq_num = column_names
+        let need_seq_num = scan_column_names
             .iter()
             .any(|name| name == ICEBERG_SEQUENCE_NUM_COLUMN_NAME);
-        let need_file_path_and_pos = column_names
+        let need_file_path_and_pos = scan_column_names
             .iter()
             .any(|name| name == ICEBERG_FILE_PATH_COLUMN_NAME)
             && matches!(provider.iceberg_scan_type, IcebergScanType::DataScan);
-        column_names.retain(|name| {
+        scan_column_names.retain(|name| {
             ![
                 ICEBERG_FILE_PATH_COLUMN_NAME,
                 ICEBERG_SEQUENCE_NUM_COLUMN_NAME,
@@ -166,15 +206,32 @@ impl IcebergScan {
             table,
             snapshot_id: provider.snapshot_id,
             tasks: vec![],
+            statistics: vec![],
+            total_statistics: Statistics::default(),
             iceberg_scan_type: provider.iceberg_scan_type,
-            arrow_schema: provider.arrow_schema.clone(),
-            column_names,
+            arrow_schema,
+            scan_column_names,
             need_seq_num,
             need_file_path_and_pos,
             plan_properties,
+            projection: projection.cloned(),
         };
-        let scan_tasks = inner.list_iceberg_scan_task().try_collect().await?;
-        inner.tasks = IcebergSplitEnumerator::split_n_vecs(scan_tasks, batch_parallelism);
+        let scan_tasks = inner
+            .list_iceberg_scan_task()
+            .try_collect::<Vec<_>>()
+            .await?;
+        if scan_tasks.len() <= batch_parallelism {
+            inner.tasks = scan_tasks.into_iter().map(|task| vec![task]).collect();
+        } else {
+            inner.tasks = IcebergSplitEnumerator::split_n_vecs(scan_tasks, batch_parallelism);
+        }
+        inner.statistics = inner
+            .tasks
+            .iter()
+            .map(|tasks| calculate_statistics(tasks.iter(), &inner.arrow_schema))
+            .collect();
+        inner.total_statistics =
+            calculate_statistics(inner.tasks.iter().flatten(), &inner.arrow_schema);
         inner.plan_properties.partitioning = Partitioning::UnknownPartitioning(inner.tasks.len());
 
         Ok(Self {
@@ -186,7 +243,7 @@ impl IcebergScan {
 impl IcebergScanInner {
     #[try_stream(ok = FileScanTask, error = DataFusionError)]
     async fn list_iceberg_scan_task(&self) {
-        let mut scan_builder = self.table.scan().select(&self.column_names);
+        let mut scan_builder = self.table.scan().select(&self.scan_column_names);
         if let Some(snapshot_id) = self.snapshot_id {
             scan_builder = scan_builder.snapshot_id(snapshot_id);
         }
@@ -257,15 +314,20 @@ impl IcebergScanInner {
 
             #[for_await]
             for batch in stream {
-                let batch = batch.map_err(to_datafusion_error)?;
-                let batch = append_metadata(
-                    batch,
-                    self.need_seq_num,
-                    self.need_file_path_and_pos,
-                    task,
-                    pos_start,
-                )?;
-                let batch = cast_batch(self.arrow_schema.clone(), batch)?;
+                let mut batch = batch.map_err(to_datafusion_error)?;
+                if self.need_seq_num || self.need_file_path_and_pos {
+                    batch = append_metadata(
+                        batch,
+                        self.need_seq_num,
+                        self.need_file_path_and_pos,
+                        task,
+                        pos_start,
+                    )?;
+                }
+                if let Some(projection) = &self.projection {
+                    batch = batch.project(projection).map_err(to_datafusion_error)?;
+                }
+                batch = cast_batch(self.arrow_schema.clone(), batch)?;
                 pos_start += i64::try_from(batch.num_rows()).unwrap();
                 yield batch;
             }
@@ -337,6 +399,36 @@ fn cast_batch(
         }
     }
 
-    let res = RecordBatch::try_new(target_schema.clone(), target_columns)?;
+    let res = RecordBatch::try_new_with_options(
+        target_schema.clone(),
+        target_columns,
+        &RecordBatchOptions::new().with_row_count(Some(batch.num_rows())),
+    )?;
     Ok(res)
+}
+
+fn calculate_statistics<'a>(
+    tasks: impl Iterator<Item = &'a FileScanTask>,
+    schema: &Schema,
+) -> Statistics {
+    let mut total_rows: Option<usize> = Some(0);
+    let mut total_bytes: usize = 0;
+    for task in tasks {
+        match (task.record_count, total_rows) {
+            (Some(count), Some(ref mut total_rows)) => *total_rows += count as usize,
+            (None, _) => total_rows = None,
+            _ => {}
+        };
+        total_bytes += task.file_size_in_bytes as usize;
+    }
+
+    let num_rows = match total_rows {
+        Some(rows) => Precision::Exact(rows),
+        None => Precision::Absent,
+    };
+    Statistics {
+        num_rows,
+        total_byte_size: Precision::Exact(total_bytes),
+        column_statistics: Statistics::unknown_column(schema),
+    }
 }

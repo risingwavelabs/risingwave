@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -382,17 +382,28 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 }));
                                 Self::report_collect_failure(&self.env, &error);
                                 self.context.notify_creating_job_failed(Some(database_id), format!("{}", error.as_report())).await;
-                                match self.context.reload_database_runtime_info(database_id).await? { Some(runtime_info) => {
-                                    runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
-                                        warn!(%database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
-                                    })?;
-                                    entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
-                                } _ => {
-                                    info!(%database_id, "database removed after reloading empty runtime info");
-                                    // mark ready to unblock subsequent request
-                                    self.context.mark_ready(MarkReadyOptions::Database(database_id));
-                                    entering_initializing.remove();
-                                }}
+                                match self.context.reload_database_runtime_info(database_id).await.and_then(|runtime_info| {
+                                    runtime_info.map(|runtime_info| {
+                                        runtime_info.validate(database_id, &self.active_streaming_nodes).inspect_err(|e| {
+                                            warn!(%database_id, err = ?e.as_report(), ?runtime_info, "reloaded database runtime info failed to validate");
+                                        })?;
+                                        Ok(runtime_info)
+                                    })
+                                    .transpose()
+                                }) {
+                                    Ok(Some(runtime_info)) => {
+                                        entering_initializing.enter(runtime_info, &mut self.control_stream_manager);
+                                    }
+                                    Ok(None) => {
+                                        info!(%database_id, "database removed after reloading empty runtime info");
+                                        // mark ready to unblock subsequent request
+                                        self.context.mark_ready(MarkReadyOptions::Database(database_id));
+                                        entering_initializing.remove();
+                                    }
+                                    Err(e) => {
+                                        entering_initializing.fail_reload_runtime_info(e);
+                                    }
+                                }
                             }
                             CheckpointControlEvent::EnteringRunning(entering_running) => {
                                 self.context.mark_ready(MarkReadyOptions::Database(entering_running.database_id()));
@@ -808,6 +819,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         jobs,
                         &mut state_table_committed_epochs,
                         &mut state_table_log_epochs,
+                        &fragment_relations,
                         &mut edges,
                         &stream_actors,
                         &mut source_splits,

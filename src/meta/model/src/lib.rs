@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -402,6 +402,11 @@ derive_from_blob!(ExprContext, risingwave_pb::plan_common::PbExprContext);
 derive_from_blob!(
     SourceRefreshMode,
     risingwave_pb::plan_common::PbSourceRefreshMode
+);
+
+derive_from_blob!(
+    SinkSchemachange,
+    risingwave_pb::stream_plan::PbSinkSchemaChange
 );
 
 derive_array_from_blob!(

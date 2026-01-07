@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,6 +42,7 @@ use crate::scheduler::{DistributedQueryStream, LocalQueryStream};
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
+mod alter_connection_props;
 mod alter_database_param;
 mod alter_mv;
 mod alter_owner;
@@ -112,6 +113,7 @@ pub mod privilege;
 pub mod query;
 mod recover;
 mod refresh;
+mod reset_source;
 pub mod show;
 mod transaction;
 mod use_db;
@@ -1305,6 +1307,9 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterSourceOperation::ResetSource => {
+                reset_source::handle_reset_source(handler_args, name).await
+            }
         },
         Statement::AlterFunction {
             name,
@@ -1339,6 +1344,14 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_CONNECTION,
+                )
+                .await
+            }
+            AlterConnectionOperation::AlterConnectorProps { alter_props } => {
+                alter_connection_props::handle_alter_connection_connector_props(
+                    handler_args,
+                    name,
+                    alter_props,
                 )
                 .await
             }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -69,12 +69,13 @@ use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 use tracing::Instrument;
 
-use crate::barrier::BarrierManagerRef;
+use crate::barrier::{BarrierManagerRef, Command};
 use crate::controller::catalog::{DropTableConnectorContext, ReleaseContext};
 use crate::controller::cluster::StreamingClusterInfo;
 use crate::controller::streaming_job::{FinishAutoRefreshSchemaSinkContext, SinkIntoTableContext};
 use crate::controller::utils::build_select_node_list;
 use crate::error::{MetaErrorInner, bail_invalid_parameter, bail_unavailable};
+use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     IGNORED_NOTIFICATION_VERSION, LocalNotification, MetaSrvEnv, MetadataManager,
     NotificationVersion, StreamingJob, StreamingJobType,
@@ -154,6 +155,7 @@ pub enum DdlCommand {
     DropSchema(SchemaId, DropMode),
     CreateNonSharedSource(Source),
     DropSource(SourceId, DropMode),
+    ResetSource(SourceId),
     CreateFunction(Function),
     DropFunction(FunctionId, DropMode),
     CreateView(View, HashSet<ObjectId>),
@@ -198,6 +200,7 @@ impl DdlCommand {
             DdlCommand::DropSchema(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
             DdlCommand::DropSource(id, _) => Right(id.as_object_id()),
+            DdlCommand::ResetSource(id) => Right(id.as_object_id()),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
             DdlCommand::DropFunction(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateView(view, _) => Left(view.name.clone()),
@@ -252,6 +255,7 @@ impl DdlCommand {
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
             | DdlCommand::AlterNonSharedSource(_)
+            | DdlCommand::ResetSource(_)
             | DdlCommand::CreateSubscription(_) => false,
         }
     }
@@ -265,6 +269,7 @@ pub struct DdlController {
     pub(crate) stream_manager: GlobalStreamManagerRef,
     pub(crate) source_manager: SourceManagerRef,
     barrier_manager: BarrierManagerRef,
+    sink_manager: SinkCoordinatorManager,
 
     // The semaphore is used to limit the number of concurrent streaming job creation.
     pub(crate) creating_streaming_job_permits: Arc<CreatingStreamingJobPermit>,
@@ -342,6 +347,7 @@ impl DdlController {
         stream_manager: GlobalStreamManagerRef,
         source_manager: SourceManagerRef,
         barrier_manager: BarrierManagerRef,
+        sink_manager: SinkCoordinatorManager,
     ) -> Self {
         let creating_streaming_job_permits = Arc::new(CreatingStreamingJobPermit::new(&env).await);
         Self {
@@ -350,6 +356,7 @@ impl DdlController {
             stream_manager,
             source_manager,
             barrier_manager,
+            sink_manager,
             creating_streaming_job_permits,
             seq: Arc::new(AtomicU64::new(0)),
         }
@@ -390,6 +397,7 @@ impl DdlController {
                 DdlCommand::DropSource(source_id, drop_mode) => {
                     ctrl.drop_source(source_id, drop_mode).await
                 }
+                DdlCommand::ResetSource(source_id) => ctrl.reset_source(source_id).await,
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
                 DdlCommand::DropFunction(function_id, drop_mode) => {
                     ctrl.drop_function(function_id, drop_mode).await
@@ -588,6 +596,30 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         self.drop_object(ObjectType::Source, source_id, drop_mode)
             .await
+    }
+
+    async fn reset_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
+        tracing::info!(source_id = %source_id, "resetting CDC source offset to latest");
+
+        // Get database_id for the source
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(source_id)
+            .await?;
+
+        self.stream_manager
+            .barrier_scheduler
+            .run_command(database_id, Command::ResetSource { source_id })
+            .await?;
+
+        // RESET SOURCE doesn't modify catalog, so return the current catalog version
+        let version = self
+            .metadata_manager
+            .catalog_controller
+            .current_notification_version()
+            .await;
+        Ok(version)
     }
 
     /// This replaces the source in the catalog.
@@ -926,6 +958,7 @@ impl DdlController {
                 fragment_graph.max_parallelism as _,
                 dependencies,
                 specific_resource_group.clone(),
+                &fragment_graph.backfill_parallelism,
             )
             .await;
         if let Err(meta_err) = check_ret {
@@ -1201,6 +1234,11 @@ impl DdlController {
             .await;
 
         // clean up iceberg table sinks
+        let iceberg_sink_ids: Vec<SinkId> = removed_iceberg_table_sinks
+            .iter()
+            .map(|sink| sink.id)
+            .collect();
+
         for sink in removed_iceberg_table_sinks {
             let sink_param = SinkParam::try_from_sink_catalog(sink.into())
                 .expect("Iceberg sink should be valid");
@@ -1224,6 +1262,13 @@ impl DdlController {
                         );
                     });
             }
+        }
+
+        // stop sink coordinators for iceberg table sinks
+        if !iceberg_sink_ids.is_empty() {
+            self.sink_manager
+                .stop_sink_coordinator(iceberg_sink_ids)
+                .await;
         }
 
         // remove secrets.
@@ -1654,6 +1699,7 @@ impl DdlController {
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
+        let specified_backfill_parallelism = fragment_graph.specified_backfill_parallelism();
         let max_parallelism = NonZeroUsize::new(fragment_graph.max_parallelism()).unwrap();
 
         // 1. Fragment Level ordering graph
@@ -1743,8 +1789,9 @@ impl DdlController {
         // 3. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
 
+        let initial_parallelism = specified_backfill_parallelism.or(specified_parallelism);
         let parallelism = self.resolve_stream_parallelism(
-            specified_parallelism,
+            initial_parallelism,
             max_parallelism,
             &cluster_info,
             resource_group.clone(),
@@ -1939,11 +1986,11 @@ impl DdlController {
             let old_state_graph =
                 state_match::Graph::from_existing(&old_fragments, &old_fragments_upstreams);
             let new_state_graph = state_match::Graph::from_building(&fragment_graph);
-            let mapping =
-                state_match::match_graph_internal_tables(&new_state_graph, &old_state_graph)
-                    .context("incompatible altering on the streaming job states")?;
+            let result = state_match::match_graph(&new_state_graph, &old_state_graph)
+                .context("incompatible altering on the streaming job states")?;
 
-            fragment_graph.fit_internal_table_ids_with_mapping(mapping);
+            fragment_graph.fit_internal_table_ids_with_mapping(result.table_matches);
+            fragment_graph.fit_snapshot_backfill_epochs(result.snapshot_backfill_epochs);
         } else {
             // If it's ALTER TABLE or SOURCE, use a trivial table id matching algorithm to keep the original behavior.
             // TODO(alter-mv): this is actually a special case of ALTER MV, can we merge the two branches?

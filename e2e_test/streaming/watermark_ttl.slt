@@ -1,0 +1,33 @@
+statement ok
+SET implicit_flush TO true;
+
+statement ok
+SET upsert_dml TO true;
+
+# Ensure deterministic behavior for watermark and changelog.
+statement ok
+SET streaming_parallelism TO 1;
+
+statement ok
+create table ttl (
+    k int primary key,
+    v int,
+    watermark for v as v - 10 with ttl
+);
+
+query TT
+show create table ttl;
+----
+public.ttl CREATE TABLE ttl (k INT PRIMARY KEY, v INT, WATERMARK FOR v AS v - 10 WITH TTL)
+
+statement ok
+create materialized view ttl_changelog as with c as changelog from ttl select * from c;
+
+statement ok
+drop table ttl cascade;
+
+statement ok
+SET streaming_parallelism TO DEFAULT;
+
+statement ok
+SET upsert_dml TO DEFAULT;

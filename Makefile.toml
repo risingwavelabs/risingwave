@@ -9,6 +9,7 @@ extend = [
     { path = "src/risedevtool/connector.toml" },
     { path = "src/risedevtool/risedev-components.toml" },
     { path = "src/risedevtool/moat.toml" },
+    { path = "src/risedevtool/adbc.toml" },
     { path = "src/sqlparser/sqlparser_test.toml" },
     { path = "src/frontend/planner_test/planner_test.toml" },
     { path = "src/tests/compaction_test/Makefile.toml" },
@@ -83,6 +84,30 @@ env_scripts = [
   if ${is_datafusion_enabled}
     flags = get_env RISINGWAVE_FEATURE_FLAGS
     set_env RISINGWAVE_FEATURE_FLAGS "${flags} --features datafusion"
+  end
+
+  is_adbc_enabled = get_env ENABLE_ADBC
+  if ${is_adbc_enabled}
+    # Set the ADBC driver manager path for runtime loading
+    set_env ADBC_DRIVER_PATH "${PREFIX_BIN}/adbc"
+    # Add ADBC library path to LD_LIBRARY_PATH (Linux) or DYLD_LIBRARY_PATH (macOS)
+    os_name = os_family
+    if eq ${os_name} "linux"
+      existing_ld_path = get_env LD_LIBRARY_PATH
+      if ${existing_ld_path}
+        set_env LD_LIBRARY_PATH "${PREFIX_BIN}/adbc:${existing_ld_path}"
+      else
+        set_env LD_LIBRARY_PATH "${PREFIX_BIN}/adbc"
+      end
+    else
+      # macOS
+      existing_dyld_path = get_env DYLD_LIBRARY_PATH
+      if ${existing_dyld_path}
+        set_env DYLD_LIBRARY_PATH "${PREFIX_BIN}/adbc:${existing_dyld_path}"
+      else
+        set_env DYLD_LIBRARY_PATH "${PREFIX_BIN}/adbc"
+      end
+    end
   end
 
   is_ci = get_env RISINGWAVE_CI
@@ -1231,6 +1256,26 @@ if ! typos ; then
 fi
 """
 
+[tasks.check-license-header]
+category = "RiseDev - Check"
+description = "Check license headers by HawkEye"
+install_crate = { min_version = "6.3.0", crate_name = "hawkeye", binary = "hawkeye", test_arg = [
+    "--help",
+], install_command = "binstall" }
+command = "hawkeye"
+args = ["check", "${@}"]
+env = { RUST_LOG = "info" }
+
+[tasks.fix-license-header]
+category = "RiseDev - Check"
+description = "Auto-fix license headers by HawkEye"
+install_crate = { min_version = "6.3.0", crate_name = "hawkeye", binary = "hawkeye", test_arg = [
+    "--help",
+], install_command = "binstall" }
+command = "hawkeye"
+args = ["format", "${@}"]
+env = { RUST_LOG = "info" }
+
 [tasks.check-udeps]
 private = true
 category = "RiseDev - Check"
@@ -1397,7 +1442,7 @@ echo "All processes has exited."
 
 [tasks.slt]
 category = "RiseDev - Test - SQLLogicTest"
-install_crate = { min_version = "0.28.4", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
+install_crate = { min_version = "0.29.0", crate_name = "sqllogictest-bin", binary = "sqllogictest", test_arg = [
     "--help",
 ], install_command = "binstall" }
 dependencies = ["check-and-load-risedev-env-file"]
