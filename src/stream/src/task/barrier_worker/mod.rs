@@ -44,7 +44,7 @@ use self::managed_state::ManagedBarrierState;
 use crate::error::{ScoredStreamError, StreamError, StreamResult};
 #[cfg(test)]
 use crate::task::LocalBarrierManager;
-use crate::task::managed_state::BarrierToComplete;
+use crate::task::managed_state::{BarrierToComplete, ResetPartialGraphOutput};
 use crate::task::{
     ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache,
     PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
@@ -56,10 +56,11 @@ mod tests;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
-    InitRequest, Request, ResetDatabaseRequest,
+    InitRequest, Request, ResetPartialGraphRequest,
 };
 use risingwave_pb::stream_service::streaming_control_stream_response::{
-    InitResponse, ReportDatabaseFailureResponse, ResetDatabaseResponse, Response, ShutdownResponse,
+    InitResponse, ReportPartialGraphFailureResponse, ResetPartialGraphResponse, Response,
+    ShutdownResponse,
 };
 use risingwave_pb::stream_service::{
     BarrierCompleteResponse, InjectBarrierRequest, PbScoredError, StreamingControlStreamRequest,
@@ -70,8 +71,7 @@ use crate::executor::Barrier;
 use crate::executor::exchange::permit::Receiver;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::barrier_worker::managed_state::{
-    DatabaseManagedBarrierState, DatabaseStatus, ManagedBarrierStateDebugInfo,
-    ManagedBarrierStateEvent, PartialGraphManagedBarrierState, ResetDatabaseOutput,
+    ManagedBarrierStateDebugInfo, ManagedBarrierStateEvent, PartialGraphState, PartialGraphStatus,
 };
 
 /// If enabled, all actors will be grouped in the same tracing span within one epoch.
@@ -172,14 +172,14 @@ impl ControlStreamHandle {
         }
     }
 
-    pub(super) fn ack_reset_database(
+    pub(super) fn ack_reset_partial_graph(
         &mut self,
-        database_id: DatabaseId,
+        partial_graph_id: PartialGraphId,
         root_err: Option<ScoredStreamError>,
         reset_request_id: u32,
     ) {
-        self.send_response(Response::ResetDatabase(ResetDatabaseResponse {
-            database_id,
+        self.send_response(Response::ResetPartialGraph(ResetPartialGraphResponse {
+            partial_graph_id,
             root_err: root_err.map(|err| PbScoredError {
                 err_msg: err.error.to_report_string(),
                 score: err.score.0,
@@ -222,7 +222,7 @@ impl ControlStreamHandle {
     }
 }
 
-pub(crate) enum TakeReceiverRequest {
+pub(super) enum TakeReceiverRequest {
     Remote(oneshot::Sender<StreamResult<Receiver>>),
     Local(permit::Sender),
 }
@@ -237,7 +237,6 @@ pub(super) enum LocalActorOperation {
         init_request: InitRequest,
     },
     TakeReceiver {
-        database_id: DatabaseId,
         partial_graph_id: PartialGraphId,
         term_id: String,
         ids: UpDownActorIds,
@@ -258,7 +257,8 @@ pub(super) enum LocalActorOperation {
 }
 
 pub(super) struct LocalBarrierWorkerDebugInfo<'a> {
-    managed_barrier_state: HashMap<DatabaseId, (String, Option<ManagedBarrierStateDebugInfo<'a>>)>,
+    managed_barrier_state:
+        HashMap<PartialGraphId, (String, Option<ManagedBarrierStateDebugInfo<'a>>)>,
     has_control_stream_connected: bool,
 }
 
@@ -270,11 +270,11 @@ impl Display for LocalBarrierWorkerDebugInfo<'_> {
             self.has_control_stream_connected
         )?;
 
-        for (database_id, (status, managed_barrier_state)) in &self.managed_barrier_state {
+        for (partial_graph_id, (status, managed_barrier_state)) in &self.managed_barrier_state {
             writeln!(
                 f,
-                "database {} status: {} managed_barrier_state:\n{}",
-                database_id,
+                "partial graph {} status: {} managed_barrier_state:\n{}",
+                partial_graph_id,
                 status,
                 managed_barrier_state
                     .as_ref()
@@ -298,7 +298,8 @@ pub(super) struct LocalBarrierWorker {
     pub(super) state: ManagedBarrierState,
 
     /// Futures will be finished in the order of epoch in ascending order.
-    await_epoch_completed_futures: HashMap<DatabaseId, FuturesOrdered<AwaitEpochCompletedFuture>>,
+    await_epoch_completed_futures:
+        HashMap<PartialGraphId, FuturesOrdered<AwaitEpochCompletedFuture>>,
 
     control_stream_handle: ControlStreamHandle,
 
@@ -322,22 +323,22 @@ impl LocalBarrierWorker {
         LocalBarrierWorkerDebugInfo {
             managed_barrier_state: self
                 .state
-                .databases
+                .partial_graphs
                 .iter()
-                .map(|(database_id, status)| {
-                    (*database_id, {
+                .map(|(partial_graph_id, status)| {
+                    (*partial_graph_id, {
                         match status {
-                            DatabaseStatus::ReceivedExchangeRequest(_) => {
+                            PartialGraphStatus::ReceivedExchangeRequest(_) => {
                                 ("ReceivedExchangeRequest".to_owned(), None)
                             }
-                            DatabaseStatus::Running(state) => {
+                            PartialGraphStatus::Running(state) => {
                                 ("running".to_owned(), Some(state.to_debug_info()))
                             }
-                            DatabaseStatus::Suspended(state) => {
+                            PartialGraphStatus::Suspended(state) => {
                                 (format!("suspended: {:?}", state.suspend_time), None)
                             }
-                            DatabaseStatus::Resetting(_) => ("resetting".to_owned(), None),
-                            DatabaseStatus::Unspecified => {
+                            PartialGraphStatus::Resetting(_) => ("resetting".to_owned(), None),
+                            PartialGraphStatus::Unspecified => {
                                 unreachable!()
                             }
                         }
@@ -349,19 +350,12 @@ impl LocalBarrierWorker {
     }
 
     async fn next_completed_epoch(
-        futures: &mut HashMap<DatabaseId, FuturesOrdered<AwaitEpochCompletedFuture>>,
-    ) -> (
-        DatabaseId,
-        PartialGraphId,
-        Barrier,
-        StreamResult<BarrierCompleteResult>,
-    ) {
+        futures: &mut HashMap<PartialGraphId, FuturesOrdered<AwaitEpochCompletedFuture>>,
+    ) -> (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>) {
         poll_fn(|cx| {
-            for (database_id, futures) in &mut *futures {
-                if let Poll::Ready(Some((partial_graph_id, barrier, result))) =
-                    futures.poll_next_unpin(cx)
-                {
-                    return Poll::Ready((*database_id, partial_graph_id, barrier, result));
+            for (partial_graph_id, futures) in &mut *futures {
+                if let Poll::Ready(Some((barrier, result))) = futures.poll_next_unpin(cx) {
+                    return Poll::Ready((*partial_graph_id, barrier, result));
                 }
             }
             Poll::Pending
@@ -373,37 +367,49 @@ impl LocalBarrierWorker {
         loop {
             select! {
                 biased;
-                (database_id, event) = self.state.next_event() => {
+                (partial_graph_id, event) = self.state.next_event() => {
                     match event {
                         ManagedBarrierStateEvent::BarrierCollected{
-                            partial_graph_id,
                             barrier,
                         } => {
                             // update await_epoch_completed_futures
                             // handled below in next_completed_epoch
-                            self.complete_barrier(database_id, partial_graph_id, barrier.epoch.prev);
+                            self.complete_barrier(partial_graph_id, barrier.epoch.prev);
                         }
                         ManagedBarrierStateEvent::ActorError{
                             actor_id,
                             err,
                         } => {
-                            self.on_database_failure(database_id, Some(actor_id), err, "recv actor failure");
+                            self.on_partial_graph_failure(partial_graph_id, Some(actor_id), err, "recv actor failure");
                         }
-                        ManagedBarrierStateEvent::DatabaseReset(output, reset_request_id) => {
-                            self.ack_database_reset(database_id, Some(output), reset_request_id);
+                        ManagedBarrierStateEvent::PartialGraphReset(output, reset_request_id) => {
+                            self.ack_partial_graph_reset(partial_graph_id, Some(output), reset_request_id);
+                        }
+                        ManagedBarrierStateEvent::RegisterLocalUpstreamOutput{
+                            actor_id,
+                            upstream_actor_id,
+                            upstream_partial_graph_id,
+                            tx
+                        } => {
+                            self.handle_actor_op(LocalActorOperation::TakeReceiver {
+                                partial_graph_id: upstream_partial_graph_id,
+                                term_id: self.term_id.clone(),
+                                ids: (upstream_actor_id, actor_id),
+                                request: TakeReceiverRequest::Local(tx),
+                            });
                         }
                     }
                 }
-                (database_id, partial_graph_id, barrier, result) = Self::next_completed_epoch(&mut self.await_epoch_completed_futures) => {
+                (partial_graph_id, barrier, result) = Self::next_completed_epoch(&mut self.await_epoch_completed_futures) => {
                     match result {
                         Ok(result) => {
-                            self.on_epoch_completed(database_id, partial_graph_id, barrier.epoch.prev, result);
+                            self.on_epoch_completed(partial_graph_id, barrier.epoch.prev, result);
                         }
                         Err(err) => {
-                            // TODO: may only report as database failure instead of reset the stream
+                            // TODO: may only report as partial graph failure instead of reset the stream
                             // when the HummockUploader support partial recovery. Currently the HummockUploader
                             // enter `Err` state and stop working until a global recovery to clear the uploader.
-                            self.control_stream_handle.reset_stream_with_err(Status::internal(format!("failed to complete epoch: {} {} {:?} {:?}", database_id, partial_graph_id, barrier.epoch, err.as_report())));
+                            self.control_stream_handle.reset_stream_with_err(Status::internal(format!("failed to complete epoch: {} {:?} {:?}", partial_graph_id, barrier.epoch, err.as_report())));
                         }
                     }
                 },
@@ -417,16 +423,16 @@ impl LocalBarrierWorker {
                                 self.control_stream_handle.send_response(streaming_control_stream_response::Response::Init(InitResponse {}));
                             }
                             LocalActorOperation::Shutdown { result_sender } => {
-                                if self.state.databases.values().any(|database| {
-                                    match database {
-                                        DatabaseStatus::Running(database) => {
-                                            !database.actor_states.is_empty()
+                                if self.state.partial_graphs.values().any(|graph| {
+                                    match graph {
+                                        PartialGraphStatus::Running(graph) => {
+                                            !graph.actor_states.is_empty()
                                         }
-                                        DatabaseStatus::Suspended(_) | DatabaseStatus::Resetting(_) |
-                                            DatabaseStatus::ReceivedExchangeRequest(_) => {
+                                        PartialGraphStatus::Suspended(_) | PartialGraphStatus::Resetting(_) |
+                                            PartialGraphStatus::ReceivedExchangeRequest(_) => {
                                             false
                                         }
-                                        DatabaseStatus::Unspecified => {
+                                        PartialGraphStatus::Unspecified => {
                                             unreachable!()
                                         }
                                     }
@@ -449,8 +455,8 @@ impl LocalBarrierWorker {
                 },
                 request = self.control_stream_handle.next_request() => {
                     let result = self.handle_streaming_control_request(request.request.expect("non empty"));
-                    if let Err((database_id, err)) = result {
-                        self.on_database_failure(database_id, None, err, "failed to inject barrier");
+                    if let Err((partial_graph_id, err)) = result {
+                        self.on_partial_graph_failure(partial_graph_id, None, err, "failed to inject barrier");
                     }
                 },
             }
@@ -460,27 +466,27 @@ impl LocalBarrierWorker {
     fn handle_streaming_control_request(
         &mut self,
         request: Request,
-    ) -> Result<(), (DatabaseId, StreamError)> {
+    ) -> Result<(), (PartialGraphId, StreamError)> {
         match request {
             Request::InjectBarrier(req) => {
-                let database_id = req.database_id;
+                let partial_graph_id = req.partial_graph_id;
                 let result: StreamResult<()> = try {
                     let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
                     self.send_barrier(&barrier, req)?;
                 };
-                result.map_err(|e| (database_id, e))?;
+                result.map_err(|e| (partial_graph_id, e))?;
                 Ok(())
             }
             Request::RemovePartialGraph(req) => {
-                self.remove_partial_graphs(req.database_id, req.partial_graph_ids.into_iter());
+                self.remove_partial_graphs(req.partial_graph_ids);
                 Ok(())
             }
             Request::CreatePartialGraph(req) => {
-                self.add_partial_graph(req.database_id, req.partial_graph_id);
+                self.add_partial_graph(req.partial_graph_id);
                 Ok(())
             }
-            Request::ResetDatabase(req) => {
-                self.reset_database(req);
+            Request::ResetPartialGraph(req) => {
+                self.reset_partial_graph(req);
                 Ok(())
             }
             Request::Init(_) => {
@@ -495,7 +501,6 @@ impl LocalBarrierWorker {
                 unreachable!("event {actor_op} should be handled separately in async context")
             }
             LocalActorOperation::TakeReceiver {
-                database_id,
                 partial_graph_id,
                 term_id,
                 ids,
@@ -517,37 +522,34 @@ impl LocalBarrierWorker {
                         )
                     }
                 } else {
-                    match self.state.databases.entry(database_id) {
+                    match self.state.partial_graphs.entry(partial_graph_id) {
                         Entry::Occupied(mut entry) => match entry.get_mut() {
-                            DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
-                                pending_requests.push((partial_graph_id, ids, request));
+                            PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
+                                pending_requests.push((ids, request));
                                 return;
                             }
-                            DatabaseStatus::Running(database) => {
+                            PartialGraphStatus::Running(graph) => {
                                 let (upstream_actor_id, actor_id) = ids;
-                                database.new_actor_output_request(
+                                graph.new_actor_output_request(
                                     actor_id,
                                     upstream_actor_id,
-                                    partial_graph_id,
                                     request,
                                 );
                                 return;
                             }
-                            DatabaseStatus::Suspended(_) => {
-                                anyhow!("database suspended")
+                            PartialGraphStatus::Suspended(_) => {
+                                anyhow!("partial graph suspended")
                             }
-                            DatabaseStatus::Resetting(_) => {
-                                anyhow!("database resetting")
+                            PartialGraphStatus::Resetting(_) => {
+                                anyhow!("partial graph resetting")
                             }
-                            DatabaseStatus::Unspecified => {
+                            PartialGraphStatus::Unspecified => {
                                 unreachable!()
                             }
                         },
                         Entry::Vacant(entry) => {
-                            entry.insert(DatabaseStatus::ReceivedExchangeRequest(vec![(
-                                partial_graph_id,
-                                ids,
-                                request,
+                            entry.insert(PartialGraphStatus::ReceivedExchangeRequest(vec![(
+                                ids, request,
                             )]));
                             return;
                         }
@@ -559,25 +561,25 @@ impl LocalBarrierWorker {
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentLocalBarrierManager(sender) => {
-                let database_status = self
+                let partial_graph_status = self
                     .state
-                    .databases
-                    .get(&crate::task::TEST_DATABASE_ID)
+                    .partial_graphs
+                    .get(&crate::task::TEST_PARTIAL_GRAPH_ID)
                     .unwrap();
-                let database_state = risingwave_common::must_match!(database_status, DatabaseStatus::Running(database_state) => database_state);
-                let _ = sender.send(database_state.local_barrier_manager.clone());
+                let partial_graph_state = risingwave_common::must_match!(partial_graph_status, PartialGraphStatus::Running(database_state) => database_state);
+                let _ = sender.send(partial_graph_state.local_barrier_manager.clone());
             }
             #[cfg(test)]
             LocalActorOperation::TakePendingNewOutputRequest(actor_id, sender) => {
-                let database_status = self
+                let partial_graph_status = self
                     .state
-                    .databases
-                    .get_mut(&crate::task::TEST_DATABASE_ID)
+                    .partial_graphs
+                    .get_mut(&crate::task::TEST_PARTIAL_GRAPH_ID)
                     .unwrap();
 
-                let database_state = risingwave_common::must_match!(database_status, DatabaseStatus::Running(database_state) => database_state);
-                assert!(!database_state.actor_states.contains_key(&actor_id));
-                let requests = database_state
+                let partial_graph_state = risingwave_common::must_match!(partial_graph_status, PartialGraphStatus::Running(database_state) => database_state);
+                assert!(!partial_graph_state.actor_states.contains_key(&actor_id));
+                let requests = partial_graph_state
                     .actor_pending_new_output_requests
                     .remove(&actor_id)
                     .unwrap();
@@ -592,20 +594,14 @@ impl LocalBarrierWorker {
                     )
                     .unwrap();
                 }
-                while let Some((database_id, event)) = self.state.next_event().now_or_never() {
+                while let Some((partial_graph_id, event)) = self.state.next_event().now_or_never() {
                     match event {
-                        ManagedBarrierStateEvent::BarrierCollected {
-                            partial_graph_id,
-                            barrier,
-                        } => {
-                            self.complete_barrier(
-                                database_id,
-                                partial_graph_id,
-                                barrier.epoch.prev,
-                            );
+                        ManagedBarrierStateEvent::BarrierCollected { barrier } => {
+                            self.complete_barrier(partial_graph_id, barrier.epoch.prev);
                         }
                         ManagedBarrierStateEvent::ActorError { .. }
-                        | ManagedBarrierStateEvent::DatabaseReset(..) => {
+                        | ManagedBarrierStateEvent::PartialGraphReset(..)
+                        | ManagedBarrierStateEvent::RegisterLocalUpstreamOutput { .. } => {
                             unreachable!()
                         }
                     }
@@ -634,15 +630,14 @@ mod await_epoch_completed_future {
 
     use crate::error::StreamResult;
     use crate::executor::Barrier;
-    use crate::task::{BarrierCompleteResult, PartialGraphId, await_tree_key};
+    use crate::task::{BarrierCompleteResult, await_tree_key};
 
-    pub(super) type AwaitEpochCompletedFuture = impl Future<Output = (PartialGraphId, Barrier, StreamResult<BarrierCompleteResult>)>
-        + 'static;
+    pub(super) type AwaitEpochCompletedFuture =
+        impl Future<Output = (Barrier, StreamResult<BarrierCompleteResult>)> + 'static;
 
     #[define_opaque(AwaitEpochCompletedFuture)]
     #[expect(clippy::too_many_arguments)]
     pub(super) fn instrument_complete_barrier_future(
-        partial_graph_id: PartialGraphId,
         complete_barrier_future: Option<BoxFuture<'static, StreamResult<SyncResult>>>,
         barrier: Barrier,
         barrier_await_tree_reg: Option<&await_tree::Registry>,
@@ -664,7 +659,6 @@ mod await_epoch_completed_future {
         }
         .map(move |result| {
             (
-                partial_graph_id,
                 barrier,
                 result.map(|sync_result| BarrierCompleteResult {
                     sync_result,
@@ -691,7 +685,7 @@ mod await_epoch_completed_future {
 }
 
 use await_epoch_completed_future::*;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexAdds;
 use risingwave_storage::{StateStoreImpl, dispatch_state_store};
 
@@ -729,17 +723,12 @@ fn sync_epoch(
 }
 
 impl LocalBarrierWorker {
-    fn complete_barrier(
-        &mut self,
-        database_id: DatabaseId,
-        partial_graph_id: PartialGraphId,
-        prev_epoch: u64,
-    ) {
+    fn complete_barrier(&mut self, partial_graph_id: PartialGraphId, prev_epoch: u64) {
         {
-            let Some(database_state) = self
+            let Some(graph_state) = self
                 .state
-                .databases
-                .get_mut(&database_id)
+                .partial_graphs
+                .get_mut(&partial_graph_id)
                 .expect("should exist")
                 .state_for_request()
             else {
@@ -754,7 +743,7 @@ impl LocalBarrierWorker {
                 cdc_table_backfill_progress,
                 truncate_tables,
                 refresh_finished_tables,
-            } = database_state.pop_barrier_to_complete(partial_graph_id, prev_epoch);
+            } = graph_state.pop_barrier_to_complete(prev_epoch);
 
             let complete_barrier_future = match &barrier.kind {
                 BarrierKind::Unspecified => unreachable!(),
@@ -776,11 +765,10 @@ impl LocalBarrierWorker {
             };
 
             self.await_epoch_completed_futures
-                .entry(database_id)
+                .entry(partial_graph_id)
                 .or_default()
                 .push_back({
                     instrument_complete_barrier_future(
-                        partial_graph_id,
                         complete_barrier_future,
                         barrier,
                         self.actor_manager.await_tree_reg.as_ref(),
@@ -797,7 +785,6 @@ impl LocalBarrierWorker {
 
     fn on_epoch_completed(
         &mut self,
-        database_id: DatabaseId,
         partial_graph_id: PartialGraphId,
         epoch: u64,
         result: BarrierCompleteResult,
@@ -855,7 +842,6 @@ impl LocalBarrierWorker {
                             .into_iter()
                             .map(|sst| sst.sst_info.into())
                             .collect(),
-                        database_id,
                         list_finished_sources: list_finished_source_ids,
                         load_finished_sources: load_finished_source_ids,
                         vector_index_adds: vector_index_adds
@@ -898,12 +884,12 @@ impl LocalBarrierWorker {
             request.actor_ids_to_collect
         );
 
-        let database_status = self
+        let status = self
             .state
-            .databases
-            .get_mut(&request.database_id)
+            .partial_graphs
+            .get_mut(&request.partial_graph_id)
             .expect("should exist");
-        if let Some(state) = database_status.state_for_request() {
+        if let Some(state) = status.state_for_request() {
             state.transform_to_issued(barrier, request)?;
         }
         Ok(())
@@ -911,119 +897,91 @@ impl LocalBarrierWorker {
 
     fn remove_partial_graphs(
         &mut self,
-        database_id: DatabaseId,
-        partial_graph_ids: impl Iterator<Item = PartialGraphId>,
+        partial_graph_ids: impl IntoIterator<Item = PartialGraphId>,
     ) {
-        let Some(database_status) = self.state.databases.get_mut(&database_id) else {
-            warn!(
-                %database_id,
-                "database to remove partial graph not exist"
-            );
-            return;
-        };
-        let Some(database_state) = database_status.state_for_request() else {
-            warn!(
-                %database_id,
-                "ignore remove partial graph request on err database",
-            );
-            return;
-        };
         for partial_graph_id in partial_graph_ids {
-            if let Some(graph) = database_state.graph_states.remove(&partial_graph_id) {
-                assert!(
-                    graph.is_empty(),
-                    "non empty graph to be removed: {}",
-                    &graph
-                );
+            if let Some(mut graph) = self.state.partial_graphs.remove(&partial_graph_id) {
+                if let Some(graph) = graph.state_for_request() {
+                    assert!(
+                        graph.graph_state.is_empty(),
+                        "non empty graph to be removed: {}",
+                        &graph.graph_state
+                    );
+                }
             } else {
                 warn!(
-                    %partial_graph_id,
+                    partial_graph_id = %partial_graph_id,
                     "no partial graph to remove"
                 );
             }
         }
     }
 
-    fn add_partial_graph(&mut self, database_id: DatabaseId, partial_graph_id: PartialGraphId) {
-        let status = match self.state.databases.entry(database_id) {
+    fn add_partial_graph(&mut self, partial_graph_id: PartialGraphId) {
+        match self.state.partial_graphs.entry(partial_graph_id) {
             Entry::Occupied(entry) => {
                 let status = entry.into_mut();
-                if let DatabaseStatus::ReceivedExchangeRequest(pending_requests) = status {
-                    let mut database = DatabaseManagedBarrierState::new(
-                        database_id,
+                if let PartialGraphStatus::ReceivedExchangeRequest(pending_requests) = status {
+                    let mut graph = PartialGraphState::new(
+                        partial_graph_id,
                         self.term_id.clone(),
                         self.actor_manager.clone(),
                     );
-                    for (partial_graph_id, (upstream_actor_id, actor_id), request) in
-                        pending_requests.drain(..)
-                    {
-                        database.new_actor_output_request(
-                            actor_id,
-                            upstream_actor_id,
-                            partial_graph_id,
-                            request,
-                        );
+                    for ((upstream_actor_id, actor_id), request) in pending_requests.drain(..) {
+                        graph.new_actor_output_request(actor_id, upstream_actor_id, request);
                     }
-                    *status = DatabaseStatus::Running(database);
+                    *status = PartialGraphStatus::Running(graph);
+                } else {
+                    panic!("duplicated partial graph: {}", partial_graph_id);
                 }
 
                 status
             }
             Entry::Vacant(entry) => {
-                entry.insert(DatabaseStatus::Running(DatabaseManagedBarrierState::new(
-                    database_id,
+                entry.insert(PartialGraphStatus::Running(PartialGraphState::new(
+                    partial_graph_id,
                     self.term_id.clone(),
                     self.actor_manager.clone(),
                 )))
             }
         };
-        if let Some(state) = status.state_for_request() {
-            assert!(
-                state
-                    .graph_states
-                    .insert(
-                        partial_graph_id,
-                        PartialGraphManagedBarrierState::new(&self.actor_manager)
-                    )
-                    .is_none()
-            );
-        }
     }
 
-    fn reset_database(&mut self, req: ResetDatabaseRequest) {
-        let database_id = req.database_id;
-        if let Some(database_status) = self.state.databases.get_mut(&database_id) {
-            database_status.start_reset(
-                database_id,
-                self.await_epoch_completed_futures.remove(&database_id),
+    fn reset_partial_graph(&mut self, req: ResetPartialGraphRequest) {
+        let partial_graph_id = req.partial_graph_id;
+        if let Some(status) = self.state.partial_graphs.get_mut(&partial_graph_id) {
+            status.start_reset(
+                partial_graph_id,
+                req.clear_tables,
+                self.await_epoch_completed_futures.remove(&partial_graph_id),
                 req.reset_request_id,
             );
         } else {
-            self.ack_database_reset(database_id, None, req.reset_request_id);
+            self.ack_partial_graph_reset(partial_graph_id, None, req.reset_request_id);
         }
     }
 
-    fn ack_database_reset(
+    fn ack_partial_graph_reset(
         &mut self,
-        database_id: DatabaseId,
-        reset_output: Option<ResetDatabaseOutput>,
+        partial_graph_id: PartialGraphId,
+        reset_output: Option<ResetPartialGraphOutput>,
         reset_request_id: u32,
     ) {
         info!(
-            %database_id,
-            "database reset successfully"
+            %partial_graph_id,
+            "partial graph reset successfully"
         );
-        if let Some(reset_database) = self.state.databases.remove(&database_id) {
-            match reset_database {
-                DatabaseStatus::Resetting(_) => {}
+        if let Some(reset_partial_graph) = self.state.partial_graphs.remove(&partial_graph_id) {
+            match reset_partial_graph {
+                PartialGraphStatus::Resetting(_) => {}
                 _ => {
                     unreachable!("must be resetting previously")
                 }
             }
         }
-        self.await_epoch_completed_futures.remove(&database_id);
-        self.control_stream_handle.ack_reset_database(
-            database_id,
+        self.await_epoch_completed_futures.remove(&partial_graph_id);
+        self.control_stream_handle.ack_reset_partial_graph(
+            partial_graph_id,
             reset_output.and_then(|output| output.root_err),
             reset_request_id,
         );
@@ -1031,25 +989,25 @@ impl LocalBarrierWorker {
 
     /// When some other failure happens (like failed to send barrier), the error is reported using
     /// this function. The control stream will be responded with a message to notify about the error,
-    /// and the global barrier worker will later reset and rerun the database.
-    fn on_database_failure(
+    /// and the global barrier worker will later reset and rerun the partial graph.
+    fn on_partial_graph_failure(
         &mut self,
-        database_id: DatabaseId,
+        partial_graph_id: PartialGraphId,
         failed_actor: Option<ActorId>,
         err: StreamError,
         message: impl Into<String>,
     ) {
         let message = message.into();
-        error!(%database_id, ?failed_actor, message, err = ?err.as_report(), "suspend database on error");
-        let completing_futures = self.await_epoch_completed_futures.remove(&database_id);
+        error!(%partial_graph_id, ?failed_actor, message, err = ?err.as_report(), "suspend partial graph on error");
+        let completing_futures = self.await_epoch_completed_futures.remove(&partial_graph_id);
         self.state
-            .databases
-            .get_mut(&database_id)
+            .partial_graphs
+            .get_mut(&partial_graph_id)
             .expect("should exist")
             .suspend(failed_actor, err, completing_futures);
         self.control_stream_handle
-            .send_response(Response::ReportDatabaseFailure(
-                ReportDatabaseFailureResponse { database_id },
+            .send_response(Response::ReportPartialGraphFailure(
+                ReportPartialGraphFailureResponse { partial_graph_id },
             ));
     }
 
@@ -1057,9 +1015,9 @@ impl LocalBarrierWorker {
     async fn reset(&mut self, init_request: InitRequest) {
         join_all(
             self.state
-                .databases
+                .partial_graphs
                 .values_mut()
-                .map(|database| database.abort()),
+                .map(|graph| graph.abort()),
         )
         .await;
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {
@@ -1159,9 +1117,7 @@ pub(crate) mod barrier_test_utils {
 
     use crate::executor::Barrier;
     use crate::task::barrier_worker::{ControlStreamHandle, EventSender, LocalActorOperation};
-    use crate::task::{
-        ActorId, LocalBarrierManager, NewOutputRequest, TEST_DATABASE_ID, TEST_PARTIAL_GRAPH_ID,
-    };
+    use crate::task::{ActorId, LocalBarrierManager, NewOutputRequest, TEST_PARTIAL_GRAPH_ID};
 
     pub(crate) struct LocalBarrierTestEnv {
         pub local_barrier_manager: LocalBarrierManager,
@@ -1183,7 +1139,6 @@ pub(crate) mod barrier_test_utils {
                         streaming_control_stream_request::Request::CreatePartialGraph(
                             PbCreatePartialGraphRequest {
                                 partial_graph_id: TEST_PARTIAL_GRAPH_ID,
-                                database_id: TEST_DATABASE_ID,
                             },
                         ),
                     ),
@@ -1229,7 +1184,6 @@ pub(crate) mod barrier_test_utils {
                         InjectBarrierRequest {
                             request_id: "".to_owned(),
                             barrier: Some(barrier.to_protobuf()),
-                            database_id: TEST_DATABASE_ID,
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID,

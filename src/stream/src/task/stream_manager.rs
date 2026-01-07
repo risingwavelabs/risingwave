@@ -18,7 +18,6 @@ use std::time::Instant;
 
 use futures::FutureExt;
 use futures::stream::BoxStream;
-use risingwave_common::catalog::DatabaseId;
 use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::stream_service::streaming_control_stream_request::InitRequest;
 use risingwave_pb::stream_service::{
@@ -141,14 +140,12 @@ impl LocalStreamManager {
 
     pub async fn take_receiver(
         &self,
-        database_id: DatabaseId,
         partial_graph_id: PartialGraphId,
         term_id: String,
         ids: UpDownActorIds,
     ) -> StreamResult<Receiver> {
         self.actor_op_tx
             .send_and_await(|result_sender| LocalActorOperation::TakeReceiver {
-                database_id,
                 partial_graph_id,
                 term_id,
                 ids,

@@ -853,6 +853,7 @@ impl Command {
         control_stream_manager: &ControlStreamManager,
         database_info: &mut InflightDatabaseInfo,
     ) -> MetaResult<Option<Mutation>> {
+        let database_id = database_info.database_id;
         let mutation = match self {
             Command::Flush => None,
 
@@ -970,7 +971,7 @@ impl Command {
                                 actors.into_iter().map(|(actor, worker_id)| PbActorInfo {
                                     actor_id: actor.actor_id,
                                     host: Some(control_stream_manager.host_addr(worker_id)),
-                                    partial_graph_id: to_partial_graph_id(None),
+                                    partial_graph_id: to_partial_graph_id(database_id, None),
                                 })
                             })
                             .unwrap_or_else(|_| panic!("should have exactly one sink actor"));
@@ -1168,7 +1169,10 @@ impl Command {
                                                     actor_id,
                                                     host: Some(host.clone()),
                                                     // we assume that we only scale the partial graph of database
-                                                    partial_graph_id: to_partial_graph_id(None),
+                                                    partial_graph_id: to_partial_graph_id(
+                                                        database_id,
+                                                        None,
+                                                    ),
                                                 })
                                             })
                                             .collect(),
@@ -1531,7 +1535,10 @@ impl Command {
                             PbActorInfo {
                                 actor_id: upstream_actor_id,
                                 host: Some(upstream_actor_host.clone()),
-                                partial_graph_id: to_partial_graph_id(None),
+                                partial_graph_id: to_partial_graph_id(
+                                    database_info.database_id,
+                                    None,
+                                ),
                             },
                         );
                 }
@@ -1575,7 +1582,10 @@ impl Command {
                                     PbActorInfo {
                                         actor_id: *upstream_actor_id,
                                         host: Some(upstream_actor_host.clone()),
-                                        partial_graph_id: to_partial_graph_id(None),
+                                        partial_graph_id: to_partial_graph_id(
+                                            database_info.database_id,
+                                            None,
+                                        ),
                                     },
                                 );
                         }
