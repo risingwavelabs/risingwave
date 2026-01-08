@@ -866,6 +866,7 @@ impl<S: StateStoreRead> ReadFuture<S> {
 enum ConsumerFuture<S: StateStoreRead> {
     ReadingChunk {
         read_future: ReadFuture<S>,
+        inner: DispatchExecutorInner,
     },
     Dispatching {
         future: DispatchingFuture,
@@ -940,17 +941,18 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
     }
 
     fn read_chunk(
+        mut inner: DispatchExecutorInner,
         read_future: ReadFuture<S>,
     ) -> Self {
         tracing::trace!("consumer_future: reading chunk future created");
         Self::ReadingChunk {
             read_future,
+            inner,
         }
     }
 
     async fn next_event(
         &mut self,
-        mut inner: Option<DispatchExecutorInner>,
         barriers: &mut VecDeque<Message>,
         progress: &mut LogStoreVnodeProgress,
         read_state: &LogStoreReadState<S>,
@@ -961,19 +963,18 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
             match self {
                 ConsumerFuture::ReadingChunk {
                     read_future,
+                    inner,
                 } => {
                     let msg = barriers
                         .pop_back()
                         .expect("barrier queue should not be empty!");
-                    let inner_owned = inner
-                        .take()
-                        .expect("inner should be available when dispatching a queued barrier");
-                    let read_future = must_match!(
+
+                    let (read_future, inner) = must_match!(
                         std::mem::replace(self, ConsumerFuture::Empty),
-                        ConsumerFuture::ReadingChunk { read_future } => (read_future)
+                        ConsumerFuture::ReadingChunk { read_future, inner } => (read_future, inner)
                     );
                     *self = Self::dispatch(
-                        inner_owned,
+                        inner,
                         msg,
                         read_future,
                     );
@@ -984,17 +985,18 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
         match self {
             ConsumerFuture::ReadingChunk {
                 read_future,
+                inner,
             } => {
                 let chunk = read_future
                     .next_chunk(progress, read_state, buffer, metrics)
                     .await?;
-                let read_future = must_match!(
+                let (read_future, inner) = must_match!(
                     replace(self, ConsumerFuture::Empty),
-                    ConsumerFuture::ReadingChunk { read_future } => { read_future }
+                    ConsumerFuture::ReadingChunk { read_future, inner } => (read_future, inner)
                 );
                 match chunk {
-                    Some(chunk) => Ok((inner, ConsumerFutureEvent::ReadOutChunk(chunk), read_future)),
-                    None => Ok((inner, ConsumerFutureEvent::WaitingForChunks, read_future)),
+                    Some(chunk) => Ok((Some(inner), ConsumerFutureEvent::ReadOutChunk(chunk), read_future)),
+                    None => Ok((Some(inner), ConsumerFutureEvent::WaitingForChunks, read_future)),
                 }
             }
             ConsumerFuture::Dispatching { future, .. } => {
