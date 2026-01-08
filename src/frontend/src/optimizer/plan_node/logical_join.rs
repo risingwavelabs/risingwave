@@ -1234,10 +1234,12 @@ impl LogicalJoin {
             }
         }
         if reorder_idx.len() < shortest_prefix_len {
-            // TODO: support index selection for temporal join and refine this error message.
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires the lookup table's primary key contained exactly in the equivalence condition".into(),
-                "Please add the primary key of the lookup table to the join condition and remove any other conditions".into(),
+                "Temporal join requires the equivalence join condition includes the key columns that form the distribution key of the lookup table".into(),
+                concat!(
+                    "Use DESCRIBE <table_name> to view the table's key information.\n",
+                    "You can create an index on the lookup table to facilitate the temporal join if necessary."
+                ).into(),
             )));
         }
         let lookup_prefix_len = reorder_idx.len();
