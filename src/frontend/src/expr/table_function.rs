@@ -21,16 +21,16 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
+use risingwave_connector::connector_common::create_pg_client;
 use risingwave_connector::source::iceberg::{
     FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
     new_azblob_operator, new_gcs_operator, new_s3_operator,
 };
 use risingwave_pb::expr::PbTableFunction;
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
-use thiserror_ext::AsReport;
 use tokio_postgres::types::Type as TokioPgType;
 
-use super::{ErrorCode, Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
+use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::catalog::root_catalog::SchemaPath;
@@ -329,7 +329,7 @@ impl TableFunction {
                 let secret_resolved =
                     LocalSecretManager::global().fill_secrets(props, secret_refs)?;
 
-                vec![
+                let mut args_vec = vec![
                     ExprImpl::literal_varchar(secret_resolved["hostname"].clone()),
                     ExprImpl::literal_varchar(secret_resolved["port"].clone()),
                     ExprImpl::literal_varchar(secret_resolved["username"].clone()),
@@ -339,7 +339,21 @@ impl TableFunction {
                         .unwrap()
                         .clone()
                         .cast_implicit(&DataType::Varchar)?,
-                ]
+                ];
+
+                if expect_connector_name.eq_ignore_ascii_case("postgres-cdc") {
+                    args_vec.push(ExprImpl::literal_varchar(
+                        secret_resolved.get("ssl.mode").cloned().unwrap_or_default(),
+                    ));
+                    args_vec.push(ExprImpl::literal_varchar(
+                        secret_resolved
+                            .get("ssl.root.cert")
+                            .cloned()
+                            .unwrap_or_default(),
+                    ));
+                }
+
+                args_vec
             }
             _ => {
                 return Err(BindError("postgres_query function and mysql_query function accept either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)".to_owned()).into());
@@ -379,29 +393,25 @@ impl TableFunction {
         {
             let schema = tokio::task::block_in_place(|| {
                 FRONTEND_RUNTIME.block_on(async {
-                    let mut conf = tokio_postgres::Config::new();
-                    let (client, connection) = conf
-                        .host(&evaled_args[0])
-                        .port(evaled_args[1].parse().map_err(|_| {
-                            ErrorCode::InvalidParameterValue(format!(
-                                "port number: {}",
-                                evaled_args[1]
-                            ))
-                        })?)
-                        .user(&evaled_args[2])
-                        .password(evaled_args[3].clone())
-                        .dbname(&evaled_args[4])
-                        .connect(tokio_postgres::NoTls)
-                        .await?;
+                    let ssl_mode = evaled_args
+                        .get(6)
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or_default();
 
-                    tokio::spawn(async move {
-                        if let Err(e) = connection.await {
-                            tracing::error!(
-                                "mysql_query_executor: connection error: {:?}",
-                                e.as_report()
-                            );
-                        }
-                    });
+                    let ssl_root_cert = evaled_args
+                        .get(7)
+                        .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
+
+                    let client = create_pg_client(
+                        &evaled_args[2],
+                        &evaled_args[3],
+                        &evaled_args[0],
+                        &evaled_args[1],
+                        &evaled_args[4],
+                        &ssl_mode,
+                        &ssl_root_cert,
+                    )
+                    .await?;
 
                     let statement = client.prepare(evaled_args[5].as_str()).await?;
 

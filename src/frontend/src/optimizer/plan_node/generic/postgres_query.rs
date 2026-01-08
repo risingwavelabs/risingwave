@@ -29,6 +29,8 @@ pub struct PostgresQuery {
     pub password: String,
     pub database: String,
     pub query: String,
+    pub ssl_mode: Option<String>,
+    pub ssl_root_cert: Option<String>,
 
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]
