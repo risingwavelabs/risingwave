@@ -33,7 +33,9 @@ use tokio_postgres::types::Type as PgType;
 use super::{
     LogSinker, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, SinkError, SinkLogReader,
 };
-use crate::connector_common::{PostgresExternalTable, SslMode, create_pg_client};
+use crate::connector_common::{
+    PostgresExternalTable, SslMode, TcpKeepaliveConfig, create_pg_client,
+};
 use crate::enforce_secret::EnforceSecret;
 use crate::parser::scalar_adapter::{ScalarAdapter, validate_pg_type_to_rw_type};
 use crate::sink::log_store::{LogStoreReadItem, TruncateOffset};
@@ -61,6 +63,24 @@ pub struct PostgresConfig {
     #[serde_as(as = "DisplayFromStr")]
     pub max_batch_rows: usize,
     pub r#type: String, // accept "append-only" or "upsert"
+    #[serde(default, rename = "tcp.keepalive.enable")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_enable: bool,
+    #[serde(default = "default_tcp_keepalive_idle", rename = "tcp.keepalive.idle")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_idle: u32,
+    #[serde(
+        default = "default_tcp_keepalive_interval",
+        rename = "tcp.keepalive.interval"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_interval: u32,
+    #[serde(
+        default = "default_tcp_keepalive_count",
+        rename = "tcp.keepalive.count"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_count: u32,
 }
 
 impl EnforceSecret for PostgresConfig {
@@ -75,6 +95,18 @@ fn default_max_batch_rows() -> usize {
 
 fn default_schema() -> String {
     "public".to_owned()
+}
+
+fn default_tcp_keepalive_idle() -> u32 {
+    10 * 60 // 10 minutes
+}
+
+fn default_tcp_keepalive_interval() -> u32 {
+    10
+}
+
+fn default_tcp_keepalive_count() -> u32 {
+    3
 }
 
 impl PostgresConfig {
@@ -274,6 +306,16 @@ impl PostgresSinkWriter {
         pk_indices: Vec<usize>,
         is_append_only: bool,
     ) -> Result<Self> {
+        let tcp_keepalive = if config.tcp_keepalive_enable {
+            Some(TcpKeepaliveConfig {
+                idle_secs: config.tcp_keepalive_idle,
+                interval_secs: config.tcp_keepalive_interval,
+                retries: config.tcp_keepalive_count,
+            })
+        } else {
+            None
+        };
+
         let client = create_pg_client(
             &config.user,
             &config.password,
@@ -282,6 +324,7 @@ impl PostgresSinkWriter {
             &config.database,
             &config.ssl_mode,
             &config.ssl_root_cert,
+            tcp_keepalive,
         )
         .await?;
 

@@ -327,6 +327,13 @@ impl fmt::Display for SslMode {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct TcpKeepaliveConfig {
+    pub idle_secs: u32,
+    pub interval_secs: u32,
+    pub retries: u32,
+}
+
 pub async fn create_pg_client(
     user: &str,
     password: &str,
@@ -335,6 +342,7 @@ pub async fn create_pg_client(
     database: &str,
     ssl_mode: &SslMode,
     ssl_root_cert: &Option<String>,
+    tcp_keepalive: Option<TcpKeepaliveConfig>,
 ) -> anyhow::Result<PgClient> {
     let mut pg_config = tokio_postgres::Config::new();
     pg_config
@@ -343,6 +351,25 @@ pub async fn create_pg_client(
         .host(host)
         .port(port.parse::<u16>().unwrap())
         .dbname(database);
+
+    // Configure TCP keepalive if provided
+    if let Some(keepalive) = tcp_keepalive {
+        pg_config.keepalives(true);
+        pg_config.keepalives_idle(std::time::Duration::from_secs(keepalive.idle_secs as u64));
+        #[cfg(not(target_os = "windows"))]
+        {
+            pg_config.keepalives_interval(std::time::Duration::from_secs(
+                keepalive.interval_secs as u64,
+            ));
+            pg_config.keepalives_retries(keepalive.retries);
+        }
+        tracing::info!(
+            "TCP keepalive enabled: idle={}s, interval={}s, retries={}",
+            keepalive.idle_secs,
+            keepalive.interval_secs,
+            keepalive.retries
+        );
+    }
 
     let (_verify_ca, verify_hostname) = match ssl_mode {
         SslMode::VerifyCa => (true, false),

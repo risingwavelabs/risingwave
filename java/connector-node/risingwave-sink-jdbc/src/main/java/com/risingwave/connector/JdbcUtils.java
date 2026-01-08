@@ -104,7 +104,20 @@ public abstract class JdbcUtils {
             props.setProperty(
                     "reWriteBatchedInsertsSize", String.valueOf(config.getBatchInsertRows()));
         }
-
+        // Configure TCP keep-alive with custom SocketFactory if enabled
+        if (config.isKeepaliveEnabled()) {
+            LOG.info(
+                    "Enabling TCP keep-alive: idle={}s, interval={}s, count={}",
+                    config.getKeepaliveIdleSeconds(),
+                    config.getKeepaliveIntervalSeconds(),
+                    config.getKeepaliveCount());
+            // Configure the static factory parameters
+            JDBCKeepaliveSocketFactory.configure(
+                    config.getKeepaliveIdleSeconds(),
+                    config.getKeepaliveIntervalSeconds(),
+                    config.getKeepaliveCount());
+            props.setProperty("socketFactory", JDBCKeepaliveSocketFactory.class.getName());
+        }
         var conn = DriverManager.getConnection(jdbcUrl, props);
         // disable auto commit can improve performance
         conn.setAutoCommit(config.isAutoCommit());
