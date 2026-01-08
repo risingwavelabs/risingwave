@@ -107,6 +107,7 @@ pub mod queries {
 
     const DEFAULT_INITIAL_INTERVAL: Duration = Duration::from_secs(1);
     const DEFAULT_INITIAL_TIMEOUT: Duration = Duration::from_secs(20);
+    const DEFAULT_INITIAL_TIMEOUT_EOWC: Duration = Duration::from_secs(60);
 
     pub mod q3 {
         use super::*;
@@ -115,6 +116,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q3;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q4 {
@@ -124,6 +126,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q4;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q5 {
@@ -133,6 +136,38 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q5;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
+    }
+
+    pub mod q5_eowc {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q5_eowc.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q5_eowc ORDER BY auction LIMIT 1000;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q5_eowc;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT_EOWC;
+        pub const WATERMARK: bool = true;
+    }
+
+    pub mod q6_group_top1 {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q6_group_top1.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q6_group_top1 ORDER BY seller LIMIT 1000;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q6_group_top1;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
+    }
+
+    pub mod q6_group_top1_eowc {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q6_group_top1_eowc.sql");
+        pub const SELECT: &str =
+            "SELECT * FROM nexmark_q6_group_top1_eowc ORDER BY seller LIMIT 1000;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q6_group_top1_eowc;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT_EOWC;
+        pub const WATERMARK: bool = true;
     }
 
     pub mod q7 {
@@ -142,6 +177,17 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q7;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
+    }
+
+    pub mod q7_eowc {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q7_eowc.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q7_eowc ORDER BY date_time;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q7_eowc;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT_EOWC;
+        pub const WATERMARK: bool = true;
     }
 
     pub mod q8 {
@@ -151,6 +197,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q8;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q9 {
@@ -160,6 +207,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q9;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q15 {
@@ -169,6 +217,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q15;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q18 {
@@ -178,6 +227,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q18;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q101 {
@@ -187,6 +237,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q101;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q102 {
@@ -196,6 +247,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q102;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q103 {
@@ -205,6 +257,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q103;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q104 {
@@ -214,6 +267,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q104;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q105 {
@@ -223,6 +277,7 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q105;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 
     pub mod q106 {
@@ -232,5 +287,6 @@ pub mod queries {
         pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q106;";
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
+        pub const WATERMARK: bool = false;
     }
 }

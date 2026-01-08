@@ -35,10 +35,12 @@ async fn nexmark_chaos_common_inner(
     initial_timeout: Duration,
     after_scale_duration: Duration,
     _multiple: bool,
+    watermark: bool,
 ) -> Result<()> {
     let configuration = Configuration::for_scale();
     let total_cores = configuration.total_streaming_cores();
-    let mut cluster = NexmarkCluster::new(configuration, 6, Some(20 * THROUGHPUT), false).await?;
+    let mut cluster =
+        NexmarkCluster::new(configuration, 6, Some(20 * THROUGHPUT), watermark).await?;
     let mut session = cluster.start_session();
     session.run(create).await?;
     sleep(Duration::from_secs(30)).await;
@@ -99,6 +101,7 @@ fn nexmark_chaos_common(
     initial_timeout: Duration,
     after_scale_duration: Duration,
     multiple: bool,
+    watermark: bool,
 ) -> BoxFuture<'static, Result<()>> {
     Box::pin(nexmark_chaos_common_inner(
         query_name,
@@ -109,6 +112,7 @@ fn nexmark_chaos_common(
         initial_timeout,
         after_scale_duration,
         multiple,
+        watermark,
     ))
 }
 
@@ -130,6 +134,7 @@ macro_rules! test {
                     INITIAL_TIMEOUT,
                     $after_scale_duration,
                     false,
+                    WATERMARK,
                 )
                 .await
             }
@@ -146,6 +151,7 @@ macro_rules! test {
                     INITIAL_TIMEOUT,
                     $after_scale_duration,
                     true,
+                    WATERMARK,
                 )
                 .await
             }
@@ -157,8 +163,11 @@ macro_rules! test {
 test!(q3);
 test!(q4);
 test!(q5);
-// q6: cannot plan
+test!(q5_eowc);
+test!(q6_group_top1);
+test!(q6_group_top1_eowc);
 test!(q7);
+test!(q7_eowc);
 test!(q8);
 test!(q9);
 // q10+: duplicated or unsupported
