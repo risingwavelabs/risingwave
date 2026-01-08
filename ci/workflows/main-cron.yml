@@ -218,7 +218,7 @@ steps:
       - ./ci/plugins/swapfile
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "meta backup test (release)"

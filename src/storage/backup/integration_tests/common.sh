@@ -5,12 +5,12 @@ set -eo pipefail
 [ -n "${BACKUP_TEST_RW_ALL_IN_ONE}" ]
 
 function stop_cluster() {
-  cargo make --allow-private k || true
-  cargo make --allow-private wait-processes-exit || true
+  cargo make --allow-private k 1>/dev/null 2>&1 || true
+  cargo make --allow-private wait-processes-exit 1>/dev/null 2>&1 || true
 }
 
 function clean_all_data {
-  cargo make --allow-private clean-data
+  cargo make --allow-private clean-data 1>/dev/null 2>&1
 }
 
 function clean_meta_store() {
@@ -30,19 +30,19 @@ function clean_sqlite_data() {
 
 function start_cluster() {
   stop_cluster
-  cargo make d ci-meta-backup-test-sql
+  cargo make d ci-meta-backup-test-sql 1>/dev/null 2>&1
   sleep 5
 }
 
 function full_gc_sst() {
-  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-full-gc -s 0
+  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-full-gc -s 0 1>/dev/null 2>&1
   # TODO #6482: wait full gc finish deterministically.
   # Currently have to wait long enough.
   sleep 30
 }
 
 function manual_compaction() {
-  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-manual-compaction "$@"
+  ${BACKUP_TEST_RW_ALL_IN_ONE} risectl hummock trigger-manual-compaction "$@" 1>/dev/null 2>&1
 }
 
 function start_meta_store_minio() {
@@ -50,7 +50,7 @@ function start_meta_store_minio() {
 }
 
 function start_sql_minio() {
-  cargo make d ci-meta-backup-test-restore-sql
+  cargo make d ci-meta-backup-test-restore-sql 1>/dev/null 2>&1
 }
 
 function create_mvs() {
@@ -95,7 +95,7 @@ function restore() {
   --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   --hummock-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
   --validate-integrity \
-  1>restore-${job_id}.log 2>&1
+  1>/dev/null 2>&1
 }
 
 function create_minio_bucket() {
@@ -142,7 +142,8 @@ function restore_with_overwrite() {
   --hummock-storage-url "${overwrite_hummock_storage_url}" \
   --hummock-storage-directory "${overwrite_hummock_storage_dir}" \
   --backup-storage-url minio://hummockadmin:hummockadmin@127.0.0.1:9301/hummock001 \
-  --validate-integrity
+  --validate-integrity \
+  1>/dev/null 2>&1
 }
 
 function restore_fail_integrity_validation() {
@@ -196,9 +197,13 @@ function execute_sql_and_expect() {
   [ -n "${result}" ]
 }
 
-function get_total_sst_count() {
+function get_all_sst_paths() {
   ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
-  find "hummock-minio/hummock001" -name "*.data" |wc -l
+  find "hummock-minio/hummock001" -name "*.data" | sort
+}
+
+function get_total_sst_count() {
+  get_all_sst_paths | wc -l
 }
 
 function get_table_committed_epoch_in_meta_snapshot() {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 set -euo pipefail
-DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 tests=( \
 "test_basic.sh" \
@@ -11,7 +11,6 @@ tests=( \
 )
 for t in "${tests[@]}"
 do
-  echo "--- running ${t}"
   bash "${DIR}/${t}"
 done
 
