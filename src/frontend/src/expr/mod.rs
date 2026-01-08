@@ -91,7 +91,7 @@ pub(crate) fn reject_impure(expr: impl Into<ExprImpl>, context: &str) -> RwResul
             return Err(ErrorCode::NotSupported(
                 msg,
                 "rewrite the query to extract the impure expression into the select list, \
-                 or setting `streaming_unsafe_allow_unmaterialized_impure_expr` to allow \
+                 or set `streaming_unsafe_allow_unmaterialized_impure_expr` to allow \
                  the behavior at the risk of inconsistent results or panics during execution"
                     .into(),
             )
