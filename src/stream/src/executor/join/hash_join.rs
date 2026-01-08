@@ -530,6 +530,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
             let mut state = self.inner.peek_mut(key).expect("checked contains");
             CacheResult::Hit(state.take())
         } else {
+            self.metrics.lookup_miss_count += 1;
             tracing::trace!("miss cache for join key: {:?}", key);
             CacheResult::Miss
         }

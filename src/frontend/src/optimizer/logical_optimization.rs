@@ -222,6 +222,8 @@ static SIMPLE_UNNESTING: LazyLock<OptimizationStage> = LazyLock::new(|| {
             PullUpCorrelatedPredicateAggRule::create(),
             // Eliminate max one row
             MaxOneRowEliminateRule::create(),
+            // Eliminate lateral table-function apply into a unary ProjectSet.
+            ApplyTableFunctionToProjectSetRule::create(),
             // Convert apply to join.
             ApplyToJoinRule::create(),
         ],

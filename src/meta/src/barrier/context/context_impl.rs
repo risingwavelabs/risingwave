@@ -483,6 +483,7 @@ impl CommandContext {
             }
             Command::DropSubscription { .. } => {}
             Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
+            Command::ResetSource { .. } => {}
         }
 
         Ok(())

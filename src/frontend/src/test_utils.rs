@@ -103,7 +103,6 @@ impl SessionManager for LocalFrontend {
     fn create_dummy_session(
         &self,
         _database_id: DatabaseId,
-        _user_name: u32,
     ) -> std::result::Result<Arc<Self::Session>, Self::Error> {
         unreachable!()
     }
@@ -516,6 +515,10 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
+        Ok(())
+    }
+
+    async fn reset_source(&self, _source_id: SourceId) -> Result<()> {
         Ok(())
     }
 

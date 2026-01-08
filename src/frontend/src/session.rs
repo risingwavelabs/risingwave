@@ -1496,22 +1496,19 @@ impl SessionManager for SessionManagerImpl {
     type Error = RwError;
     type Session = SessionImpl;
 
-    fn create_dummy_session(
-        &self,
-        database_id: DatabaseId,
-        user_id: u32,
-    ) -> Result<Arc<Self::Session>> {
+    fn create_dummy_session(&self, database_id: DatabaseId) -> Result<Arc<Self::Session>> {
         let dummy_addr = Address::Tcp(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
             5691, // port of meta
         ));
-        let user_reader = self.env.user_info_reader();
-        let reader = user_reader.read_guard();
-        if let Some(user_name) = reader.get_user_name_by_id(user_id) {
-            self.connect_inner(database_id, user_name.as_str(), Arc::new(dummy_addr))
-        } else {
-            bail_catalog_error!("Role id {} does not exist", user_id)
-        }
+
+        // Always use the built-in super user for dummy sessions.
+        // This avoids permission checks tied to a specific user_id.
+        self.connect_inner(
+            database_id,
+            risingwave_common::catalog::DEFAULT_SUPER_USER,
+            Arc::new(dummy_addr),
+        )
     }
 
     fn connect(
