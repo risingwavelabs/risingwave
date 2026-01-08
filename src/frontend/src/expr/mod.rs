@@ -25,6 +25,7 @@ use risingwave_pb::expr::{ExprNode, ProjectSetSelectItem};
 use user_defined_function::UserDefinedFunctionDisplay;
 
 use crate::error::{ErrorCode, Result as RwResult};
+use crate::session::current;
 
 mod agg_call;
 mod correlated_input_ref;
@@ -76,6 +77,30 @@ pub(crate) const EXPR_DEPTH_THRESHOLD: usize = 30;
 pub(crate) const EXPR_TOO_DEEP_NOTICE: &str = "Some expression is too complicated. \
 Consider simplifying or splitting the query if you encounter any issues.";
 
+pub(crate) fn reject_impure(expr: impl Into<ExprImpl>, context: &str) -> RwResult<()> {
+    if let Some(impure_expr_desc) = impure_expr_desc(&expr.into()) {
+        let msg = format!(
+            "using an impure expression ({impure_expr_desc}) in {context} \
+             on a retract stream may lead to inconsistent results"
+        );
+        if current::config()
+            .is_some_and(|c| c.read().streaming_unsafe_allow_unmaterialized_impure_expr())
+        {
+            current::notice_to_user(msg);
+        } else {
+            return Err(ErrorCode::NotSupported(
+                msg,
+                "rewrite the query to extract the impure expression into the select list, \
+                 or set `streaming_unsafe_allow_unmaterialized_impure_expr` to allow \
+                 the behavior at the risk of inconsistent results or panics during execution"
+                    .into(),
+            )
+            .into());
+        }
+    }
+    Ok(())
+}
+
 /// the trait of bound expressions
 pub trait Expr: Into<ExprImpl> {
     /// Get the return type of the expr
@@ -88,6 +113,23 @@ pub trait Expr: Into<ExprImpl> {
     fn to_expr_proto(&self) -> ExprNode {
         self.try_to_expr_proto()
             .expect("failed to serialize expression to protobuf")
+    }
+
+    /// Serialize the expression. Returns an error if this will result in an impure expression on a
+    /// retract stream, which may lead to inconsistent results.
+    fn to_expr_proto_checked_pure(
+        &self,
+        retract: bool,
+        context: &str,
+    ) -> crate::error::Result<ExprNode>
+    where
+        Self: Clone,
+    {
+        if retract {
+            reject_impure(self.clone(), context)?;
+        }
+        self.try_to_expr_proto()
+            .map_err(|e| ErrorCode::InternalError(e).into())
     }
 }
 
@@ -948,6 +990,22 @@ impl ExprImpl {
                 expr => Expr(expr.to_expr_proto()),
             }),
         }
+    }
+
+    /// Serialize the expression. Returns an error if this will result in an impure expression on a
+    /// retract stream, which may lead to inconsistent results.
+    pub fn to_project_set_select_item_proto_checked_pure(
+        &self,
+        retract: bool,
+    ) -> crate::error::Result<ProjectSetSelectItem> {
+        use risingwave_pb::expr::project_set_select_item::SelectItem::*;
+
+        Ok(ProjectSetSelectItem {
+            select_item: Some(match self {
+                ExprImpl::TableFunction(tf) => TableFunction(tf.to_protobuf_checked_pure(retract)?),
+                expr => Expr(expr.to_expr_proto_checked_pure(retract, "SELECT list")?),
+            }),
+        })
     }
 
     pub fn from_expr_proto(proto: &ExprNode) -> RwResult<Self> {

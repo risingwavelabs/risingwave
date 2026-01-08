@@ -35,6 +35,7 @@ use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::BindError;
+use crate::expr::reject_impure;
 use crate::utils::FRONTEND_RUNTIME;
 
 const INLINE_ARG_LEN: usize = 6;
@@ -658,6 +659,27 @@ impl TableFunction {
             return_type: Some(self.return_type.to_protobuf()),
             udf: self.user_defined.as_ref().map(|c| c.as_ref().into()),
         }
+    }
+
+    /// Serialize the table function. Returns an error if this will result in an impure table
+    /// function on a retract stream, which may lead to inconsistent results.
+    pub fn to_protobuf_checked_pure(&self, retract: bool) -> crate::error::Result<PbTableFunction> {
+        if retract {
+            reject_impure(self.clone(), "table function")?;
+        }
+
+        let args = self
+            .args
+            .iter()
+            .map(|arg| arg.to_expr_proto_checked_pure(retract, "table function argument"))
+            .collect::<crate::error::Result<Vec<_>>>()?;
+
+        Ok(PbTableFunction {
+            function_type: self.function_type as i32,
+            args,
+            return_type: Some(self.return_type.to_protobuf()),
+            udf: self.user_defined.as_ref().map(|c| c.as_ref().into()),
+        })
     }
 
     /// Get the name of the table function.
