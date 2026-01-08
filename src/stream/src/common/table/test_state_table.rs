@@ -1859,8 +1859,11 @@ async fn test_state_table_with_vnode_stats() {
 
     // Attach metrics to verify vnode pruning effectiveness
     let registry = Registry::new();
-    let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug)
-        .new_state_table_metrics(TEST_TABLE_ID, ActorId::new(1), FragmentId::new(1));
+    let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug).new_state_table_metrics(
+        TEST_TABLE_ID,
+        ActorId::new(1),
+        FragmentId::new(1),
+    );
 
     // Build state table with vnode stats enabled
     let vnode_bitmap = {
@@ -2103,8 +2106,11 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
     test_env.register_table(table.clone()).await;
 
     let registry = Registry::new();
-    let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug)
-        .new_state_table_metrics(TEST_TABLE_ID, ActorId::new(2), FragmentId::new(2));
+    let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug).new_state_table_metrics(
+        TEST_TABLE_ID,
+        ActorId::new(2),
+        FragmentId::new(2),
+    );
 
     let vnode_bitmap = {
         let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_TEST);
