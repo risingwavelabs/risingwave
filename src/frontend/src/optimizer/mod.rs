@@ -1121,7 +1121,7 @@ impl LogicalPlanRoot {
     }
 
     /// Optimize and generate a create sink plan.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn gen_sink_plan(
         self,
         sink_name: String,
@@ -1136,10 +1136,15 @@ impl LogicalPlanRoot {
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
+        allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
         let backfill_type = if without_backfill {
             BackfillType::UpstreamOnly
-        } else if target_table.is_none() && self.should_use_snapshot_backfill() {
+        } else if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
+            assert!(
+                target_table.is_none(),
+                "should not allow snapshot backfill for sink-into-table"
+            );
             // Snapshot backfill on sink-into-table is not allowed
             BackfillType::SnapshotBackfill
         } else if self.should_use_arrangement_backfill() {
