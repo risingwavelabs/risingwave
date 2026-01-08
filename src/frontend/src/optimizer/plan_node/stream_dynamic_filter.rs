@@ -26,10 +26,9 @@ use super::{ExprRewritable, generic};
 use crate::expr::Expr;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
-    PlanBase, PlanTreeNodeBinary, StreamPlanRef as PlanRef, TryToStreamPb,
+    PlanBase, PlanTreeNodeBinary, StreamNode, StreamPlanRef as PlanRef,
 };
 use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
-use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -173,21 +172,17 @@ impl PlanTreeNodeBinary<Stream> for StreamDynamicFilter {
 
 impl_plan_tree_node_for_binary! { Stream, StreamDynamicFilter }
 
-impl TryToStreamPb for StreamDynamicFilter {
-    fn try_to_stream_prost_body(
-        &self,
-        state: &mut BuildFragmentGraphState,
-    ) -> SchedulerResult<NodeBody> {
+impl StreamNode for StreamDynamicFilter {
+    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
         use generic::dynamic_filter::*;
         let cleaned_by_watermark = self.cleaned_by_watermark;
-        let retract =
-            self.left().stream_kind().is_retract() || self.right().stream_kind().is_retract();
         let condition = self
             .core
             .predicate()
             .as_expr_unless_true()
-            .map(|expr| expr.to_expr_proto_checked_pure(retract, "dynamic filter condition"))
-            .transpose()?;
+            // No need to call `to_expr_proto_checked_pure` since the condition of dynamic filter is
+            // always `InputRef <comparator> InputRef`.
+            .map(|x| x.to_expr_proto());
         let left_index = self.core.left_index();
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)
             .with_id(state.gen_table_id_wrapped());
@@ -195,14 +190,14 @@ impl TryToStreamPb for StreamDynamicFilter {
         let right_table = infer_right_internal_table_catalog(right.plan_base())
             .with_id(state.gen_table_id_wrapped());
         #[allow(deprecated)]
-        Ok(NodeBody::DynamicFilter(Box::new(DynamicFilterNode {
+        NodeBody::DynamicFilter(Box::new(DynamicFilterNode {
             left_key: left_index as u32,
             condition,
             left_table: Some(left_table.to_internal_table_prost()),
             right_table: Some(right_table.to_internal_table_prost()),
             condition_always_relax: false, // deprecated
             cleaned_by_watermark,
-        })))
+        }))
     }
 }
 
