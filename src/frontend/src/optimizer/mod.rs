@@ -1140,7 +1140,17 @@ impl LogicalPlanRoot {
     ) -> Result<StreamSink> {
         let backfill_type = if without_backfill {
             BackfillType::UpstreamOnly
-        } else if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
+        } else if allow_snapshot_backfill
+            && self.should_use_snapshot_backfill()
+            && {
+                if auto_refresh_schema_from_table.is_some() {
+                    self.plan.ctx().session_ctx().notice_to_user("Auto schema change only support for ArrangementBackfill. Switched to use ArrangementBackfill");
+                    false
+                } else {
+                    true
+                }
+            }
+        {
             assert!(
                 target_table.is_none(),
                 "should not allow snapshot backfill for sink-into-table"
