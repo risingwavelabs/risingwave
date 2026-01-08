@@ -56,6 +56,9 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
       --count "$SQLSMITH_COUNT" \
       --testdata ./src/tests/sqlsmith/tests/testdata > $LOGDIR/fuzzing.log 2>&1 && rm $LOGDIR/*
 
+    echo "LOGDIR ${LOGDIR}"
+    ls ${LOGDIR}
+
     if [[ -e $LOGDIR/fuzzing.log ]]; then
         echo "Fuzzing failed, please look at the artifacts fuzzing.log and error.sql.log for more details"
         extract_error_sql $LOGDIR/fuzzing.log
@@ -64,7 +67,7 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
             --input-file $LOGDIR/error.sql.log \
             --output-file $LOGDIR/error.sql.shrunk.log \
             --run-rw-cmd './risedev k && ./risedev clean-data && ./risedev ci-start ci-3cn-1fe' \
-            > "$LOGDIR/reducer.log" 2>&1
+            |& tee "$LOGDIR/reducer.log"
         echo "--- Reducer finished (log: $LOGDIR/reducer.log)"
         echo "Reduced queries saved at $LOGDIR/error.sql.shrunk.log"
         exit 1
