@@ -4,12 +4,12 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-# TODO: set `RW_BUILD_INSTRUMENT_COVERAGE=1` after addressing performance issue under madsim
 
 echo "--- Generate RiseDev CI config"
 cp ci/risedev-components.ci.env risedev-components.user.env
 
 echo "--- Build deterministic simulation e2e test runner"
+# TODO: set `RW_BUILD_INSTRUMENT_COVERAGE=1` after addressing performance issue under madsim
 risedev sslt-build-all --profile ci-sim --timings
 
 echo "--- Show sccache stats"
@@ -17,7 +17,7 @@ sccache --show-stats
 sccache --zero-stats
 
 echo "--- Build and archive deterministic simulation integration tests"
-NEXTEST_PROFILE=ci-sim risedev sarchive-it-test --cargo-profile ci-sim
+RW_BUILD_INSTRUMENT_COVERAGE=1 NEXTEST_PROFILE=ci-sim risedev sarchive-it-test --cargo-profile ci-sim
 
 echo "--- Show sccache stats"
 sccache --show-stats
