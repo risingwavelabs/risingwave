@@ -392,7 +392,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             self.sink_param,
                             self.sink_writer_param,
                             self.non_append_only_behavior,
-                            input_compact_ib,
                             self.actor_context,
                             rate_limit_rx,
                             rebuild_sink_rx,
@@ -622,6 +621,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                 }
             }
         } else {
+            // In this branch, we don't need to reorder records, either because the stream key matches
+            // the downstream pk, or the sink is append-only.
             #[for_await]
             for msg in input {
                 match msg? {
@@ -630,7 +631,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         // Compact the chunk to eliminate any unnecessary updates to external systems.
                         // This should be performed against the downstream pk, not the stream key, to
                         // ensure correct retract/upsert semantics from the downstream's perspective.
-                        if sink_type != SinkType::AppendOnly
+                        if !sink_type.is_append_only()
                             && let Some(downstream_pk) = &downstream_pk
                         {
                             if skip_compact {
@@ -642,7 +643,9 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     compact_chunk_inline::<KIND>(
                                         chunk,
                                         downstream_pk,
-                                        input_compact_ib,
+                                        // When compacting based on user provided primary key, we should never panic
+                                        // on inconsistency in case the user provided primary key is not unique.
+                                        InconsistencyBehavior::Warn,
                                     )
                                 });
                             }
@@ -674,7 +677,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         mut sink_param: SinkParam,
         mut sink_writer_param: SinkWriterParam,
         non_append_only_behavior: Option<NonAppendOnlyBehavior>,
-        input_compact_ib: InconsistencyBehavior,
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
         mut rebuild_sink_rx: UnboundedReceiver<RebuildSinkMessage>,
@@ -720,7 +722,13 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     // This guarantees that user has specified a `downstream_pk`.
                     let downstream_pk = downstream_pk.as_ref().unwrap();
                     dispatch_output_kind!(sink_param.sink_type, KIND, {
-                        compact_chunk_inline::<KIND>(chunk, downstream_pk, input_compact_ib)
+                        compact_chunk_inline::<KIND>(
+                            chunk,
+                            downstream_pk,
+                            // When compacting based on user provided primary key, we should never panic
+                            // on inconsistency in case the user provided primary key is not unique.
+                            InconsistencyBehavior::Warn,
+                        )
                     })
                 } else {
                     chunk
