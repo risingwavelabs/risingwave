@@ -34,7 +34,9 @@ use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
-use risingwave_connector::source::{ConnectorProperties, pb_connection_type_to_connection_type};
+use risingwave_connector::source::{
+    ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
+};
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink_name_str};
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
@@ -2085,6 +2087,16 @@ impl CatalogController {
                 .await?;
         }
 
+        // Validate that connector type is not being changed
+        if let Some(new_connector) = alter_props.get(UPSTREAM_SOURCE_KEY)
+            && new_connector != &connector
+        {
+            return Err(MetaError::invalid_parameter(format!(
+                "Cannot change connector type from '{}' to '{}'. Drop and recreate the source instead.",
+                connector, new_connector
+            )));
+        }
+
         // Use check_source_allow_alter_on_fly_fields to validate allowed properties
         let prop_keys: Vec<String> = alter_props
             .keys()
@@ -2186,7 +2198,8 @@ impl CatalogController {
         };
 
         {
-            // update secret dependencies
+            // Update secret dependencies atomically within the transaction.
+            // Add new dependencies for secrets that are newly referenced.
             if !to_add_secret_dep.is_empty() {
                 ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
                     object_dependency::ActiveModel {
@@ -2198,8 +2211,9 @@ impl CatalogController {
                 .exec(&txn)
                 .await?;
             }
+            // Remove dependencies for secrets that are no longer referenced.
+            // This allows the secrets to be deleted after this source no longer uses them.
             if !to_remove_secret_dep.is_empty() {
-                // todo: fix the filter logic
                 let _ = ObjectDependency::delete_many()
                     .filter(
                         object_dependency::Column::Oid

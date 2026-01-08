@@ -487,6 +487,42 @@ enum MetaCommands {
         #[clap(long, required = true)]
         parallelism: u32,
     },
+
+    /// Alter source connector properties with pause/resume orchestration (UNSAFE)
+    /// This operation pauses the source, updates properties, and resumes.
+    AlterSourcePropertiesSafe {
+        /// Source ID to update
+        #[clap(long)]
+        source_id: u32,
+        /// Properties to change in JSON format, e.g. '{"properties.bootstrap.server": "new-broker:9092"}'
+        #[clap(long)]
+        props: String,
+        /// Flush/checkpoint before pausing (recommended)
+        #[clap(long, default_value_t = true)]
+        flush: bool,
+        /// Reset split assignments after property change (for major upstream changes)
+        #[clap(long, default_value_t = false)]
+        reset_splits: bool,
+    },
+
+    /// Reset source split assignments (UNSAFE - admin only)
+    /// Clears cached split state and triggers re-discovery from upstream.
+    ResetSourceSplits {
+        /// Source ID to reset
+        #[clap(long)]
+        source_id: u32,
+    },
+
+    /// Inject specific offsets into source splits (UNSAFE - admin only)
+    /// WARNING: This can cause data duplication or loss!
+    InjectSourceOffsets {
+        /// Source ID to inject offsets for
+        #[clap(long)]
+        source_id: u32,
+        /// Split offsets in JSON format, e.g. '{"split-0": "100", "split-1": "200"}'
+        #[clap(long)]
+        offsets: String,
+    },
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -970,6 +1006,27 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             parallelism,
         }) => {
             set_cdc_table_backfill_parallelism(context, table_id, parallelism).await?;
+        }
+        Commands::Meta(MetaCommands::AlterSourcePropertiesSafe {
+            source_id,
+            props,
+            flush,
+            reset_splits,
+        }) => {
+            cmd_impl::meta::alter_source_properties_safe(
+                context,
+                source_id,
+                props,
+                flush,
+                reset_splits,
+            )
+            .await?;
+        }
+        Commands::Meta(MetaCommands::ResetSourceSplits { source_id }) => {
+            cmd_impl::meta::reset_source_splits(context, source_id).await?;
+        }
+        Commands::Meta(MetaCommands::InjectSourceOffsets { source_id, offsets }) => {
+            cmd_impl::meta::inject_source_offsets(context, source_id, offsets).await?;
         }
         Commands::Test(TestCommands::Jvm) => cmd_impl::test::test_jvm()?,
     }

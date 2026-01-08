@@ -26,7 +26,7 @@ use risingwave_meta::controller::utils::FragmentDesc;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{ConnectionId, FragmentId, StreamingParallelism};
+use risingwave_meta_model::{ConnectionId, FragmentId, SourceId, StreamingParallelism};
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
@@ -884,6 +884,171 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListUnmigratedTablesResponse {
             tables: unmigrated_tables,
         }))
+    }
+
+    /// Orchestrated source property update with pause/update/resume workflow.
+    /// This is the "safe" version that pauses sources before updating and resumes after.
+    async fn alter_source_properties_safe(
+        &self,
+        request: Request<AlterSourcePropertiesSafeRequest>,
+    ) -> Result<Response<AlterSourcePropertiesSafeResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+        let options = request.options.unwrap_or_default();
+
+        tracing::info!(
+            source_id = source_id,
+            flush_before_pause = options.flush_before_pause,
+            reset_splits = options.reset_splits,
+            "Starting orchestrated source property update"
+        );
+
+        // Get the database ID for the source
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(SourceId::from(source_id))
+            .await?;
+
+        // Step 1: Optional flush for checkpoint
+        if options.flush_before_pause {
+            tracing::info!(source_id = source_id, "Flushing before pause");
+            self.barrier_scheduler
+                .run_command(database_id, Command::Flush)
+                .await?;
+        }
+
+        // Step 2: Pause the stream
+        tracing::info!(source_id = source_id, "Pausing stream");
+        self.barrier_scheduler
+            .run_command(database_id, Command::Pause)
+            .await?;
+
+        // Step 3: Update catalog and get the new properties
+        let result = async {
+            let secret_manager = LocalSecretManager::global();
+
+            let options_with_secret = self
+                .metadata_manager
+                .catalog_controller
+                .update_source_props_by_source_id(
+                    source_id.into(),
+                    request.changed_props.clone().into_iter().collect(),
+                    request.changed_secret_refs.clone().into_iter().collect(),
+                )
+                .await?;
+
+            // Validate the source
+            self.stream_manager
+                .source_manager
+                .validate_source_once(source_id.into(), options_with_secret.clone())
+                .await?;
+
+            let (props, secret_refs) = options_with_secret.into_parts();
+            let new_props_plaintext: HashMap<String, String> = secret_manager
+                .fill_secrets(props, secret_refs)
+                .map_err(MetaError::from)?
+                .into_iter()
+                .collect();
+
+            // Step 4: Issue ConnectorPropsChange barrier
+            tracing::info!(
+                source_id = source_id,
+                "Issuing ConnectorPropsChange barrier"
+            );
+            let mut mutation = HashMap::default();
+            mutation.insert(source_id.into(), new_props_plaintext);
+            self.barrier_scheduler
+                .run_command(database_id, Command::ConnectorPropsChange(mutation))
+                .await?;
+
+            // Step 5: Optional split reset
+            if options.reset_splits {
+                tracing::info!(source_id = source_id, "Resetting source splits");
+                self.stream_manager
+                    .source_manager
+                    .reset_source_splits(source_id.into())
+                    .await?;
+            }
+
+            Ok::<_, MetaError>(())
+        }
+        .await;
+
+        // Step 6: Resume the stream (even if previous steps failed)
+        tracing::info!(source_id = source_id, "Resuming stream");
+        let resume_result = self
+            .barrier_scheduler
+            .run_command(database_id, Command::Resume)
+            .await;
+
+        // Return the first error if any
+        result?;
+        resume_result?;
+
+        tracing::info!(
+            source_id = source_id,
+            "Orchestrated source property update completed successfully"
+        );
+
+        Ok(Response::new(AlterSourcePropertiesSafeResponse {}))
+    }
+
+    /// Reset source split assignments (UNSAFE - admin only).
+    /// This clears persisted split metadata and triggers re-discovery.
+    async fn reset_source_splits(
+        &self,
+        request: Request<ResetSourceSplitsRequest>,
+    ) -> Result<Response<ResetSourceSplitsResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+
+        tracing::warn!(
+            source_id = source_id,
+            "UNSAFE: Resetting source splits - this may cause data duplication or loss"
+        );
+
+        self.stream_manager
+            .source_manager
+            .reset_source_splits(source_id.into())
+            .await?;
+
+        Ok(Response::new(ResetSourceSplitsResponse {}))
+    }
+
+    /// Inject specific offsets into source splits (UNSAFE - admin only).
+    /// This can cause data duplication or loss depending on the correctness of the provided offsets.
+    async fn inject_source_offsets(
+        &self,
+        request: Request<InjectSourceOffsetsRequest>,
+    ) -> Result<Response<InjectSourceOffsetsResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+        let split_offsets = request.split_offsets;
+
+        tracing::warn!(
+            source_id = source_id,
+            num_offsets = split_offsets.len(),
+            "UNSAFE: Injecting source offsets - this may cause data duplication or loss"
+        );
+
+        let database_id = self
+            .metadata_manager
+            .catalog_controller
+            .get_object_database_id(SourceId::from(source_id))
+            .await?;
+
+        self.barrier_scheduler
+            .run_command(
+                database_id,
+                Command::InjectSourceOffsets {
+                    source_id: SourceId::from(source_id),
+                    split_offsets,
+                },
+            )
+            .await?;
+
+        Ok(Response::new(InjectSourceOffsetsResponse {}))
     }
 }
 

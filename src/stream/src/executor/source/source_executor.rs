@@ -24,6 +24,7 @@ use risingwave_common::catalog::{ColumnId, TableId};
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::types::JsonbVal;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_connector::parser::schema_change::SchemaChangeEnvelope;
 use risingwave_connector::source::cdc::split::extract_postgres_lsn_from_offset_str;
@@ -872,6 +873,59 @@ impl<S: StateStore> SourceExecutor<S> {
                                     );
                                 }
                             }
+
+                            Mutation::InjectSourceOffsets {
+                                source_id,
+                                split_offsets,
+                            } => {
+                                if *source_id == self.stream_source_core.source_id {
+                                    tracing::warn!(
+                                        actor_id = %self.actor_ctx.id,
+                                        source_id = source_id.as_raw_id(),
+                                        num_offsets = split_offsets.len(),
+                                        "UNSAFE: Injecting source offsets - this may cause data duplication or loss"
+                                    );
+
+                                    // Store the injected offsets as JSON in the state table
+                                    let json_states: Vec<(String, JsonbVal)> = split_offsets
+                                        .iter()
+                                        .map(|(split_id, offset)| {
+                                            tracing::info!(
+                                                split_id = %split_id,
+                                                offset = %offset,
+                                                "Injecting offset for split"
+                                            );
+                                            // Parse the offset as JSON and store it
+                                            let json_value: serde_json::Value =
+                                                serde_json::from_str(offset).unwrap_or_else(
+                                                    |_| serde_json::json!({ "offset": offset }),
+                                                );
+                                            (split_id.clone(), JsonbVal::from(json_value))
+                                        })
+                                        .collect();
+
+                                    if !json_states.is_empty() {
+                                        self.stream_source_core
+                                            .split_state_store
+                                            .set_states_json(json_states)
+                                            .await?;
+
+                                        tracing::info!(
+                                            actor_id = %self.actor_ctx.id,
+                                            source_id = source_id.as_raw_id(),
+                                            "Offset injection completed"
+                                        );
+                                    }
+                                } else {
+                                    tracing::debug!(
+                                        actor_id = %self.actor_ctx.id,
+                                        target_source_id = source_id.as_raw_id(),
+                                        current_source_id = self.stream_source_core.source_id.as_raw_id(),
+                                        "InjectSourceOffsets mutation for different source, ignoring"
+                                    );
+                                }
+                            }
+
                             _ => {}
                         }
                     }
