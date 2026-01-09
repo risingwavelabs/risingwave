@@ -28,6 +28,7 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_meta_model::SinkId;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use sea_orm::TransactionTrait;
 use thiserror_ext::AsReport;
 use tracing::{info, warn};
 
@@ -41,7 +42,7 @@ use crate::controller::scale::{
 };
 use crate::controller::utils::StreamingJobExtraInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, FragmentId, StreamActor};
+use crate::model::{ActorId, FragmentDownstreamRelation, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::reload_cdc_table_snapshot_splits;
 use crate::stream::{SourceChange, StreamFragmentGraph, UpstreamSinkInfo};
@@ -55,6 +56,7 @@ struct LoadedRecoveryContext {
     fragment_context: LoadedFragmentContext,
     job_extra_info: HashMap<JobId, StreamingJobExtraInfo>,
     upstream_sink_recovery: HashMap<JobId, UpstreamSinkRecoveryInfo>,
+    fragment_relations: FragmentDownstreamRelation,
 }
 
 impl LoadedRecoveryContext {
@@ -63,6 +65,7 @@ impl LoadedRecoveryContext {
             fragment_context,
             job_extra_info: HashMap::new(),
             upstream_sink_recovery: HashMap::new(),
+            fragment_relations: FragmentDownstreamRelation::default(),
         }
     }
 }
@@ -262,18 +265,7 @@ impl GlobalBarrierWorkerContextImpl {
             .collect())
     }
 
-    /// Async load stage: collect all metadata required for rendering actor assignments.
-    async fn load_fragment_context(
-        &self,
-        database_id: Option<DatabaseId>,
-    ) -> MetaResult<LoadedFragmentContext> {
-        self.metadata_manager
-            .catalog_controller
-            .load_fragment_context(database_id)
-            .await
-    }
-
-    /// Sync render stage: use loaded context and current workers to produce actor assignments.
+    /// Sync render stage: uses loaded context and current workers to produce actor assignments.
     fn render_actor_assignments(
         &self,
         database_id: Option<DatabaseId>,
@@ -323,12 +315,21 @@ impl GlobalBarrierWorkerContextImpl {
         &self,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<LoadedRecoveryContext> {
-        let fragment_context =
-            self.load_fragment_context(database_id)
-                .await
-                .inspect_err(|err| {
-                    warn!(error = %err.as_report(), "load fragment context failed");
-                })?;
+        let inner = self
+            .metadata_manager
+            .catalog_controller
+            .get_inner_read_guard()
+            .await;
+        let txn = inner.db.begin().await?;
+
+        let fragment_context = self
+            .metadata_manager
+            .catalog_controller
+            .load_fragment_context_in_txn(&txn, database_id)
+            .await
+            .inspect_err(|err| {
+                warn!(error = %err.as_report(), "load fragment context failed");
+            })?;
 
         if fragment_context.is_empty() {
             return Ok(LoadedRecoveryContext::empty(fragment_context));
@@ -338,7 +339,7 @@ impl GlobalBarrierWorkerContextImpl {
         let job_extra_info = self
             .metadata_manager
             .catalog_controller
-            .get_streaming_job_extra_info(job_ids)
+            .get_streaming_job_extra_info_in_txn(&txn, job_ids)
             .await?;
 
         let mut upstream_targets = HashMap::new();
@@ -371,7 +372,7 @@ impl GlobalBarrierWorkerContextImpl {
             let tables = self
                 .metadata_manager
                 .catalog_controller
-                .get_user_created_table_by_ids(upstream_targets.keys().copied())
+                .get_user_created_table_by_ids_in_txn(&txn, upstream_targets.keys().copied())
                 .await?;
 
             for table in tables {
@@ -388,7 +389,7 @@ impl GlobalBarrierWorkerContextImpl {
                 let upstream_infos = self
                     .metadata_manager
                     .catalog_controller
-                    .get_all_upstream_sink_infos(&table, *target_fragment_id as _)
+                    .get_all_upstream_sink_infos_in_txn(&txn, &table, *target_fragment_id as _)
                     .await?;
 
                 upstream_sink_recovery.insert(
@@ -401,10 +402,20 @@ impl GlobalBarrierWorkerContextImpl {
             }
         }
 
+        let fragment_relations = self
+            .metadata_manager
+            .catalog_controller
+            .get_fragment_downstream_relations_in_txn(
+                &txn,
+                fragment_context.fragment_map.keys().copied().collect_vec(),
+            )
+            .await?;
+
         Ok(LoadedRecoveryContext {
             fragment_context,
             job_extra_info,
             upstream_sink_recovery,
+            fragment_relations,
         })
     }
 
@@ -709,17 +720,7 @@ impl GlobalBarrierWorkerContextImpl {
                     let stream_actors =
                         build_stream_actors(&info, &recovery_context.job_extra_info)?;
 
-                    let fragment_relations = self
-                        .metadata_manager
-                        .catalog_controller
-                        .get_fragment_downstream_relations(
-                            info.values()
-                                .flatten()
-                                .flat_map(|(_, job)| job.keys())
-                                .map(|fragment_id| *fragment_id as _)
-                                .collect(),
-                        )
-                        .await?;
+                    let fragment_relations = recovery_context.fragment_relations;
 
                     // Refresh background job progress for the final snapshot to reflect any catalog changes.
                     let background_jobs = {
@@ -894,16 +895,7 @@ impl GlobalBarrierWorkerContextImpl {
             .get_mv_depended_subscriptions(Some(database_id))
             .await?;
 
-        let fragment_relations = self
-            .metadata_manager
-            .catalog_controller
-            .get_fragment_downstream_relations(
-                info.values()
-                    .flatten()
-                    .map(|(fragment_id, _)| *fragment_id as _)
-                    .collect(),
-            )
-            .await?;
+        let fragment_relations = recovery_context.fragment_relations;
 
         // get split assignments for all actors
         let mut source_splits = HashMap::new();
