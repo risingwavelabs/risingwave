@@ -334,7 +334,7 @@ impl CdcScanOptions {
             backfill_num_rows_per_split: self.backfill_num_rows_per_split,
             backfill_as_even_splits: self.backfill_as_even_splits,
             backfill_split_pk_column_index: self.backfill_split_pk_column_index,
-            backfill_split_column_name: self.backfill_split_column_name.to_owned(),
+            backfill_split_column_name: self.backfill_split_column_name.clone(),
         }
     }
 
@@ -347,7 +347,7 @@ impl CdcScanOptions {
             backfill_num_rows_per_split: proto.backfill_num_rows_per_split,
             backfill_as_even_splits: proto.backfill_as_even_splits,
             backfill_split_pk_column_index: proto.backfill_split_pk_column_index,
-            backfill_split_column_name: proto.backfill_split_column_name.to_owned(),
+            backfill_split_column_name: proto.backfill_split_column_name.clone(),
         }
     }
 

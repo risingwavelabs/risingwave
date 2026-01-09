@@ -195,19 +195,18 @@ impl ExternalTableReader for PostgresExternalTableReader {
             ))
             .into());
         }
-        if let Some(backfill_split_column_name) = &options.backfill_split_column_name {
-            if self
+        if let Some(backfill_split_column_name) = &options.backfill_split_column_name
+            && self
                 .rw_schema
                 .fields
                 .iter()
                 .all(|f| f.name != *backfill_split_column_name)
-            {
-                return Err(anyhow::anyhow!(format!(
-                    "invalid backfill_split_column_name {}",
-                    backfill_split_column_name
-                ))
-                .into());
-            }
+        {
+            return Err(anyhow::anyhow!(format!(
+                "invalid backfill_split_column_name {}",
+                backfill_split_column_name
+            ))
+            .into());
         }
         let split_column = self.split_column(&options);
         let row_stream = if options.backfill_as_even_splits
