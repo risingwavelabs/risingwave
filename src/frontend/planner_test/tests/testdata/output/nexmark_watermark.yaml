@@ -2672,7 +2672,7 @@
           └─LogicalShare { id: 3 }
             └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
               └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+                └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [$expr2, $expr3, $expr1, $expr4, (sum / count::Decimal) as $expr5, max] }
