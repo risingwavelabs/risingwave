@@ -948,14 +948,7 @@ impl DdlController {
             self.validate_table_for_sink(target_table).await?;
         }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
-        let specific_resource_group =
-            if let streaming_job_resource_type::ResourceType::SpecificResourceGroup(group) =
-                &resource_type
-            {
-                Some(group.clone())
-            } else {
-                None
-            };
+        let specific_resource_group = resource_type.resource_group();
         let check_ret = self
             .metadata_manager
             .catalog_controller
@@ -1779,18 +1772,13 @@ impl DdlController {
             },
             (&stream_job).into(),
         )?;
-        let resource_group =
-            if let streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
-            | streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(
-                group,
-            ) = &resource_type
-            {
-                group.clone()
-            } else {
-                self.metadata_manager
-                    .get_database_resource_group(stream_job.database_id())
-                    .await?
-            };
+        let resource_group = if let Some(group) = resource_type.resource_group() {
+            group
+        } else {
+            self.metadata_manager
+                .get_database_resource_group(stream_job.database_id())
+                .await?
+        };
         let is_serverless_backfill = matches!(
             &resource_type,
             streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
