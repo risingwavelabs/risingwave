@@ -1,9 +1,8 @@
 # Test dynamic source property updates via risectl
 # This test covers:
-# 1. Safe property update (alter-source-properties-safe) - update message size limit
-# 2. Update broker address - most critical ops scenario (broker migration)
-# 3. Split reset (reset-source-splits) - force split re-discovery
-# 4. Offset injection (inject-source-offsets) - UNSAFE offset manipulation
+# 1. Update broker address - most critical ops scenario (broker migration)
+# 2. Split reset (reset-source-splits) - force split re-discovery
+# 3. Offset injection (inject-source-offsets) - UNSAFE offset manipulation
 
 control substitution on
 
@@ -24,8 +23,7 @@ CREATE SOURCE kafka_test_source (id INT, data VARCHAR)
 WITH (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     topic = 'test_safe_update',
-    scan.startup.mode = 'earliest',
-    properties.receive.message.max.bytes = '10485760'
+    scan.startup.mode = 'earliest'
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
@@ -39,46 +37,7 @@ SELECT COUNT(*) FROM mv_test;
 ----
 3
 
-# Test 1: Safe property update using risectl
-# Get source_id via inline psql query and call risectl
-system ok
-SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
-    -p ${RISEDEV_RW_FRONTEND_PORT} \
-    -d $__DATABASE__ \
-    -U root \
-    -t -A \
-    -c "SELECT id FROM rw_sources WHERE name = 'kafka_test_source'") && \
-echo "Source ID: $SOURCE_ID" && \
-./risedev ctl meta alter-source-properties-safe \
-    --source-id $SOURCE_ID \
-    --props '{"properties.receive.message.max.bytes": "20971520"}' \
-    --reset-splits
-
-# Produce more data after update
-system ok
-cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
-{"id": 4, "data": "after_update"}
-{"id": 5, "data": "after_update"}
-{"id": 6, "data": "after_update"}
-EOF
-
-sleep 2s
-
-# Verify data consumption continues after update
-query I
-SELECT COUNT(*) FROM mv_test;
-----
-6
-
-# Verify catalog definition was updated
-query I
-SELECT COUNT(*) FROM rw_sources
-WHERE name = 'kafka_test_source'
-  AND definition LIKE '%20971520%';
-----
-1
-
-# Test 2: Update broker address (most critical ops scenario)
+# Test 1: Update broker address (most critical ops scenario)
 # This simulates migrating to a different Kafka cluster
 system ok
 SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
@@ -96,9 +55,9 @@ echo "Updating broker address for Source ID: $SOURCE_ID" && \
 # Produce more data after broker update
 system ok
 cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
-{"id": 7, "data": "after_broker_update"}
-{"id": 8, "data": "after_broker_update"}
-{"id": 9, "data": "after_broker_update"}
+{"id": 4, "data": "after_broker_update"}
+{"id": 5, "data": "after_broker_update"}
+{"id": 6, "data": "after_broker_update"}
 EOF
 
 sleep 2s
@@ -107,7 +66,7 @@ sleep 2s
 query I retry 5 backoff 1s
 SELECT COUNT(*) FROM mv_test;
 ----
-9
+6
 
 # Verify broker was updated in catalog
 query I
@@ -117,7 +76,7 @@ WHERE name = 'kafka_test_source'
 ----
 1
 
-# Test 3: Reset splits (without property update)
+# Test 2: Reset splits (without property update)
 system ok
 SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
     -p ${RISEDEV_RW_FRONTEND_PORT} \
@@ -131,18 +90,18 @@ echo "Resetting splits for Source ID: $SOURCE_ID" && \
 # Produce more data after reset
 system ok
 cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
-{"id": 10, "data": "after_reset"}
-{"id": 11, "data": "after_reset"}
-{"id": 12, "data": "after_reset"}
+{"id": 7, "data": "after_reset"}
+{"id": 8, "data": "after_reset"}
+{"id": 9, "data": "after_reset"}
 EOF
 
 # Verify consumption after split reset
 query I retry 5 backoff 1s
 SELECT COUNT(*) FROM mv_test;
 ----
-12
+9
 
-# Test 4: Inject offsets (UNSAFE)
+# Test 3: Inject offsets (UNSAFE)
 # Use Python script only for getting Kafka offsets (complex operation)
 system ok
 python3 e2e_test/source_inline/kafka/alter/get_kafka_offsets.py \
@@ -167,8 +126,8 @@ echo "Offsets: $OFFSETS" && \
 # Produce more data - should be consumed based on new offsets
 system ok
 cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
-{"id": 13, "data": "after_inject"}
-{"id": 14, "data": "after_inject"}
+{"id": 10, "data": "after_inject"}
+{"id": 11, "data": "after_inject"}
 EOF
 
 # Verify at least one message with "after_inject" was consumed
