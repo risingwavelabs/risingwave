@@ -5512,8 +5512,9 @@ dependencies = [
 
 [[package]]
 name = "futures-async-stream"
-version = "0.2.12"
-source = "git+https://github.com/BugenZhao/futures-async-stream.git?rev=6239c16043421f7f9c62e27604a02fb383ac209c#6239c16043421f7f9c62e27604a02fb383ac209c"
+version = "0.2.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1890317fad72bd60d4254c0a06140676bcc321889e73b8be23ddf1e7adb2b62d"
 dependencies = [
  "futures-async-stream-macro",
  "futures-core",
@@ -5522,8 +5523,9 @@ dependencies = [
 
 [[package]]
 name = "futures-async-stream-macro"
-version = "0.2.12"
-source = "git+https://github.com/BugenZhao/futures-async-stream.git?rev=6239c16043421f7f9c62e27604a02fb383ac209c#6239c16043421f7f9c62e27604a02fb383ac209c"
+version = "0.2.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8fc954740d4b5ce849e6d8e01b79dbdb0e156b02737f7fb8d17130e25f36ff00"
 dependencies = [
  "proc-macro2",
  "quote",
