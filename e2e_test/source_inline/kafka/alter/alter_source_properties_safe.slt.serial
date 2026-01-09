@@ -1,0 +1,190 @@
+# Test dynamic source property updates via risectl
+# This test covers:
+# 1. Safe property update (alter-source-properties-safe) - update message size limit
+# 2. Update broker address - most critical ops scenario (broker migration)
+# 3. Split reset (reset-source-splits) - force split re-discovery
+# 4. Offset injection (inject-source-offsets) - UNSAFE offset manipulation
+
+control substitution on
+
+# Setup: Create topic and produce initial data
+system ok
+rpk topic create test_safe_update
+
+system ok
+cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
+{"id": 1, "data": "initial"}
+{"id": 2, "data": "initial"}
+{"id": 3, "data": "initial"}
+EOF
+
+# Create source
+statement ok
+CREATE SOURCE kafka_test_source (id INT, data VARCHAR)
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_safe_update',
+    scan.startup.mode = 'earliest',
+    properties.receive.message.max.bytes = '1000000'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_test AS SELECT * FROM kafka_test_source;
+
+# Verify initial consumption
+sleep 2s
+
+query I
+SELECT COUNT(*) FROM mv_test;
+----
+3
+
+# Test 1: Safe property update using risectl
+# Get source_id via inline psql query and call risectl
+system ok
+SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    -p ${RISEDEV_RW_FRONTEND_PORT} \
+    -d $__DATABASE__ \
+    -U root \
+    -t -A \
+    -c "SELECT id FROM rw_sources WHERE name = 'kafka_test_source'") && \
+echo "Source ID: $SOURCE_ID" && \
+./risedev ctl meta alter-source-properties-safe \
+    --source-id $SOURCE_ID \
+    --props '{"properties.receive.message.max.bytes": "2000000"}' \
+    --flush \
+    --reset-splits
+
+# Produce more data after update
+system ok
+cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
+{"id": 4, "data": "after_update"}
+{"id": 5, "data": "after_update"}
+{"id": 6, "data": "after_update"}
+EOF
+
+sleep 2s
+
+# Verify data consumption continues after update
+query I
+SELECT COUNT(*) FROM mv_test;
+----
+6
+
+# Verify catalog definition was updated
+query I
+SELECT COUNT(*) FROM rw_sources
+WHERE name = 'kafka_test_source'
+  AND definition LIKE '%2000000%';
+----
+1
+
+# Test 2: Update broker address (most critical ops scenario)
+# This simulates migrating to a different Kafka cluster
+system ok
+SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    -p ${RISEDEV_RW_FRONTEND_PORT} \
+    -d $__DATABASE__ \
+    -U root \
+    -t -A \
+    -c "SELECT id FROM rw_sources WHERE name = 'kafka_test_source'") && \
+echo "Updating broker address for Source ID: $SOURCE_ID" && \
+./risedev ctl meta alter-source-properties-safe \
+    --source-id $SOURCE_ID \
+    --props "{\"properties.bootstrap.server\": \"${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}\"}" \
+    --flush \
+    --reset-splits
+
+# Produce more data after broker update
+system ok
+cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
+{"id": 7, "data": "after_broker_update"}
+{"id": 8, "data": "after_broker_update"}
+{"id": 9, "data": "after_broker_update"}
+EOF
+
+sleep 2s
+
+# Verify consumption continues after broker update
+query I retry 5 backoff 1s
+SELECT COUNT(*) FROM mv_test;
+----
+9
+
+# Verify broker was updated in catalog
+query I
+SELECT COUNT(*) FROM rw_sources
+WHERE name = 'kafka_test_source'
+  AND definition LIKE '%${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}%';
+----
+1
+
+# Test 3: Reset splits (without property update)
+system ok
+SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    -p ${RISEDEV_RW_FRONTEND_PORT} \
+    -d $__DATABASE__ \
+    -U root \
+    -t -A \
+    -c "SELECT id FROM rw_sources WHERE name = 'kafka_test_source'") && \
+echo "Resetting splits for Source ID: $SOURCE_ID" && \
+./risedev ctl meta reset-source-splits --source-id $SOURCE_ID
+
+# Produce more data after reset
+system ok
+cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
+{"id": 10, "data": "after_reset"}
+{"id": 11, "data": "after_reset"}
+{"id": 12, "data": "after_reset"}
+EOF
+
+# Verify consumption after split reset
+query I retry 5 backoff 1s
+SELECT COUNT(*) FROM mv_test;
+----
+12
+
+# Test 4: Inject offsets (UNSAFE)
+# Use Python script only for getting Kafka offsets (complex operation)
+system ok
+python3 e2e_test/source_inline/kafka/alter/get_kafka_offsets.py \
+    --topic test_safe_update \
+    --output /tmp/offsets.json
+
+# Call risectl to inject offsets
+system ok
+SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
+    -p ${RISEDEV_RW_FRONTEND_PORT} \
+    -d $__DATABASE__ \
+    -U root \
+    -t -A \
+    -c "SELECT id FROM rw_sources WHERE name = 'kafka_test_source'") && \
+OFFSETS=$(cat /tmp/offsets.json) && \
+echo "Injecting offsets for Source ID: $SOURCE_ID" && \
+echo "Offsets: $OFFSETS" && \
+./risedev ctl meta inject-source-offsets \
+    --source-id $SOURCE_ID \
+    --offsets "$OFFSETS"
+
+# Produce more data - should be consumed based on new offsets
+system ok
+cat <<EOF | rpk topic produce 'test_safe_update' -f "%v\n"
+{"id": 13, "data": "after_inject"}
+{"id": 14, "data": "after_inject"}
+EOF
+
+# Verify at least one message with "after_inject" was consumed
+query I retry 5 backoff 1s
+SELECT COUNT(*) FROM mv_test WHERE data = 'after_inject';
+----
+2
+
+# Cleanup
+statement ok
+DROP MATERIALIZED VIEW mv_test;
+
+statement ok
+DROP SOURCE kafka_test_source;
+
+system ok
+rpk topic delete test_safe_update
