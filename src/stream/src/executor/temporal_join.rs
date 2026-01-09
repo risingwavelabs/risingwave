@@ -33,7 +33,7 @@ use risingwave_storage::table::batch_table::BatchTable;
 
 use super::join::{JoinType, JoinTypePrimitive};
 use super::monitor::TemporalJoinMetrics;
-use crate::cache::{ManagedLruCache, cache_may_stale};
+use crate::cache::{ManagedLruCache, keyed_cache_may_stale};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::prelude::*;
@@ -828,7 +828,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, const APPEND_ONLY: b
                     if let Some(vnodes) = update_vnode_bitmap {
                         let prev_vnodes =
                             self.right_table.source.update_vnode_bitmap(vnodes.clone());
-                        if cache_may_stale(&prev_vnodes, &vnodes) {
+                        if keyed_cache_may_stale(&prev_vnodes, &vnodes) {
                             self.right_table.cache.clear();
                         }
                     }
