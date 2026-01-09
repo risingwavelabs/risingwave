@@ -1554,17 +1554,13 @@ impl MetaClient {
         source_id: SourceId,
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
-        flush_before_pause: bool,
         reset_splits: bool,
     ) -> Result<()> {
         let req = AlterSourcePropertiesSafeRequest {
             source_id: source_id.as_raw_id(),
             changed_props: changed_props.into_iter().collect(),
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
-            options: Some(PropertyUpdateOptions {
-                flush_before_pause,
-                reset_splits,
-            }),
+            options: Some(PropertyUpdateOptions { reset_splits }),
         };
         let _resp = self.inner.alter_source_properties_safe(req).await?;
         Ok(())

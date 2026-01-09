@@ -407,11 +407,9 @@ message AlterConnectorPropsResponse {}
 
 // Options for controlling the safe property update workflow
 message PropertyUpdateOptions {
-  // If true, issue a flush/checkpoint before pausing (recommended for data safety)
-  bool flush_before_pause = 1;
   // If true, reset split assignments after updating properties
   // This causes splits to be re-discovered from upstream
-  bool reset_splits = 2;
+  bool reset_splits = 1;
 }
 
 // Request for orchestrated source property update with pause/resume

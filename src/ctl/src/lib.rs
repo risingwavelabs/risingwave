@@ -497,9 +497,6 @@ enum MetaCommands {
         /// Properties to change in JSON format, e.g. '{"properties.bootstrap.server": "new-broker:9092"}'
         #[clap(long)]
         props: String,
-        /// Flush/checkpoint before pausing (recommended)
-        #[clap(long, default_value_t = true)]
-        flush: bool,
         /// Reset split assignments after property change (for major upstream changes)
         #[clap(long, default_value_t = false)]
         reset_splits: bool,
@@ -1010,17 +1007,10 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::AlterSourcePropertiesSafe {
             source_id,
             props,
-            flush,
             reset_splits,
         }) => {
-            cmd_impl::meta::alter_source_properties_safe(
-                context,
-                source_id,
-                props,
-                flush,
-                reset_splits,
-            )
-            .await?;
+            cmd_impl::meta::alter_source_properties_safe(context, source_id, props, reset_splits)
+                .await?;
         }
         Commands::Meta(MetaCommands::ResetSourceSplits { source_id }) => {
             cmd_impl::meta::reset_source_splits(context, source_id).await?;

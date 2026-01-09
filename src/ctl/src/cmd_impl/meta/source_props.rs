@@ -22,16 +22,14 @@ use crate::CtlContext;
 /// Alter source connector properties with pause/resume orchestration.
 ///
 /// This is a safe way to update source properties that:
-/// 1. Optionally flushes for checkpoint
-/// 2. Pauses the source
-/// 3. Updates catalog and propagates changes
-/// 4. Optionally resets split assignments
-/// 5. Resumes the source
+/// 1. Pauses the source (already commits state)
+/// 2. Updates catalog and propagates changes
+/// 3. Optionally resets split assignments
+/// 4. Resumes the source
 pub async fn alter_source_properties_safe(
     context: &CtlContext,
     source_id: u32,
     props_json: String,
-    flush: bool,
     reset_splits: bool,
 ) -> Result<()> {
     let meta_client = context.meta_client().await?;
@@ -46,7 +44,6 @@ pub async fn alter_source_properties_safe(
     println!("=== ALTER SOURCE PROPERTIES (SAFE) ===");
     println!("Source ID: {}", source_id);
     println!("Properties to update: {:?}", props);
-    println!("Flush before pause: {}", flush);
     println!("Reset splits: {}", reset_splits);
     println!();
 
@@ -61,7 +58,6 @@ pub async fn alter_source_properties_safe(
             SourceId::from(source_id),
             props.into_iter().collect(),
             Default::default(), // No secret refs for now
-            flush,
             reset_splits,
         )
         .await?;
