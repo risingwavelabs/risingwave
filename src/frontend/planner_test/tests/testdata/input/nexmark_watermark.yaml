@@ -617,3 +617,32 @@
   - stream_dist_plan
   - batch_plan
   - eowc_stream_error
+- id: nexmark_q107
+  before:
+  - create_sources
+  sql: |
+    SELECT
+        auction,
+        bidder,
+        date_time,
+        price,
+        AVG(price) OVER (
+            PARTITION BY auction
+            ORDER BY date_time
+            ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
+        ) AS avg_price_10,
+        MAX(price) OVER (
+            PARTITION BY auction
+            ORDER BY date_time
+            ROWS BETWEEN 10 PRECEDING AND CURRENT ROW
+        ) AS max_price_10
+    FROM
+        bid
+    WHERE
+        auction % 100 = 0;
+  expected_outputs:
+  - stream_dist_plan
+  - batch_plan
+  - eowc_stream_plan
+  - stream_plan
+  - logical_plan

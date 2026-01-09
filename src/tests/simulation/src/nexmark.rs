@@ -151,17 +151,6 @@ pub mod queries {
         pub const WATERMARK: bool = true;
     }
 
-    pub mod q6_group_top1_eowc {
-        use super::*;
-        pub const CREATE: &str = include_str!("nexmark/q6_group_top1_eowc.sql");
-        pub const SELECT: &str =
-            "SELECT * FROM nexmark_q6_group_top1_eowc ORDER BY seller LIMIT 1000;";
-        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q6_group_top1_eowc;";
-        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
-        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT_EOWC;
-        pub const WATERMARK: bool = true;
-    }
-
     pub mod q7 {
         use super::*;
         pub const CREATE: &str = include_str!("nexmark/q7.sql");
@@ -280,5 +269,15 @@ pub mod queries {
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
         pub const WATERMARK: bool = false;
+    }
+
+    pub mod q107_eowc {
+        use super::*;
+        pub const CREATE: &str = include_str!("nexmark/q107_eowc.sql");
+        pub const SELECT: &str = "SELECT * FROM nexmark_q107_eowc ORDER BY date_time LIMIT 1000;";
+        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q107_eowc;";
+        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
+        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT_EOWC;
+        pub const WATERMARK: bool = true;
     }
 }
