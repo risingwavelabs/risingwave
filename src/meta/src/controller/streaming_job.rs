@@ -2061,6 +2061,7 @@ impl CatalogController {
         source_id: SourceId,
         alter_props: BTreeMap<String, String>,
         alter_secret_refs: BTreeMap<String, PbSecretRef>,
+        skip_alter_on_fly_check: bool,
     ) -> MetaResult<WithOptionsSecResolved> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -2097,15 +2098,17 @@ impl CatalogController {
             )));
         }
 
-        // Use check_source_allow_alter_on_fly_fields to validate allowed properties
-        let prop_keys: Vec<String> = alter_props
-            .keys()
-            .chain(alter_secret_refs.keys())
-            .cloned()
-            .collect();
-        risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
-            &connector, &prop_keys,
-        )?;
+        // Only check alter-on-fly restrictions for SQL ALTER SOURCE, not for admin risectl operations
+        if !skip_alter_on_fly_check {
+            let prop_keys: Vec<String> = alter_props
+                .keys()
+                .chain(alter_secret_refs.keys())
+                .cloned()
+                .collect();
+            risingwave_connector::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
+                &connector, &prop_keys,
+            )?;
+        }
 
         let mut options_with_secret = WithOptionsSecResolved::new(
             source.with_properties.0.clone(),
