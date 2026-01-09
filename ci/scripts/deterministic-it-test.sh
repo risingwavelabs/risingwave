@@ -16,6 +16,8 @@ buildkite-agent artifact download simulation-it-test.tar.zst .
 # can find the object files later.
 echo "--- Extract artifacts"
 tar -xvf simulation-it-test.tar.zst
+mkdir target/sim
+mv target/ci-sim target/sim
 
 if [[ -z "${1:-}" ]]; then
   TEST_PATTERN=""
@@ -39,6 +41,7 @@ fi
 # https://github.com/taiki-e/cargo-llvm-cov/issues/335#issuecomment-1890349373
 export LLVM_PROFILE_FILE='/risingwave/target/risingwave-madsim-it-test-%4m.profraw'
 export RW_COVERAGE_CARGO_PROFILE="ci-sim"
+export CARGO_LLVM_COV_TARGET_DIR="${REPO_ROOT}/target/sim"
 
 echo "--- Run integration tests in deterministic simulation mode"
 seq "$TEST_NUM" | parallel -j 8 --line-buffer "MADSIM_TEST_SEED={} NEXTEST_PROFILE=ci-sim \

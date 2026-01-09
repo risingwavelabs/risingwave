@@ -6,6 +6,7 @@ set -euo pipefail
 source ci/scripts/common.sh
 
 echo "--- Download artifacts"
+mkdir -p target/debug
 download-and-decompress-artifact risingwave_simulation target/debug/
 chmod +x ./target/debug/risingwave_simulation
 RW_SIM=target/debug/risingwave_simulation
