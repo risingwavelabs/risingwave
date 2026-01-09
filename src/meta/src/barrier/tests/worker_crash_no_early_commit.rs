@@ -39,7 +39,7 @@ use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::MetaResult;
 use crate::barrier::command::CommandContext;
-use crate::barrier::context::GlobalBarrierWorkerContext;
+use crate::barrier::context::{CreateSnapshotBackfillJobInfo, GlobalBarrierWorkerContext};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::from_partial_graph_id;
 use crate::barrier::schedule::MarkReadyOptions;
@@ -90,6 +90,13 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
 
     async fn post_collect_command<'a>(&'a self, _command: &'a CommandContext) -> MetaResult<()> {
         unreachable!()
+    }
+
+    async fn post_collect_create_snapshot_backfill<'a>(
+        &'a self,
+        _info: &'a CreateSnapshotBackfillJobInfo,
+    ) -> MetaResult<()> {
+        unimplemented!()
     }
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, _err: String) {

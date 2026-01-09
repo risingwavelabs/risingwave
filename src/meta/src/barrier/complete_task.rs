@@ -32,7 +32,7 @@ use tokio::task::JoinHandle;
 
 use crate::barrier::checkpoint::CheckpointControl;
 use crate::barrier::command::CommandContext;
-use crate::barrier::context::GlobalBarrierWorkerContext;
+use crate::barrier::context::{CreateSnapshotBackfillJobInfo, GlobalBarrierWorkerContext};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::ControlStreamManager;
@@ -65,10 +65,15 @@ pub(super) struct CompleteBarrierTask {
     pub(super) finished_jobs: Vec<TrackingJob>,
     pub(super) finished_cdc_table_backfill: Vec<JobId>,
     pub(super) notifiers: Vec<Notifier>,
-    /// `database_id` -> (Some((`command_ctx`, `enqueue_time`)), vec!((`creating_job_id`, `epoch`)))
+    /// `database_id` -> (Some((`command_ctx`, `enqueue_time`)), vec!((`creating_job_id`, `epoch`, `create_snapshot_backfill_info`)))
     #[expect(clippy::type_complexity)]
-    pub(super) epoch_infos:
-        HashMap<DatabaseId, (Option<(CommandContext, HistogramTimer)>, Vec<(JobId, u64)>)>,
+    pub(super) epoch_infos: HashMap<
+        DatabaseId,
+        (
+            Option<(CommandContext, HistogramTimer)>,
+            Vec<(JobId, u64, Option<CreateSnapshotBackfillJobInfo>)>,
+        ),
+    >,
     /// Source listing completion events that need `ListFinish` commands
     pub(super) list_finished_source_ids: Vec<PbListFinishedSource>,
     /// Source load completion events that need `LoadFinish` commands
@@ -89,7 +94,10 @@ impl CompleteBarrierTask {
                         command_context
                             .as_ref()
                             .map(|(command, _)| command.barrier_info.prev_epoch()),
-                        creating_job_epochs.clone(),
+                        creating_job_epochs
+                            .iter()
+                            .map(|(job_id, epoch, _)| (*job_id, *epoch))
+                            .collect(),
                     ),
                 )
             })
@@ -136,12 +144,17 @@ impl CompleteBarrierTask {
                     .await?;
             }
 
-            for command_ctx in self
-                .epoch_infos
-                .values()
-                .flat_map(|(command, _)| command.as_ref().map(|(command, _)| command))
-            {
-                context.post_collect_command(command_ctx).await?;
+            for (command_ctx, creating_jobs) in self.epoch_infos.values() {
+                if let Some((command_ctx, _)) = command_ctx {
+                    context.post_collect_command(command_ctx).await?;
+                }
+                for (_, _, create_info) in creating_jobs {
+                    if let Some(create_info) = create_info {
+                        context
+                            .post_collect_create_snapshot_backfill(create_info)
+                            .await?;
+                    }
+                }
             }
 
             wait_commit_timer.observe_duration();

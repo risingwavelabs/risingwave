@@ -332,6 +332,10 @@ pub mod default {
             true
         }
 
+        pub fn stream_enable_snapshot_backfill() -> bool {
+            true
+        }
+
         pub fn enable_shared_source() -> bool {
             true
         }

@@ -52,7 +52,7 @@ kill_cluster() {
 host_args=(-h localhost -p 4565 -h localhost -p 4566 -h localhost -p 4567)
 
 echo "--- e2e, $mode, streaming"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor::compactor_runner=warn" \
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_storage::hummock::compactor=error,risingwave_hummock_sdk::compaction_group::hummock_version_ext=error" \
 start_cluster
 risedev slt "${host_args[@]}" -d dev './e2e_test/streaming/**/*.slt' -j 16 --junit "parallel-streaming-${profile}" --label "parallel"
 kill_cluster

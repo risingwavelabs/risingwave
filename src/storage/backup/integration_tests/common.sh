@@ -197,9 +197,13 @@ function execute_sql_and_expect() {
   [ -n "${result}" ]
 }
 
-function get_total_sst_count() {
+function get_all_sst_paths() {
   ${BACKUP_TEST_MCLI} -C "${BACKUP_TEST_MCLI_CONFIG}" \
-  find "hummock-minio/hummock001" -name "*.data" |wc -l
+  find "hummock-minio/hummock001" -name "*.data" | sort
+}
+
+function get_total_sst_count() {
+  get_all_sst_paths | wc -l
 }
 
 function get_table_committed_epoch_in_meta_snapshot() {
