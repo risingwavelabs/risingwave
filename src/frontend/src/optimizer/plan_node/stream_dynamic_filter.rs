@@ -180,6 +180,8 @@ impl StreamNode for StreamDynamicFilter {
             .core
             .predicate()
             .as_expr_unless_true()
+            // No need to call `to_expr_proto_checked_pure` since the condition of dynamic filter is
+            // always `InputRef <comparator> InputRef`.
             .map(|x| x.to_expr_proto());
         let left_index = self.core.left_index();
         let left_table = infer_left_internal_table_catalog(&self.base, left_index)

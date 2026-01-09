@@ -327,6 +327,14 @@ impl fmt::Display for SslMode {
     }
 }
 
+impl std::str::FromStr for SslMode {
+    type Err = serde_json::Error;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        serde_json::from_value(serde_json::Value::String(s.to_owned()))
+    }
+}
+
 pub async fn create_pg_client(
     user: &str,
     password: &str,

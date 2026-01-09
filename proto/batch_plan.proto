@@ -140,6 +140,8 @@ message PostgresQueryNode {
   string password = 5;
   string database = 6;
   string query = 7;
+  string ssl_mode = 8;
+  string ssl_root_cert = 9;
 }
 
 // NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.

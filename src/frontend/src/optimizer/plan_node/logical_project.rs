@@ -18,7 +18,6 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
 
-use super::generic::GenericPlanNode;
 use super::utils::{Distill, childless_record};
 use super::{
     BatchPlanRef, BatchProject, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
@@ -259,53 +258,42 @@ impl ToStream for LogicalProject {
             .input()
             .to_stream_with_dist_required(&input_required, ctx)?;
 
-        let enable_materialized_exprs = self
-            .core
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_enable_materialized_expressions();
-
         let should_materialize_expr = match new_input.stream_kind() {
             StreamKind::AppendOnly => None,
             kind @ (StreamKind::Retract | StreamKind::Upsert) => {
-                if enable_materialized_exprs {
-                    // Extract impure functions to `MaterializedExprs` operator
-                    let mut impure_field_names = BTreeMap::new();
-                    let mut impure_expr_indices = HashSet::new();
-                    let impure_exprs: Vec<_> = self
-                        .exprs()
-                        .iter()
-                        .enumerate()
-                        .filter_map(|(idx, expr)| {
-                            // Extract impure expressions
-                            if expr.is_impure() {
-                                impure_expr_indices.insert(idx);
-                                if let Some(name) = self.core.field_names.get(&idx) {
-                                    impure_field_names.insert(idx, name.clone());
-                                }
-                                Some(expr.clone())
-                            } else {
-                                None
+                // Extract impure functions to `MaterializedExprs` operator
+                let mut impure_field_names = BTreeMap::new();
+                let mut impure_expr_indices = HashSet::new();
+                let impure_exprs: Vec<_> = self
+                    .exprs()
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(idx, expr)| {
+                        // Extract impure expressions
+                        if expr.is_impure() {
+                            impure_expr_indices.insert(idx);
+                            if let Some(name) = self.core.field_names.get(&idx) {
+                                impure_field_names.insert(idx, name.clone());
                             }
-                        })
-                        .collect();
-                    if impure_exprs.is_empty() {
-                        None
-                    } else if kind == StreamKind::Upsert
-                        && new_input
-                            .stream_key()
-                            .into_iter()
-                            .flatten()
-                            .all(|stream_key_idx| !impure_expr_indices.contains(stream_key_idx))
-                    {
-                        // We're operating on non-stream-key columns of upsert stream, no need to materialize.
-                        None
-                    } else {
-                        Some((impure_field_names, impure_expr_indices, impure_exprs))
-                    }
-                } else {
+                            Some(expr.clone())
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+                if impure_exprs.is_empty() {
                     None
+                } else if kind == StreamKind::Upsert
+                    && new_input
+                        .stream_key()
+                        .into_iter()
+                        .flatten()
+                        .all(|stream_key_idx| !impure_expr_indices.contains(stream_key_idx))
+                {
+                    // We're operating on non-stream-key columns of upsert stream, no need to materialize.
+                    None
+                } else {
+                    Some((impure_field_names, impure_expr_indices, impure_exprs))
                 }
             }
         };
