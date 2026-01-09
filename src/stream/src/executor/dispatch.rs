@@ -885,6 +885,16 @@ enum ConsumerFutureEvent {
 
 // TODO: add metrics here
 impl<S: StateStoreRead> ConsumerFuture<S> {
+    // fn take_inner(&mut self) -> DispatchExecutorInner {
+    //     match replace(self, ConsumerFuture::Empty) {
+    //         ConsumerFuture::ReadingChunk { inner, .. } => inner,
+    //         ConsumerFuture::Dispatching { inner, .. } => inner,
+    //         ConsumerFuture::Empty => {
+    //             unreachable!("ConsumerFuture::Empty should be handled!")
+    //         }
+    //     }
+    // }
+
     fn dispatch(
         mut inner: DispatchExecutorInner,
         message: Message,
@@ -958,7 +968,7 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
         read_state: &LogStoreReadState<S>,
         buffer: &mut SyncedLogStoreBuffer,
         metrics: &SyncedKvLogStoreMetrics,
-    ) -> StreamResult<(Option<DispatchExecutorInner>, ConsumerFutureEvent, ReadFuture<S>)> {
+    ) -> StreamResult<(DispatchExecutorInner, ConsumerFutureEvent, ReadFuture<S>)> {
         if !barriers.is_empty() {
             match self {
                 ConsumerFuture::ReadingChunk {
@@ -995,15 +1005,15 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
                     ConsumerFuture::ReadingChunk { read_future, inner } => (read_future, inner)
                 );
                 match chunk {
-                    Some(chunk) => Ok((Some(inner), ConsumerFutureEvent::ReadOutChunk(chunk), read_future)),
-                    None => Ok((Some(inner), ConsumerFutureEvent::WaitingForChunks, read_future)),
+                    Some(chunk) => Ok((inner, ConsumerFutureEvent::ReadOutChunk(chunk), read_future)),
+                    None => Ok((inner, ConsumerFutureEvent::WaitingForChunks, read_future)),
                 }
             }
             ConsumerFuture::Dispatching { future, .. } => {
-                let (_inner, result) = future.await;
+                let (inner, result) = future.await;
                 result?;
                 must_match!(replace(self, ConsumerFuture::Empty), ConsumerFuture::Dispatching { read_future,kind, .. } => {
-                    Ok((Some(_inner), match kind {
+                    Ok((inner, match kind {
                         DispatchType::Barrier(msg) => ConsumerFutureEvent::BarrierDispatched(msg),
                         DispatchType::ChunkOrWatermark => ConsumerFutureEvent::ChunkDispatched,
                     }, read_future))
@@ -1110,6 +1120,9 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
             let mut initial_write_epoch = first_write_epoch;
             let mut pause_stream = first_barrier.is_pause_on_startup();
 
+            // barriers serves as a queue to hold barriers waiting for dispatching
+            let mut barriers = VecDeque::<Message>::new();
+
             // Todo(yingzhu): add aligned mode here
             'recreate_consume_stream: loop {
                 let mut seq_id = FIRST_SEQ_ID;
@@ -1138,13 +1151,13 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 let mut progress = LogStoreVnodeProgress::None;
                 let mut read_future_state = ReadFuture::ReadingPersistedStream(log_store_stream);
                 let mut consumer_future_state = ConsumerFuture::ReadingChunk {
+                    inner: self.inner,
                     read_future: read_future_state,
                 };
 
                 let mut write_future_state =
                     WriteFuture::receive_from_upstream(input, initial_write_state);
 
-                let mut barriers = VecDeque::<Message>::new();
                 loop {
                     let select_result = {
                         let consumer_future = async {
@@ -1159,7 +1172,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                             } else {
                                 consumer_future_state
                                     .next_event(
-                                        Some(self.inner), 
                                         &mut barriers, 
                                         &mut progress, 
                                         &read_state, 
@@ -1270,6 +1282,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                                 initial_write_epoch = barrier_epoch;
                                                 input = stream;
                                                 initial_write_state = write_state;
+                                                
                                                 continue 'recreate_consume_stream;
                                             } else {
                                                 write_future_state = 
@@ -1308,38 +1321,29 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                 }
                             }
                         }
-                        Either::Right(_consumer_result) => {
+                        Either::Right(consumer_result) => {
                             drop(consumer_future_state);
-                            let (inner_opt, event, read_future) = _consumer_result?;
+                            let (inner, event, read_future) = consumer_result?;
                             match event {
                                 ConsumerFutureEvent::ReadOutChunk(chunk) => {
                                     log_store_config.metrics.total_read_count.inc_by(chunk.cardinality() as _);
-                                    let Some(inner) = inner_opt else {
-                                        unreachable!("inner should be available when reading chunk");
-                                    };
                                     consumer_future_state = ConsumerFuture::dispatch(inner, 
                                         Message::Chunk(chunk), 
                                         read_future);
                                 }
                                 ConsumerFutureEvent::ChunkDispatched => {
-                                    let Some(inner) = inner_opt else {
-                                        unreachable!("inner should be available when dispatching chunk");
-                                    };
-                                    consumer_future_state = ConsumerFuture::read_chunk(read_future);
+                                    consumer_future_state = ConsumerFuture::read_chunk(inner, read_future);
                                 }
                                 ConsumerFutureEvent::BarrierDispatched(barrier) => {
-                                    let Some(inner) = inner_opt else {
-                                        unreachable!("inner should be available when dispatching barrier");
-                                    };
                                     yield barrier;
-                                    consumer_future_state = ConsumerFuture::read_chunk(read_future);
+                                    consumer_future_state = ConsumerFuture::read_chunk(inner, read_future);
                                 }
                                 ConsumerFutureEvent::WaitingForChunks => {
                                     // todo: does consumerfuture need to wait here?
                                     if matches!(write_future_state, WriteFuture::EndOfStream) {
                                         break;
                                     };
-                                    consumer_future_state = ConsumerFuture::read_chunk(read_future);
+                                    consumer_future_state = ConsumerFuture::read_chunk(inner, read_future);
                                 }
                             }
                         }
