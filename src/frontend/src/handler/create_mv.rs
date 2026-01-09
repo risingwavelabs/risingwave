@@ -18,6 +18,7 @@ use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId};
+use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
 };
@@ -237,67 +238,8 @@ pub async fn handle_create_mv_bound(
         return Ok(resp);
     }
 
-    let (table, graph, dependencies, resource_group) = {
-        gen_create_mv_graph(
-            handler_args,
-            name,
-            query,
-            dependent_relations,
-            dependent_udfs,
-            columns,
-            emit_mode,
-        )
-        .await?
-    };
-
-    // Ensure writes to `StreamJobTracker` are atomic.
-    let _job_guard =
-        session
-            .env()
-            .creating_streaming_job_tracker()
-            .guard(CreatingStreamingJobInfo::new(
-                session.session_id(),
-                table.database_id,
-                table.schema_id,
-                table.name.clone(),
-            ));
-
-    let catalog_writer = session.catalog_writer()?;
-    execute_with_long_running_notification(
-        catalog_writer.create_materialized_view(
-            table.to_prost(),
-            graph,
-            dependencies,
-            resource_group,
-            if_not_exists,
-        ),
-        &session,
-        "CREATE MATERIALIZED VIEW",
-        LongRunningNotificationAction::MonitorBackfillJob,
-    )
-    .await?;
-
-    Ok(PgResponse::empty_result(
-        StatementType::CREATE_MATERIALIZED_VIEW,
-    ))
-}
-
-pub(crate) async fn gen_create_mv_graph(
-    handler_args: HandlerArgs,
-    name: ObjectName,
-    query: BoundQuery,
-    dependent_relations: HashSet<ObjectId>,
-    dependent_udfs: HashSet<FunctionId>,
-    columns: Vec<Ident>,
-    emit_mode: Option<EmitMode>,
-) -> Result<(
-    TableCatalog,
-    PbStreamFragmentGraph,
-    HashSet<ObjectId>,
-    Option<String>,
-)> {
     let mut with_options = get_with_options(handler_args.clone());
-    let mut resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+    let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
     if resource_group.is_some() {
         risingwave_common::license::Feature::ResourceGroup.check_available()?;
@@ -313,6 +255,15 @@ pub(crate) async fn gen_create_mv_graph(
         return Err(RwError::from(InvalidInputSyntax(
             "Please do not specify serverless backfilling and resource group together".to_owned(),
         )));
+    }
+
+    if resource_group.is_some()
+        && !handler_args
+            .session
+            .config()
+            .streaming_use_arrangement_backfill()
+    {
+        return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
     }
 
     if !with_options.is_empty() {
@@ -335,7 +286,8 @@ pub(crate) async fn gen_create_mv_graph(
         )));
     }
 
-    if is_serverless_backfill {
+    let resource_type = if is_serverless_backfill {
+        assert_eq!(resource_group, None);
         match provision_resource_group(sbc_addr).await {
             Err(e) => {
                 return Err(RwError::from(ProtocolError(format!(
@@ -343,29 +295,79 @@ pub(crate) async fn gen_create_mv_graph(
                     e.as_report()
                 ))));
             }
-            Ok(val) => resource_group = Some(val),
+            Ok(group) => {
+                tracing::info!(
+                    resource_group = resource_group,
+                    "provisioning serverless backfill resource group"
+                );
+                streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group)
+            }
         }
-    }
-    tracing::debug!(
-        resource_group = resource_group,
-        "provisioning on resource group"
-    );
+    } else if let Some(group) = resource_group {
+        streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
+    } else {
+        streaming_job_resource_type::ResourceType::Regular(true)
+    };
 
+    let (table, graph, dependencies) = {
+        gen_create_mv_graph(
+            handler_args,
+            name,
+            query,
+            dependent_relations,
+            dependent_udfs,
+            columns,
+            emit_mode,
+        )?
+    };
+
+    // Ensure writes to `StreamJobTracker` are atomic.
+    let _job_guard =
+        session
+            .env()
+            .creating_streaming_job_tracker()
+            .guard(CreatingStreamingJobInfo::new(
+                session.session_id(),
+                table.database_id,
+                table.schema_id,
+                table.name.clone(),
+            ));
+
+    let catalog_writer = session.catalog_writer()?;
+    execute_with_long_running_notification(
+        catalog_writer.create_materialized_view(
+            table.to_prost(),
+            graph,
+            dependencies,
+            resource_type,
+            if_not_exists,
+        ),
+        &session,
+        "CREATE MATERIALIZED VIEW",
+        LongRunningNotificationAction::MonitorBackfillJob,
+    )
+    .await?;
+
+    Ok(PgResponse::empty_result(
+        StatementType::CREATE_MATERIALIZED_VIEW,
+    ))
+}
+
+pub(crate) fn gen_create_mv_graph(
+    handler_args: HandlerArgs,
+    name: ObjectName,
+    query: BoundQuery,
+    dependent_relations: HashSet<ObjectId>,
+    dependent_udfs: HashSet<FunctionId>,
+    columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
+) -> Result<(TableCatalog, PbStreamFragmentGraph, HashSet<ObjectId>)> {
     let context = OptimizerContext::from_handler_args(handler_args);
     let has_order_by = !query.order.is_empty();
     if has_order_by {
         context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
 "#.to_owned());
-    }
-
-    if resource_group.is_some()
-        && !context
-            .session_ctx()
-            .config()
-            .streaming_use_arrangement_backfill()
-    {
-        return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
     }
 
     let context: OptimizerContextRef = context.into();
@@ -393,7 +395,7 @@ It only indicates the physical clustering of the data, which may improve the per
         Some(backfill_order),
     )?;
 
-    Ok((table, graph, dependencies, resource_group))
+    Ok((table, graph, dependencies))
 }
 
 #[cfg(test)]

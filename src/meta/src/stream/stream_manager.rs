@@ -105,6 +105,8 @@ pub struct CreateStreamingJobContext {
     pub fragment_backfill_ordering: FragmentBackfillOrder,
 
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
+
+    pub is_serverless_backfill: bool,
 }
 
 struct StreamingJobExecution {
@@ -409,6 +411,7 @@ impl GlobalStreamManager {
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
+            is_serverless_backfill,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -447,6 +450,7 @@ impl GlobalStreamManager {
             fragment_backfill_ordering,
             cdc_table_snapshot_splits,
             locality_fragment_state_table_mapping,
+            is_serverless: is_serverless_backfill,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
