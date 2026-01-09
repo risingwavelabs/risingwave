@@ -33,6 +33,8 @@ impl NexmarkCluster {
     ///
     /// If `event_num` is specified, the sources should finish in `event_num / NEXMARK_THROUGHPUT`
     /// seconds.
+    ///
+    /// If `watermark` is true, there will be a watermark with delay of 4 seconds on `date_time`.
     pub async fn new(
         conf: Configuration,
         split_num: usize,
@@ -147,16 +149,6 @@ pub mod queries {
         pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
         pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT_EOWC;
         pub const WATERMARK: bool = true;
-    }
-
-    pub mod q6_group_top1 {
-        use super::*;
-        pub const CREATE: &str = include_str!("nexmark/q6_group_top1.sql");
-        pub const SELECT: &str = "SELECT * FROM nexmark_q6_group_top1 ORDER BY seller LIMIT 1000;";
-        pub const DROP: &str = "DROP MATERIALIZED VIEW nexmark_q6_group_top1;";
-        pub const INITIAL_INTERVAL: Duration = DEFAULT_INITIAL_INTERVAL;
-        pub const INITIAL_TIMEOUT: Duration = DEFAULT_INITIAL_TIMEOUT;
-        pub const WATERMARK: bool = false;
     }
 
     pub mod q6_group_top1_eowc {

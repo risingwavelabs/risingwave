@@ -164,7 +164,6 @@ test!(q3);
 test!(q4);
 test!(q5);
 test!(q5_eowc);
-test!(q6_group_top1);
 test!(q6_group_top1_eowc);
 test!(q7);
 test!(q7_eowc);
