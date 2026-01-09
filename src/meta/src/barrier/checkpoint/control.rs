@@ -295,7 +295,11 @@ impl CheckpointControl {
                 continue;
             };
             // Progress of normal backfill
-            progress.extend(database_checkpoint_control.database_info.gen_backfill_progress());
+            progress.extend(
+                database_checkpoint_control
+                    .database_info
+                    .gen_backfill_progress(),
+            );
             // Progress of snapshot backfill
             for creating_job in database_checkpoint_control
                 .creating_streaming_job_controls

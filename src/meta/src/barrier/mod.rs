@@ -50,6 +50,7 @@ mod worker;
 pub use backfill_order_control::{BackfillNode, BackfillOrderState};
 use risingwave_common::id::JobId;
 use risingwave_pb::ddl_service::PbBackfillType;
+
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
     ReplaceStreamJobPlan, Reschedule, SnapshotBackfillInfo,
