@@ -877,7 +877,6 @@ impl StreamManagerService for StreamServiceImpl {
 
         tracing::info!(
             source_id = source_id,
-            flush_before_pause = options.flush_before_pause,
             reset_splits = options.reset_splits,
             "Starting orchestrated source property update"
         );
@@ -889,21 +888,13 @@ impl StreamManagerService for StreamServiceImpl {
             .get_object_database_id(SourceId::from(source_id))
             .await?;
 
-        // Step 1: Optional flush for checkpoint
-        if options.flush_before_pause {
-            tracing::info!(source_id = source_id, "Flushing before pause");
-            self.barrier_scheduler
-                .run_command(database_id, Command::Flush)
-                .await?;
-        }
-
-        // Step 2: Pause the stream
+        // Step 1: Pause the stream (already commits state)
         tracing::info!(source_id = source_id, "Pausing stream");
         self.barrier_scheduler
             .run_command(database_id, Command::Pause)
             .await?;
 
-        // Step 3: Update catalog and get the new properties
+        // Step 2: Update catalog and get the new properties
         let result = async {
             let secret_manager = LocalSecretManager::global();
 
@@ -930,7 +921,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .into_iter()
                 .collect();
 
-            // Step 4: Issue ConnectorPropsChange barrier
+            // Step 3: Issue ConnectorPropsChange barrier
             tracing::info!(
                 source_id = source_id,
                 "Issuing ConnectorPropsChange barrier"
@@ -941,7 +932,7 @@ impl StreamManagerService for StreamServiceImpl {
                 .run_command(database_id, Command::ConnectorPropsChange(mutation))
                 .await?;
 
-            // Step 5: Optional split reset
+            // Step 4: Optional split reset
             if options.reset_splits {
                 tracing::info!(source_id = source_id, "Resetting source splits");
                 self.stream_manager
@@ -954,7 +945,7 @@ impl StreamManagerService for StreamServiceImpl {
         }
         .await;
 
-        // Step 6: Resume the stream (even if previous steps failed)
+        // Step 5: Resume the stream (even if previous steps failed)
         tracing::info!(source_id = source_id, "Resuming stream");
         let resume_result = self
             .barrier_scheduler

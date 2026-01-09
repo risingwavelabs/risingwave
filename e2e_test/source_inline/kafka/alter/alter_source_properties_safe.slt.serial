@@ -52,7 +52,6 @@ echo "Source ID: $SOURCE_ID" && \
 ./risedev ctl meta alter-source-properties-safe \
     --source-id $SOURCE_ID \
     --props '{"properties.receive.message.max.bytes": "20971520"}' \
-    --flush \
     --reset-splits
 
 # Produce more data after update
@@ -92,7 +91,6 @@ echo "Updating broker address for Source ID: $SOURCE_ID" && \
 ./risedev ctl meta alter-source-properties-safe \
     --source-id $SOURCE_ID \
     --props "{\"properties.bootstrap.server\": \"${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}\"}" \
-    --flush \
     --reset-splits
 
 # Produce more data after broker update
