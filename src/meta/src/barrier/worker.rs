@@ -278,8 +278,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 request = self.request_rx.recv() => {
                     if let Some(request) = request {
                         match request {
-                            BarrierManagerRequest::GetDdlProgress(result_tx) => {
-                                let progress = self.checkpoint_control.gen_ddl_progress();
+                            BarrierManagerRequest::GetBackfillProgress(result_tx) => {
+                                let progress = self.checkpoint_control.gen_backfill_progress();
                                 if result_tx.send(progress).is_err() {
                                     error!("failed to send get ddl progress");
                                 }
@@ -902,7 +902,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     warn!(actor_ids = ?source_splits.keys().collect_vec(), "unused actor source splits in recovery");
                 }
                 if !background_jobs.is_empty() {
-                    warn!(job_ids = ?background_jobs.keys().collect_vec(), "unused recovered background mview in recovery");
+                    warn!(job_ids = ?background_jobs.iter().collect_vec(), "unused recovered background mview in recovery");
                 }
                 if !mv_depended_subscriptions.is_empty() {
                     warn!(?mv_depended_subscriptions, "unused subscription infos in recovery");

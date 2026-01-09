@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_common::catalog::{ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_common::util::epoch::Epoch;
@@ -332,7 +333,7 @@ impl CatalogController {
         .await?;
         pb_function.id = function_obj.oid.as_function_id();
         pb_function.created_at_epoch = Some(
-            Epoch::from_unix_millis(function_obj.created_at.and_utc().timestamp_millis() as _).0,
+            Epoch::from_unix_millis(datetime_to_timestamp_millis(function_obj.created_at) as _).0,
         );
         pb_function.created_at_cluster_version = function_obj.created_at_cluster_version;
         let function: function::ActiveModel = pb_function.clone().into();
@@ -521,7 +522,7 @@ impl CatalogController {
         .await?;
         pb_view.id = view_obj.oid.as_view_id();
         pb_view.created_at_epoch =
-            Some(Epoch::from_unix_millis(view_obj.created_at.and_utc().timestamp_millis() as _).0);
+            Some(Epoch::from_unix_millis(datetime_to_timestamp_millis(view_obj.created_at) as _).0);
         pb_view.created_at_cluster_version = view_obj.created_at_cluster_version;
 
         let view: view::ActiveModel = pb_view.clone().into();

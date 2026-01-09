@@ -252,7 +252,7 @@ impl GlobalBarrierWorkerContextImpl {
     async fn list_background_job_progress(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<JobId, String>> {
+    ) -> MetaResult<HashSet<JobId>> {
         let mgr = &self.metadata_manager;
         let job_info = mgr
             .catalog_controller
@@ -261,7 +261,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         Ok(job_info
             .into_iter()
-            .map(|(job_id, definition, _init_at)| (job_id, definition))
+            .map(|(job_id, _definition, _init_at)| job_id)
             .collect())
     }
 
@@ -596,7 +596,7 @@ impl GlobalBarrierWorkerContextImpl {
                             .await?;
 
                     let background_streaming_jobs =
-                        initial_background_jobs.keys().cloned().collect_vec();
+                        initial_background_jobs.iter().cloned().collect_vec();
 
                     tracing::info!(
                         "background streaming jobs: {:?} total {}",
@@ -703,7 +703,7 @@ impl GlobalBarrierWorkerContextImpl {
                                 info.values().flat_map(|jobs| {
                                     jobs.iter().filter_map(|(job_id, job)| {
                                         initial_background_jobs
-                                            .contains_key(job_id)
+                                            .contains(job_id)
                                             .then_some((*job_id, job))
                                     })
                                 }),
@@ -731,9 +731,7 @@ impl GlobalBarrierWorkerContextImpl {
                         info.values()
                             .flatten()
                             .filter_map(|(job_id, _)| {
-                                refreshed_background_jobs
-                                    .remove(job_id)
-                                    .map(|definition| (*job_id, definition))
+                                refreshed_background_jobs.remove(job_id).then_some(*job_id)
                             })
                             .collect()
                     };
@@ -866,7 +864,7 @@ impl GlobalBarrierWorkerContextImpl {
         };
 
         let missing_background_jobs = background_jobs
-            .keys()
+            .iter()
             .filter(|job_id| !info.contains_key(job_id))
             .copied()
             .collect_vec();
@@ -883,7 +881,7 @@ impl GlobalBarrierWorkerContextImpl {
             .on_current_version(|version| {
                 Self::resolve_hummock_version_epochs(
                     background_jobs
-                        .keys()
+                        .iter()
                         .filter_map(|job_id| info.get(job_id).map(|job| (*job_id, job))),
                     version,
                 )

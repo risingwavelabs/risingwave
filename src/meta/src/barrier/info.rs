@@ -27,7 +27,7 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
@@ -43,7 +43,7 @@ use crate::barrier::cdc_progress::{CdcProgress, CdcTableBackfillTracker};
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
-use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::barrier::{BackfillProgress, BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
@@ -407,7 +407,10 @@ pub enum SubscriberType {
 #[derive(Debug)]
 pub(super) enum CreateStreamingJobStatus {
     Init,
-    Creating(CreateMviewProgressTracker),
+    Creating {
+        tracker: CreateMviewProgressTracker,
+        is_serverless: bool,
+    },
     Created,
 }
 
@@ -486,13 +489,24 @@ impl InflightDatabaseInfo {
             .expect("should exist")
     }
 
-    pub fn gen_ddl_progress(&self) -> impl Iterator<Item = (JobId, DdlProgress)> + '_ {
+    pub fn gen_backfill_progress(&self) -> impl Iterator<Item = (JobId, BackfillProgress)> + '_ {
         self.jobs
             .iter()
             .filter_map(|(job_id, job)| match &job.status {
                 CreateStreamingJobStatus::Init => None,
-                CreateStreamingJobStatus::Creating(tracker) => {
-                    Some((*job_id, tracker.gen_ddl_progress()))
+                CreateStreamingJobStatus::Creating {
+                    tracker,
+                    is_serverless,
+                } => {
+                    let progress = tracker.gen_backfill_progress();
+                    Some((
+                        *job_id,
+                        BackfillProgress {
+                            progress,
+                            is_serverless: *is_serverless,
+                            backfill_type: PbBackfillType::NormalBackfill,
+                        },
+                    ))
                 }
                 CreateStreamingJobStatus::Created => None,
             })
@@ -559,10 +573,10 @@ impl InflightDatabaseInfo {
                     if let Some(job_info) = self.jobs.get_mut(&job_id) {
                         let CreateStreamingJobStatus::Init = replace(
                             &mut job_info.status,
-                            CreateStreamingJobStatus::Creating(CreateMviewProgressTracker::new(
-                                info,
-                                version_stats,
-                            )),
+                            CreateStreamingJobStatus::Creating {
+                                tracker: CreateMviewProgressTracker::new(info, version_stats),
+                                is_serverless: info.is_serverless,
+                            },
                         ) else {
                             unreachable!("should be init before collect the first barrier")
                         };
@@ -592,7 +606,7 @@ impl InflightDatabaseInfo {
                 .collect::<HashSet<_>>();
             for job_id in related_job_ids {
                 if let Some(job) = self.jobs.get_mut(&job_id)
-                    && let CreateStreamingJobStatus::Creating(tracker) = &mut job.status
+                    && let CreateStreamingJobStatus::Creating { tracker, .. } = &mut job.status
                 {
                     tracker.refresh_after_reschedule(&job.fragment_infos, version_stats);
                 }
@@ -605,7 +619,7 @@ impl InflightDatabaseInfo {
                 );
                 continue;
             };
-            let CreateStreamingJobStatus::Creating(tracker) =
+            let CreateStreamingJobStatus::Creating { tracker, .. } =
                 &mut self.jobs.get_mut(job_id).expect("should exist").status
             else {
                 warn!("update the progress of an created streaming job: {progress:?}");
@@ -639,7 +653,7 @@ impl InflightDatabaseInfo {
     fn iter_creating_job_tracker(&self) -> impl Iterator<Item = &CreateMviewProgressTracker> {
         self.jobs.values().filter_map(|job| match &job.status {
             CreateStreamingJobStatus::Init => None,
-            CreateStreamingJobStatus::Creating(tracker) => Some(tracker),
+            CreateStreamingJobStatus::Creating { tracker, .. } => Some(tracker),
             CreateStreamingJobStatus::Created => None,
         })
     }
@@ -651,7 +665,7 @@ impl InflightDatabaseInfo {
             .values_mut()
             .filter_map(|job| match &mut job.status {
                 CreateStreamingJobStatus::Init => None,
-                CreateStreamingJobStatus::Creating(tracker) => Some(tracker),
+                CreateStreamingJobStatus::Creating { tracker, .. } => Some(tracker),
                 CreateStreamingJobStatus::Created => None,
             })
     }
@@ -672,11 +686,11 @@ impl InflightDatabaseInfo {
         let mut table_ids_to_truncate = vec![];
         let mut finished_cdc_table_backfill = vec![];
         for (job_id, job) in &mut self.jobs {
-            if let CreateStreamingJobStatus::Creating(tracker) = &mut job.status {
+            if let CreateStreamingJobStatus::Creating { tracker, .. } = &mut job.status {
                 let (is_finished, truncate_table_ids) = tracker.collect_staging_commit_info();
                 table_ids_to_truncate.extend(truncate_table_ids);
                 if is_finished {
-                    let CreateStreamingJobStatus::Creating(tracker) =
+                    let CreateStreamingJobStatus::Creating { tracker, .. } =
                         replace(&mut job.status, CreateStreamingJobStatus::Created)
                     else {
                         unreachable!()

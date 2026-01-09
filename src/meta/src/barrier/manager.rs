@@ -13,26 +13,27 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use anyhow::Context;
 use arc_swap::ArcSwap;
 use risingwave_common::bail;
+use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_meta_model::{CreateType, DatabaseId};
-use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_meta_model::DatabaseId;
+use risingwave_pb::ddl_service::{DdlProgress, PbBackfillType};
 use risingwave_pb::id::JobId;
 use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
-use tracing::warn;
 
 use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
-use crate::barrier::{BarrierManagerRequest, BarrierManagerStatus, RecoveryReason, schedule};
+use crate::barrier::{
+    BackfillProgress, BarrierManagerRequest, BarrierManagerStatus, RecoveryReason, schedule,
+};
 use crate::hummock::HummockManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
@@ -50,10 +51,10 @@ pub type BarrierManagerRef = Arc<GlobalBarrierManager>;
 impl GlobalBarrierManager {
     /// Serving `SHOW JOBS / SELECT * FROM rw_ddl_progress`
     pub async fn get_ddl_progress(&self) -> MetaResult<Vec<DdlProgress>> {
-        let mut ddl_progress = {
+        let mut backfill_progress = {
             let (tx, rx) = oneshot::channel();
             self.request_tx
-                .send(BarrierManagerRequest::GetDdlProgress(tx))
+                .send(BarrierManagerRequest::GetBackfillProgress(tx))
                 .context("failed to send get ddl progress request")?;
             rx.await.context("failed to receive get ddl progress")?
         };
@@ -62,21 +63,33 @@ impl GlobalBarrierManager {
         let job_info = self
             .metadata_manager
             .catalog_controller
-            .list_background_creating_jobs(true, None)
+            .list_creating_jobs(true, true, None)
             .await?;
-        for (job_id, definition, _init_at) in job_info {
-            if let Entry::Vacant(e) = ddl_progress.entry(job_id) {
-                warn!(%job_id, "background job has no ddl progress");
-                e.insert(DdlProgress {
+        Ok(job_info
+            .into_iter()
+            .map(|(job_id, definition, init_at, create_type)| {
+                let BackfillProgress {
+                    progress,
+                    is_serverless,
+                    backfill_type,
+                } = backfill_progress
+                    .remove(&job_id)
+                    .unwrap_or_else(|| BackfillProgress {
+                        progress: "0.0%".into(),
+                        is_serverless: false,
+                        backfill_type: PbBackfillType::NormalBackfill,
+                    });
+                DdlProgress {
                     id: job_id.as_raw_id() as u64,
                     statement: definition,
-                    create_type: CreateType::Background.as_str().into(),
-                    progress: "0.0%".into(),
-                });
-            }
-        }
-
-        Ok(ddl_progress.into_values().collect())
+                    create_type: create_type.as_str().into(),
+                    initialized_at_time_millis: datetime_to_timestamp_millis(init_at),
+                    progress,
+                    is_serverless_backfill: is_serverless,
+                    backfill_type: backfill_type as _,
+                }
+            })
+            .collect())
     }
 
     pub async fn get_cdc_progress(&self) -> MetaResult<HashMap<JobId, CdcProgress>> {
