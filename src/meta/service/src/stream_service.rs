@@ -685,6 +685,7 @@ impl StreamManagerService for StreamServiceImpl {
                         request.object_id.into(),
                         request.changed_props.clone().into_iter().collect(),
                         request.changed_secret_refs.clone().into_iter().collect(),
+                        false, // SQL ALTER SOURCE enforces alter-on-fly check
                     )
                     .await?;
 
@@ -905,6 +906,7 @@ impl StreamManagerService for StreamServiceImpl {
                     source_id.into(),
                     request.changed_props.clone().into_iter().collect(),
                     request.changed_secret_refs.clone().into_iter().collect(),
+                    true, // risectl admin operation skips alter-on-fly check
                 )
                 .await?;
 
