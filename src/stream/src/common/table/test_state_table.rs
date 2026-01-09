@@ -1829,10 +1829,11 @@ async fn test_non_pk_prefix_watermark_read() {
 
 #[tokio::test]
 async fn test_state_table_with_vnode_stats() {
+    use prometheus::Registry;
     use risingwave_common::config::MetricLevel;
 
     use crate::common::table::state_table::StateTableBuilder;
-    use crate::executor::monitor::streaming_stats::global_streaming_metrics;
+    use crate::executor::monitor::StreamingMetrics;
     use crate::task::{ActorId, FragmentId};
 
     const TEST_TABLE_ID: TableId = TableId::new(233);
@@ -1857,7 +1858,8 @@ async fn test_state_table_with_vnode_stats() {
     test_env.register_table(table.clone()).await;
 
     // Attach metrics to verify vnode pruning effectiveness
-    let metrics = global_streaming_metrics(MetricLevel::Debug).new_state_table_metrics(
+    let registry = Registry::new();
+    let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug).new_state_table_metrics(
         TEST_TABLE_ID,
         ActorId::new(1),
         FragmentId::new(1),
@@ -2074,10 +2076,11 @@ async fn test_state_table_with_vnode_stats() {
 
 #[tokio::test]
 async fn test_state_table_pruned_key_range_with_two_pk_columns() {
+    use prometheus::Registry;
     use risingwave_common::config::MetricLevel;
 
     use crate::common::table::state_table::StateTableBuilder;
-    use crate::executor::monitor::streaming_stats::global_streaming_metrics;
+    use crate::executor::monitor::StreamingMetrics;
     use crate::task::{ActorId, FragmentId};
 
     const TEST_TABLE_ID: TableId = TableId::new(234);
@@ -2102,7 +2105,8 @@ async fn test_state_table_pruned_key_range_with_two_pk_columns() {
 
     test_env.register_table(table.clone()).await;
 
-    let metrics = global_streaming_metrics(MetricLevel::Debug).new_state_table_metrics(
+    let registry = Registry::new();
+    let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug).new_state_table_metrics(
         TEST_TABLE_ID,
         ActorId::new(2),
         FragmentId::new(2),
