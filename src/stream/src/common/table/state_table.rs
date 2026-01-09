@@ -65,7 +65,7 @@ use risingwave_storage::table::{KeyedRow, TableDistribution};
 use thiserror_ext::AsReport;
 use tracing::{Instrument, trace};
 
-use crate::cache::cache_may_stale;
+use crate::cache::keyed_cache_may_stale;
 use crate::common::state_cache::{StateCache, StateCacheFiller};
 use crate::common::table::state_table_cache::StateTableWatermarkCache;
 use crate::executor::StreamExecutorResult;
@@ -1037,6 +1037,10 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
+    /// Returns `Some((new_vnodes, old_vnodes, state_table), keyed_cache_may_stale)` if the vnode bitmap is updated.
+    ///
+    /// Note the `keyed_cache_may_stale` only applies to keyed cache. If the executor's cache is not keyed, but will
+    /// be consumed with all vnodes it owns, the executor may need to ALWAYS clear the cache regardless of this flag.
     pub async fn post_yield_barrier(
         mut self,
         new_vnodes: Option<Arc<Bitmap>>,
@@ -1052,9 +1056,9 @@ where
     > {
         self.inner.on_post_commit = false;
         Ok(if let Some(new_vnodes) = new_vnodes {
-            let (old_vnodes, cache_may_stale) =
+            let (old_vnodes, keyed_cache_may_stale) =
                 self.update_vnode_bitmap(new_vnodes.clone()).await?;
-            Some(((new_vnodes, old_vnodes, self.inner), cache_may_stale))
+            Some(((new_vnodes, old_vnodes, self.inner), keyed_cache_may_stale))
         } else {
             None
         })
@@ -1089,9 +1093,9 @@ where
         }
         assert_eq!(self.inner.vnodes().len(), new_vnodes.len());
 
-        let cache_may_stale = cache_may_stale(self.inner.vnodes(), &new_vnodes);
+        let keyed_cache_may_stale = keyed_cache_may_stale(self.inner.vnodes(), &new_vnodes);
 
-        if cache_may_stale {
+        if keyed_cache_may_stale {
             self.inner.pending_watermark = None;
             if USE_WATERMARK_CACHE {
                 self.inner.watermark_cache.clear();
@@ -1100,7 +1104,7 @@ where
 
         Ok((
             self.inner.distribution.update_vnode_bitmap(new_vnodes),
-            cache_may_stale,
+            keyed_cache_may_stale,
         ))
     }
 }

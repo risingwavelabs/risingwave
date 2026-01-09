@@ -676,7 +676,7 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                     yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of all agg calls if asked.
-                    if let Some(cache_may_stale) =
+                    if let Some(keyed_cache_may_stale) =
                         try_join_all(post_commits.into_iter().map(|post_commit| {
                             post_commit.post_yield_barrier(update_vnode_bitmap.clone())
                         }))
@@ -685,8 +685,18 @@ impl<K: HashKey, S: StateStore> HashAggExecutor<K, S> {
                         .expect("should have at least one table")
                         .map(|(_, cache_may_stale)| cache_may_stale)
                     {
+                        if emit_on_window_close {
+                            // `SortBuffer` may output data directly from its in-memory cache without
+                            // checking current vnode ownership. Therefore, we must rebuild the cache
+                            // whenever the vnode bitmap is updated to avoid emitting rows that no
+                            // longer belong to this actor.
+                            vars.buffer
+                                .refill_cache(None, &this.intermediate_state_table)
+                                .await?;
+                        }
+
                         // Manipulate the cache if necessary.
-                        if cache_may_stale {
+                        if keyed_cache_may_stale {
                             vars.agg_group_cache.clear();
                             vars.distinct_dedup.dedup_caches_mut().for_each(|cache| {
                                 cache.clear();
