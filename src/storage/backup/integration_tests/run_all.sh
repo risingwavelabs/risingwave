@@ -11,6 +11,7 @@ tests=( \
 )
 for t in "${tests[@]}"
 do
+  echo "--- running ${t}"
   bash "${DIR}/${t}"
 done
 
