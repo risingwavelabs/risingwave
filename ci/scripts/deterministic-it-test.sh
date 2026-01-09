@@ -12,11 +12,6 @@ mkdir -p $LOGDIR
 echo "--- Download artifacts"
 buildkite-agent artifact download simulation-it-test.tar.zst .
 
-echo "--- Extract artifacts"
-tar -xvf simulation-it-test.tar.zst
-mkdir target/sim
-mv target/ci-sim target/sim
-
 if [[ -z "${1:-}" ]]; then
   TEST_PATTERN=""
 elif [[ "$1" == "pull-request" ]]; then
@@ -44,7 +39,6 @@ seq "$TEST_NUM" | parallel -j 8 --line-buffer "MADSIM_TEST_SEED={} NEXTEST_PROFI
  cargo nextest run \
  $NEXTEST_PARTITION_ARG \
  --no-fail-fast \
- --cargo-metadata target/nextest/cargo-metadata.json \
- --binaries-metadata target/nextest/binaries-metadata.json \
+ --archive-file simulation-it-test.tar.zst \
  $TEST_PATTERN \
  2> $LOGDIR/it-test-{}.log && rm $LOGDIR/it-test-{}.log"
