@@ -14,12 +14,12 @@ JOIN (
         MAX(price) AS maxprice,
         window_end as date_time
     FROM
-        TUMBLE(bid, date_time, INTERVAL '10' SECOND)
+        TUMBLE(bid, date_time, INTERVAL '2' SECOND)
     GROUP BY
         window_end
 ) B1 ON B.price = B1.maxprice
 WHERE
-    B.date_time BETWEEN B1.date_time - INTERVAL '10' SECOND
+    B.date_time BETWEEN B1.date_time - INTERVAL '2' SECOND
     AND B1.date_time
 EMIT ON WINDOW CLOSE;
 

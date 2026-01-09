@@ -49,6 +49,9 @@ async fn nexmark_chaos_common_inner(
     sleep(Duration::from_secs(5)).await;
 
     println!("Reference run done.");
+    if final_result.trim().is_empty() {
+        anyhow::bail!("Reference run result is empty. Check the query.")
+    }
     // Create a new session for the chaos run.
     let mut session = cluster.start_session();
     session.run(create).await?;
