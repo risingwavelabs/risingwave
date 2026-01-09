@@ -25,7 +25,7 @@ WITH (
     ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
     topic = 'test_safe_update',
     scan.startup.mode = 'earliest',
-    properties.receive.message.max.bytes = '1000000'
+    properties.receive.message.max.bytes = '10485760'
 ) FORMAT PLAIN ENCODE JSON;
 
 statement ok
@@ -51,7 +51,7 @@ SOURCE_ID=$(psql -h ${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS} \
 echo "Source ID: $SOURCE_ID" && \
 ./risedev ctl meta alter-source-properties-safe \
     --source-id $SOURCE_ID \
-    --props '{"properties.receive.message.max.bytes": "2000000"}' \
+    --props '{"properties.receive.message.max.bytes": "20971520"}' \
     --flush \
     --reset-splits
 
@@ -75,7 +75,7 @@ SELECT COUNT(*) FROM mv_test;
 query I
 SELECT COUNT(*) FROM rw_sources
 WHERE name = 'kafka_test_source'
-  AND definition LIKE '%2000000%';
+  AND definition LIKE '%20971520%';
 ----
 1
 
