@@ -11340,7 +11340,6 @@ dependencies = [
  "risingwave_storage",
  "rw_futures_util",
  "tempfile",
- "thiserror-ext",
  "tikv-jemallocator",
  "tokio-postgres",
  "tokio-stream 0.1.15",

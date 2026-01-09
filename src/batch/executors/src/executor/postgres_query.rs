@@ -20,8 +20,8 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_connector::connector_common::{SslMode, create_pg_client};
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use thiserror_ext::AsReport;
 use tokio_postgres;
 
 use crate::error::BatchError;
@@ -30,14 +30,20 @@ use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBui
 /// `PostgresQuery` executor. Runs a query against a Postgres database.
 pub struct PostgresQueryExecutor {
     schema: Schema,
-    host: String,
-    port: String,
-    username: String,
-    password: String,
-    database: String,
+    params: PostgresConnectionParams,
     query: String,
     identity: String,
     chunk_size: usize,
+}
+
+pub struct PostgresConnectionParams {
+    pub host: String,
+    pub port: String,
+    pub username: String,
+    pub password: String,
+    pub database: String,
+    pub ssl_mode: SslMode,
+    pub ssl_root_cert: Option<String>,
 }
 
 impl Executor for PostgresQueryExecutor {
@@ -109,22 +115,14 @@ fn postgres_cell_to_scalar_impl(
 impl PostgresQueryExecutor {
     pub fn new(
         schema: Schema,
-        host: String,
-        port: String,
-        username: String,
-        password: String,
-        database: String,
+        params: PostgresConnectionParams,
         query: String,
         identity: String,
         chunk_size: usize,
     ) -> Self {
         Self {
             schema,
-            host,
-            port,
-            username,
-            password,
-            database,
+            params,
             query,
             identity,
             chunk_size,
@@ -134,31 +132,17 @@ impl PostgresQueryExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         tracing::debug!("postgres_query_executor: started");
-        let mut conf = tokio_postgres::Config::new();
-        let port = self
-            .port
-            .parse()
-            .map_err(|_| risingwave_expr::ExprError::InvalidParam {
-                name: "port",
-                reason: self.port.clone().into(),
-            })?;
-        let (client, conn) = conf
-            .host(&self.host)
-            .port(port)
-            .user(&self.username)
-            .password(self.password)
-            .dbname(&self.database)
-            .connect(tokio_postgres::NoTls)
-            .await?;
 
-        tokio::spawn(async move {
-            if let Err(e) = conn.await {
-                tracing::error!(
-                    "postgres_query_executor: connection error: {:?}",
-                    e.as_report()
-                );
-            }
-        });
+        let client = create_pg_client(
+            &self.params.username,
+            &self.params.password,
+            &self.params.host,
+            &self.params.port,
+            &self.params.database,
+            &self.params.ssl_mode,
+            &self.params.ssl_root_cert,
+        )
+        .await?;
 
         let params: &[&str] = &[];
         let row_stream = client
@@ -197,11 +181,19 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
 
         Ok(Box::new(PostgresQueryExecutor::new(
             Schema::from_iter(postgres_query_node.columns.iter().map(Field::from)),
-            postgres_query_node.hostname.clone(),
-            postgres_query_node.port.clone(),
-            postgres_query_node.username.clone(),
-            postgres_query_node.password.clone(),
-            postgres_query_node.database.clone(),
+            PostgresConnectionParams {
+                host: postgres_query_node.hostname.clone(),
+                port: postgres_query_node.port.clone(),
+                username: postgres_query_node.username.clone(),
+                password: postgres_query_node.password.clone(),
+                database: postgres_query_node.database.clone(),
+                ssl_mode: postgres_query_node.ssl_mode.parse().unwrap_or_default(),
+                ssl_root_cert: if postgres_query_node.ssl_root_cert.is_empty() {
+                    None
+                } else {
+                    Some(postgres_query_node.ssl_root_cert.clone())
+                },
+            },
             postgres_query_node.query.clone(),
             source.plan_node().get_identity().clone(),
             source.context().get_config().developer.chunk_size,
