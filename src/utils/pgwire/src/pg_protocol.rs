@@ -374,6 +374,13 @@ where
 
         // Query log.
         let fut = async move {
+            if !tracing::Span::current().is_none() {
+                tracing::info!(
+                    target: PGWIRE_QUERY_LOG,
+                    status = "started",
+                );
+            }
+
             let start = Instant::now();
             let result = fut.await;
             let elapsed = start.elapsed();
