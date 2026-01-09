@@ -387,6 +387,8 @@ pub async fn gen_sink_plan(
         }
     }
 
+    let allow_snapshot_backfill = target_table_catalog.is_none() && !is_iceberg_engine_internal;
+
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -400,6 +402,7 @@ pub async fn gen_sink_plan(
         partition_info,
         user_specified_columns,
         auto_refresh_schema_from_table,
+        allow_snapshot_backfill,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();

@@ -429,18 +429,18 @@
     └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: [] }
       ├─LogicalShare { id: 2 }
       │ └─LogicalProject { exprs: [a1] }
-      │   └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
+      │   └─LogicalSource { source: a, is_shared: false, columns: [a1, a2, _row_id] }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: all }
         ├─LogicalAgg { group_key: [a1], aggs: [] }
         │ └─LogicalShare { id: 2 }
         │   └─LogicalProject { exprs: [a1] }
-        │     └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
+        │     └─LogicalSource { source: a, is_shared: false, columns: [a1, a2, _row_id] }
         └─LogicalJoin { type: Inner, on: true, output: [a1] }
           ├─LogicalAgg { group_key: [a1], aggs: [] }
           │ └─LogicalShare { id: 2 }
           │   └─LogicalProject { exprs: [a1] }
-          │     └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
-          └─LogicalSource { source: c, columns: [c1, c2, _row_id] }
+          │     └─LogicalSource { source: a, is_shared: false, columns: [a1, a2, _row_id] }
+          └─LogicalSource { source: c, is_shared: false, columns: [c1, c2, _row_id] }
 - name: test subquery in table function
   sql: |
     create table t(x int[], y int[], k int primary key);

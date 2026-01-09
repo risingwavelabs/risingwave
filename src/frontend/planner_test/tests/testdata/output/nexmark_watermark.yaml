@@ -356,7 +356,7 @@
       │         └─LogicalShare { id: 3 }
       │           └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
       │             └─LogicalFilter { predicate: (event_type = 2:Int32) }
-      │               └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+      │               └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
       └─LogicalProject { exprs: [max(count), window_start] }
         └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
           └─LogicalProject { exprs: [window_start, count] }
@@ -368,7 +368,7 @@
                       └─LogicalShare { id: 3 }
                         └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
                           └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                            └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+                            └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [$expr2, count] }
@@ -971,11 +971,11 @@
                 ├─LogicalShare { id: 3 }
                 │ └─LogicalProject { exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2, Field(auction, 2:Int32) as $expr3, Field(auction, 3:Int32) as $expr4, Field(auction, 4:Int32) as $expr5, date_time, Field(auction, 6:Int32) as $expr6, Field(auction, 7:Int32) as $expr7, Field(auction, 8:Int32) as $expr8, Field(auction, 9:Int32) as $expr9] }
                 │   └─LogicalFilter { predicate: (event_type = 1:Int32) }
-                │     └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+                │     └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
                 └─LogicalShare { id: 6 }
                   └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr10, Field(bid, 1:Int32) as $expr11, Field(bid, 2:Int32) as $expr12, Field(bid, 3:Int32) as $expr13, Field(bid, 4:Int32) as $expr14, date_time, Field(bid, 6:Int32) as $expr15] }
                     └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                      └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+                      └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [$expr1, $expr2, $expr3, $expr4, $expr5, date_time, $expr6, $expr7, $expr8, $expr9, $expr10, $expr11, date_time] }
     └─LogicalFilter { predicate: (row_number <= 1:Int32) }
@@ -983,10 +983,10 @@
         └─LogicalJoin { type: Inner, on: ($expr1 = $expr9) AND (date_time >= date_time) AND (date_time <= $expr6), output: all }
           ├─LogicalProject { exprs: [Field(auction, 0:Int32) as $expr1, Field(auction, 1:Int32) as $expr2, Field(auction, 2:Int32) as $expr3, Field(auction, 3:Int32) as $expr4, Field(auction, 4:Int32) as $expr5, date_time, Field(auction, 6:Int32) as $expr6, Field(auction, 7:Int32) as $expr7, Field(auction, 8:Int32) as $expr8] }
           │ └─LogicalFilter { predicate: (event_type = 1:Int32) }
-          │   └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+          │   └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
           └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr9, Field(bid, 1:Int32) as $expr10, Field(bid, 2:Int32) as $expr11, date_time] }
             └─LogicalFilter { predicate: (event_type = 2:Int32) }
-              └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+              └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7, $expr8, $expr9, $expr11, $expr12, $expr13, $expr10] }
@@ -1499,7 +1499,7 @@
             └─LogicalShare { id: 3 }
               └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
                 └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                  └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+                  └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7] }
@@ -1574,7 +1574,7 @@
             └─LogicalShare { id: 3 }
               └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
                 └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                  └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+                  └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7] }
@@ -1645,7 +1645,7 @@
             └─LogicalShare { id: 3 }
               └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
                 └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                  └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+                  └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (row_number <= 10:Int32) }
@@ -2672,7 +2672,7 @@
           └─LogicalShare { id: 3 }
             └─LogicalProject { exprs: [Field(bid, 0:Int32) as $expr1, Field(bid, 1:Int32) as $expr2, Field(bid, 2:Int32) as $expr3, Field(bid, 3:Int32) as $expr4, Field(bid, 4:Int32) as $expr5, date_time, Field(bid, 6:Int32) as $expr6] }
               └─LogicalFilter { predicate: (event_type = 2:Int32) }
-                └─LogicalSource { source: nexmark, columns: [event_type, person, auction, bid, date_time, _row_id] }
+                └─LogicalSource { source: nexmark, is_shared: false, columns: [event_type, person, auction, bid, date_time, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [$expr2, $expr3, $expr1, $expr4, (sum / count::Decimal) as $expr5, max] }
