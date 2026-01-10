@@ -15,7 +15,7 @@
 use risingwave_common::types::DataType;
 use risingwave_sqlparser::ast::Ident;
 
-use crate::binder::{Binder, Clause};
+use crate::binder::{Binder, COLUMN_GROUP_PREFIX, Clause};
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CorrelatedInputRef, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
 
@@ -44,38 +44,66 @@ impl Binder {
             return self.bind_sql_udf_parameter(&column_name);
         }
 
-        match self
-            .context
-            .get_column_binding_indices(&table_name, &column_name)
-        {
-            Ok(mut indices) => {
-                match indices.len() {
-                    0 => unreachable!(),
-                    1 => {
-                        let index = indices[0];
-                        let column = &self.context.columns[index];
-                        return Ok(
-                            InputRef::new(column.index, column.field.data_type.clone()).into()
-                        );
+        // For qualified references (with table name), check if it's a column group reference.
+        // Column groups (from natural joins) can have duplicate column names and use COALESCE.
+        // For regular qualified references, error on ambiguous columns.
+        let is_column_group = table_name
+            .as_ref()
+            .map(|t| t.starts_with(COLUMN_GROUP_PREFIX))
+            .unwrap_or(false);
+
+        if table_name.is_some() && !is_column_group {
+            match self
+                .context
+                .get_column_binding_index(&table_name, &column_name)
+            {
+                Ok(index) => {
+                    let column = &self.context.columns[index];
+                    return Ok(InputRef::new(column.index, column.field.data_type.clone()).into());
+                }
+                Err(e) => {
+                    // If it's an ambiguous column error or other non-not-found error, propagate it immediately
+                    if !matches!(e, ErrorCode::ItemNotFound(_)) {
+                        return Err(e.into());
                     }
-                    _ => {
-                        indices.sort(); // make sure we have a consistent result
-                        let inputs = indices
-                            .iter()
-                            .map(|index| {
-                                let column = &self.context.columns[*index];
-                                InputRef::new(column.index, column.field.data_type.clone()).into()
-                            })
-                            .collect::<Vec<_>>();
-                        return Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into());
-                    }
+                    // Otherwise, continue to try lateral and upper contexts
                 }
             }
-            Err(e) => {
-                // If the error message is not that the column is not found, throw the error
-                if let ErrorCode::ItemNotFound(_) = e {
-                } else {
-                    return Err(e.into());
+        } else {
+            match self
+                .context
+                .get_column_binding_indices(&table_name, &column_name)
+            {
+                Ok(mut indices) => {
+                    match indices.len() {
+                        0 => unreachable!(),
+                        1 => {
+                            let index = indices[0];
+                            let column = &self.context.columns[index];
+                            return Ok(
+                                InputRef::new(column.index, column.field.data_type.clone()).into()
+                            );
+                        }
+                        _ => {
+                            indices.sort(); // make sure we have a consistent result
+                            let inputs = indices
+                                .iter()
+                                .map(|index| {
+                                    let column = &self.context.columns[*index];
+                                    InputRef::new(column.index, column.field.data_type.clone())
+                                        .into()
+                                })
+                                .collect::<Vec<_>>();
+                            return Ok(FunctionCall::new(ExprType::Coalesce, inputs)?.into());
+                        }
+                    }
+                }
+                Err(e) => {
+                    // If the error message is not that the column is not found, throw the error
+                    if let ErrorCode::ItemNotFound(_) = e {
+                    } else {
+                        return Err(e.into());
+                    }
                 }
             }
         }
@@ -102,6 +130,10 @@ impl Binder {
                         .into());
                     }
                     Err(e) => {
+                        // If it's an ambiguous column error, propagate it immediately
+                        if !matches!(e, ErrorCode::ItemNotFound(_)) {
+                            return Err(e.into());
+                        }
                         err = e;
                     }
                 }
@@ -127,6 +159,10 @@ impl Binder {
                     .into());
                 }
                 Err(e) => {
+                    // If it's an ambiguous column error, propagate it immediately
+                    if !matches!(e, ErrorCode::ItemNotFound(_)) {
+                        return Err(e.into());
+                    }
                     err = e;
                 }
             }
@@ -150,6 +186,10 @@ impl Binder {
                             .into());
                         }
                         Err(e) => {
+                            // If it's an ambiguous column error, propagate it immediately
+                            if !matches!(e, ErrorCode::ItemNotFound(_)) {
+                                return Err(e.into());
+                            }
                             err = e;
                         }
                     }
