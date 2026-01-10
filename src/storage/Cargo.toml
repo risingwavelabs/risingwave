@@ -98,7 +98,7 @@ libc = "0.2.148"
 mach2 = "0.6"
 
 [dev-dependencies]
-bincode = "1"
+bincode = "2"
 criterion = { workspace = true, features = ["async_futures", "async_tokio"] }
 expect-test = "1"
 risingwave_hummock_sdk = { workspace = true, features = ["test"] }
