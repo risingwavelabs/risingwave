@@ -123,7 +123,7 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
                     && (role.equals("readWrite")
                             || role.equals("read")
                             || role.equals("readWriteAnyDatabase")
-                            || roles.equals("readAnyDatabase"))) {
+                            || role.equals("readAnyDatabase"))) {
                 LOG.info("user has the appropriate roles to read the admin database");
                 return true;
             }
