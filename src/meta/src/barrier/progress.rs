@@ -18,8 +18,6 @@ use std::mem::take;
 use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::CreateType;
-use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
@@ -378,9 +376,6 @@ pub(super) enum UpdateProgressResult {
 
 #[derive(Debug)]
 pub(super) struct CreateMviewProgressTracker {
-    job_id: JobId,
-    definition: String,
-    create_type: CreateType,
     tracking_job: TrackingJob,
     status: CreateMviewStatus,
 }
@@ -405,13 +400,11 @@ enum CreateMviewStatus {
 impl CreateMviewProgressTracker {
     pub fn recover(
         creating_job_id: JobId,
-        definition: String,
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
         backfill_order_state: BackfillOrderState,
         version_stats: &HummockVersionStats,
     ) -> Self {
         {
-            let create_type = CreateType::Background;
             let tracking_job = TrackingJob::recovered(creating_job_id, fragment_infos);
             let actors = InflightStreamingJobInfo::tracking_progress_actor_ids(fragment_infos);
             let status = if actors.is_empty() {
@@ -447,9 +440,6 @@ impl CreateMviewProgressTracker {
                 }
             };
             Self {
-                job_id: creating_job_id,
-                definition,
-                create_type,
                 tracking_job,
                 status,
             }
@@ -485,16 +475,10 @@ impl CreateMviewProgressTracker {
         }
     }
 
-    pub fn gen_ddl_progress(&self) -> DdlProgress {
-        let progress = match &self.status {
+    pub fn gen_backfill_progress(&self) -> String {
+        match &self.status {
             CreateMviewStatus::Backfilling { progress, .. } => progress.calculate_progress(),
             CreateMviewStatus::Finished { .. } => "100%".to_owned(),
-        };
-        DdlProgress {
-            id: self.job_id.as_raw_id() as u64,
-            statement: self.definition.clone(),
-            create_type: self.create_type.as_str().to_owned(),
-            progress,
         }
     }
 
@@ -595,23 +579,16 @@ impl CreateMviewProgressTracker {
         tracing::trace!(?info, "add job to track");
         let CreateStreamingJobCommandInfo {
             stream_job_fragments,
-            definition,
-            create_type,
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
             ..
         } = info;
         let job_id = stream_job_fragments.stream_job_id();
-        let definition = definition.clone();
-        let create_type = (*create_type).into();
         let actors = stream_job_fragments.tracking_progress_actor_ids();
         let tracking_job = TrackingJob::new(&info.stream_job_fragments);
         if actors.is_empty() {
             // The command can be finished immediately.
             return Self {
-                job_id,
-                definition,
-                create_type,
                 tracking_job,
                 status: CreateMviewStatus::Finished {
                     table_ids_to_truncate: vec![],
@@ -639,9 +616,6 @@ impl CreateMviewProgressTracker {
             .backfill_order_state
             .current_backfill_node_fragment_ids();
         Self {
-            job_id,
-            definition,
-            create_type,
             tracking_job,
             status: CreateMviewStatus::Backfilling {
                 progress,

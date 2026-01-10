@@ -50,7 +50,7 @@ impl CreateMviewLogStoreProgressTracker {
         }
     }
 
-    pub(super) fn gen_ddl_progress(&self) -> String {
+    pub(super) fn gen_backfill_progress(&self) -> String {
         let sum = self.ongoing_actors.values().sum::<u64>() as f64;
         let count = if self.ongoing_actors.is_empty() {
             1

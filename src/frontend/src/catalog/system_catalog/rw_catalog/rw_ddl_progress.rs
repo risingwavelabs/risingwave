@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_frontend_macro::system_catalog;
+use risingwave_pb::ddl_service::PbBackfillType;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
 use crate::error::Result;
@@ -27,36 +27,31 @@ struct RwDdlProgress {
     ddl_statement: String,
     create_type: String,
     progress: String,
-    initialized_at: Option<Timestamptz>,
+    initialized_at: Timestamptz,
+    is_serverless_backfill: bool,
+    backfill_type: String,
 }
 
 #[system_catalog(table, "rw_catalog.rw_ddl_progress")]
 async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwDdlProgress>> {
     let ddl_progresses = reader.meta_client.get_ddl_progress().await?;
 
-    let table_ids = ddl_progresses
-        .iter()
-        .map(|progress| progress.id as u32)
-        .map_into()
-        .collect_vec();
-
-    // TODO: fetch initialized_at_epoch together with ddl_progresses
-    let tables = reader.meta_client.get_tables(table_ids, false).await?;
-
     let ddl_progress = ddl_progresses
         .into_iter()
-        .map(|s| {
-            let initialized_at = tables
-                .get(&(s.id as u32).into())
-                .and_then(|table| table.initialized_at_epoch.map(Epoch::from));
-
-            RwDdlProgress {
-                ddl_id: s.id as i64,
-                ddl_statement: s.statement,
-                create_type: s.create_type,
-                progress: s.progress,
-                initialized_at: initialized_at.map(|e| *e.as_scalar().as_timestamptz()),
-            }
+        .map(|s| RwDdlProgress {
+            ddl_id: s.id as i64,
+            backfill_type: s
+                .get_backfill_type()
+                .unwrap_or(PbBackfillType::Unspecified)
+                .as_str_name()
+                .to_owned(),
+            ddl_statement: s.statement,
+            create_type: s.create_type,
+            progress: s.progress,
+            initialized_at: *Epoch::from_unix_millis(s.initialized_at_time_millis as _)
+                .as_scalar()
+                .as_timestamptz(),
+            is_serverless_backfill: s.is_serverless_backfill,
         })
         .collect();
     Ok(ddl_progress)

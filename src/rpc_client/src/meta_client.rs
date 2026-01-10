@@ -64,7 +64,6 @@ use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerN
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
-use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -420,15 +419,16 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
-            backfill: PbBackfillType::Regular as _,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
             dependencies: dependencies.into_iter().collect(),
-            specific_resource_group,
             if_not_exists,
         };
         let resp = self.inner.create_materialized_view(request).await?;
