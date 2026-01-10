@@ -533,6 +533,7 @@ impl DatabaseCheckpointControl {
             barrier_info,
             &node_actors,
             InflightFragmentInfo::existing_table_ids(self.database_info.fragment_infos()),
+            InflightFragmentInfo::workers(self.database_info.fragment_infos()),
             actors_to_create,
         )?;
 
