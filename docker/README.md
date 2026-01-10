@@ -89,7 +89,7 @@ The docker images for x86_64 are built with AVX2 SIMD extensions, while the imag
 To build the images, simply run:
 
 ```
-docker build . -f docker/Dockerfile
+docker build . -f docker/Dockerfile --build-arg CARGO_PROFILE=release
 ```
 
 from the project root.
@@ -97,7 +97,7 @@ from the project root.
 To build the images without SIMD vector extensions, run
 
 ```
-docker build . -f docker/Dockerfile --build-arg simd_disabled=true
+docker build . -f docker/Dockerfile --build-arg CARGO_PROFILE=release --build-arg simd_disabled=true
 ```
 
 from the project root and run any subsequent docker commands on the resultant image.
