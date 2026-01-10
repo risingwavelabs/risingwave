@@ -64,13 +64,15 @@ impl MetaSnapshotMetadata {
         v: &HummockVersion,
         format_version: u32,
         remarks: Option<String>,
+        table_change_log_object_ids: impl Iterator<Item = HummockRawObjectId>,
     ) -> Self {
         Self {
             id,
             hummock_version_id: v.id,
             objects: v
-                .get_object_ids(false)
+                .get_object_ids()
                 .map(|object_id| object_id.as_raw())
+                .chain(table_change_log_object_ids)
                 .collect(),
             format_version,
             remarks,
