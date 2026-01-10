@@ -472,7 +472,9 @@ mod tests {
     use risingwave_pb::task_service::stream_exchange_service_server::{
         StreamExchangeService, StreamExchangeServiceServer,
     };
-    use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse, PbPermits};
+    use risingwave_pb::task_service::{
+        GetMuxStreamRequest, GetMuxStreamResponse, GetStreamRequest, GetStreamResponse, PbPermits,
+    };
     use tokio::time::sleep;
     use tokio_stream::wrappers::ReceiverStream;
     use tonic::{Request, Response, Status, Streaming};
@@ -855,6 +857,7 @@ mod tests {
 
     #[async_trait::async_trait]
     impl StreamExchangeService for FakeExchangeService {
+        type GetMuxStreamStream = ReceiverStream<std::result::Result<GetMuxStreamResponse, Status>>;
         type GetStreamStream = ReceiverStream<std::result::Result<GetStreamResponse, Status>>;
 
         async fn get_stream(
@@ -895,6 +898,13 @@ mod tests {
             .unwrap();
             Ok(Response::new(ReceiverStream::new(rx)))
         }
+
+        async fn get_mux_stream(
+            &self,
+            _request: Request<Streaming<GetMuxStreamRequest>>,
+        ) -> std::result::Result<Response<Self::GetMuxStreamStream>, Status> {
+            unreachable!("test case should use simple `get_stream`")
+        }
     }
 
     #[tokio::test]
@@ -926,7 +936,7 @@ mod tests {
         let test_env = LocalBarrierTestEnv::for_test().await;
 
         let remote_input = {
-            RemoteInput::new(
+            RemoteInput::new_simple(
                 &test_env.local_barrier_manager,
                 addr.into(),
                 (0.into(), 0.into()),

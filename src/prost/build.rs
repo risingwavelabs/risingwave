@@ -768,6 +768,23 @@ for_all_wrapped_id_fields! (
         FastInsertRequest {
             table_id: TableId,
         }
+        GetMuxStreamRequest.AddPermits {
+            up_actor_id: ActorId,
+            down_actor_id: ActorId,
+        }
+        GetMuxStreamRequest.Init {
+            database_id: DatabaseId,
+            up_fragment_id: FragmentId,
+            down_fragment_id: FragmentId,
+        }
+        GetMuxStreamRequest.Register {
+            up_actor_id: ActorId,
+            down_actor_id: ActorId,
+        }
+        GetMuxStreamResponse {
+            up_actor_id: ActorId,
+            down_actor_id: ActorId,
+        }
         GetStreamRequest.Get {
             database_id: DatabaseId,
             up_fragment_id: FragmentId,
@@ -1066,6 +1083,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.UdfExprVersion", "#[derive(prost_helpers::Version)]")
         .type_attribute("meta.Object.object_info", "#[derive(strum::Display)]")
         .type_attribute("meta.SubscribeResponse.info", "#[derive(strum::Display)]")
+        .type_attribute("task_service.GetMuxStreamRequest.Init", "#[derive(Hash, Eq)]")
         // end
         ;
 

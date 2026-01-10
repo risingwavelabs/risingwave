@@ -24,6 +24,8 @@ use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::{ComputeClientPoolRef, MetaClient};
 use risingwave_storage::StateStoreImpl;
 
+use crate::executor::exchange::input::MuxExchangeWorkers;
+
 /// The global environment for task execution.
 /// The instance will be shared by every task.
 #[derive(Clone, Debug)]
@@ -60,6 +62,9 @@ pub struct StreamEnvironment {
 
     /// Compute client pool for streaming gRPC exchange.
     client_pool: ComputeClientPoolRef,
+
+    /// Workers for multiplexed exchange.
+    mux_exchange_workers: MuxExchangeWorkers,
 }
 
 impl StreamEnvironment {
@@ -86,6 +91,7 @@ impl StreamEnvironment {
             total_mem_val: Arc::new(TrAdder::new()),
             meta_client: Some(meta_client),
             client_pool,
+            mux_exchange_workers: MuxExchangeWorkers::new(),
         }
     }
 
@@ -95,6 +101,7 @@ impl StreamEnvironment {
         use risingwave_dml::dml_manager::DmlManager;
         use risingwave_rpc_client::ComputeClientPool;
         use risingwave_storage::monitor::MonitoredStorageMetrics;
+
         StreamEnvironment {
             server_addr: "127.0.0.1:2333".parse().unwrap(),
             global_config: Arc::new(StreamingConfig::default()),
@@ -108,6 +115,7 @@ impl StreamEnvironment {
             total_mem_val: Arc::new(TrAdder::new()),
             meta_client: None,
             client_pool: Arc::new(ComputeClientPool::for_test()),
+            mux_exchange_workers: MuxExchangeWorkers::new(),
         }
     }
 
@@ -149,5 +157,9 @@ impl StreamEnvironment {
 
     pub fn client_pool(&self) -> ComputeClientPoolRef {
         self.client_pool.clone()
+    }
+
+    pub fn mux_exchange_workers(&self) -> &MuxExchangeWorkers {
+        &self.mux_exchange_workers
     }
 }
