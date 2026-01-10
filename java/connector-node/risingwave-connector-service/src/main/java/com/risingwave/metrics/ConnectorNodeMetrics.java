@@ -28,6 +28,8 @@ import java.lang.management.ManagementFactory;
 import java.net.InetSocketAddress;
 
 public class ConnectorNodeMetrics {
+    private static volatile HTTPServer prometheusHttpServer;
+
     private static final Counter activeSourceConnections =
             Counter.build()
                     .name("active_source_connections")
@@ -81,6 +83,19 @@ public class ConnectorNodeMetrics {
                     .help("Number of errors")
                     .register();
 
+    // Debezium CDC engine error metrics.
+    //
+    // NOTE: error_kind is set to the exception class name (e.g., "IOException", "SQLException",
+    // etc.),
+    // which keeps cardinality finite and avoids using the full error message/stacktrace to prevent
+    // metric explosion.
+    private static final Counter cdcEngineFailureTotal =
+            Counter.build()
+                    .name("connector_cdc_engine_failure_total")
+                    .labelNames("source_type", "source_id", "connector_class", "error_kind")
+                    .help("Number of Debezium CDC engine failures observed in connector-node.")
+                    .register();
+
     static class PeriodicMetricsCollector extends Thread {
         private final int interval;
         private final OperatingSystemMXBean osBean;
@@ -119,14 +134,31 @@ public class ConnectorNodeMetrics {
         CollectorRegistry registry = new CollectorRegistry();
         registry.register(activeSourceConnections);
         registry.register(activeSinkConnections);
+        registry.register(totalSinkConnections);
         registry.register(sourceRowsReceived);
         registry.register(sinkRowsReceived);
+        registry.register(errorCount);
+        registry.register(cdcEngineFailureTotal);
         registry.register(cpuUsage);
         registry.register(ramUsage);
         PeriodicMetricsCollector collector = new PeriodicMetricsCollector(1000, "connector");
         collector.start();
         try {
-            new HTTPServer(new InetSocketAddress(host, port), registry);
+            // Keep a reference so it can be closed gracefully on JVM shutdown.
+            prometheusHttpServer = new HTTPServer(new InetSocketAddress(host, port), registry);
+            Runtime.getRuntime()
+                    .addShutdownHook(
+                            new Thread(
+                                    () -> {
+                                        try {
+                                            if (prometheusHttpServer != null) {
+                                                prometheusHttpServer.close();
+                                            }
+                                        } catch (Throwable ignored) {
+                                            // Best-effort cleanup.
+                                        }
+                                    },
+                                    "connector-node-prometheus-httpserver-shutdown"));
         } catch (IOException e) {
             throw INTERNAL.withDescription("Failed to start HTTP server")
                     .withCause(e)
@@ -168,5 +200,52 @@ public class ConnectorNodeMetrics {
 
     public static void setRamUsage(String ip, long usedRamInBytes) {
         ramUsage.labels(ip).set(usedRamInBytes);
+    }
+
+    public static void recordCdcEngineFailure(
+            String sourceType,
+            String sourceId,
+            String connectorClass,
+            String message,
+            Throwable error) {
+        String kind = classifyCdcEngineFailureKind(message, error);
+        cdcEngineFailureTotal.labels(sourceType, sourceId, connectorClass, kind).inc();
+    }
+
+    private static String classifyCdcEngineFailureKind(String message, Throwable error) {
+        // Use the actual exception type as error_kind, instead of keyword matching.
+        // This stays low-cardinality in practice and is much more precise for alerting.
+        Throwable root = rootCause(error);
+        if (root != null) {
+            String simple = root.getClass().getSimpleName();
+            if (simple != null && !simple.isBlank()) {
+                return simple;
+            }
+            // Fallback to the full class name if needed (still finite), but keep it short.
+            String full = root.getClass().getName();
+            return full == null || full.isBlank() ? "Unknown" : full;
+        }
+        // If we don't have a Throwable at all, we can't reliably infer the type.
+        // Keep a stable fallback value to avoid label explosion.
+        return "Unknown";
+    }
+
+    private static Throwable rootCause(Throwable t) {
+        if (t == null) {
+            return null;
+        }
+        Throwable cur = t;
+        // Guard against cause cycles or overly deep chains.
+        // NOTE: Future improvement: detect non-trivial cycles (beyond `next == cur`) and
+        // de-duplicate / filter wrapper exceptions that add little signal, so `error_kind` can be
+        // derived from the most useful root cause.
+        for (int i = 0; i < 32; i++) {
+            Throwable next = cur.getCause();
+            if (next == null || next == cur) {
+                return cur;
+            }
+            cur = next;
+        }
+        return cur;
     }
 }
