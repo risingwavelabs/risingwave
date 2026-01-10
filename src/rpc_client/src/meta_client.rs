@@ -1722,6 +1722,54 @@ impl MetaClient {
     ) {
     }
 
+    /// Extract actor context information from await-tree if available
+    #[cfg(not(madsim))]
+    fn extract_actor_context_from_await_tree() -> (Option<u32>, Option<u32>, Option<String>) {
+        // Try to get fragment_id from task-local storage if available
+        // The FRAGMENT_ID is set up in actor execution context
+        let fragment_id = risingwave_expr::expr_context::FRAGMENT_ID::try_with(|id| {
+            Some(id.as_raw_id())
+        }).ok().flatten();
+
+        // Try to extract actor_id and job_name from await-tree
+        if let Some(tree) = await_tree::current_tree() {
+            let tree_str = tree.to_string();
+            
+            // Try to extract actor_id from await-tree key
+            // The await-tree format is typically: "Actor {actor_id}: `{job_definition}`"
+            let actor_id = if let Some(start) = tree_str.find("Actor ") {
+                if let Some(end) = tree_str[start + 6..].find(':') {
+                    tree_str[start + 6..start + 6 + end].trim().parse::<u32>().ok()
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            // Try to extract job name/definition from the tree string
+            let job_name = if let Some(start) = tree_str.find(": `") {
+                if let Some(end) = tree_str[start + 3..].find('`') {
+                    let name = tree_str[start + 3..start + 3 + end].trim();
+                    // Only include if non-empty
+                    if !name.is_empty() {
+                        Some(name.to_string())
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            
+            (actor_id, fragment_id, job_name)
+        } else {
+            (None, fragment_id, None)
+        }
+    }
+
     /// If `timeout_millis` is None, default is used.
     #[cfg(not(madsim))]
     pub fn try_add_panic_event_blocking(
@@ -1729,11 +1777,16 @@ impl MetaClient {
         panic_info: impl Display,
         timeout_millis: Option<u64>,
     ) {
+        let (actor_id, fragment_id, job_name) = Self::extract_actor_context_from_await_tree();
+        
         let event = event_log::EventWorkerNodePanic {
             worker_id: self.worker_id,
             worker_type: self.worker_type.into(),
             host_addr: Some(self.host_addr.to_protobuf()),
             panic_info: format!("{panic_info}"),
+            actor_id,
+            fragment_id,
+            job_name,
         };
         let grpc_meta_client = self.inner.clone();
         let _ = thread::spawn(move || {
