@@ -712,8 +712,6 @@ pub(crate) use retry_strategy::*;
 use risingwave_common::error::tonic::extra::{Score, ScoredError};
 use risingwave_pb::meta::event_log::{Event, EventRecovery};
 
-use crate::barrier::edge_builder::FragmentEdgeBuilder;
-
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
     ///
@@ -806,10 +804,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
 
             {
-                let mut builder = FragmentEdgeBuilder::new(database_job_infos.values().flat_map(|jobs| jobs.values().flat_map(|fragments| fragments.values())), &control_stream_manager);
-                builder.add_relations(&fragment_relations);
-                let mut edges = builder.build();
-
                 let mut collected_databases = HashMap::new();
                 let mut collecting_databases = HashMap::new();
                 let mut failed_databases = HashSet::new();
@@ -820,7 +814,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         &mut state_table_committed_epochs,
                         &mut state_table_log_epochs,
                         &fragment_relations,
-                        &mut edges,
                         &stream_actors,
                         &mut source_splits,
                         &mut background_jobs,

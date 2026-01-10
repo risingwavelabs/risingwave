@@ -222,6 +222,11 @@ impl ControlStreamHandle {
     }
 }
 
+pub(crate) enum TakeReceiverRequest {
+    Remote(oneshot::Sender<StreamResult<Receiver>>),
+    Local(permit::Sender),
+}
+
 /// Sent from [`crate::task::stream_manager::LocalStreamManager`] to [`crate::task::barrier_worker::LocalBarrierWorker::run`].
 ///
 /// See [`crate::task`] for architecture overview.
@@ -233,9 +238,10 @@ pub(super) enum LocalActorOperation {
     },
     TakeReceiver {
         database_id: DatabaseId,
+        partial_graph_id: PartialGraphId,
         term_id: String,
         ids: UpDownActorIds,
-        result_sender: oneshot::Sender<StreamResult<Receiver>>,
+        request: TakeReceiverRequest,
     },
     #[cfg(test)]
     GetCurrentLocalBarrierManager(oneshot::Sender<LocalBarrierManager>),
@@ -397,7 +403,7 @@ impl LocalBarrierWorker {
                             // TODO: may only report as database failure instead of reset the stream
                             // when the HummockUploader support partial recovery. Currently the HummockUploader
                             // enter `Err` state and stop working until a global recovery to clear the uploader.
-                            self.control_stream_handle.reset_stream_with_err(Status::internal(format!("failed to complete epoch: {} {} {:?} {:?}", database_id, partial_graph_id.0, barrier.epoch, err.as_report())));
+                            self.control_stream_handle.reset_stream_with_err(Status::internal(format!("failed to complete epoch: {} {} {:?} {:?}", database_id, partial_graph_id, barrier.epoch, err.as_report())));
                         }
                     }
                 },
@@ -466,14 +472,11 @@ impl LocalBarrierWorker {
                 Ok(())
             }
             Request::RemovePartialGraph(req) => {
-                self.remove_partial_graphs(
-                    req.database_id,
-                    req.partial_graph_ids.into_iter().map(PartialGraphId::new),
-                );
+                self.remove_partial_graphs(req.database_id, req.partial_graph_ids.into_iter());
                 Ok(())
             }
             Request::CreatePartialGraph(req) => {
-                self.add_partial_graph(req.database_id, PartialGraphId::new(req.partial_graph_id));
+                self.add_partial_graph(req.database_id, req.partial_graph_id);
                 Ok(())
             }
             Request::ResetDatabase(req) => {
@@ -493,9 +496,10 @@ impl LocalBarrierWorker {
             }
             LocalActorOperation::TakeReceiver {
                 database_id,
+                partial_graph_id,
                 term_id,
                 ids,
-                result_sender,
+                request,
             } => {
                 let err = if self.term_id != term_id {
                     {
@@ -516,15 +520,16 @@ impl LocalBarrierWorker {
                     match self.state.databases.entry(database_id) {
                         Entry::Occupied(mut entry) => match entry.get_mut() {
                             DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
-                                pending_requests.push((ids, result_sender));
+                                pending_requests.push((partial_graph_id, ids, request));
                                 return;
                             }
                             DatabaseStatus::Running(database) => {
                                 let (upstream_actor_id, actor_id) = ids;
-                                database.new_actor_remote_output_request(
+                                database.new_actor_output_request(
                                     actor_id,
                                     upstream_actor_id,
-                                    result_sender,
+                                    partial_graph_id,
+                                    request,
                                 );
                                 return;
                             }
@@ -540,14 +545,17 @@ impl LocalBarrierWorker {
                         },
                         Entry::Vacant(entry) => {
                             entry.insert(DatabaseStatus::ReceivedExchangeRequest(vec![(
+                                partial_graph_id,
                                 ids,
-                                result_sender,
+                                request,
                             )]));
                             return;
                         }
                     }
                 };
-                let _ = result_sender.send(Err(err.into()));
+                if let TakeReceiverRequest::Remote(result_sender) = request {
+                    let _ = result_sender.send(Err(err.into()));
+                }
             }
             #[cfg(test)]
             LocalActorOperation::GetCurrentLocalBarrierManager(sender) => {
@@ -820,7 +828,7 @@ impl LocalBarrierWorker {
                 streaming_control_stream_response::Response::CompleteBarrier(
                     BarrierCompleteResponse {
                         request_id: "todo".to_owned(),
-                        partial_graph_id: partial_graph_id.into(),
+                        partial_graph_id,
                         epoch,
                         status: None,
                         create_mview_progress,
@@ -929,7 +937,7 @@ impl LocalBarrierWorker {
                 );
             } else {
                 warn!(
-                    partial_graph_id = partial_graph_id.0,
+                    %partial_graph_id,
                     "no partial graph to remove"
                 );
             }
@@ -946,12 +954,14 @@ impl LocalBarrierWorker {
                         self.term_id.clone(),
                         self.actor_manager.clone(),
                     );
-                    for ((upstream_actor_id, actor_id), result_sender) in pending_requests.drain(..)
+                    for (partial_graph_id, (upstream_actor_id, actor_id), request) in
+                        pending_requests.drain(..)
                     {
-                        database.new_actor_remote_output_request(
+                        database.new_actor_output_request(
                             actor_id,
                             upstream_actor_id,
-                            result_sender,
+                            partial_graph_id,
+                            request,
                         );
                     }
                     *status = DatabaseStatus::Running(database);
@@ -1172,7 +1182,7 @@ pub(crate) mod barrier_test_utils {
                     request: Some(
                         streaming_control_stream_request::Request::CreatePartialGraph(
                             PbCreatePartialGraphRequest {
-                                partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
+                                partial_graph_id: TEST_PARTIAL_GRAPH_ID,
                                 database_id: TEST_DATABASE_ID,
                             },
                         ),
@@ -1222,7 +1232,7 @@ pub(crate) mod barrier_test_utils {
                             database_id: TEST_DATABASE_ID,
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
-                            partial_graph_id: TEST_PARTIAL_GRAPH_ID.into(),
+                            partial_graph_id: TEST_PARTIAL_GRAPH_ID,
                             actors_to_build: vec![],
                         },
                     )),
