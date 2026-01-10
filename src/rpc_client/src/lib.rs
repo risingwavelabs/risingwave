@@ -48,6 +48,7 @@ pub use hummock_meta_client::{
 };
 pub use meta_client::{MetaClient, SinkCoordinationRpcClient};
 use moka::future::Cache;
+pub use monitor_client::{MonitorClient, MonitorClientPool, MonitorClientPoolRef};
 use rand::prelude::IndexedRandom;
 use risingwave_common::config::RpcClientConfig;
 use risingwave_common::util::addr::HostAddr;
@@ -70,6 +71,7 @@ mod connector_client;
 mod frontend_client;
 mod hummock_meta_client;
 mod meta_client;
+mod monitor_client;
 mod sink_coordinate_client;
 mod stream_client;
 
