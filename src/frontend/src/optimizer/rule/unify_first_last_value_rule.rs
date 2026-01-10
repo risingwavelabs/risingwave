@@ -209,14 +209,7 @@ impl Rule<Logical> for UnifyFirstLastValueRule {
                         .clone(),
                 )],
                 distinct: pattern.distinct,
-                order_by: pattern
-                    .order_by
-                    .iter()
-                    .map(|order| {
-                        // Adjust column references in ORDER BY to point to ROW column
-                        ColumnOrder::new(row_col_idx, order.order_type)
-                    })
-                    .collect(),
+                order_by: pattern.order_by.clone(),
                 filter: pattern.filter.clone(),
                 direct_args: vec![],
             };
