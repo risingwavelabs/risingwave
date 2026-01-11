@@ -135,11 +135,21 @@ impl NonOverlapSubLevelPicker {
         }
     }
 
-    // Use the incoming sst as the basic range and select as many sub levels as possible
-    // 1. Build basic range based on sst
-    // 2. Add a new sub level in each round
-    // 3. Expand sst according to the basic range from new to old sub levels.
-    // 4. According to the size and count restrictions, select the plan that contains the most sub levels as much as possible
+    /// Selects overlapping SSTs across multiple L0 sub-levels for a given key range.
+    ///
+    /// For each possible target sub-level, expands backwards (toward older sub-levels)
+    /// to collect overlapping SSTs. Returns the expansion covering the most sub-levels
+    /// within configured size and count limits.
+    ///
+    /// # Arguments
+    ///
+    /// * `levels` - L0 sub-levels ordered from oldest to newest
+    /// * `level_handler` - Tracks which SSTs are currently being compacted
+    /// * `key_range` - Initial key range to search for overlaps
+    ///
+    /// # Returns
+    ///
+    /// `Some` with selected SSTs grouped by sub-level, or `None` if no valid selection exists.
     fn pick_sub_level(
         &self,
         levels: &[Level],
@@ -301,6 +311,21 @@ impl NonOverlapSubLevelPicker {
         Some(ret)
     }
 
+    /// Generates multiple compaction task candidates from L0 sub-levels.
+    ///
+    /// Iterates through candidate SSTs from a selected interval sub-level, calls
+    /// `pick_sub_level` for each to form tasks, then classifies and sorts them
+    /// by priority ("expected" tasks before "unexpected" ones).
+    ///
+    /// # Arguments
+    ///
+    /// * `l0` - L0 sub-levels ordered from oldest to newest
+    /// * `level_handler` - Tracks which SSTs are currently being compacted
+    ///
+    /// # Returns
+    ///
+    /// Sorted vector of task candidates, or empty if insufficient sub-levels exist.
+    /// Tasks are marked "expected" when satisfying configured size and level count thresholds.
     pub fn pick_l0_multi_non_overlap_level(
         &self,
         l0: &[Level],

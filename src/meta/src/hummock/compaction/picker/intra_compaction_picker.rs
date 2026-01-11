@@ -199,14 +199,14 @@ impl IntraCompactionPicker {
                         target_sub_level_id = Some(sub_level_id);
                     }
 
+                    task_input_size += level_select_sst.iter().map(|sst| sst.sst_size).sum::<u64>();
+                    task_file_count += level_select_sst.len();
+
                     select_level_inputs.push(InputLevel {
                         level_idx: 0,
                         level_type: LevelType::Nonoverlapping,
                         table_infos: level_select_sst,
                     });
-
-                    task_input_size += input.total_file_size;
-                    task_file_count += input.total_file_count;
                 }
                 select_level_inputs.reverse();
 
@@ -747,7 +747,13 @@ pub mod tests {
 
             // Ensure we can pick a candidate and the returned size/count matches the tables chosen.
             assert_eq!(ret.input_levels.len(), 2);
-            assert_eq!(ret.total_file_count, 6);
+
+            let actual_file_count: usize = ret
+                .input_levels
+                .iter()
+                .map(|lvl| lvl.table_infos.len())
+                .sum();
+            assert_eq!(ret.total_file_count as usize, actual_file_count);
 
             let expect_size: u64 = ret
                 .input_levels
@@ -755,7 +761,7 @@ pub mod tests {
                 .flat_map(|lvl| lvl.table_infos.iter())
                 .map(|sst| sst.sst_size)
                 .sum();
-            assert!(ret.select_input_size >= expect_size);
+            assert_eq!(ret.select_input_size, expect_size);
         }
     }
 
