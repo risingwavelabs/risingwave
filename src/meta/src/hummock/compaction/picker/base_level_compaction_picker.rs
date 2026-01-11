@@ -195,11 +195,11 @@ impl LevelCompactionPicker {
             max_vnode_partition_idx = idx;
         }
 
-        let l0_select_tables_vec = non_overlap_sub_level_picker.pick_l0_multi_non_overlap_level(
+        let candidate_l0_plans = non_overlap_sub_level_picker.pick_l0_multi_non_overlap_level(
             &l0.sub_levels[..=max_vnode_partition_idx],
             &level_handlers[0],
         );
-        if l0_select_tables_vec.is_empty() {
+        if candidate_l0_plans.is_empty() {
             stats.skip_by_pending_files += 1;
             return None;
         }
@@ -207,7 +207,7 @@ impl LevelCompactionPicker {
         let mut skip_by_pending = false;
         let mut input_levels = vec![];
 
-        for input in l0_select_tables_vec {
+        for input in candidate_l0_plans {
             let l0_select_tables = input
                 .sstable_infos
                 .iter()

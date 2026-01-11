@@ -12,15 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::Write;
 use std::sync::Arc;
 
+use itertools::Itertools;
 use risingwave_hummock_sdk::append_sstable_info_to_string;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::level::Level;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_pb::hummock::LevelType;
 
-use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
+use crate::hummock::compaction::overlap_strategy::{OverlapInfo, OverlapStrategy};
 use crate::hummock::level_handler::LevelHandler;
 
 #[derive(Default, Debug)]
@@ -61,17 +63,11 @@ impl NonOverlapSubLevelPicker {
             });
         }
 
-        let non_overlapping_levels: Vec<(usize, &Level)> = l0
+        // Directly find the best non-overlapping level without allocating intermediate Vec
+        let level_idx = l0
             .iter()
             .enumerate()
             .filter(|(_, level)| level.level_type == LevelType::Nonoverlapping)
-            .collect();
-        if non_overlapping_levels.is_empty() {
-            return None;
-        }
-
-        let level_idx = non_overlapping_levels
-            .iter()
             .max_by(|(idx1, levels1), (idx2, levels2)| {
                 let non_pending1 = levels1
                     .table_infos
@@ -89,8 +85,7 @@ impl NonOverlapSubLevelPicker {
                     .then_with(|| levels1.table_infos.len().cmp(&levels2.table_infos.len()))
                     .then(idx2.cmp(idx1))
             })
-            .map(|(idx, _)| *idx)
-            .unwrap();
+            .map(|(idx, _)| idx)?;
 
         Some(&l0[level_idx].table_infos)
     }
@@ -393,11 +388,6 @@ impl NonOverlapSubLevelPicker {
     }
 
     fn verify_task_level_overlap(&self, ret: &SubLevelSstables, levels: &[Level]) {
-        use std::fmt::Write;
-
-        use itertools::Itertools;
-
-        use crate::hummock::compaction::overlap_strategy::OverlapInfo;
         let mut overlap_info: Option<Box<dyn OverlapInfo>> = None;
         for (level_idx, (_sub_level_id, ssts)) in ret.sstable_infos.iter().enumerate().rev() {
             if let Some(overlap_info) = overlap_info.as_mut() {
