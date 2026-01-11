@@ -18,12 +18,11 @@ use risingwave_common::config::meta::default::compaction_config;
 use risingwave_hummock_sdk::level::{InputLevel, Levels, OverlappingLevel};
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
-use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
 use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
 };
-use crate::hummock::compaction::picker::TrivialMovePicker;
+use crate::hummock::compaction::picker::{NonOverlapSubLevelPicker, TrivialMovePicker};
 use crate::hummock::compaction::{CompactionDeveloperConfig, create_overlap_strategy};
 use crate::hummock::level_handler::LevelHandler;
 
@@ -177,19 +176,18 @@ impl IntraCompactionPicker {
                     .unwrap_or(compaction_config::enable_optimize_l0_interval_selection()),
             );
 
-            let l0_select_tables_vec = non_overlap_sub_level_picker
-                .pick_l0_multi_non_overlap_level(
-                    &l0.sub_levels[idx..=max_vnode_partition_idx],
-                    level_handler,
-                );
+            let candidate_l0_plans = non_overlap_sub_level_picker.pick_l0_multi_non_overlap_level(
+                &l0.sub_levels[idx..=max_vnode_partition_idx],
+                level_handler,
+            );
 
-            if l0_select_tables_vec.is_empty() {
+            if candidate_l0_plans.is_empty() {
                 continue;
             }
 
-            let mut select_input_size = 0;
-            let mut total_file_count = 0;
-            for input in l0_select_tables_vec {
+            for input in candidate_l0_plans {
+                let mut task_input_size = 0;
+                let mut task_file_count = 0;
                 let mut select_level_inputs = Vec::with_capacity(input.sstable_infos.len());
                 let mut target_sub_level_id = None;
                 for (sub_level_id, level_select_sst) in input.sstable_infos {
@@ -207,16 +205,16 @@ impl IntraCompactionPicker {
                         table_infos: level_select_sst,
                     });
 
-                    select_input_size += input.total_file_size;
-                    total_file_count += input.total_file_count;
+                    task_input_size += input.total_file_size;
+                    task_file_count += input.total_file_count;
                 }
                 select_level_inputs.reverse();
 
                 let result = CompactionInput {
                     input_levels: select_level_inputs,
                     target_sub_level_id: target_sub_level_id.unwrap(),
-                    select_input_size,
-                    total_file_count: total_file_count as u64,
+                    select_input_size: task_input_size,
+                    total_file_count: task_file_count as u64,
                     ..Default::default()
                 };
 
@@ -708,6 +706,56 @@ pub mod tests {
             assert_eq!(5, ret2.input_levels[0].table_infos[0].sst_id);
             assert_eq!(10, ret2.input_levels[1].table_infos[0].sst_id);
             assert_eq!(2, ret2.input_levels[2].table_infos[0].sst_id);
+        }
+
+        {
+            // Two candidates exist; ensure size/count are not accumulated across candidates.
+            let l0 = generate_l0_nonoverlapping_multi_sublevels(vec![
+                vec![
+                    generate_table(1, 1, 0, 50, 1),    // seed 1
+                    generate_table(2, 1, 100, 150, 1), // seed 2
+                ],
+                vec![generate_table(3, 1, 0, 150, 1)], // overlaps both seeds
+            ]);
+            let levels = Levels {
+                l0,
+                levels: vec![generate_level(1, vec![generate_table(100, 1, 0, 1000, 1)])],
+                ..Default::default()
+            };
+            let levels_handler = [LevelHandler::new(0), LevelHandler::new(1)];
+            let config = Arc::new(
+                CompactionConfigBuilder::new()
+                    .level0_sub_level_compact_level_count(2)
+                    .level0_max_compact_file_number(2)
+                    .sub_level_max_compaction_bytes(500)
+                    .max_compaction_bytes(300) // single candidate fits; accumulated would exceed
+                    .build(),
+            );
+            let picker = IntraCompactionPicker::for_test(
+                config,
+                Arc::new(CompactionDeveloperConfig::default()),
+            );
+            let mut local_stats = LocalPickerStatistic::default();
+            let ret = picker
+                .pick_l0_intra(
+                    &levels.l0,
+                    &levels_handler[0],
+                    levels.l0.sub_levels[0].vnode_partition_count,
+                    &mut local_stats,
+                )
+                .unwrap();
+
+            // Ensure we can pick a candidate and the returned size/count matches the tables chosen.
+            assert_eq!(ret.input_levels.len(), 2);
+            assert_eq!(ret.total_file_count, 6);
+
+            let expect_size: u64 = ret
+                .input_levels
+                .iter()
+                .flat_map(|lvl| lvl.table_infos.iter())
+                .map(|sst| sst.sst_size)
+                .sum();
+            assert!(ret.select_input_size >= expect_size);
         }
     }
 

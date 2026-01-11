@@ -20,7 +20,7 @@ use risingwave_common::config::meta::default::compaction_config;
 use risingwave_hummock_sdk::level::{InputLevel, Level, Levels, OverlappingLevel};
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
-use super::min_overlap_compaction_picker::NonOverlapSubLevelPicker;
+use super::non_overlap_sub_level_picker::NonOverlapSubLevelPicker;
 use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LocalPickerStatistic,
     ValidationRuleType,
