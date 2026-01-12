@@ -778,9 +778,9 @@ impl StateStoreReadLog for HummockStorage {
                 return Ok(next_epoch);
             }
         }
-        let next_epoch_ret = ArcSwap::new(Arc::new(None));
+        let next_epoch_ret = Arc::new(ArcSwap::from_pointee(None));
         let inspect_fn = |version: &PinnedVersion| {
-            let next_epoch_ret_clone = ArcSwap::new(Arc::new(None));
+            let next_epoch_ret_clone = next_epoch_ret.clone();
             let table_change_log_manager = self.table_change_log_manager.clone();
             let max_epoch = version
                 .state_table_info
