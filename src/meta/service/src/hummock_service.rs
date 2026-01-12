@@ -690,7 +690,7 @@ impl HummockManagerService for HummockServiceImpl {
                 end_epoch_inclusive,
                 table_ids
                     .map(|t| t.table_ids.iter().map(|id| TableId::new(*id)).collect())
-                    .to_owned(),
+                    .clone(),
                 exclude_empty,
                 limit,
             )
