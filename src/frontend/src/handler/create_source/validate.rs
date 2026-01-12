@@ -234,7 +234,10 @@ pub fn validate_compatibility(
             // Build a random publication name with UUID to avoid conflicts between sources
             // e.g. "rw_publication_f9a3567e6dd54bf5900444c8b1c03815"
             let uuid = uuid::Uuid::new_v4();
-            props.insert("publication.name".into(), format!("rw_publication_{}", uuid.simple()));
+            props.insert(
+                "publication.name".into(),
+                format!("rw_publication_{}", uuid.simple()),
+            );
         }
         if !props.contains_key("publication.create.enable") {
             // Default auto create publication if doesn't exist
