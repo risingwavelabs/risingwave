@@ -1,0 +1,56 @@
+name: Trigger Homebrew bump
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Override RisingWave version (e.g. 2.5.1). Leave empty to use latest stable release.'
+        required: false
+        type: string
+
+jobs:
+  dispatch-homebrew-bump:
+    if: ${{ github.event_name == 'workflow_dispatch' || !github.event.release.prerelease }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve RisingWave version
+        id: version
+        run: |
+          if [ -n "${{ github.event.inputs.version }}" ]; then
+            echo "version=${{ github.event.inputs.version }}" >> $GITHUB_OUTPUT
+          else
+            echo "version=${{ github.event.release.tag_name }}" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Trigger homebrew-risingwave workflow
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.PR_TOKEN }}
+          script: |
+            const owner = "risingwavelabs";
+            const repo = "homebrew-risingwave";
+            const targetName = "bump risingwave";
+            const version = "${{ steps.version.outputs.version }}".replace(/^v/, "");
+
+            const workflows = await github.paginate(github.rest.actions.listRepoWorkflows, {
+              owner,
+              repo,
+            });
+
+            const workflow = workflows.find((wf) => wf.name === targetName);
+            if (!workflow) {
+              core.setFailed(`Workflow "${targetName}" not found in ${owner}/${repo}`);
+              return;
+            }
+
+            await github.rest.actions.createWorkflowDispatch({
+              owner,
+              repo,
+              workflow_id: workflow.id,
+              ref: workflow.default_branch || "main",
+              inputs: { version },
+            });
+
+            core.info(`Dispatched "${targetName}" with version ${version}`);
