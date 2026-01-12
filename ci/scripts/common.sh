@@ -23,10 +23,10 @@ export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef0123456789abcdef"
 export SLT_FAIL_FAST=true
 export SLT_KEEP_DB_ON_FAILURE=true
 export SLT_SHUTDOWN_TIMEOUT=10
-export LLVM_PROFILE_FILE="${REPO_ROOT}/target/risingwave-%p.profraw" # used both by executables generating profraw files and `cargo llvm-cov` to find them
 export CARGO_LLVM_COV=1
 export CARGO_LLVM_COV_SHOW_ENV=1
 export CARGO_LLVM_COV_TARGET_DIR="${REPO_ROOT}/target" # used to locate object files, should be same as `CARGO_TARGET_DIR`
+export LLVM_PROFILE_FILE="${CARGO_LLVM_COV_TARGET_DIR}/risingwave-%p.profraw" # used both by executables generating profraw files and `cargo llvm-cov` to find them
 
 unset LANG
 
