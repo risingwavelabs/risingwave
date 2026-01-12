@@ -17,7 +17,7 @@ use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::change_log::{TableChangeLog, TableChangeLogs};
+use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog, TableChangeLogs};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
     BranchedSstInfo, get_compaction_group_ids, get_table_compaction_group_id_mapping,
@@ -367,6 +367,59 @@ impl HummockManager {
                 })
                 .collect();
         Ok(())
+    }
+
+    pub async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> TableChangeLogs {
+        self.on_current_version_and_table_change_log(|_, table_change_logs| {
+            table_change_logs
+                .iter()
+                .filter_map(|(id, change_log)| {
+                    if let Some(table_filter) = &table_ids
+                        && !table_filter.contains(&id)
+                    {
+                        return None;
+                    }
+                    let filtered_change_logs = change_log
+                        .filter_epoch((
+                            start_epoch_inclusive.unwrap_or(0),
+                            end_epoch_inclusive.unwrap_or(u64::MAX),
+                        ))
+                        .filter(|change_log| {
+                            if exclude_empty
+                                && change_log.new_value.is_empty()
+                                && change_log.old_value.is_empty()
+                            {
+                                return false;
+                            }
+                            true
+                        })
+                        .take(limit.map(|l| l as usize).unwrap_or(usize::MAX))
+                        .map(|change_log| {
+                            if epoch_only {
+                                // TODO(ZW): review callsites checking for non-empty old_value and new_value fields.
+                                EpochNewChangeLog {
+                                    new_value: vec![],
+                                    old_value: vec![],
+                                    non_checkpoint_epochs: change_log.non_checkpoint_epochs.clone(),
+                                    checkpoint_epoch: change_log.checkpoint_epoch,
+                                }
+                            } else {
+                                change_log.clone()
+                            }
+                        });
+                    Some((id.to_owned(), TableChangeLog::new(filtered_change_logs)))
+                })
+                .collect()
+        })
+        .await
     }
 }
 
