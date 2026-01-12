@@ -7,7 +7,7 @@ use std::time::Duration;
 use anyhow::anyhow;
 use futures::future::{BoxFuture, Either, select};
 use futures::stream::StreamFuture;
-use futures::FutureExt;
+use futures::{FutureExt, TryStreamExt};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::must_match;
 use risingwave_pb::stream_plan;
@@ -613,9 +613,24 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
             let mut write_future_state =
                 WriteFuture::receive_from_upstream(input, initial_write_state);
             let mut write_done = false;
-            
+
             loop {
+                // Avoid a busy-loop when there's no buffered data to dispatch. In that case we
+                // should wait for upstream, but still exit promptly once upstream is done.
+                let consumer_idle = matches!(
+                    consumer_future_state,
+                    ConsumerFuture::ReadingChunk {
+                        read_future: ReadFuture::Idle,
+                        ..
+                    }
+                );
+                if write_done && barriers.is_empty() && buffer.buffer.is_empty() && consumer_idle {
+                    break;
+                }
+
                 let select_result = {
+                    let should_wait_for_upstream =
+                        barriers.is_empty() && buffer.buffer.is_empty() && consumer_idle;
                     let consumer_future = async {
                         if pause_stream
                             && barriers.is_empty()
@@ -624,6 +639,8 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                 ConsumerFuture::ReadingChunk { .. }
                             )
                         {
+                            pending().await
+                        } else if should_wait_for_upstream {
                             pending().await
                         } else {
                             consumer_future_state
@@ -637,7 +654,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                 .await
                         }
                     };
-                    futures::pin_mut!(consumer_future);
+                    pin_mut!(consumer_future);
                     // let write_future = write_future_state.next_event(&log_store_config.metrics);
                     let write_future = async {
                         if write_done {
@@ -646,7 +663,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                             write_future_state.next_event(&log_store_config.metrics).await
                         }
                     };
-                    futures::pin_mut!(write_future);
+                    pin_mut!(write_future);
                     let output = select(write_future, consumer_future).await;
                     drop_either_future(output)
                 };
@@ -809,16 +826,24 @@ mod tests {
     use std::sync::Arc;
 
     use futures::StreamExt;
+    use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::StreamChunkTestExt;
     use risingwave_common::bitmap::Bitmap;
+    use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::hash::VirtualNode;
+    use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_pb::stream_plan::{DispatcherType, PbDispatchOutputMapping};
     use risingwave_storage::memory::MemoryStateStore;
     use tokio::sync::mpsc::unbounded_channel;
+    use tokio::time::timeout;
 
     use super::*;
+    use crate::assert_stream_chunk_eq;
     use crate::common::log_store_impl::kv_log_store::KV_LOG_STORE_V2_INFO;
-    use crate::common::log_store_impl::kv_log_store::test_utils::gen_test_log_store_table;
+    use crate::common::log_store_impl::kv_log_store::test_utils::{
+        check_stream_chunk_eq, gen_test_log_store_table,
+    };
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
     use crate::executor::{
@@ -876,6 +901,9 @@ mod tests {
             chunk_size: 128,
             metrics: SyncedKvLogStoreMetrics::for_test(),
         };
+        let first_barrier = Barrier::new_test_barrier(test_epoch(1));
+        barrier_test_env.inject_barrier(&first_barrier, [actor_id]);
+        barrier_test_env.flush_all_events().await;
 
         let input = Executor::new(
             Default::default(),
@@ -899,9 +927,8 @@ mod tests {
 
         // Drive the executor: send the first barrier and ensure it is surfaced.
         let mut barrier_stream = Box::new(executor).execute();
-        let first_barrier = Barrier::new_test_barrier(test_epoch(1));
-        barrier_test_env.inject_barrier(&first_barrier, [actor_id]);
-        barrier_test_env.flush_all_events().await;
+        pin_mut!(barrier_stream);
+
         tx.send(Message::Barrier(first_barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
@@ -911,5 +938,160 @@ mod tests {
 
         // Downstream receiver is wired and ready for later assertions in follow-up tests.
         drop(down_rx);
+    }
+
+    /// Mirror `sync_kv_log_store::test_barrier_persisted_read`, but assert the dispatched output
+    /// order: chunk(1) -> chunk(2) -> barrier(2), while barrier(1) is surfaced via barrier stream.
+    #[tokio::test]
+    async fn test_barrier_chunk_ordering_in_dispatch() {
+        init_logger();
+
+        let actor_id = 4242.into();
+        let downstream_actor = 5252.into();
+
+        let barrier_test_env = LocalBarrierTestEnv::for_test().await;
+        let (tx, rx) = channel_for_test();
+
+        let (new_output_request_tx, new_output_request_rx) = unbounded_channel();
+        let (down_tx, mut down_rx) = channel_for_test();
+        new_output_request_tx
+            .send((downstream_actor, NewOutputRequest::Local(down_tx)))
+            .unwrap();
+
+        let dispatcher = stream_plan::Dispatcher {
+            r#type: DispatcherType::Simple as _,
+            dispatcher_id: 7,
+            downstream_actor_id: vec![downstream_actor],
+            output_mapping: PbDispatchOutputMapping::identical(2).into(),
+            ..Default::default()
+        };
+
+        let pk_info = &KV_LOG_STORE_V2_INFO;
+        let table = gen_test_log_store_table(pk_info);
+        let vnodes = Some(Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+        let serde = LogStoreRowSerde::new(&table, vnodes, pk_info);
+        let log_store_config = SyncLogStoreDispatchConfig {
+            table_id: table.id,
+            serde,
+            state_store: MemoryStateStore::new(),
+            // Big enough to avoid forced chunk flushes in this test.
+            max_buffer_size: 1024,
+            pause_duration_ms: Duration::from_millis(10),
+            aligned: false,
+            chunk_size: 1024,
+            metrics: SyncedKvLogStoreMetrics::for_test(),
+        };
+
+        // Inject the first barrier before subscribing, so the barrier worker has an actor state
+        // for `actor_id` to register the barrier sender.
+        let barrier1 = Barrier::new_test_barrier(test_epoch(1));
+        barrier_test_env.inject_barrier(&barrier1, [actor_id]);
+        barrier_test_env.flush_all_events().await;
+
+        let input_schema = Schema {
+            fields: vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Varchar),
+            ],
+        };
+        let input = Executor::new(
+            ExecutorInfo {
+                schema: input_schema,
+                stream_key: vec![0],
+                ..Default::default()
+            },
+            ReceiverExecutor::for_test(
+                actor_id,
+                rx,
+                barrier_test_env.local_barrier_manager.clone(),
+            )
+            .boxed(),
+        );
+
+        let executor = SyncLogStoreDispatchExecutor::new(
+            input,
+            new_output_request_rx,
+            vec![dispatcher],
+            &ActorContext::for_test(actor_id),
+            log_store_config,
+        )
+        .await
+        .unwrap();
+
+        let (barrier_out_tx, mut barrier_out_rx) = unbounded_channel();
+        let barrier_driver = tokio::spawn(async move {
+            let barrier_stream = Box::new(executor).execute();
+            futures::pin_mut!(barrier_stream);
+            while let Some(item) = barrier_stream.next().await {
+                barrier_out_tx.send(item).ok();
+            }
+        });
+
+        tx.send(Message::Barrier(barrier1.clone().into_dispatcher()).into())
+            .await
+            .unwrap();
+        let observed1 = timeout(Duration::from_secs(1), barrier_out_rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(observed1.epoch.curr, test_epoch(1));
+
+        // chunk(1), chunk(2)
+        let chunk_1 = StreamChunk::from_pretty(
+            "  I   T
+            +  5  10
+            +  6  10
+            +  8  10
+            +  9  10
+            + 10  11",
+        );
+        let chunk_2 = StreamChunk::from_pretty(
+            "  I   T
+            -  5  10
+            -  6  10
+            -  8  10
+            U- 10  11
+            U+ 10  10",
+        );
+        tx.send(Message::Chunk(chunk_1.clone()).into()).await.unwrap();
+        tx.send(Message::Chunk(chunk_2.clone()).into()).await.unwrap();
+
+        let msg = timeout(Duration::from_secs(1), down_rx.recv())
+            .await
+            .unwrap()
+            .expect("downstream should receive chunk(1)");
+        assert_stream_chunk_eq!(msg.as_chunk().unwrap(), chunk_1);
+
+        let msg = timeout(Duration::from_secs(1), down_rx.recv())
+            .await
+            .unwrap()
+            .expect("downstream should receive chunk(2)");
+        assert_stream_chunk_eq!(msg.as_chunk().unwrap(), chunk_2);
+
+        // barrier(2)
+        let barrier2 = Barrier::new_test_barrier(test_epoch(2));
+        barrier_test_env.inject_barrier(&barrier2, [actor_id]);
+        barrier_test_env.flush_all_events().await;
+        tx.send(Message::Barrier(barrier2.clone().into_dispatcher()).into())
+            .await
+            .unwrap();
+
+        let msg = timeout(Duration::from_secs(1), down_rx.recv())
+            .await
+            .unwrap()
+            .expect("downstream should receive barrier(2)");
+        let barriers = msg.as_barrier_batch().unwrap();
+        assert_eq!(barriers.len(), 1);
+        assert_eq!(barriers[0].epoch.curr, test_epoch(2));
+
+        let observed2 = timeout(Duration::from_secs(1), barrier_out_rx.recv())
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(observed2.epoch.curr, test_epoch(2));
+
+        barrier_driver.abort();
     }
 }
