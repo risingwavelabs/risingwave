@@ -1,31 +1,15 @@
 use sea_orm_migration::prelude::*;
 
-use crate::m20230908_072257_init::Object;
 use crate::utils::ColumnDefExt;
 
 #[derive(DeriveMigrationName)]
 pub struct Migration;
 
-fn complete_table_statement(this: &mut TableCreateStatement) -> TableCreateStatement {
-    if cfg!(test) {
-        return this.to_owned();
-    }
-    this.foreign_key(
-        &mut ForeignKey::create()
-            .name("FK_hummock_table_change_log_table_id")
-            .from(HummockTableChangeLog::Table, HummockTableChangeLog::TableId)
-            .to(Object::Table, Object::Oid)
-            .on_delete(ForeignKeyAction::Cascade)
-            .to_owned(),
-    )
-    .to_owned()
-}
-
 #[async_trait::async_trait]
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         manager
-            .create_table(complete_table_statement(
+            .create_table(
                 Table::create()
                     .table(HummockTableChangeLog::Table)
                     .if_not_exists()
@@ -58,8 +42,9 @@ impl MigrationTrait for Migration {
                         Index::create()
                             .col(HummockTableChangeLog::TableId)
                             .col(HummockTableChangeLog::CheckpointEpoch),
-                    ),
-            ))
+                    )
+                    .to_owned(),
+            )
             .await
     }
 
