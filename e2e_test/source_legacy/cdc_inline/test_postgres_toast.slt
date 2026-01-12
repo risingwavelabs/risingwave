@@ -154,3 +154,15 @@ drop table test;
 
 statement ok
 drop source s;
+
+
+system ok
+psql -c "create extension if not exists postgis;"
+
+
+system ok
+e2e_test/source_legacy/cdc_inline/test_postgis.rs
+----
+0101000020E610000055C1A8A44EE855C00E4FAF9465F04440
+0101000020E610000055C1A8A44EE855C00E4FAF9465F04440
+SRID: 4326
