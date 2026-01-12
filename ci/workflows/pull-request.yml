@@ -538,6 +538,7 @@ steps:
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 30
+    parallelism: 4
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
