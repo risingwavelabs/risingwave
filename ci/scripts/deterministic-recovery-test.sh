@@ -9,7 +9,7 @@ echo "--- Download artifacts"
 mkdir -p target/debug
 download-and-decompress-artifact risingwave_simulation target/debug/
 chmod +x ./target/debug/risingwave_simulation
-RW_SIM=target/debug/risingwave_simulation
+export RW_SIM=target/debug/risingwave_simulation
 
 export RUST_LOG="info,risingwave_meta::barrier::recovery=debug,\
 risingwave_meta::manager::catalog=debug,\

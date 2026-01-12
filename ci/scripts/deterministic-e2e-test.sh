@@ -9,7 +9,7 @@ echo "--- Download artifacts"
 mkdir -p target/debug
 download-and-decompress-artifact risingwave_simulation target/debug/
 chmod +x ./target/debug/risingwave_simulation
-RW_SIM=target/debug/risingwave_simulation
+export RW_SIM=target/debug/risingwave_simulation
 
 echo "--- Extract data for Kafka"
 pushd ./e2e_test/source_legacy/basic/scripts/
