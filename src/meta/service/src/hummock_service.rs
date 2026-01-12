@@ -25,6 +25,7 @@ use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::backup_restore::BackupManagerRef;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManagerRef;
+use risingwave_meta_model::TableId;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerService;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Event as RequestEvent;
@@ -667,6 +668,39 @@ impl HummockManagerService for HummockServiceImpl {
             .merge_compaction_group(req.left_group_id, req.right_group_id)
             .await?;
         Ok(Response::new(MergeCompactionGroupResponse {}))
+    }
+
+    async fn get_table_change_logs(
+        &self,
+        request: Request<GetTableChangeLogsRequest>,
+    ) -> Result<Response<GetTableChangeLogsResponse>, Status> {
+        let GetTableChangeLogsRequest {
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids,
+            exclude_empty,
+            limit,
+        } = request.into_inner();
+        let table_change_logs = self
+            .hummock_manager
+            .get_table_change_logs(
+                epoch_only,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids
+                    .map(|t| t.table_ids.iter().map(|id| TableId::new(*id)).collect())
+                    .clone(),
+                exclude_empty,
+                limit,
+            )
+            .await
+            .into_iter()
+            .map(|(i, l)| (i.as_raw_id(), l.to_protobuf()))
+            .collect();
+        Ok(Response::new(GetTableChangeLogsResponse {
+            table_change_logs,
+        }))
     }
 }
 

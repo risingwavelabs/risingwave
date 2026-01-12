@@ -19,12 +19,14 @@ use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo, PbTableChangeLog};
 use tracing::warn;
 
+use crate::HummockObjectId;
 use crate::sstable_info::SstableInfo;
+use crate::version::ObjectIdReader;
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct TableChangeLogCommon<T>(
     // older log at the front
-    VecDeque<EpochNewChangeLogCommon<T>>,
+    pub VecDeque<EpochNewChangeLogCommon<T>>,
 );
 
 impl<T> TableChangeLogCommon<T> {
@@ -54,19 +56,21 @@ impl<T> TableChangeLogCommon<T> {
             .iter()
             .flat_map(|epoch_change_log| epoch_change_log.epochs())
     }
-
-    pub(crate) fn change_log_into_iter(self) -> impl Iterator<Item = EpochNewChangeLogCommon<T>> {
-        self.0.into_iter()
-    }
-
-    pub(crate) fn change_log_iter_mut(
-        &mut self,
-    ) -> impl Iterator<Item = &mut EpochNewChangeLogCommon<T>> {
-        self.0.iter_mut()
-    }
 }
 
 pub type TableChangeLog = TableChangeLogCommon<SstableInfo>;
+pub type TableChangeLogs = HashMap<TableId, TableChangeLog>;
+
+impl TableChangeLog {
+    pub fn get_object_ids(&self) -> impl Iterator<Item = HummockObjectId> + '_ {
+        self.0.iter().flat_map(|c| {
+            c.old_value
+                .iter()
+                .chain(c.new_value.iter())
+                .map(|t| HummockObjectId::Sstable(t.object_id()))
+        })
+    }
+}
 
 #[derive(Debug, Clone, PartialEq)]
 pub struct EpochNewChangeLogCommon<T> {
@@ -219,21 +223,6 @@ impl<T> TableChangeLogCommon<T> {
             // all epochs are less than `epoch`
             Ok(None)
         }
-    }
-
-    /// Returns epochs where value is non-null and >= `min_epoch`.
-    pub fn get_non_empty_epochs(&self, min_epoch: u64, max_count: usize) -> Vec<u64> {
-        self.filter_epoch((min_epoch, u64::MAX))
-            .filter(|epoch_change_log| {
-                // Filter out empty change logs
-                let new_value_empty = epoch_change_log.new_value.is_empty();
-                let old_value_empty = epoch_change_log.old_value.is_empty();
-                !new_value_empty || !old_value_empty
-            })
-            .flat_map(|epoch_change_log| epoch_change_log.epochs())
-            .filter(|a| a >= &min_epoch)
-            .take(max_count)
-            .collect()
     }
 
     pub fn truncate(&mut self, truncate_epoch: u64) {
