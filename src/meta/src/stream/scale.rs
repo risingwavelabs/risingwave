@@ -958,6 +958,9 @@ impl GlobalStreamManager {
         // waiting for the first tick
         ticker.tick().await;
 
+        // waiting for the first tick
+        ticker.tick().await;
+
         let worker_nodes = self
             .metadata_manager
             .list_active_streaming_compute_nodes()
@@ -971,7 +974,7 @@ impl GlobalStreamManager {
 
         let mut previous_adaptive_parallelism_strategy = AdaptiveParallelismStrategy::default();
 
-        let mut should_trigger = false;
+        let mut should_trigger = true;
 
         loop {
             tokio::select! {
