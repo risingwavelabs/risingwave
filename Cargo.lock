@@ -8534,7 +8534,7 @@ dependencies = [
  "md-5",
  "parking_lot 0.12.5",
  "percent-encoding",
- "quick-xml 0.38.3",
+ "quick-xml 0.38.4",
  "rand 0.9.2",
  "reqwest 0.12.25",
  "ring 0.17.13",
@@ -8634,7 +8634,7 @@ dependencies = [
  "log",
  "md-5",
  "percent-encoding",
- "quick-xml 0.38.3",
+ "quick-xml 0.38.4",
  "reqsign",
  "reqwest 0.12.25",
  "serde",
@@ -10283,9 +10283,19 @@ dependencies = [
 
 [[package]]
 name = "quick-xml"
-version = "0.38.3"
+version = "0.38.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "42a232e7487fc2ef313d96dde7948e7a3c05101870d8985e4fd8d26aedd27b89"
+checksum = "b66c2058c55a409d601666cffe35f04333cf1013010882cec174a7467cd4e21c"
+dependencies = [
+ "memchr",
+ "serde",
+]
+
+[[package]]
+name = "quick-xml"
+version = "0.39.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "f2e3bf4aa9d243beeb01a7b3bc30b77cfe2c44e24ec02d751a7104a53c2c49a1"
 dependencies = [
  "memchr",
  "serde",
@@ -11924,7 +11934,7 @@ dependencies = [
  "prometheus",
  "prometheus-http-query",
  "prost 0.13.4",
- "quick-xml 0.38.3",
+ "quick-xml 0.39.0",
  "rand 0.9.2",
  "risingwave_batch",
  "risingwave_batch_executors",
