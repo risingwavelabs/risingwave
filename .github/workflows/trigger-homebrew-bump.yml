@@ -50,14 +50,43 @@ jobs:
               `https://github.com/${owner}/${repo}/actions/workflows/${workflow.path}`;
             core.info(`Workflow URL: ${workflowUrl}`);
 
+            const ref = workflow.default_branch || "main";
             const inputs = version ? { version } : {};
+            const dispatchTime = new Date();
             await github.rest.actions.createWorkflowDispatch({
               owner,
               repo,
               workflow_id: workflow.id,
-              ref: workflow.default_branch || "main",
+              ref,
               inputs,
             });
 
             const detail = version ? `version ${version}` : "latest stable release (no override)";
             core.info(`Dispatched "${targetName}" with ${detail}`);
+
+            const earliestTime = new Date(dispatchTime.getTime() - 60000);
+            const maxAttempts = 6;
+            const delayMs = 5000;
+            for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+              await new Promise((resolve) => setTimeout(resolve, delayMs));
+              const runs = await github.rest.actions.listWorkflowRuns({
+                owner,
+                repo,
+                workflow_id: workflow.id,
+                event: "workflow_dispatch",
+                branch: ref,
+                per_page: 5,
+              });
+              const run = runs.data.workflow_runs.find(
+                (candidate) => new Date(candidate.created_at) >= earliestTime,
+              );
+              if (run?.html_url) {
+                core.info(`Workflow run URL: ${run.html_url}`);
+                break;
+              }
+              if (attempt === maxAttempts) {
+                core.warning("Workflow run not found yet. Check Actions page later.");
+              } else {
+                core.info(`Waiting for workflow run... (${attempt}/${maxAttempts})`);
+              }
+            }
