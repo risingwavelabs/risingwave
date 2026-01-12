@@ -21,7 +21,9 @@ use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSi
 use risingwave_sqlparser::keywords::Keyword;
 use thiserror_ext::AsReport;
 
-use super::alter_utils::resolve_streaming_job_id_for_alter_parallelism;
+use super::alter_utils::{
+    resolve_streaming_job_id_for_alter, resolve_streaming_job_id_for_alter_parallelism,
+};
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::FragmentId;
 use crate::error::{ErrorCode, Result};
