@@ -7,9 +7,9 @@ system ok
 psql -c "
     DROP SCHEMA IF EXISTS test_pub CASCADE;
     DROP PUBLICATION IF EXISTS rw_test_publication;
-    
+
     CREATE SCHEMA test_pub;
-    
+
     CREATE TABLE test_pub.users (
         id int PRIMARY KEY,
         username varchar,
@@ -17,13 +17,13 @@ psql -c "
         password_hash varchar,
         created_at timestamp
     );
-    
-    INSERT INTO test_pub.users VALUES 
+
+    INSERT INTO test_pub.users VALUES
         (1, 'alice', 'alice@example.com', 'hash123', '2024-01-01 10:00:00'),
         (2, 'bob', 'bob@example.com', 'hash456', '2024-01-02 11:00:00');
-    
+
     -- Create partial publication with only 3 columns (PostgreSQL 15+)
-    CREATE PUBLICATION rw_test_publication 
+    CREATE PUBLICATION rw_test_publication
     FOR TABLE test_pub.users (id, username, email);
 "
 
@@ -69,7 +69,7 @@ drop source s1 cascade;
 sleep 1s
 
 # Test 2: Try to create source with same publication but 5 columns
-# CREATE SOURCE succeeds, but CREATE TABLE should FAIL 
+# CREATE SOURCE succeeds, but CREATE TABLE should FAIL
 # because the publication only covers 3 columns
 statement ok
 create source s2_fail with (
@@ -138,7 +138,7 @@ select id, username, email, password_hash from t2 order by id;
 # Insert new data to verify CDC is working
 system ok
 psql -c "
-    INSERT INTO test_pub.users VALUES 
+    INSERT INTO test_pub.users VALUES
         (3, 'charlie', 'charlie@example.com', 'hash789', '2024-01-03 12:00:00');
 "
 
