@@ -45,6 +45,10 @@ jobs:
               core.setFailed(`Workflow "${targetName}" not found in ${owner}/${repo}`);
               return;
             }
+            const workflowUrl =
+              workflow.html_url ||
+              `https://github.com/${owner}/${repo}/actions/workflows/${workflow.path}`;
+            core.info(`Workflow URL: ${workflowUrl}`);
 
             const inputs = version ? { version } : {};
             await github.rest.actions.createWorkflowDispatch({
