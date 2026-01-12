@@ -98,6 +98,14 @@ impl Metadata for ClusterMetadata {
     fn hummock_version(self) -> HummockVersion {
         self.hummock_version
     }
+
+    fn storage_url(&self) -> BackupResult<String> {
+        unreachable!("");
+    }
+
+    fn storage_directory(&self) -> BackupResult<String> {
+        unreachable!("");
+    }
 }
 
 /// For backward compatibility, never remove fields and only append new field.
