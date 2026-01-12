@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,8 +55,8 @@ use super::property::{
     Distribution, FunctionalDependencySet, MonotonicityMap, Order, WatermarkColumns,
 };
 use crate::error::{ErrorCode, Result};
-use crate::optimizer::ExpressionSimplifyRewriter;
 use crate::optimizer::property::StreamKind;
+use crate::optimizer::{ExpressionSimplifyRewriter, PlanVisitor};
 use crate::session::current::notice_to_user;
 use crate::utils::{PrettySerde, build_graph_from_pretty};
 
@@ -314,6 +314,12 @@ impl<C: ConventionMarker> Layer for PlanRef<C> {
 #[derive(Clone, Debug, Copy, Serialize, Hash, Eq, PartialEq, PartialOrd, Ord)]
 pub struct PlanNodeId(pub i32);
 
+impl PlanNodeId {
+    pub fn to_stream_node_operator_id(self) -> StreamNodeLocalOperatorId {
+        StreamNodeLocalOperatorId::new(self.0 as _)
+    }
+}
+
 /// A more sophisticated `Endo` taking into account of the DAG structure of `PlanRef`.
 /// In addition to `Endo`, one have to specify the `cached` function
 /// to persist transformed `LogicalShare` and their results,
@@ -556,6 +562,42 @@ impl LogicalPlanRef {
             let dyn_t = self.deref();
             dyn_t.predicate_pushdown(predicate, ctx)
         }
+    }
+
+    pub fn forbid_snapshot_backfill(&self) -> Option<String> {
+        struct ForbidSnapshotBackfill {
+            warning_msg: Option<String>,
+        }
+        impl LogicalPlanVisitor for ForbidSnapshotBackfill {
+            type Result = ();
+
+            type DefaultBehavior = impl DefaultBehavior<Self::Result>;
+
+            fn default_behavior() -> Self::DefaultBehavior {
+                DefaultValue
+            }
+
+            fn visit_logical_join(&mut self, plan: &LogicalJoin) -> Self::Result {
+                self.visit(plan.left());
+                self.visit(plan.right());
+                if self.warning_msg.is_none() && plan.should_be_temporal_join() {
+                    self.warning_msg =
+                        Some("snapshot backfill disabled due to temporal join".to_owned());
+                }
+            }
+
+            fn visit_logical_source(&mut self, plan: &LogicalSource) -> Self::Result {
+                if self.warning_msg.is_none() && plan.is_shared_source() {
+                    self.warning_msg = Some(format!(
+                        "snapshot backfill disabled due to using shared source {:?}",
+                        plan.core.catalog.as_ref().map(|c| &c.name)
+                    ));
+                }
+            }
+        }
+        let mut forbid_snapshot = ForbidSnapshotBackfill { warning_msg: None };
+        forbid_snapshot.visit(self.clone());
+        forbid_snapshot.warning_msg
     }
 }
 
@@ -892,7 +934,7 @@ impl dyn StreamPlanNode {
                 input,
                 identity: self.explain_myself_to_string(),
                 node_body: node,
-                operator_id: self.id().0 as _,
+                operator_id: self.id().to_stream_node_operator_id(),
                 stream_key: self
                     .stream_key()
                     .unwrap_or_default()
@@ -1172,6 +1214,7 @@ pub use logical_update::LogicalUpdate;
 pub use logical_values::LogicalValues;
 pub use logical_vector_search::LogicalVectorSearch;
 pub use logical_vector_search_lookup_join::LogicalVectorSearchLookupJoin;
+use risingwave_pb::id::StreamNodeLocalOperatorId;
 pub use stream_asof_join::StreamAsOfJoin;
 pub use stream_cdc_table_scan::StreamCdcTableScan;
 pub use stream_changelog::StreamChangeLog;
@@ -1224,7 +1267,9 @@ use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_rewriter::PlanCloner;
-use crate::optimizer::plan_visitor::ExprCorrelatedIdFinder;
+use crate::optimizer::plan_visitor::{
+    DefaultBehavior, DefaultValue, ExprCorrelatedIdFinder, LogicalPlanVisitor,
+};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, Condition, DynEq, DynHash, Endo, Layer, Visit};

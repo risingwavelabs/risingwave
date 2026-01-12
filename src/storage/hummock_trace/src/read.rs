@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -45,7 +45,7 @@ pub struct BincodeDeserializer;
 
 impl<R: Read> Deserializer<R> for BincodeDeserializer {
     fn deserialize(&self, reader: &mut R) -> Result<Record> {
-        let record = decode_from_std_read(reader, config::standard())?;
+        let record: Record = decode_from_std_read(reader, config::standard())?;
         Ok(record)
     }
 }

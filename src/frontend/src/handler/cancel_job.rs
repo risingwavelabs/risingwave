@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::JobIdents;
 
 use super::RwPgResponseBuilderExt;
-use super::util::execute_with_long_running_notification;
+use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse};
 
@@ -44,6 +44,7 @@ pub(super) async fn handle_cancel(
             },
             &session,
             "CANCEL JOBS",
+            LongRunningNotificationAction::SuggestRecover,
         )
         .await?
     } else {

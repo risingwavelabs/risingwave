@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,8 +31,9 @@ use risingwave_pb::stream_plan::SourceNode;
 use super::*;
 use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
-    BatchIcebergListExecutor, BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor,
-    IcebergListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+    BatchAdbcSnowflakeListExecutor, BatchIcebergListExecutor, BatchPosixFsListExecutor,
+    DummySourceExecutor, FsListExecutor, IcebergListExecutor, SourceExecutor,
+    SourceStateTableHandler, StreamSourceCore,
 };
 use crate::from_proto::source::is_full_reload_refresh;
 
@@ -262,6 +263,25 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                             barrier_receiver,
                             system_params,
                             source.rate_limit,
+                            params.local_barrier_manager.clone(),
+                            associated_table_id,
+                        )
+                        .boxed()
+                    } else if source
+                        .with_properties
+                        .get_connector()
+                        .map(|c| {
+                            c.eq_ignore_ascii_case(
+                                risingwave_connector::source::ADBC_SNOWFLAKE_CONNECTOR,
+                            )
+                        })
+                        .unwrap_or(false)
+                    {
+                        BatchAdbcSnowflakeListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            params.executor_stats.clone(),
+                            barrier_receiver,
                             params.local_barrier_manager.clone(),
                             associated_table_id,
                         )

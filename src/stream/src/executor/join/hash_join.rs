@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -530,6 +530,7 @@ impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
             let mut state = self.inner.peek_mut(key).expect("checked contains");
             CacheResult::Hit(state.take())
         } else {
+            self.metrics.lookup_miss_count += 1;
             tracing::trace!("miss cache for join key: {:?}", key);
             CacheResult::Miss
         }

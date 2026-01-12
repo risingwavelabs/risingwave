@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -187,6 +187,8 @@ impl From<&BuiltinView> for ViewCatalog {
             sql: val.sql.clone(),
             owner: DEFAULT_SUPER_USER_ID,
             properties: Default::default(),
+            created_at_epoch: None,
+            created_at_cluster_version: None,
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -215,7 +215,7 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
         let ssl_mode = self
             .properties
             .get("ssl.mode")
-            .and_then(|s| serde_json::from_value(serde_json::Value::String(s.clone())).ok())
+            .and_then(|s| s.parse().ok())
             .unwrap_or(SslMode::Preferred);
         let ssl_root_cert = self.properties.get("database.ssl.root.cert").cloned();
 
@@ -393,7 +393,7 @@ impl DebeziumSplitEnumerator<Mysql> {
         let ssl_mode = self
             .properties
             .get("ssl.mode")
-            .and_then(|s| serde_json::from_value(serde_json::Value::String(s.clone())).ok())
+            .and_then(|s| s.parse().ok())
             .unwrap_or(SslMode::Preferred);
 
         // Build MySQL connection pool with proper SSL configuration

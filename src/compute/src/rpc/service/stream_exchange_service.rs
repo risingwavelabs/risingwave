@@ -18,60 +18,28 @@ use std::sync::Arc;
 use either::Either;
 use futures::{Stream, StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
-use risingwave_batch::task::BatchManager;
 use risingwave_pb::id::FragmentId;
-use risingwave_pb::task_service::exchange_service_server::ExchangeService;
-use risingwave_pb::task_service::{
-    GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse, PbPermits, permits,
-};
+use risingwave_pb::task_service::stream_exchange_service_server::StreamExchangeService;
+use risingwave_pb::task_service::{GetStreamRequest, GetStreamResponse, PbPermits, permits};
 use risingwave_stream::executor::DispatcherMessageBatch;
 use risingwave_stream::executor::exchange::permit::{MessageWithPermits, Receiver};
 use risingwave_stream::task::LocalStreamManager;
-use thiserror_ext::AsReport;
-use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 
-use crate::rpc::service::exchange_metrics::ExchangeServiceMetrics;
+pub mod metrics;
+pub use metrics::{GLOBAL_STREAM_EXCHANGE_SERVICE_METRICS, StreamExchangeServiceMetrics};
 
-#[derive(Clone)]
-pub struct ExchangeServiceImpl {
-    batch_mgr: Arc<BatchManager>,
-    stream_mgr: LocalStreamManager,
-    metrics: Arc<ExchangeServiceMetrics>,
-}
-
-pub type BatchDataStream = ReceiverStream<std::result::Result<GetDataResponse, Status>>;
 pub type StreamDataStream = impl Stream<Item = std::result::Result<GetStreamResponse, Status>>;
 
+#[derive(Clone)]
+pub struct StreamExchangeServiceImpl {
+    stream_mgr: LocalStreamManager,
+    metrics: Arc<StreamExchangeServiceMetrics>,
+}
+
 #[async_trait::async_trait]
-impl ExchangeService for ExchangeServiceImpl {
-    type GetDataStream = BatchDataStream;
+impl StreamExchangeService for StreamExchangeServiceImpl {
     type GetStreamStream = StreamDataStream;
-
-    async fn get_data(
-        &self,
-        request: Request<GetDataRequest>,
-    ) -> std::result::Result<Response<Self::GetDataStream>, Status> {
-        let peer_addr = request
-            .remote_addr()
-            .ok_or_else(|| Status::unavailable("connection unestablished"))?;
-        let pb_task_output_id = request
-            .into_inner()
-            .task_output_id
-            .expect("Failed to get task output id.");
-        let (tx, rx) =
-            tokio::sync::mpsc::channel(self.batch_mgr.config().developer.receiver_channel_size);
-        if let Err(e) = self.batch_mgr.get_data(tx, peer_addr, &pb_task_output_id) {
-            error!(
-                %peer_addr,
-                error = %e.as_report(),
-                "Failed to serve exchange RPC"
-            );
-            return Err(e.into());
-        }
-
-        Ok(Response::new(ReceiverStream::new(rx)))
-    }
 
     #[define_opaque(StreamDataStream)]
     async fn get_stream(
@@ -126,14 +94,9 @@ impl ExchangeService for ExchangeServiceImpl {
     }
 }
 
-impl ExchangeServiceImpl {
-    pub fn new(
-        mgr: Arc<BatchManager>,
-        stream_mgr: LocalStreamManager,
-        metrics: Arc<ExchangeServiceMetrics>,
-    ) -> Self {
-        ExchangeServiceImpl {
-            batch_mgr: mgr,
+impl StreamExchangeServiceImpl {
+    pub fn new(stream_mgr: LocalStreamManager, metrics: Arc<StreamExchangeServiceMetrics>) -> Self {
+        Self {
             stream_mgr,
             metrics,
         }
@@ -141,7 +104,7 @@ impl ExchangeServiceImpl {
 
     #[try_stream(ok = GetStreamResponse, error = Status)]
     async fn get_stream_impl(
-        metrics: Arc<ExchangeServiceMetrics>,
+        metrics: Arc<StreamExchangeServiceMetrics>,
         peer_addr: SocketAddr,
         mut receiver: Receiver,
         add_permits_stream: impl Stream<Item = std::result::Result<permits::Value, tonic::Status>>,
@@ -164,6 +127,10 @@ impl ExchangeServiceImpl {
             },
         );
         pin_mut!(select_stream);
+
+        let exchange_frag_send_size_metrics = metrics
+            .stream_fragment_exchange_bytes
+            .with_label_values(&[&up_fragment_id, &down_fragment_id]);
 
         while let Some(r) = select_stream.try_next().await? {
             match r {
@@ -188,10 +155,7 @@ impl ExchangeServiceImpl {
 
                     yield response;
 
-                    metrics
-                        .stream_fragment_exchange_bytes
-                        .with_label_values(&[&up_fragment_id, &down_fragment_id])
-                        .inc_by(bytes as u64);
+                    exchange_frag_send_size_metrics.inc_by(bytes as u64);
                 }
             }
         }

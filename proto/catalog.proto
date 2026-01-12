@@ -25,6 +25,8 @@ message WatermarkDesc {
   uint32 watermark_idx = 1;
   // The expression to calculate the watermark value.
   expr.ExprNode expr = 2;
+  // Whether this watermark is used for TTL (`WITH TTL`).
+  bool with_ttl = 3;
 }
 
 enum SchemaRegistryNameStrategy {
@@ -161,7 +163,8 @@ message Source {
 enum SinkType {
   SINK_TYPE_UNSPECIFIED = 0;
   SINK_TYPE_APPEND_ONLY = 1;
-  SINK_TYPE_FORCE_APPEND_ONLY = 2;
+  // Deprecated. Use `append_only` + `ignore_delete` instead.
+  SINK_TYPE_FORCE_APPEND_ONLY = 2 [deprecated = true];
   SINK_TYPE_UPSERT = 3;
   SINK_TYPE_RETRACT = 4;
 }
@@ -228,6 +231,12 @@ message Sink {
   repeated plan_common.ColumnCatalog original_target_columns = 26;
 
   optional uint32 auto_refresh_schema_from_table = 27;
+
+  // Backward-compatible replacement for `SINK_TYPE_FORCE_APPEND_ONLY`.
+  // When set, the sink executor will drop DELETE messages and convert UPDATE messages to INSERT.
+  //
+  // Should not directly access this field. Use method `ignore_delete()` instead.
+  bool raw_ignore_delete = 28;
 }
 
 message Subscription {
@@ -477,10 +486,9 @@ message Table {
   optional uint64 initialized_at_epoch = 28;
   optional uint64 created_at_epoch = 29;
 
-  // This field is introduced in v1.2.0. It is used to indicate whether the
-  // table should use watermark_cache to avoid state cleaning as a performance
-  // optimization. In older versions we can just initialize without it.
-  bool cleaned_by_watermark = 30;
+  // Deprecated: reserved for compatibility with older streaming plans.
+  // Dynamic filter used to set this, but now carries this flag in its plan node body instead.
+  bool cleaned_by_watermark = 30 [deprecated = true];
 
   // Used to filter created / creating tables in meta.
   StreamJobStatus stream_job_status = 31;
@@ -537,8 +545,9 @@ message Table {
   optional Engine engine = 43;
 
   // Indicate the index of the watermark column in the primary key that should be cleaned.
-  // NOTICE: when it is "None", the watermark column should be the first column in the pk
-  optional int32 clean_watermark_index_in_pk = 44;
+  // NOTICE: when it is "None", the watermark column should be the first column in the pk.
+  // deprecated, use "clean_watermark_indices" instead. Only kept for backward compatibility.
+  optional int32 clean_watermark_index_in_pk = 44 [deprecated = true];
 
   // Whether the table supports manual refresh operation:
   // reload data from external source and emit messages based on the diff with current data.
@@ -551,6 +560,11 @@ message Table {
 
   reserved "refresh_state";
   reserved 48;
+
+  // Indices of watermark columns in all columns that should be used for state cleaning.
+  // This replaces clean_watermark_index_in_pk but is kept for backward compatibility.
+  // When set, this takes precedence over clean_watermark_index_in_pk.
+  repeated uint32 clean_watermark_indices = 49;
 
   // Per-table catalog version, used by schema change. `None` for internal
   // tables and tests. Not to be confused with the global catalog version for
@@ -586,6 +600,8 @@ message View {
   reserved "dependent_relations";
   // User-specified column names.
   repeated plan_common.Field columns = 9;
+  optional uint64 created_at_epoch = 10;
+  optional string created_at_cluster_version = 11;
 }
 
 message Schema {

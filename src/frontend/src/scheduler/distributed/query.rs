@@ -1,6 +1,6 @@
-// Copyright 2025 RisingWave Labs
-// Licensed under the Apache License, Version 2.0 (the "License");
+// Copyright 2022 RisingWave Labs
 //
+// Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
@@ -577,7 +577,6 @@ pub(crate) mod tests {
             watermark_columns: FixedBitSet::with_capacity(3),
             dist_key_in_pk: vec![],
             cardinality: Cardinality::unknown(),
-            cleaned_by_watermark: false,
             created_at_epoch: None,
             initialized_at_epoch: None,
             stream_job_status: StreamJobStatus::Creating,
@@ -591,6 +590,7 @@ pub(crate) mod tests {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
             vector_index_info: None,
             cdc_table_type: None,
         };

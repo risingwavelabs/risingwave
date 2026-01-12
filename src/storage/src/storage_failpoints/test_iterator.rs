@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -407,8 +407,10 @@ async fn test_failpoints_compactor_iterator_recreate() {
     let mut stats = StoreLocalStatistic::default();
 
     let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
+    let block_metas_range = 0..table.meta.block_metas.len();
     let mut sstable_iter = SstableStreamIterator::new(
-        table.meta.block_metas.clone(),
+        table,
+        block_metas_range,
         info,
         &stats,
         Arc::new(TaskProgress::default()),

@@ -16,12 +16,13 @@ use core::num::NonZeroU64;
 use std::collections::BTreeMap;
 
 use anyhow::anyhow;
+use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
-use sea_orm::DatabaseConnection;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
@@ -39,8 +40,9 @@ use crate::sink::remote::CoordinatedRemoteSinkWriter;
 use crate::sink::snowflake_redshift::{AugmentedChunk, SnowflakeRedshiftSinkS3Writer};
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
-    Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkCommitCoordinator,
-    SinkCommittedEpochSubscriber, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
+    SinkWriterMetrics, SinkWriterParam,
 };
 
 pub const SNOWFLAKE_SINK_V2: &str = "snowflake_v2";
@@ -428,7 +430,6 @@ impl TryFrom<SinkParam> for SnowflakeV2Sink {
 }
 
 impl Sink for SnowflakeV2Sink {
-    type Coordinator = SnowflakeSinkCommitter;
     type LogSinker = CoordinatedLogSinker<SnowflakeSinkWriter>;
 
     const SINK_NAME: &'static str = SNOWFLAKE_SINK_V2;
@@ -492,16 +493,15 @@ impl Sink for SnowflakeV2Sink {
 
     async fn new_coordinator(
         &self,
-        _db: DatabaseConnection,
         _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    ) -> Result<Self::Coordinator> {
+    ) -> Result<SinkCommitCoordinator> {
         let coordinator = SnowflakeSinkCommitter::new(
             self.config.clone(),
             &self.schema,
             &self.pk_indices,
             self.is_append_only,
         )?;
-        Ok(coordinator)
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -740,38 +740,49 @@ impl SnowflakeSinkCommitter {
 }
 
 #[async_trait]
-impl SinkCommitCoordinator for SnowflakeSinkCommitter {
-    async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
+impl SinglePhaseCommitCoordinator for SnowflakeSinkCommitter {
+    async fn init(&mut self) -> Result<()> {
         if let Some(client) = &self.client {
             // Todo: move this to validate
             client.execute_create_pipe().await?;
             client.execute_create_merge_into_task().await?;
         }
-        Ok(None)
+        Ok(())
     }
 
-    async fn commit(
-        &mut self,
-        _epoch: u64,
-        _metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
-    ) -> Result<()> {
+    async fn commit_data(&mut self, _epoch: u64, _metadata: Vec<SinkMetadata>) -> Result<()> {
         let client = self.client.as_mut().ok_or_else(|| {
             SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
         })?;
-        client.execute_flush_pipe().await?;
+        client.execute_flush_pipe().await
+    }
 
-        if let Some(add_columns) = add_columns {
-            client
-                .execute_alter_add_columns(
-                    &add_columns
-                        .iter()
-                        .map(|f| (f.name.clone(), f.data_type.to_string()))
-                        .collect::<Vec<_>>(),
-                )
-                .await?;
-        }
-        Ok(())
+    async fn commit_schema_change(
+        &mut self,
+        _epoch: u64,
+        schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        use risingwave_pb::stream_plan::sink_schema_change::PbOp as SinkSchemaChangeOp;
+        let schema_change_op = schema_change
+            .op
+            .ok_or_else(|| SinkError::Coordinator(anyhow!("Invalid schema change operation")))?;
+        let SinkSchemaChangeOp::AddColumns(add_columns) = schema_change_op else {
+            return Err(SinkError::Coordinator(anyhow!(
+                "Only AddColumns schema change is supported for Snowflake sink"
+            )));
+        };
+        let client = self.client.as_mut().ok_or_else(|| {
+            SinkError::Config(anyhow!("Snowflake sink committer is not initialized."))
+        })?;
+        client
+            .execute_alter_add_columns(
+                &add_columns
+                    .fields
+                    .into_iter()
+                    .map(|f| (f.name, DataType::from(f.data_type.unwrap()).to_string()))
+                    .collect_vec(),
+            )
+            .await
     }
 }
 

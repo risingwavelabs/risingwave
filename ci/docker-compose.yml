@@ -15,8 +15,12 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+    volumes:
+      - ./postgres-conf/00-setup-ssl-user.sh:/docker-entrypoint-initdb.d/00-setup-ssl-user.sh
+      - ./postgres-conf/entrypoint-wrapper.sh:/entrypoint-wrapper.sh
+    entrypoint: ["/bin/sh", "/entrypoint-wrapper.sh"]
     command:
-      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=50", "-c", "max_wal_senders=20"]
+      ["postgres", "-c", "wal_level=logical", "-c", "max_replication_slots=50", "-c", "max_wal_senders=20", "-c", "ssl=on", "-c", "ssl_cert_file=/etc/postgresql/server.crt", "-c", "ssl_key_file=/etc/postgresql/server.key"]
 
   mysql:
     image: mysql:8.0

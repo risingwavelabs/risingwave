@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -324,7 +324,9 @@ impl StreamingJob {
 
     // Check whether we should notify the FE about the `CREATING` catalog of this job.
     pub fn should_notify_creating(&self) -> bool {
-        self.is_materialized_view() || matches!(self.create_type(), CreateType::Background)
+        self.is_materialized_view()
+            || self.is_sink()
+            || matches!(self.create_type(), CreateType::Background)
     }
 
     pub fn is_sink_into_table(&self) -> bool {

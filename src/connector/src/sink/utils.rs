@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -38,18 +38,13 @@ pub(crate) mod dummy {
 
     use anyhow::anyhow;
     use phf::{Set, phf_set};
-    use risingwave_common::catalog::Field;
-    use risingwave_pb::connector_service::SinkMetadata;
-    use sea_orm::DatabaseConnection;
     use tokio::sync::mpsc::UnboundedSender;
 
     use crate::connector_common::IcebergSinkCompactionUpdate;
     use crate::enforce_secret::EnforceSecret;
     use crate::error::ConnectorResult;
     use crate::sink::prelude::*;
-    use crate::sink::{
-        LogSinker, SinkCommitCoordinator, SinkCommittedEpochSubscriber, SinkLogReader,
-    };
+    use crate::sink::{LogSinker, SinkCommitCoordinator, SinkLogReader};
 
     #[allow(dead_code)]
     pub fn err_feature_not_enabled(sink_name: &'static str) -> SinkError {
@@ -66,25 +61,6 @@ pub(crate) mod dummy {
     }
 
     /// A dummy coordinator that always returns an error.
-    #[allow(dead_code)]
-    pub struct FeatureNotEnabledCoordinator<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
-    #[async_trait::async_trait]
-    impl<S: FeatureNotEnabledSinkMarker> SinkCommitCoordinator for FeatureNotEnabledCoordinator<S> {
-        async fn init(&mut self, _subscriber: SinkCommittedEpochSubscriber) -> Result<Option<u64>> {
-            Err(err_feature_not_enabled(S::SINK_NAME))
-        }
-
-        async fn commit(
-            &mut self,
-            _epoch: u64,
-            _metadata: Vec<SinkMetadata>,
-            _add_columns: Option<Vec<Field>>,
-        ) -> Result<()> {
-            Err(err_feature_not_enabled(S::SINK_NAME))
-        }
-    }
-
-    /// A dummy log sinker that always returns an error.
     #[allow(dead_code)]
     pub struct FeatureNotEnabledLogSinker<S: FeatureNotEnabledSinkMarker>(PhantomData<S>);
     #[async_trait::async_trait]
@@ -127,7 +103,6 @@ pub(crate) mod dummy {
     }
 
     impl<S: FeatureNotEnabledSinkMarker> Sink for FeatureNotEnabledSink<S> {
-        type Coordinator = FeatureNotEnabledCoordinator<S>;
         type LogSinker = FeatureNotEnabledLogSinker<S>;
 
         const SINK_NAME: &'static str = S::SINK_NAME;
@@ -150,9 +125,8 @@ pub(crate) mod dummy {
 
         async fn new_coordinator(
             &self,
-            _db: DatabaseConnection,
             _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-        ) -> Result<Self::Coordinator> {
+        ) -> Result<SinkCommitCoordinator> {
             Err(err_feature_not_enabled(S::SINK_NAME))
         }
     }

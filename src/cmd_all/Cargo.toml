@@ -32,7 +32,13 @@ rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
 openssl-vendored = ["workspace-config/openssl-vendored"]
 udf = ["risingwave_expr_impl/udf"]
 fips = ["workspace-config/fips"]
-all-connectors = ["risingwave_connector/all-sinks", "risingwave_connector/all-sources"]
+all-connectors = [
+    "risingwave_connector/all-sinks",
+    "risingwave_connector/all-sources",
+    "risingwave_compute/all-sources",
+    "risingwave_frontend/all-sources",
+]
+datafusion = ["risingwave_frontend/datafusion"]
 
 [dependencies]
 clap = { workspace = true }

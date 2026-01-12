@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use prost_011::Message as _;
 use pulsar::consumer::Message;
-use pulsar_prost::Message as PulsarProstMessage;
 
 use crate::source::{SourceMessage, SourceMeta};
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -182,6 +182,7 @@ where
                     match self.wait_init_notification().await {
                         Err(err) => {
                             tracing::warn!(error = %err.as_report(), "Receives meta's notification err");
+                            tokio::time::sleep(RE_SUBSCRIBE_RETRY_INTERVAL).await;
                             continue;
                         }
                         _ => {

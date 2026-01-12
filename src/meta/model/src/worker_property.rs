@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,6 +28,7 @@ pub struct Model {
     pub is_unschedulable: bool,
     pub internal_rpc_host_addr: Option<String>,
     pub resource_group: Option<String>,
+    pub is_iceberg_compactor: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]

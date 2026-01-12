@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -261,6 +261,7 @@ impl Binder {
             .map(|order_by_expr| {
                 self.bind_order_by_expr_in_query(
                     order_by_expr,
+                    &body,
                     &name_to_index,
                     &mut extra_order_exprs,
                     visible_output_num,
@@ -308,11 +309,23 @@ impl Binder {
             asc,
             nulls_first,
         }: &OrderByExpr,
+        body: &BoundSetExpr,
         name_to_index: &HashMap<String, usize>,
         extra_order_exprs: &mut Vec<ExprImpl>,
         visible_output_num: usize,
     ) -> Result<ColumnOrder> {
         let order_type = OrderType::from_bools(*asc, *nulls_first);
+
+        // If the query body is a simple `SELECT`, we can reuse an existing select item by
+        // expression equality, instead of always appending a new hidden column for ORDER BY.
+        //
+        // This is only safe for pure expressions. For example, `ORDER BY random()` must not be
+        // rewritten to reuse `SELECT random()` because they should be evaluated independently.
+        let select_items_for_match = match body {
+            BoundSetExpr::Select(s) => Some(&s.select_items[..]),
+            _ => None,
+        };
+
         let column_index = match expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => {
                 match *index != usize::MAX {
@@ -337,8 +350,17 @@ impl Binder {
                 }
             },
             expr => {
-                extra_order_exprs.push(self.bind_expr(expr)?);
-                visible_output_num + extra_order_exprs.len() - 1
+                let bound_expr = self.bind_expr(expr)?;
+
+                if bound_expr.is_pure()
+                    && let Some(select_items) = select_items_for_match
+                    && let Some(existing_idx) = select_items.iter().position(|e| e == &bound_expr)
+                {
+                    existing_idx
+                } else {
+                    extra_order_exprs.push(bound_expr);
+                    visible_output_num + extra_order_exprs.len() - 1
+                }
             }
         };
         Ok(ColumnOrder::new(column_index, order_type))

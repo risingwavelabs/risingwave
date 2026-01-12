@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -717,7 +717,7 @@ impl StateStoreImpl {
                         .with_capacity(opts.meta_file_cache_capacity_mb * MB)
                         .with_throttle(opts.meta_file_cache_throttle.clone())
                         .build()
-                        .map_err(HummockError::foyer_io_error)?;
+                        .map_err(HummockError::foyer_error)?;
                     let engine_builder = BlockEngineBuilder::new(device)
                         .with_block_size(opts.meta_file_cache_file_capacity_mb * MB)
                         .with_indexer_shards(opts.meta_file_cache_indexer_shards)
@@ -732,7 +732,11 @@ impl StateStoreImpl {
                         .with_eviction_pickers(vec![Box::new(FifoPicker::new(
                             opts.meta_file_cache_fifo_probation_ratio,
                         ))]);
-                    builder = builder.with_engine_config(engine_builder);
+                    builder = builder
+                        .with_engine_config(engine_builder)
+                        .with_recover_mode(opts.meta_file_cache_recover_mode)
+                        .with_compression(opts.meta_file_cache_compression)
+                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone());
                 }
             }
 
@@ -763,7 +767,7 @@ impl StateStoreImpl {
                         .with_capacity(opts.data_file_cache_capacity_mb * MB)
                         .with_throttle(opts.data_file_cache_throttle.clone())
                         .build()
-                        .map_err(HummockError::foyer_io_error)?;
+                        .map_err(HummockError::foyer_error)?;
                     let engine_builder = BlockEngineBuilder::new(device)
                         .with_block_size(opts.data_file_cache_file_capacity_mb * MB)
                         .with_indexer_shards(opts.data_file_cache_indexer_shards)
@@ -778,7 +782,11 @@ impl StateStoreImpl {
                         .with_eviction_pickers(vec![Box::new(FifoPicker::new(
                             opts.data_file_cache_fifo_probation_ratio,
                         ))]);
-                    builder = builder.with_engine_config(engine_builder);
+                    builder = builder
+                        .with_engine_config(engine_builder)
+                        .with_recover_mode(opts.data_file_cache_recover_mode)
+                        .with_compression(opts.data_file_cache_compression)
+                        .with_runtime_options(opts.data_file_cache_runtime_config.clone());
                 }
             }
 
@@ -840,6 +848,7 @@ impl StateStoreImpl {
                     recent_filter,
                     state_store_metrics: state_store_metrics.clone(),
                     use_new_object_prefix_strategy,
+                    skip_bloom_filter_in_serde: opts.sst_skip_bloom_filter_in_serde,
 
                     meta_cache,
                     block_cache,

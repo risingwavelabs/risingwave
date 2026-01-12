@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_common::catalog::ICEBERG_SINK_PREFIX;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
-use super::util::execute_with_long_running_notification;
+use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::Result;
@@ -72,6 +72,7 @@ pub async fn handle_drop_sink(
         catalog_writer.drop_sink(sink_id, cascade),
         &session,
         "DROP SINK",
+        LongRunningNotificationAction::SuggestRecover,
     )
     .await?;
 

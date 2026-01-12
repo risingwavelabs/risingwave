@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::id::JobId;
+use sea_orm::ConnectionTrait;
 
 use super::*;
 use crate::controller::utils::{
@@ -149,6 +150,18 @@ impl CatalogController {
         job_ids: impl Iterator<Item = JobId>,
     ) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
+        self.get_user_created_table_by_ids_in_txn(&inner.db, job_ids)
+            .await
+    }
+
+    pub async fn get_user_created_table_by_ids_in_txn<C>(
+        &self,
+        txn: &C,
+        job_ids: impl Iterator<Item = JobId>,
+    ) -> MetaResult<Vec<PbTable>>
+    where
+        C: ConnectionTrait,
+    {
         let table_objs = Table::find()
             .find_also_related(Object)
             .filter(
@@ -156,13 +169,12 @@ impl CatalogController {
                     .is_in(job_ids.map(|job_id| job_id.as_mv_table_id()).collect_vec())
                     .and(table::Column::TableType.eq(TableType::Table)),
             )
-            .all(&inner.db)
+            .all(txn)
             .await?;
-        let tables = table_objs
+        Ok(table_objs
             .into_iter()
             .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
-            .collect();
-        Ok(tables)
+            .collect())
     }
 
     pub async fn get_table_by_ids(
@@ -207,10 +219,22 @@ impl CatalogController {
 
     pub async fn get_table_incoming_sinks(&self, table_id: TableId) -> MetaResult<Vec<PbSink>> {
         let inner = self.inner.read().await;
+        self.get_table_incoming_sinks_in_txn(&inner.db, table_id)
+            .await
+    }
+
+    pub async fn get_table_incoming_sinks_in_txn<C>(
+        &self,
+        txn: &C,
+        table_id: TableId,
+    ) -> MetaResult<Vec<PbSink>>
+    where
+        C: ConnectionTrait,
+    {
         let sink_objs = Sink::find()
             .find_also_related(Object)
             .filter(sink::Column::TargetTable.eq(table_id))
-            .all(&inner.db)
+            .all(txn)
             .await?;
         Ok(sink_objs
             .into_iter()
@@ -505,6 +529,27 @@ impl CatalogController {
         Ok(job_parallelism)
     }
 
+    pub async fn get_job_parallelisms(
+        &self,
+        streaming_job_id: JobId,
+    ) -> MetaResult<(StreamingParallelism, Option<StreamingParallelism>)> {
+        let inner = self.inner.read().await;
+
+        let (job_parallelism, backfill_parallelism): (
+            StreamingParallelism,
+            Option<StreamingParallelism>,
+        ) = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .column(streaming_job::Column::Parallelism)
+            .column(streaming_job::Column::BackfillParallelism)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+
+        Ok((job_parallelism, backfill_parallelism))
+    }
+
     pub async fn get_fragment_streaming_job_id(
         &self,
         fragment_id: FragmentId,
@@ -615,7 +660,18 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let result = fetch_streaming_job_extra_info(&txn, job_ids).await?;
-        Ok(result)
+        self.get_streaming_job_extra_info_in_txn(&txn, job_ids)
+            .await
+    }
+
+    pub async fn get_streaming_job_extra_info_in_txn<C>(
+        &self,
+        txn: &C,
+        job_ids: Vec<JobId>,
+    ) -> MetaResult<HashMap<JobId, StreamingJobExtraInfo>>
+    where
+        C: ConnectionTrait,
+    {
+        fetch_streaming_job_extra_info(txn, job_ids).await
     }
 }

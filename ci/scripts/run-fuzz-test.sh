@@ -6,6 +6,40 @@ set -euo pipefail
 export LOGDIR=.risingwave/log
 export RUST_LOG=info
 
+backup_existing_logs() {
+    local dest="$1"
+    echo "backing up ${dest}"
+    if [[ ! -d "${LOGDIR}" ]]; then
+        return
+    fi
+    mkdir -p "${dest}"
+    while IFS= read -r -d '' entry; do
+        cp "${entry}" "${dest}/"
+        echo "copying ${entry} to ${dest}"
+    done < <(find "${LOGDIR}" -mindepth 1 -maxdepth 1 -print0)
+}
+
+restore_preserved_logs() {
+    local src="${1:-}"
+    local prefix="${2:-}"
+    if [[ -z "${src}" || -z "${prefix}" ]]; then
+        echo "restore_preserved_logs requires src and prefix" >&2
+        return 1
+    fi
+    echo "restoring ${src}"
+    if [[ ! -d "${src}" ]]; then
+        return
+    fi
+    mkdir -p "${LOGDIR}"
+    while IFS= read -r -d '' entry; do
+        local name dest_name
+        name=$(basename "${entry}")
+        dest_name="${prefix}-${name}"
+        mv "${entry}" "${LOGDIR}/${dest_name}"
+        echo "moving ${entry} back to ${LOGDIR}/${dest_name}"
+    done < <(find "${src}" -mindepth 1 -maxdepth 1 -print0)
+}
+
 if [[ $RUN_SQLSMITH_FRONTEND -eq "1" ]]; then
     echo "--- Run sqlsmith frontend tests"
     NEXTEST_PROFILE=ci cargo nextest run --package risingwave_sqlsmith --features "enable_sqlsmith_unit_test"
@@ -60,8 +94,12 @@ if [[ "$RUN_SQLSMITH" -eq "1" ]]; then
         echo "Fuzzing failed, please look at the artifacts fuzzing.log and error.sql.log for more details"
         extract_error_sql $LOGDIR/fuzzing.log
         echo "--- Running reducer on failing queries"
+        preserved_dir=$(mktemp -d "${TMPDIR:-/tmp}/rw-preserved.XXXXXX")
+        backup_existing_logs "${preserved_dir}"
+        trap 'restore_preserved_logs "${preserved_dir}" reducer-prev' EXIT
+
         ./target/debug/sqlsmith-reducer \
-            --input-file $LOGDIR/error.sql.log \
+            --input-file ${preserved_dir}/error.sql.log \
             --output-file $LOGDIR/error.sql.shrunk.log \
             --run-rw-cmd './risedev k && ./risedev clean-data && ./risedev ci-start ci-3cn-1fe' \
             > "$LOGDIR/reducer.log" 2>&1

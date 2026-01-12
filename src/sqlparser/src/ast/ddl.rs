@@ -281,6 +281,8 @@ pub enum AlterSourceOperation {
     ResetConfig {
         keys: Vec<ObjectName>,
     },
+    /// `RESET` - Reset CDC source offset to latest
+    ResetSource,
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -295,6 +297,7 @@ pub enum AlterFunctionOperation {
 pub enum AlterConnectionOperation {
     SetSchema { new_schema_name: ObjectName },
     ChangeOwner { new_owner_name: Ident },
+    AlterConnectorProps { alter_props: Vec<SqlOption> },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -641,6 +644,9 @@ impl fmt::Display for AlterSourceOperation {
             AlterSourceOperation::ResetConfig { keys } => {
                 write!(f, "RESET CONFIG ({})", display_comma_separated(keys))
             }
+            AlterSourceOperation::ResetSource => {
+                write!(f, "RESET")
+            }
             AlterSourceOperation::AlterConnectorProps { alter_props } => {
                 write!(
                     f,
@@ -670,6 +676,13 @@ impl fmt::Display for AlterConnectionOperation {
             }
             AlterConnectionOperation::ChangeOwner { new_owner_name } => {
                 write!(f, "OWNER TO {new_owner_name}")
+            }
+            AlterConnectionOperation::AlterConnectorProps { alter_props } => {
+                write!(
+                    f,
+                    "CONNECTOR WITH ({})",
+                    display_comma_separated(alter_props)
+                )
             }
         }
     }
@@ -745,11 +758,17 @@ impl fmt::Display for AlterFragmentOperation {
 pub struct SourceWatermark {
     pub column: Ident,
     pub expr: Expr,
+    /// Whether `WITH TTL` is specified.
+    pub with_ttl: bool,
 }
 
 impl fmt::Display for SourceWatermark {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "WATERMARK FOR {} AS {}", self.column, self.expr,)
+        write!(f, "WATERMARK FOR {} AS {}", self.column, self.expr,)?;
+        if self.with_ttl {
+            write!(f, " WITH TTL")?;
+        }
+        Ok(())
     }
 }
 

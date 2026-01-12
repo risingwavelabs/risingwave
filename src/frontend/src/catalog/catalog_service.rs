@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -182,6 +182,8 @@ pub trait CatalogWriter: Send + Sync {
     async fn drop_view(&self, view_id: ViewId, cascade: bool) -> Result<()>;
 
     async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<()>;
+
+    async fn reset_source(&self, source_id: SourceId) -> Result<()>;
 
     async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()>;
 
@@ -535,6 +537,11 @@ impl CatalogWriter for CatalogWriterImpl {
 
     async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<()> {
         let version = self.meta_client.drop_source(source_id, cascade).await?;
+        self.wait_version(version).await
+    }
+
+    async fn reset_source(&self, source_id: SourceId) -> Result<()> {
+        let version = self.meta_client.reset_source(source_id).await?;
         self.wait_version(version).await
     }
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -429,6 +429,7 @@ mod runner {
                     "get error from control stream",
                     "cluster is under recovering",
                     "streaming vnode mapping has not been initialized",
+                    "streaming vnode mapping not found",
                 ];
                 let should_retry = i < MAX_RETRY
                     && allowed_errs

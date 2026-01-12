@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -266,7 +266,7 @@ impl TableDistribution {
 }
 
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
-fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
+pub fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
     let is_set = vnodes.is_set(vnode.to_index());
 
     if !is_set {

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,13 +18,13 @@ use std::task::{Context, Poll};
 use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
+use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
 
 use super::permit::Receiver;
 use crate::executor::prelude::*;
 use crate::executor::{
-    BarrierInner, DispatcherBarrier, DispatcherMessage, DispatcherMessageBatch,
-    DispatcherMessageStreamItem,
+    BarrierInner, DispatcherMessage, DispatcherMessageBatch, DispatcherMessageStreamItem,
 };
 use crate::task::{FragmentId, LocalBarrierManager, UpDownActorIds, UpDownFragmentIds};
 
@@ -75,16 +75,6 @@ pub(crate) fn assert_equal_dispatcher_barrier<M1, M2>(
 ) {
     assert_eq!(first.epoch, second.epoch);
     assert_eq!(first.kind, second.kind);
-}
-
-pub(crate) fn apply_dispatcher_barrier(
-    recv_barrier: &mut Barrier,
-    dispatcher_barrier: DispatcherBarrier,
-) {
-    assert_equal_dispatcher_barrier(recv_barrier, &dispatcher_barrier);
-    recv_barrier
-        .passed_actors
-        .extend(dispatcher_barrier.passed_actors);
 }
 
 impl LocalInput {
@@ -172,6 +162,7 @@ impl RemoteInput {
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
+        actor_config: Arc<StreamingConfig>,
     ) -> StreamExecutorResult<Self> {
         let actor_id = up_down_ids.0;
 
@@ -199,11 +190,7 @@ impl RemoteInput {
                 up_down_ids,
                 up_down_frag,
                 metrics,
-                local_barrier_manager
-                    .env
-                    .global_config()
-                    .developer
-                    .exchange_batched_permits,
+                actor_config.developer.exchange_batched_permits,
             ),
         })
     }
@@ -346,6 +333,7 @@ pub(crate) async fn new_input(
     fragment_id: FragmentId,
     upstream_actor_info: &ActorInfo,
     upstream_fragment_id: FragmentId,
+    actor_config: Arc<StreamingConfig>,
 ) -> StreamExecutorResult<BoxedActorInput> {
     let upstream_actor_id = upstream_actor_info.actor_id;
     let upstream_addr = upstream_actor_info.get_host()?.into();
@@ -363,6 +351,7 @@ pub(crate) async fn new_input(
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),
             metrics,
+            actor_config,
         )
         .await?
         .boxed_input()

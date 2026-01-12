@@ -3,7 +3,7 @@
     select * from s
   logical_plan: |-
     LogicalProject { exprs: [id, value] }
-    └─LogicalSource { source: s, columns: [id, value, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
+    └─LogicalSource { source: s, is_shared: true, columns: [id, value, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [id, value] }

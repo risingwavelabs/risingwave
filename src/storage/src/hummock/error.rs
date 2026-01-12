@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -166,10 +166,6 @@ impl HummockError {
 
     pub fn foyer_error(error: foyer::Error) -> HummockError {
         HummockErrorInner::FoyerError(error).into()
-    }
-
-    pub fn foyer_io_error(error: foyer::IoError) -> HummockError {
-        HummockErrorInner::FoyerError(foyer::Error::Storage(error.into())).into()
     }
 
     pub fn other(error: impl ToString) -> HummockError {

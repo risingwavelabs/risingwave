@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_connector::source::BATCH_POSIX_FS_CONNECTOR;
+use risingwave_connector::source::{ADBC_SNOWFLAKE_CONNECTOR, BATCH_POSIX_FS_CONNECTOR};
 
 use super::*;
 
@@ -114,6 +114,9 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json],
                 ),
                 ICEBERG_CONNECTOR => hashmap!(
+                    Format::None => vec![Encode::None],
+                ),
+                ADBC_SNOWFLAKE_CONNECTOR => hashmap!(
                     Format::None => vec![Encode::None],
                 ),
                 SQL_SERVER_CDC_CONNECTOR => hashmap!(

@@ -106,7 +106,7 @@ select count(*) from single_partition_rw;
 25
 
 # Verify data synchronization for sub-partitioned table
-query I
+query I retry 6 backoff 1s
 select count(*) from sub_partition_rw;
 ----
 25

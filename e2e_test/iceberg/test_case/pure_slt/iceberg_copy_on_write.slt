@@ -37,6 +37,7 @@ insert into t_cow values (1, 1), (2, 2);
 statement ok
 flush;
 
+sleep 5s
 
 # without VACUUM, the old version is still visible
 query ?? rowsort retry 6 backoff 1s
@@ -58,6 +59,7 @@ update t_cow set b = 22 where b = 2;
 statement ok
 flush;
 
+sleep 5s
 
 # without VACUUM, the old version is still visible
 query ?? rowsort retry 6 backoff 1s

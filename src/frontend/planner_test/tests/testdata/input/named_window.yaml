@@ -161,7 +161,7 @@
   expected_outputs:
     - logical_plan
     - stream_error
-    - batch_error
+    - batch_plan
 
 # Complex expressions in window spec
 - id: expressions in named window spec

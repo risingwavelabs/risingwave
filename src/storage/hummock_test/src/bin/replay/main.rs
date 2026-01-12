@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -136,6 +136,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: state_store_metrics.clone(),
         use_new_object_prefix_strategy: args.use_new_object_prefix_strategy,
+        skip_bloom_filter_in_serde: storage_opts.sst_skip_bloom_filter_in_serde,
         meta_cache,
         block_cache,
         vector_meta_cache: CacheBuilder::new(1 << 10).build(),

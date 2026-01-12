@@ -48,6 +48,7 @@ cargo build \
     -p risingwave_e2e_extended_mode_test \
     "${RISINGWAVE_FEATURE_FLAGS[@]}" \
     --features udf \
+    --features datafusion \
     --profile "$profile" \
     --timings
 

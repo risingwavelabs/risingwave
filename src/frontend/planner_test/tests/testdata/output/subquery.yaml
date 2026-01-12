@@ -429,18 +429,18 @@
     └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: [] }
       ├─LogicalShare { id: 2 }
       │ └─LogicalProject { exprs: [a1] }
-      │   └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
+      │   └─LogicalSource { source: a, is_shared: false, columns: [a1, a2, _row_id] }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: all }
         ├─LogicalAgg { group_key: [a1], aggs: [] }
         │ └─LogicalShare { id: 2 }
         │   └─LogicalProject { exprs: [a1] }
-        │     └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
+        │     └─LogicalSource { source: a, is_shared: false, columns: [a1, a2, _row_id] }
         └─LogicalJoin { type: Inner, on: true, output: [a1] }
           ├─LogicalAgg { group_key: [a1], aggs: [] }
           │ └─LogicalShare { id: 2 }
           │   └─LogicalProject { exprs: [a1] }
-          │     └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
-          └─LogicalSource { source: c, columns: [c1, c2, _row_id] }
+          │     └─LogicalSource { source: a, is_shared: false, columns: [a1, a2, _row_id] }
+          └─LogicalSource { source: c, is_shared: false, columns: [c1, c2, _row_id] }
 - name: test subquery in table function
   sql: |
     create table t(x int[], y int[], k int primary key);
@@ -577,25 +577,23 @@
     CREATE TABLE integers(i INTEGER);
     SELECT i1.i, (SELECT row_number() OVER (ORDER BY i) FROM integers WHERE i1.i=i limit 1) col FROM integers i1, integers i2 ORDER BY i1.i;
   batch_plan: |-
-    BatchProject { exprs: [integers.i, row_number] }
-    └─BatchExchange { order: [integers.i ASC], dist: Single }
-      └─BatchProject { exprs: [integers.i, row_number, integers.i] }
-        └─BatchSort { order: [integers.i ASC] }
-          └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number] }
-            ├─BatchExchange { order: [], dist: HashShard(integers.i) }
-            │ └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-            │   ├─BatchExchange { order: [], dist: Single }
-            │   │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
-            │   └─BatchExchange { order: [], dist: Single }
-            │     └─BatchScan { table: integers, columns: [], distribution: SomeShard }
-            └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-              └─BatchProject { exprs: [integers.i, row_number] }
-                └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-                  └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
-                    └─BatchSort { order: [integers.i ASC, integers.i ASC] }
-                      └─BatchProject { exprs: [integers.i, integers.i] }
-                        └─BatchFilter { predicate: IsNotNull(integers.i) }
-                          └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+    BatchExchange { order: [integers.i ASC], dist: Single }
+    └─BatchSort { order: [integers.i ASC] }
+      └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number] }
+        ├─BatchExchange { order: [], dist: HashShard(integers.i) }
+        │ └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+        │   ├─BatchExchange { order: [], dist: Single }
+        │   │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+        │   └─BatchExchange { order: [], dist: Single }
+        │     └─BatchScan { table: integers, columns: [], distribution: SomeShard }
+        └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+          └─BatchProject { exprs: [integers.i, row_number] }
+            └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
+                └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+                  └─BatchProject { exprs: [integers.i, integers.i] }
+                    └─BatchFilter { predicate: IsNotNull(integers.i) }
+                      └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.

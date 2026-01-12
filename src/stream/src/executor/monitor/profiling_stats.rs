@@ -15,6 +15,7 @@
 use std::sync::atomic::Ordering;
 
 use risingwave_common::monitor::in_mem::GuardedCount;
+use risingwave_pb::id::ExecutorId;
 
 use crate::executor::monitor::StreamingMetrics;
 
@@ -25,7 +26,7 @@ pub enum ProfileMetricsImpl {
 
 impl ProfileMetricsImpl {
     pub fn new(
-        executor_id: u64,
+        executor_id: ExecutorId,
         stats: &StreamingMetrics,
         enable_profiling: bool,
     ) -> ProfileMetricsImpl {
@@ -45,8 +46,8 @@ impl ProfileMetricsImpl {
 }
 
 pub struct ProfileMetrics {
-    pub stream_node_output_row_count: GuardedCount,
-    pub stream_node_output_blocking_duration_ns: GuardedCount,
+    pub stream_node_output_row_count: GuardedCount<ExecutorId>,
+    pub stream_node_output_blocking_duration_ns: GuardedCount<ExecutorId>,
 }
 
 pub trait ProfileMetricsExt {

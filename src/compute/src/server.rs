@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,7 +49,8 @@ use risingwave_pb::compute::config_service_server::ConfigServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::stream_service::stream_service_server::StreamServiceServer;
-use risingwave_pb::task_service::exchange_service_server::ExchangeServiceServer;
+use risingwave_pb::task_service::batch_exchange_service_server::BatchExchangeServiceServer;
+use risingwave_pb::task_service::stream_exchange_service_server::StreamExchangeServiceServer;
 use risingwave_pb::task_service::task_service_server::TaskServiceServer;
 use risingwave_rpc_client::{ComputeClientPool, MetaClient};
 use risingwave_storage::StateStoreImpl;
@@ -76,11 +77,13 @@ use crate::memory::config::{
 };
 use crate::memory::manager::{MemoryManager, MemoryManagerConfig};
 use crate::observer::observer_manager::ComputeObserverNode;
+use crate::rpc::service::batch_exchange_service::BatchExchangeServiceImpl;
 use crate::rpc::service::config_service::ConfigServiceImpl;
-use crate::rpc::service::exchange_metrics::GLOBAL_EXCHANGE_SERVICE_METRICS;
-use crate::rpc::service::exchange_service::ExchangeServiceImpl;
 use crate::rpc::service::health_service::HealthServiceImpl;
 use crate::rpc::service::monitor_service::{AwaitTreeMiddlewareLayer, MonitorServiceImpl};
+use crate::rpc::service::stream_exchange_service::{
+    GLOBAL_STREAM_EXCHANGE_SERVICE_METRICS, StreamExchangeServiceImpl,
+};
 use crate::rpc::service::stream_service::StreamServiceImpl;
 use crate::telemetry::ComputeTelemetryCreator;
 /// Bootstraps the compute-node.
@@ -130,6 +133,7 @@ pub async fn compute_node_serve(
             is_unschedulable: false,
             internal_rpc_host_addr: "".to_owned(),
             resource_group: Some(opts.resource_group.clone()),
+            is_iceberg_compactor: false,
         },
         Arc::new(config.meta.clone()),
     )
@@ -185,7 +189,7 @@ pub async fn compute_node_serve(
     let streaming_metrics = Arc::new(global_streaming_metrics(config.server.metrics_level));
     let batch_executor_metrics = Arc::new(GLOBAL_BATCH_EXECUTOR_METRICS.clone());
     let batch_manager_metrics = Arc::new(GLOBAL_BATCH_MANAGER_METRICS.clone());
-    let exchange_srv_metrics = Arc::new(GLOBAL_EXCHANGE_SERVICE_METRICS.clone());
+    let stream_exchange_srv_metrics = Arc::new(GLOBAL_STREAM_EXCHANGE_SERVICE_METRICS.clone());
     let batch_spill_metrics = Arc::new(GLOBAL_BATCH_SPILL_METRICS.clone());
     let iceberg_scan_metrics = Arc::new(GLOBAL_ICEBERG_SCAN_METRICS.clone());
 
@@ -410,8 +414,9 @@ pub async fn compute_node_serve(
 
     // Boot the runtime gRPC services.
     let batch_srv = BatchServiceImpl::new(batch_mgr.clone(), batch_env);
-    let exchange_srv =
-        ExchangeServiceImpl::new(batch_mgr.clone(), stream_mgr.clone(), exchange_srv_metrics);
+    let batch_exchange_srv = BatchExchangeServiceImpl::new(batch_mgr.clone());
+    let stream_exchange_srv =
+        StreamExchangeServiceImpl::new(stream_mgr.clone(), stream_exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
     let (meta_cache, block_cache) = if let Some(hummock) = state_store.as_hummock() {
         (
@@ -456,7 +461,14 @@ pub async fn compute_node_serve(
         .layer(TracingExtractLayer::new())
         // XXX: unlimit the max message size to allow arbitrary large SQL input.
         .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
-        .add_service(ExchangeServiceServer::new(exchange_srv).max_decoding_message_size(usize::MAX))
+        .add_service(
+            BatchExchangeServiceServer::new(batch_exchange_srv)
+                .max_decoding_message_size(usize::MAX),
+        )
+        .add_service(
+            StreamExchangeServiceServer::new(stream_exchange_srv)
+                .max_decoding_message_size(usize::MAX),
+        )
         .add_service({
             let await_tree_reg = stream_srv.mgr.await_tree_reg().cloned();
             let srv = StreamServiceServer::new(stream_srv).max_decoding_message_size(usize::MAX);

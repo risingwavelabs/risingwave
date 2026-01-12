@@ -38,6 +38,7 @@ user create_compaction_group_for_mv
 user datestyle
 user disable_purify_definition
 user dml_rate_limit
+user enable_datafusion_engine
 user enable_index_selection
 user enable_join_ordering
 user enable_locality_backfill
@@ -68,13 +69,13 @@ user statement_timeout
 user streaming_allow_jsonb_in_stream_key
 user streaming_enable_bushy_join
 user streaming_enable_delta_join
-user streaming_enable_materialized_expressions
 user streaming_enable_unaligned_join
 user streaming_force_filter_inside_join
 user streaming_join_encoding
 user streaming_max_parallelism
 user streaming_over_window_cache_policy
 user streaming_parallelism
+user streaming_parallelism_for_backfill
 user streaming_parallelism_for_index
 user streaming_parallelism_for_materialized_view
 user streaming_parallelism_for_sink
@@ -84,6 +85,7 @@ user streaming_separate_consecutive_join
 user streaming_separate_sink
 user streaming_sync_log_store_buffer_size
 user streaming_sync_log_store_pause_duration_ms
+user streaming_unsafe_allow_unmaterialized_impure_expr
 user streaming_use_arrangement_backfill
 user streaming_use_shared_source
 user streaming_use_snapshot_backfill
@@ -91,6 +93,7 @@ user synchronize_seqscans
 user timezone
 user transaction_isolation
 user unsafe_enable_storage_retention_for_non_append_only_tables
+user upsert_dml
 user visibility_mode
 
 query TT

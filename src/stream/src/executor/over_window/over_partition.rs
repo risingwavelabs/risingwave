@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,8 +23,8 @@ use delta_btree_map::{Change, DeltaBTreeMap};
 use educe::Educe;
 use futures_async_stream::for_await;
 use risingwave_common::array::stream_record::Record;
+use risingwave_common::config::streaming::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::session_config::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::types::{Datum, Sentinelled};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::window_function::{StateKey, WindowStates, create_window_state};

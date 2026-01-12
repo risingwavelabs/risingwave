@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::fmt::Write;
 use std::sync::Arc;
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -20,6 +21,7 @@ use opendal::Operator;
 use risingwave_common::array::{ArrayImpl, DataChunk, Op, PrimitiveArray, StreamChunk, Utf8Array};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
+use risingwave_pb::id::ExecutorId;
 use serde_json::{Map, Value};
 use thiserror_ext::AsReport;
 
@@ -148,13 +150,13 @@ pub struct SnowflakeRedshiftSinkS3Writer {
     s3_operator: Operator,
     augmented_row: AugmentedRow,
     opendal_writer_path: Option<(opendal::Writer, String)>,
-    executor_id: u64,
+    executor_id: ExecutorId,
     target_table_name: Option<String>,
 }
 
 pub async fn build_opendal_writer_path(
     s3_config: &S3Common,
-    executor_id: u64,
+    executor_id: ExecutorId,
     operator: &Operator,
     target_table_name: &Option<String>,
 ) -> Result<(opendal::Writer, String)> {
@@ -187,7 +189,7 @@ impl SnowflakeRedshiftSinkS3Writer {
         s3_config: S3Common,
         schema: Schema,
         is_append_only: bool,
-        executor_id: u64,
+        executor_id: ExecutorId,
         target_table_name: Option<String>,
     ) -> Result<Self> {
         let s3_operator = FileSink::<S3Sink>::new_s3_sink(&s3_config)?;
