@@ -23,6 +23,7 @@ use parking_lot::lock_api::RwLockReadGuard;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::id::JobId;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
@@ -370,6 +371,13 @@ impl BarrierInfo {
 
     pub(super) fn curr_epoch(&self) -> u64 {
         self.curr_epoch.value().0
+    }
+
+    pub(super) fn epoch(&self) -> EpochPair {
+        EpochPair {
+            curr: self.curr_epoch(),
+            prev: self.prev_epoch(),
+        }
     }
 }
 

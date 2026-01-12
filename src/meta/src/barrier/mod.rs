@@ -37,6 +37,7 @@ mod edge_builder;
 mod info;
 mod manager;
 mod notifier;
+mod partial_graph;
 mod progress;
 mod rpc;
 mod schedule;
