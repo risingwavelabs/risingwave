@@ -665,16 +665,15 @@ impl GlobalStreamManager {
             .await?;
 
         if !background_jobs.is_empty() {
-            let related_jobs = self
-                .scale_controller
-                .resolve_related_no_shuffle_jobs(&background_jobs)
+            let unreschedulable = self
+                .metadata_manager
+                .collect_unreschedulable_backfill_jobs(&background_jobs)
                 .await?;
 
-            if related_jobs.contains(&job_id) {
+            if unreschedulable.contains(&job_id) {
                 bail!(
-                    "Cannot alter the job {} because the related job {:?} is currently being created",
+                    "Cannot alter the job {} because it is a non-reschedulable background backfill job",
                     job_id,
-                    background_jobs,
                 );
             }
         }
