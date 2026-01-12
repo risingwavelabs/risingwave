@@ -398,14 +398,24 @@ impl HummockMetaClient for MockHummockMetaClient {
 
     async fn get_table_change_logs(
         &self,
-        _epoch_only: bool,
-        _start_epoch_inclusive: Option<u64>,
-        _end_epoch_inclusive: Option<u64>,
-        _table_ids: Option<HashSet<TableId>>,
-        _exclude_empty: bool,
-        _limit: Option<u32>,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
     ) -> Result<TableChangeLogs> {
-        unimplemented!()
+        Ok(self
+            .hummock_manager
+            .get_table_change_logs(
+                epoch_only,
+                start_epoch_inclusive,
+                end_epoch_inclusive,
+                table_ids,
+                exclude_empty,
+                limit,
+            )
+            .await)
     }
 }
 
