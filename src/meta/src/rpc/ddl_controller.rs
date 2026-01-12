@@ -1039,6 +1039,7 @@ impl DdlController {
                         self.source_manager
                             .apply_source_change(SourceChange::DropSource {
                                 dropped_source_ids: vec![source_id],
+                                sources_to_drop: vec![], // No catalog info available for aborted job cleanup
                             })
                             .await;
                     }
@@ -1191,6 +1192,7 @@ impl DdlController {
             removed_streaming_job_ids,
             removed_state_table_ids,
             removed_source_ids,
+            removed_sources,
             removed_secret_ids: secret_ids,
             removed_source_fragments,
             removed_actors,
@@ -1221,6 +1223,7 @@ impl DdlController {
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
                 dropped_source_ids: removed_source_ids.into_iter().map(|id| id as _).collect(),
+                sources_to_drop: removed_sources,
             })
             .await;
 
@@ -1547,6 +1550,7 @@ impl DdlController {
                     self.source_manager
                         .apply_source_change(SourceChange::DropSource {
                             dropped_source_ids: vec![drop_table_connector_ctx.to_remove_source_id],
+                            sources_to_drop: vec![], // No catalog info available for table connector cleanup
                         })
                         .await;
                 }

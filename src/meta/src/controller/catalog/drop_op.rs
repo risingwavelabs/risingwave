@@ -277,6 +277,20 @@ impl CatalogController {
             .map(|obj| obj.oid.as_source_id())
             .collect();
 
+        // Fetch full source catalog info for CDC cleanup (e.g., dropping replication slots)
+        let removed_sources: Vec<PbSource> = if !removed_source_ids.is_empty() {
+            Source::find()
+                .find_also_related(Object)
+                .filter(source::Column::SourceId.is_in(removed_source_ids.iter().copied()))
+                .all(&txn)
+                .await?
+                .into_iter()
+                .map(|(source, obj)| PbSource::from(ObjectModel(source, obj.unwrap())))
+                .collect()
+        } else {
+            vec![]
+        };
+
         let removed_secret_ids = removed_objects
             .iter()
             .filter(|obj| obj.obj_type == ObjectType::Secret)
@@ -433,6 +447,7 @@ impl CatalogController {
                 removed_streaming_job_ids,
                 removed_state_table_ids: removed_state_table_ids.into_iter().collect(),
                 removed_source_ids: removed_source_ids.into_iter().collect(),
+                removed_sources,
                 removed_secret_ids,
                 removed_source_fragments,
                 removed_actors,

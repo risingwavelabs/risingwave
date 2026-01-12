@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub(crate) mod cdc;
+mod cdc_cleanup;
 mod refresh_manager;
 mod scale;
 mod sink;

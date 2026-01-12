@@ -170,6 +170,7 @@ impl GlobalBarrierWorkerContextImpl {
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
                 dropped_source_ids: dirty_associated_source_ids,
+                sources_to_drop: vec![], // No catalog info available during recovery cleanup
             })
             .await;
 

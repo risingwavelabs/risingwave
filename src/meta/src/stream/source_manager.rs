@@ -143,6 +143,7 @@ impl SourceManagerCore {
             }
             SourceChange::DropSource {
                 dropped_source_ids: dropped_source_ids_,
+                sources_to_drop: _, // Used for cleanup, not for state management
             } => {
                 dropped_source_ids = dropped_source_ids_;
             }
@@ -387,9 +388,34 @@ impl SourceManager {
             Vec::new()
         };
 
+        // For DropSource, use the provided source info for cleanup
+        let sources_to_cleanup = if let SourceChange::DropSource {
+            ref sources_to_drop,
+            ..
+        } = source_change
+        {
+            sources_to_drop.clone()
+        } else {
+            Vec::new()
+        };
+
         {
             let mut core = self.core.lock().await;
             core.apply_source_change(source_change);
+        }
+
+        // Clean up PostgreSQL replication slots for dropped sources
+        for source in sources_to_cleanup {
+            let source_id = source.id;
+            tokio::spawn(async move {
+                if let Err(e) = super::cdc_cleanup::try_drop_postgres_slot(&source).await {
+                    tracing::error!(
+                        error = %e.as_report(),
+                        source_id = %source_id,
+                        "Failed to drop PostgreSQL replication slot"
+                    );
+                }
+            });
         }
 
         // Force tick for updated source workers
@@ -535,7 +561,11 @@ pub enum SourceChange {
         finished_backfill_fragments: HashMap<SourceId, BTreeSet<(FragmentId, FragmentId)>>,
     },
     /// `DROP SOURCE` or `DROP MV`
-    DropSource { dropped_source_ids: Vec<SourceId> },
+    DropSource {
+        dropped_source_ids: Vec<SourceId>,
+        /// Source catalog info for cleanup (optional, for CDC slot cleanup)
+        sources_to_drop: Vec<Source>,
+    },
     DropMv {
         // FIXME: we should consider source backfill fragments here for MV on shared source.
         dropped_source_fragments: HashMap<SourceId, BTreeSet<FragmentId>>,

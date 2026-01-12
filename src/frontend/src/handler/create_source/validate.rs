@@ -202,29 +202,23 @@ pub fn validate_compatibility(
     }
 
     if connector == POSTGRES_CDC_CONNECTOR || connector == CITUS_CDC_CONNECTOR {
-        match props.get("slot.name") {
-            None => {
-                // Build a random slot name with UUID
-                // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
-                let uuid = uuid::Uuid::new_v4();
-                props.insert("slot.name".into(), format!("rw_cdc_{}", uuid.simple()));
-            }
-            Some(slot_name) => {
-                // please refer to
-                // - https://github.com/debezium/debezium/blob/97956ce25b7612e3413d363658661896b7d2e0a2/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresConnectorConfig.java#L1179
-                // - https://doxygen.postgresql.org/slot_8c.html#afac399f07320b9adfd2c599cf822aaa3
-                if !slot_name
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
-                    || slot_name.len() > 63
-                {
-                    return Err(RwError::from(ProtocolError(format!(
-                        "Invalid replication slot name: {:?}. Valid replication slot name must contain only digits, lowercase characters and underscores with length <= 63",
-                        slot_name
-                    ))));
-                }
-            }
+        // Replication slot is now auto-managed by RisingWave.
+        // Users cannot specify slot.name manually to ensure proper lifecycle management.
+        if props.contains_key("slot.name") {
+            return Err(RwError::from(ProtocolError(
+                "Replication slot name ('slot.name') cannot be specified manually. \
+                RisingWave now automatically manages replication slots. \
+                Each source will have a unique auto-generated slot that will be \
+                automatically created and cleaned up. Please remove 'slot.name' from your WITH clause."
+                    .to_owned(),
+            )));
         }
+
+        // Always auto-generate a unique slot name with UUID
+        // Format: "rw_cdc_{uuid}" for uniqueness
+        // e.g. "rw_cdc_f9a3567e6dd54bf5900444c8b1c03815"
+        let uuid = uuid::Uuid::new_v4();
+        props.insert("slot.name".into(), format!("rw_cdc_{}", uuid.simple()));
 
         if !props.contains_key("schema.name") {
             // Default schema name is "public"
