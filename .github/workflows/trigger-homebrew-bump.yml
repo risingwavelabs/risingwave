@@ -32,7 +32,8 @@ jobs:
             const owner = "risingwavelabs";
             const repo = "homebrew-risingwave";
             const targetName = "bump risingwave";
-            const version = "${{ steps.version.outputs.version }}".replace(/^v/, "");
+            const rawVersion = "${{ steps.version.outputs.version }}";
+            const version = rawVersion ? rawVersion.replace(/^v/, "") : "";
 
             const workflows = await github.paginate(github.rest.actions.listRepoWorkflows, {
               owner,
@@ -45,12 +46,14 @@ jobs:
               return;
             }
 
+            const inputs = version ? { version } : {};
             await github.rest.actions.createWorkflowDispatch({
               owner,
               repo,
               workflow_id: workflow.id,
               ref: workflow.default_branch || "main",
-              inputs: { version },
+              inputs,
             });
 
-            core.info(`Dispatched "${targetName}" with version ${version}`);
+            const detail = version ? `version ${version}` : "latest stable release (no override)";
+            core.info(`Dispatched "${targetName}" with ${detail}`);
