@@ -383,7 +383,7 @@ impl HummockManager {
                 .iter()
                 .filter_map(|(id, change_log)| {
                     if let Some(table_filter) = &table_ids
-                        && !table_filter.contains(&id)
+                        && !table_filter.contains(id)
                     {
                         return None;
                     }
