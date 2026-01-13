@@ -265,7 +265,7 @@ impl ScaleController {
         policy: HashMap<JobId, ReschedulePolicy>,
         workers: HashMap<WorkerId, PbWorkerNode>,
     ) -> MetaResult<HashMap<DatabaseId, Command>> {
-        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
 
         for (table_id, target) in &policy {
@@ -334,7 +334,7 @@ impl ScaleController {
             return Ok(HashMap::new());
         }
 
-        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
 
         for (table_id, parallelism) in &policy {
@@ -390,7 +390,7 @@ impl ScaleController {
             return Ok(HashMap::new());
         }
 
-        let inner = self.metadata_manager.catalog_controller.inner.read().await;
+        let inner = self.metadata_manager.catalog_controller.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let fragment_id_list = policy.keys().copied().collect_vec();
