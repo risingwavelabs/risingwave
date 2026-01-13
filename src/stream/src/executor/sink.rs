@@ -501,7 +501,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     if let Err(e) = rate_limit_tx.send(entry.rate_limit.into()) {
                                         error!(
                                             error = %e.as_report(),
-                                            "fail to send sink ate limit update"
+                                            "fail to send sink rate limit update"
                                         );
                                         return Err(StreamExecutorError::from(
                                             e.to_report_string(),
