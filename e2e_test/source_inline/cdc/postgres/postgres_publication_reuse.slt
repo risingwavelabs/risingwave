@@ -7,7 +7,6 @@ system ok
 psql -c "
     DROP TABLE IF EXISTS users CASCADE;
     DROP PUBLICATION IF EXISTS rw_test_publication;
-
     CREATE TABLE users (
         id int PRIMARY KEY,
         username varchar,
@@ -15,15 +14,11 @@ psql -c "
         password_hash varchar,
         created_at timestamp
     );
-
     INSERT INTO users VALUES
         (1, 'alice', 'alice@example.com', 'hash123', '2024-01-01 10:00:00'),
         (2, 'bob', 'bob@example.com', 'hash456', '2024-01-02 11:00:00');
-
-    -- Create partial publication with only 3 columns (PostgreSQL 15+)
-    CREATE PUBLICATION rw_test_publication
-    FOR TABLE users (id, username, email);
-"
+    CREATE PUBLICATION rw_test_publication FOR TABLE users (id, username, email);
+    "
 
 # Test 1: Create source with fixed publication name (3 columns)
 statement ok
@@ -133,9 +128,8 @@ select id, username, email, password_hash from t2 order by id;
 # Insert new data to verify CDC is working
 system ok
 psql -c "
-    INSERT INTO users VALUES
-        (3, 'charlie', 'charlie@example.com', 'hash789', '2024-01-03 12:00:00');
-"
+    INSERT INTO users VALUES (3, 'charlie', 'charlie@example.com', 'hash789', '2024-01-03 12:00:00');
+    "
 
 sleep 2s
 
@@ -157,4 +151,4 @@ system ok
 psql -c "
     DROP TABLE IF EXISTS users CASCADE;
     DROP PUBLICATION IF EXISTS rw_test_publication;
-"
+    "
