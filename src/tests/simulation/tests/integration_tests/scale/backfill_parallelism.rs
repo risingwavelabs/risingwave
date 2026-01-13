@@ -28,12 +28,26 @@ async fn wait_parallelism(
     expected: &str,
 ) -> Result<()> {
     for _ in 0..(MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE * 10) {
-        let res = session
+        let res = match session
             .run(format!(
                 "select distinct parallelism from rw_fragment_parallelism where name = '{}' order by parallelism;",
                 name
             ))
-            .await?;
+            .await
+        {
+            Ok(res) => res,
+            Err(err) => {
+                // Background DDL may not have notified the catalog yet; treat as transient.
+                if err
+                    .chain()
+                    .any(|cause| cause.to_string().contains("table not found"))
+                {
+                    sleep(Duration::from_millis(200)).await;
+                    continue;
+                }
+                return Err(err);
+            }
+        };
         if res.trim() == expected {
             return Ok(());
         }
@@ -268,6 +282,9 @@ async fn test_alter_backfill_parallelism_during_backfill() -> Result<()> {
         .run("alter materialized view m set backfill_parallelism = 3;")
         .await?;
     wait_parallelism(&mut session, "m", "3").await?;
+    session
+        .run("alter materialized view m set backfill_rate_limit = default;")
+        .await?;
 
     wait_jobs_finished(&mut session).await?;
     wait_parallelism(&mut session, "m", "4").await?;
