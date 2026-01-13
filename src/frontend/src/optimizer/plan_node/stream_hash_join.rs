@@ -64,42 +64,29 @@ pub struct StreamHashJoin {
 }
 
 impl StreamHashJoin {
-    pub(super) fn reorder_eq_join_predicate_by_watermark(
-        core: &generic::Join<PlanRef>,
-        predicate: EqJoinPredicate,
-    ) -> EqJoinPredicate {
-        let mut reorder_idx = vec![];
-        for (i, (left_key, right_key)) in predicate.eq_indexes().iter().enumerate() {
-            if core.left.watermark_columns().contains(*left_key)
-                && core.right.watermark_columns().contains(*right_key)
-            {
-                reorder_idx.push(i);
-            }
-        }
-
-        if reorder_idx.is_empty() {
-            predicate
-        } else {
-            predicate.reorder(&reorder_idx)
-        }
-    }
-
-    pub fn new(core: generic::Join<PlanRef>) -> Result<Self> {
+    pub fn new(mut core: generic::Join<PlanRef>) -> Result<Self> {
         let ctx = core.ctx();
 
-        let eq_join_predicate = core
-            .on
-            .as_eq_predicate_ref()
-            .expect("StreamHashJoin requires JoinOn::EqPredicate in core")
-            .clone();
-        debug_assert_eq!(
-            Self::reorder_eq_join_predicate_by_watermark(&core, eq_join_predicate.clone()),
-            eq_join_predicate,
-            "StreamHashJoin expects watermark eq keys to be placed first; call \
-             StreamHashJoin::reorder_eq_join_predicate_by_watermark at the caller side"
-        );
-
         let stream_kind = core.stream_kind()?;
+
+        // Reorder `eq_join_predicate` by placing the watermark column at the beginning.
+        let eq_join_predicate = {
+            let eq_join_predicate = core
+                .on
+                .as_eq_predicate_ref()
+                .expect("StreamHashJoin requires JoinOn::EqPredicate in core")
+                .clone();
+            let mut reorder_idx = vec![];
+            for (i, (left_key, right_key)) in eq_join_predicate.eq_indexes().iter().enumerate() {
+                if core.left.watermark_columns().contains(*left_key)
+                    && core.right.watermark_columns().contains(*right_key)
+                {
+                    reorder_idx.push(i);
+                }
+            }
+            eq_join_predicate.reorder(&reorder_idx)
+        };
+        core.on = generic::JoinOn::EqPredicate(eq_join_predicate.clone());
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),

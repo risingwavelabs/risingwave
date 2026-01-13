@@ -978,8 +978,7 @@ impl LogicalJoin {
         let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
 
         let mut core = self.core.clone_with_inputs(left, right);
-        let predicate = StreamHashJoin::reorder_eq_join_predicate_by_watermark(&core, predicate);
-        core.on = generic::JoinOn::EqPredicate(predicate.clone());
+        core.on = generic::JoinOn::EqPredicate(predicate);
 
         // Convert to Hash Join for equal joins
         // For inner joins, pull non-equal conditions to a filter operator on top of it by default.
@@ -990,6 +989,11 @@ impl LogicalJoin {
         // materialization of rows only to be filtered later.
 
         let stream_hash_join = StreamHashJoin::new(core.clone())?;
+        let predicate = core
+            .on
+            .as_eq_predicate_ref()
+            .expect("core predicate must exist")
+            .clone();
 
         let force_filter_inside_join = self
             .base
