@@ -93,7 +93,12 @@ risedev slt -p 4566 -d dev './e2e_test/dashboard/**/*.slt'
 cluster_stop
 
 echo "--- e2e, $mode, streaming"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_stream::common::table::state_table=warn" \
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,sqlx=debug,\
+risingwave_meta::barrier::recovery=debug,\
+risingwave_meta::manager::catalog=debug,\
+risingwave_meta::rpc::ddl_controller=debug,\
+risingwave_meta::stream::stream_manager=debug,\
+risingwave_meta::barrier::progress=debug"
 cluster_start
 # Please make sure the regression is expected before increasing the timeout.
 risedev slt -p 4566 -d dev './e2e_test/streaming/**/*.slt' --junit "streaming-${profile}" --label "serial"
@@ -102,7 +107,12 @@ echo "--- Kill cluster"
 cluster_stop
 
 echo "--- e2e, $mode, batch"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,sqlx=debug,\
+risingwave_meta::barrier::recovery=debug,\
+risingwave_meta::manager::catalog=debug,\
+risingwave_meta::rpc::ddl_controller=debug,\
+risingwave_meta::stream::stream_manager=debug,\
+risingwave_meta::barrier::progress=debug"
 cluster_start
 risedev slt -p 4566 -d dev './e2e_test/ddl/**/*.slt' --junit "batch-ddl-${profile}" --label "can-use-recover"
 risedev slt -p 4566 -d dev './e2e_test/background_ddl/*.slt' --junit "batch-ddl-${profile}"
@@ -157,7 +167,12 @@ if [[ "$mode" != "single-node" && "$mode" != "standalone" ]]; then
 fi
 
 echo "--- e2e, $mode, extended query"
-RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
+RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,sqlx=debug,\
+risingwave_meta::barrier::recovery=debug,\
+risingwave_meta::manager::catalog=debug,\
+risingwave_meta::rpc::ddl_controller=debug,\
+risingwave_meta::stream::stream_manager=debug,\
+risingwave_meta::barrier::progress=debug" \
 cluster_start
 risedev slt -p 4566 -d dev -e postgres-extended './e2e_test/extended_mode/**/*.slt'
 RUST_BACKTRACE=1 target/debug/risingwave_e2e_extended_mode_test --host 127.0.0.1 \
