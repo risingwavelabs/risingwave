@@ -559,8 +559,7 @@ where
                             }
                         }
                         Mutation::Throttle(fragment_to_apply) => {
-                            let entry = fragment_to_apply.get(&self.fragment_id);
-                            if let Some(entry) = entry
+                            if let Some(entry) = fragment_to_apply.get(&self.fragment_id)
                                 && entry.throttle_type() == ThrottleType::Backfill
                             {
                                 let new_rate_limit = entry.rate_limit.into();
