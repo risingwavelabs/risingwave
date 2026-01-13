@@ -199,7 +199,6 @@ impl StreamManagerService for StreamServiceImpl {
             .get_object_database_id(job_id)
             .await?;
 
-        // TODO: check whether shared source is correct
         let throttle_config = ThrottleConfig {
             rate_limit: request.rate,
             throttle_type: throttle_type.into(),
