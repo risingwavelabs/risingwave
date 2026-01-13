@@ -17,6 +17,7 @@ use std::time::Duration;
 use anyhow::{Result, bail};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
+use thiserror_ext::AsReport;
 use tokio::time::sleep;
 
 use crate::scale::auto_parallelism::MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE;
@@ -38,9 +39,11 @@ async fn wait_parallelism(
             Ok(res) => res,
             Err(err) => {
                 // Background DDL may not have notified the catalog yet; treat as transient.
-                if err
-                    .chain()
-                    .any(|cause| cause.to_string().contains("table not found"))
+                if err.chain().any(|cause| {
+                    cause
+                        .to_report_string()
+                        .contains("table not found")
+                })
                 {
                     sleep(Duration::from_millis(200)).await;
                     continue;
