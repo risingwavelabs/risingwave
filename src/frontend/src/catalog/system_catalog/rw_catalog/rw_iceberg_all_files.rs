@@ -87,7 +87,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
             for snapshot in snapshots {
                 let manifest_list = table
                     .object_cache()
-                    .get_manifest_list(&snapshot, &metadata)
+                    .get_manifest_list(snapshot, &metadata)
                     .await
                     .map_err(|e| anyhow!(e))?;
                 reachable_manifests.extend(manifest_list.entries().iter().cloned());
