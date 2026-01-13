@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Display, Formatter};
 use std::future::{Future, pending, poll_fn};
 use std::mem::replace;
@@ -32,8 +32,8 @@ use risingwave_pb::stream_service::barrier_complete_response::{
     PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_storage::StateStoreImpl;
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 
 use crate::error::{StreamError, StreamResult};
@@ -89,10 +89,9 @@ use risingwave_common::must_match;
 use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
-use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
-use crate::task::barrier_worker::ScoredStreamError;
 use crate::task::barrier_worker::await_epoch_completed_future::AwaitEpochCompletedFuture;
+use crate::task::barrier_worker::{ScoredStreamError, TakeReceiverRequest};
 use crate::task::cdc_progress::CdcTableBackfillState;
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
@@ -107,7 +106,7 @@ impl Display for ManagedBarrierStateDebugInfo<'_> {
             write!(f, "{}, ", actor_id)?;
         }
         for (partial_graph_id, graph_states) in self.graph_states {
-            writeln!(f, "--- Partial Group {}", partial_graph_id.0)?;
+            writeln!(f, "--- Partial Group {}", partial_graph_id)?;
             write!(f, "{}", graph_states)?;
         }
         Ok(())
@@ -199,8 +198,9 @@ impl InflightActorStatus {
 pub(crate) struct InflightActorState {
     actor_id: ActorId,
     barrier_senders: Vec<mpsc::UnboundedSender<Barrier>>,
-    /// `prev_epoch` -> partial graph id
-    pub(crate) inflight_barriers: BTreeMap<u64, PartialGraphId>,
+    pub(crate) partial_graph_id: PartialGraphId,
+    /// `prev_epoch`. `push_back` and `pop_front`
+    pub(in crate::task) inflight_barriers: VecDeque<u64>,
     status: InflightActorStatus,
     /// Whether the actor has been issued a stop barrier
     is_stopping: bool,
@@ -213,7 +213,7 @@ pub(crate) struct InflightActorState {
 impl InflightActorState {
     pub(super) fn start(
         actor_id: ActorId,
-        initial_partial_graph_id: PartialGraphId,
+        partial_graph_id: PartialGraphId,
         initial_barrier: &Barrier,
         new_output_request_tx: UnboundedSender<(ActorId, NewOutputRequest)>,
         join_handle: JoinHandle<()>,
@@ -222,10 +222,8 @@ impl InflightActorState {
         Self {
             actor_id,
             barrier_senders: vec![],
-            inflight_barriers: BTreeMap::from_iter([(
-                initial_barrier.epoch.prev,
-                initial_partial_graph_id,
-            )]),
+            partial_graph_id,
+            inflight_barriers: VecDeque::from_iter([initial_barrier.epoch.prev]),
             status: InflightActorStatus::IssuedFirst(vec![initial_barrier.clone()]),
             is_stopping: false,
             new_output_request_tx,
@@ -240,6 +238,7 @@ impl InflightActorState {
         barrier: &Barrier,
         is_stop: bool,
     ) -> StreamResult<()> {
+        assert_eq!(self.partial_graph_id, partial_graph_id);
         assert!(barrier.epoch.prev > self.status.max_issued_epoch());
 
         for barrier_sender in &self.barrier_senders {
@@ -252,11 +251,10 @@ impl InflightActorState {
             })?;
         }
 
-        assert!(
-            self.inflight_barriers
-                .insert(barrier.epoch.prev, partial_graph_id)
-                .is_none()
-        );
+        if let Some(prev_epoch) = self.inflight_barriers.back() {
+            assert!(*prev_epoch < barrier.epoch.prev);
+        }
+        self.inflight_barriers.push_back(barrier.epoch.prev);
 
         match &mut self.status {
             InflightActorStatus::IssuedFirst(pending_barriers) => {
@@ -274,9 +272,8 @@ impl InflightActorState {
         Ok(())
     }
 
-    pub(super) fn collect(&mut self, epoch: EpochPair) -> (PartialGraphId, bool) {
-        let (prev_epoch, prev_partial_graph_id) =
-            self.inflight_barriers.pop_first().expect("should exist");
+    pub(super) fn collect(&mut self, epoch: EpochPair) -> bool {
+        let prev_epoch = self.inflight_barriers.pop_front().expect("should exist");
         assert_eq!(prev_epoch, epoch.prev);
         match &self.status {
             InflightActorStatus::IssuedFirst(pending_barriers) => {
@@ -290,10 +287,8 @@ impl InflightActorState {
             }
             InflightActorStatus::Running(_) => {}
         }
-        (
-            prev_partial_graph_id,
-            self.inflight_barriers.is_empty() && self.is_stopping,
-        )
+
+        self.inflight_barriers.is_empty() && self.is_stopping
     }
 }
 
@@ -413,12 +408,7 @@ pub(crate) struct ResetDatabaseOutput {
 }
 
 pub(crate) enum DatabaseStatus {
-    ReceivedExchangeRequest(
-        Vec<(
-            UpDownActorIds,
-            oneshot::Sender<StreamResult<permit::Receiver>>,
-        )>,
-    ),
+    ReceivedExchangeRequest(Vec<(PartialGraphId, UpDownActorIds, TakeReceiverRequest)>),
     Running(DatabaseManagedBarrierState),
     Suspended(SuspendedDatabaseState),
     Resetting(ResettingDatabaseState),
@@ -430,8 +420,10 @@ impl DatabaseStatus {
     pub(crate) async fn abort(&mut self) {
         match self {
             DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
-                for (_, sender) in pending_requests.drain(..) {
-                    let _ = sender.send(Err(anyhow!("database aborted").into()));
+                for (_, _, request) in pending_requests.drain(..) {
+                    if let TakeReceiverRequest::Remote(sender) = request {
+                        let _ = sender.send(Err(anyhow!("database aborted").into()));
+                    }
                 }
             }
             DatabaseStatus::Running(state) => {
@@ -507,8 +499,10 @@ impl DatabaseStatus {
     ) {
         let join_handle = match replace(self, DatabaseStatus::Unspecified) {
             DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
-                for (_, sender) in pending_requests {
-                    let _ = sender.send(Err(anyhow!("database reset").into()));
+                for (_, _, request) in pending_requests {
+                    if let TakeReceiverRequest::Remote(sender) = request {
+                        let _ = sender.send(Err(anyhow!("database graph reset").into()));
+                    }
                 }
                 tokio::spawn(async move { ResetDatabaseOutput { root_err: None } })
             }
@@ -699,7 +693,7 @@ impl DatabaseManagedBarrierState {
         barrier: &Barrier,
         request: InjectBarrierRequest,
     ) -> StreamResult<()> {
-        let partial_graph_id = PartialGraphId::new(request.partial_graph_id);
+        let partial_graph_id = request.partial_graph_id;
         let actor_to_stop = barrier.all_stop_actors();
         let is_stop_actor = |actor_id| {
             actor_to_stop
@@ -820,24 +814,23 @@ impl DatabaseManagedBarrierState {
         Ok(())
     }
 
-    pub(super) fn new_actor_remote_output_request(
-        &mut self,
-        actor_id: ActorId,
-        upstream_actor_id: ActorId,
-        result_sender: oneshot::Sender<StreamResult<permit::Receiver>>,
-    ) {
-        let (tx, rx) = channel_from_config(self.local_barrier_manager.env.global_config());
-        self.new_actor_output_request(actor_id, upstream_actor_id, NewOutputRequest::Remote(tx));
-        let _ = result_sender.send(Ok(rx));
-    }
-
     pub(super) fn new_actor_output_request(
         &mut self,
         actor_id: ActorId,
         upstream_actor_id: ActorId,
-        request: NewOutputRequest,
+        upstream_partial_graph_id: PartialGraphId,
+        request: TakeReceiverRequest,
     ) {
+        let request = match request {
+            TakeReceiverRequest::Remote(result_sender) => {
+                let (tx, rx) = channel_from_config(self.local_barrier_manager.env.global_config());
+                let _ = result_sender.send(Ok(rx));
+                NewOutputRequest::Remote(tx)
+            }
+            TakeReceiverRequest::Local(tx) => NewOutputRequest::Local(tx),
+        };
         if let Some(actor) = self.actor_states.get_mut(&upstream_actor_id) {
+            assert_eq!(actor.partial_graph_id, upstream_partial_graph_id);
             let _ = actor.new_output_request_tx.send((actor_id, request));
         } else {
             self.actor_pending_new_output_requests
@@ -928,12 +921,14 @@ impl DatabaseManagedBarrierState {
                 LocalBarrierEvent::RegisterLocalUpstreamOutput {
                     actor_id,
                     upstream_actor_id,
+                    upstream_partial_graph_id,
                     tx,
                 } => {
                     self.new_actor_output_request(
                         actor_id,
                         upstream_actor_id,
-                        NewOutputRequest::Local(tx),
+                        upstream_partial_graph_id,
+                        TakeReceiverRequest::Local(tx),
                     );
                 }
                 LocalBarrierEvent::ReportCdcTableBackfillProgress {
@@ -962,25 +957,23 @@ impl DatabaseManagedBarrierState {
         actor_id: ActorId,
         epoch: EpochPair,
     ) -> Option<(PartialGraphId, Barrier)> {
-        let (prev_partial_graph_id, is_finished) = self
-            .actor_states
-            .get_mut(&actor_id)
-            .expect("should exist")
-            .collect(epoch);
+        let actor = self.actor_states.get_mut(&actor_id).expect("should exist");
+        let partial_graph_id = actor.partial_graph_id;
+        let is_finished = actor.collect(epoch);
         if is_finished {
             let state = self.actor_states.remove(&actor_id).expect("should exist");
             if let Some(monitor_task_handle) = state.monitor_task_handle {
                 monitor_task_handle.abort();
             }
         }
-        let prev_graph_state = self
+        let graph_state = self
             .graph_states
-            .get_mut(&prev_partial_graph_id)
+            .get_mut(&partial_graph_id)
             .expect("should exist");
-        prev_graph_state.collect(actor_id, epoch);
-        prev_graph_state
+        graph_state.collect(actor_id, epoch);
+        graph_state
             .may_have_collected_all()
-            .map(|barrier| (prev_partial_graph_id, barrier))
+            .map(|barrier| (partial_graph_id, barrier))
     }
 
     #[allow(clippy::type_complexity)]
@@ -1036,8 +1029,7 @@ impl DatabaseManagedBarrierState {
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
-            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
-            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
+            && let Some(graph_state) = self.graph_states.get_mut(&actor_state.partial_graph_id)
         {
             graph_state
                 .list_finished_source_ids
@@ -1066,8 +1058,7 @@ impl DatabaseManagedBarrierState {
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
-            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
-            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
+            && let Some(graph_state) = self.graph_states.get_mut(&actor_state.partial_graph_id)
         {
             graph_state
                 .load_finished_source_ids
@@ -1102,18 +1093,17 @@ impl DatabaseManagedBarrierState {
             );
             return;
         };
-        let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev) else {
-            let inflight_barriers = actor_state.inflight_barriers.keys().collect::<Vec<_>>();
+        if !actor_state.inflight_barriers.contains(&epoch.prev) {
             warn!(
                 ?epoch,
                 %actor_id,
                 %table_id,
-                ?inflight_barriers,
+                inflight_barriers = ?actor_state.inflight_barriers,
                 "ignore refresh finished table: partial_graph_id not found in inflight_barriers"
             );
             return;
         };
-        let Some(graph_state) = self.graph_states.get_mut(partial_graph_id) else {
+        let Some(graph_state) = self.graph_states.get_mut(&actor_state.partial_graph_id) else {
             warn!(
                 ?epoch,
                 %actor_id, %table_id, "ignore refresh finished table: graph_state not found"

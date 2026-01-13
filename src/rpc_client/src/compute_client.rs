@@ -28,6 +28,7 @@ use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{
     ResizeCacheRequest, ResizeCacheResponse, ShowConfigRequest, ShowConfigResponse,
 };
+use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
@@ -124,6 +125,7 @@ impl ComputeClient {
         up_fragment_id: FragmentId,
         down_fragment_id: FragmentId,
         database_id: DatabaseId,
+        up_partial_graph_id: PartialGraphId,
         term_id: String,
     ) -> Result<(
         Streaming<GetStreamResponse>,
@@ -143,6 +145,7 @@ impl ComputeClient {
                     up_fragment_id,
                     down_fragment_id,
                     database_id,
+                    up_partial_graph_id,
                     term_id,
                 })),
             },

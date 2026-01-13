@@ -152,6 +152,7 @@ pub struct RemoteInput {
 
 use remote_input::RemoteInputStreamInner;
 use risingwave_pb::common::ActorInfo;
+use risingwave_pb::id::PartialGraphId;
 
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
@@ -159,6 +160,7 @@ impl RemoteInput {
     pub async fn new(
         local_barrier_manager: &LocalBarrierManager,
         upstream_addr: HostAddr,
+        upstream_partial_graph_id: PartialGraphId,
         up_down_ids: UpDownActorIds,
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
@@ -178,6 +180,7 @@ impl RemoteInput {
                 up_down_frag.0,
                 up_down_frag.1,
                 local_barrier_manager.database_id,
+                upstream_partial_graph_id,
                 local_barrier_manager.term_id.clone(),
             )
             .await?;
@@ -340,7 +343,11 @@ pub(crate) async fn new_input(
 
     let input = if is_local_address(local_barrier_manager.env.server_address(), &upstream_addr) {
         LocalInput::new(
-            local_barrier_manager.register_local_upstream_output(actor_id, upstream_actor_id),
+            local_barrier_manager.register_local_upstream_output(
+                actor_id,
+                upstream_actor_id,
+                upstream_actor_info.partial_graph_id,
+            ),
             upstream_actor_id,
         )
         .boxed_input()
@@ -348,6 +355,7 @@ pub(crate) async fn new_input(
         RemoteInput::new(
             local_barrier_manager,
             upstream_addr,
+            upstream_actor_info.partial_graph_id,
             (upstream_actor_id, actor_id),
             (upstream_fragment_id, fragment_id),
             metrics,
