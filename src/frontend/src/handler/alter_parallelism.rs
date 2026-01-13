@@ -74,8 +74,12 @@ pub async fn handle_alter_backfill_parallelism(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
 
-    let job_id =
-        resolve_streaming_job_id_for_alter(&session, obj_name, stmt_type, "backfill_parallelism")?;
+    let job_id = resolve_streaming_job_id_for_alter_parallelism(
+        &session,
+        obj_name,
+        stmt_type,
+        "backfill_parallelism",
+    )?;
 
     let target_parallelism = extract_backfill_parallelism(parallelism)?;
 
