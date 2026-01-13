@@ -356,12 +356,6 @@ pub struct StopMutation {
     pub dropped_sink_fragments: HashSet<FragmentId>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-pub struct ActorThrottle {
-    pub rate_limit: Option<u32>,
-    pub throttle_type: ThrottleType,
-}
-
 /// See [`PbMutation`] for the semantics of each mutation.
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
 #[derive(Debug, Clone)]
