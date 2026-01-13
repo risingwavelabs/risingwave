@@ -197,6 +197,27 @@ impl HummockEvent {
             HummockEvent::DropVectorWriter { .. } => "DropVectorWriter".to_owned(),
         }
     }
+
+    pub fn event_name(&self) -> &'static str {
+        match self {
+            HummockEvent::BufferMayFlush => "BufferMayFlush",
+            HummockEvent::SyncEpoch { .. } => "SyncEpoch",
+            HummockEvent::Clear(..) => "Clear",
+            HummockEvent::Shutdown => "Shutdown",
+            HummockEvent::ImmToUploader { .. } => "ImmToUploader",
+            HummockEvent::StartEpoch { .. } => "StartEpoch",
+            HummockEvent::InitEpoch { .. } => "InitEpoch",
+            HummockEvent::LocalSealEpoch { .. } => "LocalSealEpoch",
+            #[cfg(any(test, feature = "test"))]
+            HummockEvent::FlushEvent(_) => "FlushEvent",
+            HummockEvent::RegisterReadVersion { .. } => "RegisterReadVersion",
+            HummockEvent::DestroyReadVersion { .. } => "DestroyReadVersion",
+            HummockEvent::RegisterVectorWriter { .. } => "RegisterVectorWriter",
+            HummockEvent::VectorWriterSealEpoch { .. } => "VectorWriterSealEpoch",
+            HummockEvent::DropVectorWriter { .. } => "DropVectorWriter",
+            HummockEvent::GetMinUncommittedObjectId { .. } => "GetMinUncommittedObjectId",
+        }
+    }
 }
 
 impl std::fmt::Debug for HummockEvent {

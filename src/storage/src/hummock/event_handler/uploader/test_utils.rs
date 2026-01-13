@@ -51,11 +51,11 @@ use crate::hummock::event_handler::uploader::{
 };
 use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::shared_buffer::TableMemoryMetrics;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchId, SharedBufferValue,
 };
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
-use crate::hummock::shared_buffer::TableMemoryMetrics;
 use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
@@ -137,9 +137,10 @@ pub(crate) async fn gen_imm_inner(
     let tracker = match limiter {
         Some(limiter) => {
             let tracker = limiter.require_memory(size as u64).await;
-            let per_table_tracker = TableMemoryMetrics::new(&HummockStateStoreMetrics::unused(), table_id).into();
+            let per_table_tracker =
+                TableMemoryMetrics::new(&HummockStateStoreMetrics::unused(), table_id).into();
             Some((tracker, per_table_tracker))
-        },
+        }
         None => None,
     };
     SharedBufferBatch::build_shared_buffer_batch(
