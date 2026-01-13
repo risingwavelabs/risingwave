@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -263,7 +263,7 @@ impl CommandContext {
         match command {
             Command::Flush => {}
 
-            Command::Throttle(..) => {}
+            Command::Throttle { .. } => {}
 
             Command::Pause => {}
 
@@ -483,6 +483,7 @@ impl CommandContext {
             }
             Command::DropSubscription { .. } => {}
             Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
+            Command::ResetSource { .. } => {}
         }
 
         Ok(())

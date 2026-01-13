@@ -66,3 +66,14 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- with_config_map:
+    streaming_use_shared_source: true
+  before:
+    - create_source
+  sql: |
+    CREATE TABLE t(x int,y int);
+    set streaming_use_snapshot_backfill = true;
+    select * from s union select * from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan

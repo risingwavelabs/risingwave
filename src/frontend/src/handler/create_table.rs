@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -596,7 +596,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     let (mut columns, pk_column_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
-    let watermark_descs: Vec<WatermarkDesc> = bind_source_watermark(
+    let watermark_descs = bind_source_watermark(
         context.session_ctx(),
         table_name.real_value(),
         source_watermarks,
@@ -775,7 +775,9 @@ fn gen_table_plan_inner(
         vec![],
     );
 
-    if !append_only && !watermark_descs.is_empty() {
+    let has_non_ttl_watermark = watermark_descs.iter().any(|d| !d.with_ttl);
+
+    if !append_only && has_non_ttl_watermark {
         return Err(ErrorCode::NotSupported(
             "Defining watermarks on table requires the table to be append only.".to_owned(),
             "Use the key words `APPEND ONLY`".to_owned(),
@@ -1535,68 +1537,6 @@ pub async fn create_iceberg_engine_table(
     job_type: PbTableJobType,
     if_not_exists: bool,
 ) -> Result<()> {
-    let meta_client = session.env().meta_client();
-    let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
-
-    let meta_store_endpoint = url::Url::parse(&meta_store_endpoint).map_err(|_| {
-        ErrorCode::InternalError("failed to parse the meta store endpoint".to_owned())
-    })?;
-    let meta_store_backend = meta_store_endpoint.scheme().to_owned();
-    let meta_store_user = meta_store_endpoint.username().to_owned();
-    let meta_store_password = match meta_store_endpoint.password() {
-        Some(password) => percent_decode_str(password)
-            .decode_utf8()
-            .map_err(|_| {
-                ErrorCode::InternalError(
-                    "failed to parse password from meta store endpoint".to_owned(),
-                )
-            })?
-            .into_owned(),
-        None => "".to_owned(),
-    };
-    let meta_store_host = meta_store_endpoint
-        .host_str()
-        .ok_or_else(|| {
-            ErrorCode::InternalError("failed to parse host from meta store endpoint".to_owned())
-        })?
-        .to_owned();
-    let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
-        ErrorCode::InternalError("failed to parse port from meta store endpoint".to_owned())
-    })?;
-    let meta_store_database = meta_store_endpoint
-        .path()
-        .trim_start_matches('/')
-        .to_owned();
-
-    let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
-        bail!("failed to parse meta backend: {}", meta_store_backend);
-    };
-
-    let catalog_uri = match meta_backend {
-        MetaBackend::Postgres => {
-            format!(
-                "jdbc:postgresql://{}:{}/{}",
-                meta_store_host.clone(),
-                meta_store_port.clone(),
-                meta_store_database.clone()
-            )
-        }
-        MetaBackend::Mysql => {
-            format!(
-                "jdbc:mysql://{}:{}/{}",
-                meta_store_host.clone(),
-                meta_store_port.clone(),
-                meta_store_database.clone()
-            )
-        }
-        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
-            bail!(
-                "Unsupported meta backend for iceberg engine table: {}",
-                meta_store_backend
-            );
-        }
-    };
-
     let rw_db_name = session
         .env()
         .catalog_reader()
@@ -1649,16 +1589,81 @@ pub async fn create_iceberg_engine_table(
                 with_common.insert("database.name".to_owned(), iceberg_database_name);
                 with_common.insert("table.name".to_owned(), iceberg_table_name);
 
-                if let Some(s) = params.properties.get("hosted_catalog")
-                    && s.eq_ignore_ascii_case("true")
-                {
+                let hosted_catalog = params
+                    .properties
+                    .get("hosted_catalog")
+                    .map(|s| s.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                if hosted_catalog {
+                    let meta_client = session.env().meta_client();
+                    let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
+
+                    let meta_store_endpoint =
+                        url::Url::parse(&meta_store_endpoint).map_err(|_| {
+                            ErrorCode::InternalError(
+                                "failed to parse the meta store endpoint".to_owned(),
+                            )
+                        })?;
+                    let meta_store_backend = meta_store_endpoint.scheme().to_owned();
+                    let meta_store_user = meta_store_endpoint.username().to_owned();
+                    let meta_store_password = match meta_store_endpoint.password() {
+                        Some(password) => percent_decode_str(password)
+                            .decode_utf8()
+                            .map_err(|_| {
+                                ErrorCode::InternalError(
+                                    "failed to parse password from meta store endpoint".to_owned(),
+                                )
+                            })?
+                            .into_owned(),
+                        None => "".to_owned(),
+                    };
+                    let meta_store_host = meta_store_endpoint
+                        .host_str()
+                        .ok_or_else(|| {
+                            ErrorCode::InternalError(
+                                "failed to parse host from meta store endpoint".to_owned(),
+                            )
+                        })?
+                        .to_owned();
+                    let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
+                        ErrorCode::InternalError(
+                            "failed to parse port from meta store endpoint".to_owned(),
+                        )
+                    })?;
+                    let meta_store_database = meta_store_endpoint
+                        .path()
+                        .trim_start_matches('/')
+                        .to_owned();
+
+                    let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
+                        bail!("failed to parse meta backend: {}", meta_store_backend);
+                    };
+
+                    let catalog_uri = match meta_backend {
+                        MetaBackend::Postgres => {
+                            format!(
+                                "jdbc:postgresql://{}:{}/{}",
+                                meta_store_host, meta_store_port, meta_store_database
+                            )
+                        }
+                        MetaBackend::Mysql => {
+                            format!(
+                                "jdbc:mysql://{}:{}/{}",
+                                meta_store_host, meta_store_port, meta_store_database
+                            )
+                        }
+                        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
+                            bail!(
+                                "Unsupported meta backend for iceberg engine table: {}",
+                                meta_store_backend
+                            );
+                        }
+                    };
+
                     with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
                     with_common.insert("catalog.uri".to_owned(), catalog_uri);
                     with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user);
-                    with_common.insert(
-                        "catalog.jdbc.password".to_owned(),
-                        meta_store_password.clone(),
-                    );
+                    with_common.insert("catalog.jdbc.password".to_owned(), meta_store_password);
                     with_common.insert("catalog.name".to_owned(), iceberg_catalog_name);
                 }
 

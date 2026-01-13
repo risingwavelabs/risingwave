@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -846,6 +846,14 @@ impl MetaClient {
     pub async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<WaitVersion> {
         let request = DropSourceRequest { source_id, cascade };
         let resp = self.inner.drop_source(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
+    pub async fn reset_source(&self, source_id: SourceId) -> Result<WaitVersion> {
+        let request = ResetSourceRequest { source_id };
+        let resp = self.inner.reset_source(request).await?;
         Ok(resp
             .version
             .ok_or_else(|| anyhow!("wait version not set"))?)
@@ -2533,6 +2541,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+            ,{ ddl_client, reset_source, ResetSourceRequest, ResetSourceResponse }
             ,{ ddl_client, drop_secret, DropSecretRequest, DropSecretResponse}
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }

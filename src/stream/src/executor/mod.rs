@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{Field, Schema, TableId};
+use risingwave_common::catalog::{Schema, TableId};
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::metrics::LabelGuardedMetric;
 use risingwave_common::row::OwnedRow;
@@ -48,10 +48,11 @@ use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
 use risingwave_pb::stream_plan::stream_node::PbStreamKind;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    PbBarrier, PbBarrierMutation, PbDispatcher, PbStreamMessageBatch, PbWatermark,
-    SubscriptionUpstreamInfo,
+    PbBarrier, PbBarrierMutation, PbDispatcher, PbSinkSchemaChange, PbStreamMessageBatch,
+    PbWatermark, SubscriptionUpstreamInfo,
 };
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
@@ -144,7 +145,7 @@ pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
 pub use changelog::ChangeLogExecutor;
 pub use dedup::AppendOnlyDedupExecutor;
-pub use dispatch::{DispatchExecutor, DispatcherImpl};
+pub use dispatch::DispatchExecutor;
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
 pub use expand::ExpandExecutor;
@@ -196,8 +197,7 @@ use risingwave_connector::source::cdc::{
     CdcTableSnapshotSplitAssignmentWithGeneration,
     build_actor_cdc_table_snapshot_splits_with_generation,
 };
-pub use risingwave_pb::common::ThrottleType;
-use risingwave_pb::id::SubscriberId;
+use risingwave_pb::id::{ExecutorId, SubscriberId};
 use risingwave_pb::stream_plan::stream_message_batch::{BarrierBatch, StreamMessageBatch};
 
 pub trait MessageStreamInner<M> = Stream<Item = MessageStreamItemInner<M>> + Send;
@@ -220,7 +220,7 @@ pub struct ExecutorInfo {
     pub identity: String,
 
     /// The executor id of the executor.
-    pub id: u64,
+    pub id: ExecutorId,
 }
 
 impl ExecutorInfo {
@@ -230,7 +230,7 @@ impl ExecutorInfo {
             stream_key,
             stream_kind: PbStreamKind::Retract, // dummy value for test
             identity,
-            id,
+            id: id.into(),
         }
     }
 }
@@ -318,8 +318,8 @@ pub const INVALID_EPOCH: u64 = 0;
 type UpstreamFragmentId = FragmentId;
 type SplitAssignments = HashMap<ActorId, Vec<SplitImpl>>;
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "test"), derive(Default))]
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
 pub struct UpdateMutation {
     pub dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
     pub merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
@@ -328,11 +328,12 @@ pub struct UpdateMutation {
     pub actor_splits: SplitAssignments,
     pub actor_new_dispatchers: HashMap<ActorId, Vec<PbDispatcher>>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
-    pub sink_add_columns: HashMap<SinkId, Vec<Field>>,
+    pub sink_schema_change: HashMap<SinkId, PbSinkSchemaChange>,
+    pub subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "test"), derive(Default))]
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
 pub struct AddMutation {
     pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
     pub added_actors: HashSet<ActorId>,
@@ -347,8 +348,8 @@ pub struct AddMutation {
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
 }
 
-#[derive(Debug, Clone, PartialEq)]
-#[cfg_attr(any(test, feature = "test"), derive(Default))]
+#[derive(Debug, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
 pub struct StopMutation {
     pub dropped_actors: HashSet<ActorId>,
     pub dropped_sink_fragments: HashSet<FragmentId>,
@@ -361,7 +362,8 @@ pub struct ActorThrottle {
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
-#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, Clone)]
 pub enum Mutation {
     Stop(StopMutation),
     Update(UpdateMutation),
@@ -369,13 +371,11 @@ pub enum Mutation {
     SourceChangeSplit(SplitAssignments),
     Pause,
     Resume,
-    Throttle {
-        actor_throttle: HashMap<ActorId, ActorThrottle>,
-    },
+    Throttle(HashMap<FragmentId, ThrottleConfig>),
     ConnectorPropsChange(HashMap<u32, HashMap<String, String>>),
     DropSubscriptions {
         /// `subscriber` -> `upstream_mv_table_id`
-        subscriptions_to_drop: Vec<(SubscriberId, TableId)>,
+        subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
     },
     StartFragmentBackfill {
         fragment_ids: HashSet<FragmentId>,
@@ -389,6 +389,9 @@ pub enum Mutation {
     },
     LoadFinish {
         associated_source_id: SourceId,
+    },
+    ResetSource {
+        source_id: SourceId,
     },
 }
 
@@ -568,7 +571,8 @@ impl Barrier {
             | Mutation::StartFragmentBackfill { .. }
             | Mutation::RefreshStart { .. }
             | Mutation::ListFinish { .. }
-            | Mutation::LoadFinish { .. } => false,
+            | Mutation::LoadFinish { .. }
+            | Mutation::ResetSource { .. } => false,
         }
     }
 
@@ -661,15 +665,28 @@ impl Barrier {
             })
     }
 
-    pub fn as_sink_add_columns(&self, sink_id: SinkId) -> Option<Vec<Field>> {
+    pub fn as_sink_schema_change(&self, sink_id: SinkId) -> Option<PbSinkSchemaChange> {
         self.mutation
             .as_deref()
             .and_then(|mutation| match mutation {
                 Mutation::Update(UpdateMutation {
-                    sink_add_columns, ..
-                }) => sink_add_columns.get(&sink_id).cloned(),
+                    sink_schema_change, ..
+                }) => sink_schema_change.get(&sink_id).cloned(),
                 _ => None,
             })
+    }
+
+    pub fn as_subscriptions_to_drop(&self) -> Option<&[SubscriptionUpstreamInfo]> {
+        match self.mutation.as_deref() {
+            Some(Mutation::DropSubscriptions {
+                subscriptions_to_drop,
+            })
+            | Some(Mutation::Update(UpdateMutation {
+                subscriptions_to_drop,
+                ..
+            })) => Some(subscriptions_to_drop.as_slice()),
+            _ => None,
+        }
     }
 
     pub fn get_curr_epoch(&self) -> Epoch {
@@ -729,7 +746,7 @@ impl Mutation {
         use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
         use risingwave_pb::stream_plan::{
             PbAddMutation, PbConnectorPropsChangeMutation, PbDispatchers,
-            PbDropSubscriptionsMutation, PbPauseMutation, PbResumeMutation, PbSinkAddColumns,
+            PbDropSubscriptionsMutation, PbPauseMutation, PbResumeMutation,
             PbSourceChangeSplitMutation, PbStartFragmentBackfillMutation, PbStopMutation,
             PbThrottleMutation, PbUpdateMutation,
         };
@@ -763,7 +780,8 @@ impl Mutation {
                 actor_splits,
                 actor_new_dispatchers,
                 actor_cdc_table_snapshot_splits,
-                sink_add_columns,
+                sink_schema_change,
+                subscriptions_to_drop,
             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -792,17 +810,11 @@ impl Mutation {
                         })
                     }).collect()
                 }),
-                sink_add_columns: sink_add_columns
+                sink_schema_change: sink_schema_change
                     .iter()
-                    .map(|(sink_id, add_columns)| {
-                        (
-                            *sink_id,
-                            PbSinkAddColumns {
-                                fields: add_columns.iter().map(|field| field.to_prost()).collect(),
-                            },
-                        )
-                    })
+                    .map(|(sink_id, change)| ((*sink_id).as_raw_id(), change.clone()))
                     .collect(),
+                subscriptions_to_drop: subscriptions_to_drop.clone(),
             }),
             Mutation::Add(AddMutation {
                 adds,
@@ -871,32 +883,13 @@ impl Mutation {
             }
             Mutation::Pause => PbMutation::Pause(PbPauseMutation {}),
             Mutation::Resume => PbMutation::Resume(PbResumeMutation {}),
-            Mutation::Throttle { actor_throttle } => PbMutation::Throttle(PbThrottleMutation {
-                actor_throttle: actor_throttle
-                    .iter()
-                    .map(|(actor_id, entry)| {
-                        (
-                            risingwave_pb::id::ActorId::new(actor_id.as_raw_id()),
-                            RateLimit {
-                                rate_limit: entry.rate_limit,
-                                throttle_type: entry.throttle_type as i32,
-                            },
-                        )
-                    })
-                    .collect(),
+            Mutation::Throttle (changes) => PbMutation::Throttle(PbThrottleMutation {
+                fragment_throttle: changes.clone(),
             }),
             Mutation::DropSubscriptions {
                 subscriptions_to_drop,
             } => PbMutation::DropSubscriptions(PbDropSubscriptionsMutation {
-                info: subscriptions_to_drop
-                    .iter()
-                    .map(
-                        |(subscriber_id, upstream_mv_table_id)| SubscriptionUpstreamInfo {
-                            subscriber_id: *subscriber_id,
-                            upstream_mv_table_id: *upstream_mv_table_id,
-                        },
-                    )
-                    .collect(),
+                info: subscriptions_to_drop.clone(),
             }),
             Mutation::ConnectorPropsChange(map) => {
                 PbMutation::ConnectorPropsChange(PbConnectorPropsChangeMutation {
@@ -938,6 +931,11 @@ impl Mutation {
             } => PbMutation::LoadFinish(risingwave_pb::stream_plan::LoadFinishMutation {
                 associated_source_id: *associated_source_id,
             }),
+            Mutation::ResetSource { source_id } => {
+                PbMutation::ResetSource(risingwave_pb::stream_plan::ResetSourceMutation {
+                    source_id: source_id.as_raw_id(),
+                })
+            }
         }
     }
 
@@ -991,16 +989,12 @@ impl Mutation {
                             .clone()
                             .unwrap_or_default(),
                     ),
-                sink_add_columns: update
-                    .sink_add_columns
+                sink_schema_change: update
+                    .sink_schema_change
                     .iter()
-                    .map(|(sink_id, add_columns)| {
-                        (
-                            *sink_id,
-                            add_columns.fields.iter().map(Field::from_prost).collect(),
-                        )
-                    })
+                    .map(|(sink_id, change)| (SinkId::from(*sink_id), change.clone()))
                     .collect(),
+                subscriptions_to_drop: update.subscriptions_to_drop.clone(),
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {
@@ -1071,31 +1065,10 @@ impl Mutation {
             PbMutation::Pause(_) => Mutation::Pause,
             PbMutation::Resume(_) => Mutation::Resume,
             PbMutation::Throttle(changes) => {
-                let actor_throttle: HashMap<ActorId, ActorThrottle> = changes
-                    .actor_throttle
-                    .iter()
-                    .map(|(actor_id, limit)| {
-                        let throttle_type = limit
-                            .throttle_type
-                            .try_into()
-                            .unwrap_or(ThrottleType::Unspecified);
-                        (
-                            ActorId::new(actor_id.as_raw_id()),
-                            ActorThrottle {
-                                rate_limit: limit.rate_limit,
-                                throttle_type,
-                            },
-                        )
-                    })
-                    .collect();
-                Mutation::Throttle { actor_throttle }
-            }
+                Mutation::Throttle(changes.fragment_throttle.clone())
+            },
             PbMutation::DropSubscriptions(drop) => Mutation::DropSubscriptions {
-                subscriptions_to_drop: drop
-                    .info
-                    .iter()
-                    .map(|info| (info.subscriber_id, info.upstream_mv_table_id))
-                    .collect(),
+                subscriptions_to_drop: drop.info.clone(),
             },
             PbMutation::ConnectorPropsChange(alter_connector_props) => {
                 Mutation::ConnectorPropsChange(
@@ -1133,6 +1106,9 @@ impl Mutation {
             },
             PbMutation::LoadFinish(load_finish) => Mutation::LoadFinish {
                 associated_source_id: load_finish.associated_source_id,
+            },
+            PbMutation::ResetSource(reset_source) => Mutation::ResetSource {
+                source_id: SourceId::from(reset_source.source_id),
             },
         };
         Ok(mutation)
@@ -1284,7 +1260,8 @@ impl Watermark {
     }
 }
 
-#[derive(Debug, EnumAsInner, PartialEq, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, EnumAsInner, Clone)]
 pub enum MessageInner<M> {
     Chunk(StreamChunk),
     Barrier(BarrierInner<M>),
@@ -1306,7 +1283,7 @@ pub type DispatcherMessage = MessageInner<()>;
 
 /// `MessageBatchInner` is used exclusively by `Dispatcher` and the `Merger`/`Receiver` for exchanging messages between them.
 /// It shares the same message type as the fundamental `MessageInner`, but batches multiple barriers into a single message.
-#[derive(Debug, EnumAsInner, PartialEq, Clone)]
+#[derive(Debug, EnumAsInner, Clone)]
 pub enum MessageBatchInner<M> {
     Chunk(StreamChunk),
     BarrierBatch(Vec<BarrierInner<M>>),

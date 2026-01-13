@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ mod array_positions;
 mod array_range_access;
 mod array_remove;
 mod array_replace;
+mod array_reverse;
 mod array_sort;
 mod array_sum;
 mod array_to_string;

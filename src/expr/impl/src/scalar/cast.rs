@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,9 +21,10 @@ use risingwave_common::array::{DataChunk, ListRef, ListValue, StructRef, StructV
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{
-    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, ToText,
+    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, Serial, Timestamptz, ToText,
 };
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::row_id::row_id_to_unix_millis;
 use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
 use risingwave_expr::{ExprError, Result, function};
 use risingwave_pb::expr::expr_node::PbType;
@@ -65,8 +66,14 @@ pub fn to_int256<T: TryInto<Int256>>(elem: T) -> Result<Int256> {
 }
 
 #[function("cast(jsonb) -> boolean")]
-pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
-    v.as_bool().map_err(|e| ExprError::Parse(e.into()))
+pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<Option<bool>> {
+    if v.is_jsonb_null() {
+        Ok(None)
+    } else {
+        v.as_bool()
+            .map(Some)
+            .map_err(|e| ExprError::Parse(e.into()))
+    }
 }
 
 /// Note that PostgreSQL casts JSON numbers from arbitrary precision `numeric` but we use `f64`.
@@ -77,11 +84,16 @@ pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
 #[function("cast(jsonb) -> decimal")]
 #[function("cast(jsonb) -> float4")]
 #[function("cast(jsonb) -> float8")]
-pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
-    v.as_number()
-        .map_err(|e| ExprError::Parse(e.into()))?
-        .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<Option<T>> {
+    if v.is_jsonb_null() {
+        Ok(None)
+    } else {
+        v.as_number()
+            .map_err(|e| ExprError::Parse(e.into()))?
+            .try_into()
+            .map(Some)
+            .map_err(|_| ExprError::NumericOutOfRange)
+    }
 }
 
 #[function("cast(int4) -> int2")]
@@ -137,6 +149,13 @@ where
     T1: Into<T2>,
 {
     elem.into()
+}
+
+/// Extract the timestamp from row id.
+#[function("cast(serial) -> timestamptz")]
+pub fn serial_to_timestamptz(elem: Serial) -> Result<Timestamptz> {
+    let unix_ms = row_id_to_unix_millis(elem.as_row_id()).ok_or(ExprError::NumericOutOfRange)?;
+    Timestamptz::from_millis(unix_ms).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("cast(varchar) -> boolean")]

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -54,21 +54,6 @@ use crate::rpc::metrics::MetaMetrics;
 pub type SourceManagerRef = Arc<SourceManager>;
 pub type SplitAssignment = HashMap<FragmentId, HashMap<ActorId, Vec<SplitImpl>>>;
 pub type DiscoveredSourceSplits = HashMap<SourceId, Vec<SplitImpl>>;
-
-pub type RateLimit = Option<u32>;
-
-/// Per-actor throttle configuration.
-#[derive(Clone, Copy, Debug)]
-pub struct ThrottleActorConfig {
-    pub rate_limit: RateLimit,
-}
-
-/// Throttle configuration to apply, grouped by fragment and actor, with a throttle type.
-#[derive(Clone, Debug)]
-pub struct ThrottleConfig {
-    pub throttle_type: risingwave_pb::common::ThrottleType,
-    pub limits: HashMap<FragmentId, HashMap<ActorId, ThrottleActorConfig>>,
-}
 
 // ALTER CONNECTOR parameters, specifying the new parameters to be set for each job_id (source_id/sink_id)
 pub type ConnectorPropsChange = HashMap<ObjectId, HashMap<String, String>>;

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use futures_async_stream::for_await;
 use parking_lot::RwLock;
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_response::StatementType;
-use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     AlterDatabaseParam, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
@@ -81,7 +81,7 @@ use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, FragmentId, SchemaId, SecretId, SinkId};
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
@@ -97,13 +97,13 @@ pub struct LocalFrontend {
 }
 
 impl SessionManager for LocalFrontend {
+    type Error = RwError;
     type Session = SessionImpl;
 
     fn create_dummy_session(
         &self,
         _database_id: DatabaseId,
-        _user_name: u32,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    ) -> std::result::Result<Arc<Self::Session>, Self::Error> {
         unreachable!()
     }
 
@@ -112,7 +112,7 @@ impl SessionManager for LocalFrontend {
         _database: &str,
         _user_name: &str,
         _peer_addr: AddressRef,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    ) -> std::result::Result<Arc<Self::Session>, Self::Error> {
         Ok(self.session_ref())
     }
 
@@ -515,6 +515,10 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
+        Ok(())
+    }
+
+    async fn reset_source(&self, _source_id: SourceId) -> Result<()> {
         Ok(())
     }
 

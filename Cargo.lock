@@ -4,12 +4,51 @@ version = 4
 
 [[package]]
 name = "adbc_core"
-version = "0.17.0"
+version = "0.21.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5c00daa298739db8f033952bdf3c67ccbcf2ccee9652df7eb4c7cd3397a7646d"
+checksum = "1a38cdcc3e43dc645038c2b6339dd98610c48ae593cc67839452e6670fa09f27"
 dependencies = [
- "arrow-array 54.3.1",
- "arrow-schema 54.3.1",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
+]
+
+[[package]]
+name = "adbc_driver_manager"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75c8a313f30eb7d90584eda8760037c746a1827297100b64704b30f3f6cbd203"
+dependencies = [
+ "adbc_core",
+ "adbc_ffi",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
+ "libloading 0.8.9",
+ "toml 0.9.8",
+]
+
+[[package]]
+name = "adbc_ffi"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "08d36274376fdc4849cf47a78f3baeef4ae1654ef703dc3148d91adde3336c11"
+dependencies = [
+ "adbc_core",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
+]
+
+[[package]]
+name = "adbc_snowflake"
+version = "0.21.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "66bd090599dae80c96bb6e52615e5c1d7d97cc2e622be162c62dce6e18f7f88f"
+dependencies = [
+ "adbc_core",
+ "adbc_driver_manager",
+ "adbc_ffi",
+ "arrow-array 56.2.0",
+ "arrow-schema 56.2.0",
+ "url",
 ]
 
 [[package]]
@@ -280,6 +319,12 @@ name = "arc-swap"
 version = "1.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69f7f8c3906b62b754cd5326047894316021dcfe5a194c8ea52bdd94934a3457"
+
+[[package]]
+name = "arcstr"
+version = "1.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "03918c3dbd7701a85c6b9887732e2921175f26c350b4563841d0958c21d57e6d"
 
 [[package]]
 name = "array-init"
@@ -576,9 +621,6 @@ name = "arrow-schema"
 version = "54.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cfaf5e440be44db5413b75b72c2a87c1f8f0627117d110264048f2969b99e9"
-dependencies = [
- "bitflags 2.10.0",
-]
 
 [[package]]
 name = "arrow-schema"
@@ -2392,7 +2434,7 @@ checksum = "c688fc74432808e3eb684cae8830a86be1d66a2bd58e1f248ed0960a590baf6f"
 dependencies = [
  "glob",
  "libc",
- "libloading",
+ "libloading 0.7.4",
 ]
 
 [[package]]
@@ -5470,9 +5512,9 @@ dependencies = [
 
 [[package]]
 name = "futures-async-stream"
-version = "0.2.11"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cce57e88ba9fe4953f476112b2c8e315a2da07725a14dc091ac3e5b6e4cca72"
+checksum = "1890317fad72bd60d4254c0a06140676bcc321889e73b8be23ddf1e7adb2b62d"
 dependencies = [
  "futures-async-stream-macro",
  "futures-core",
@@ -5481,9 +5523,9 @@ dependencies = [
 
 [[package]]
 name = "futures-async-stream-macro"
-version = "0.2.11"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ac45ed0bddbd110eb68862768a194f88700f5b91c39931d2f432fab67a16d08"
+checksum = "8fc954740d4b5ce849e6d8e01b79dbdb0e156b02737f7fb8d17130e25f36ff00"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6459,7 +6501,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fc3867d81aa279bdfecd8703b56144cfb80e9c12#fc3867d81aa279bdfecd8703b56144cfb80e9c12"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=54498bc5189b8d1f68419b53ba2d0288ce375a87#54498bc5189b8d1f68419b53ba2d0288ce375a87"
 dependencies = [
  "anyhow",
  "apache-avro 0.20.0",
@@ -6517,7 +6559,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fc3867d81aa279bdfecd8703b56144cfb80e9c12#fc3867d81aa279bdfecd8703b56144cfb80e9c12"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=54498bc5189b8d1f68419b53ba2d0288ce375a87#54498bc5189b8d1f68419b53ba2d0288ce375a87"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6532,7 +6574,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fc3867d81aa279bdfecd8703b56144cfb80e9c12#fc3867d81aa279bdfecd8703b56144cfb80e9c12"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=54498bc5189b8d1f68419b53ba2d0288ce375a87#54498bc5189b8d1f68419b53ba2d0288ce375a87"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6552,7 +6594,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=c3a03ec19c93377ee18cae76d9c042a05a52ed6c#c3a03ec19c93377ee18cae76d9c042a05a52ed6c"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=ccfe8d55169ea33d4575f923598f7bf28b3aaad3#ccfe8d55169ea33d4575f923598f7bf28b3aaad3"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6582,7 +6624,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=fc3867d81aa279bdfecd8703b56144cfb80e9c12#fc3867d81aa279bdfecd8703b56144cfb80e9c12"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=54498bc5189b8d1f68419b53ba2d0288ce375a87#54498bc5189b8d1f68419b53ba2d0288ce375a87"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6948,7 +6990,7 @@ dependencies = [
  "combine",
  "java-locator",
  "jni-sys",
- "libloading",
+ "libloading 0.7.4",
  "log",
  "thiserror 1.0.63",
  "walkdir",
@@ -7253,6 +7295,16 @@ checksum = "b67380fd3b2fbe7527a606e18729d21c6f3951633d0500574c4dc22d2d638b9f"
 dependencies = [
  "cfg-if",
  "winapi",
+]
+
+[[package]]
+name = "libloading"
+version = "0.8.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d7c4b02199fee7c5d21a5ae7d8cfa79a6ef5bb2fc834d6e9058e89c825efdc55"
+dependencies = [
+ "cfg-if",
+ "windows-link 0.2.1",
 ]
 
 [[package]]
@@ -7589,7 +7641,7 @@ dependencies = [
  "spin 0.9.8",
  "tokio",
  "tokio-util",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tracing",
  "tracing-subscriber",
 ]
@@ -10442,15 +10494,15 @@ checksum = "0b97c0a6319ae55341eb213c8ef97002630a3a5bd6f287f0124d077121d3f2a5"
 
 [[package]]
 name = "redis"
-version = "0.32.7"
+version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "014cc767fefab6a3e798ca45112bccad9c6e0e218fbd49720042716c73cfef44"
+checksum = "5dfe20977fe93830c0e9817a16fbf1ed1cfd8d4bba366087a1841d2c6033c251"
 dependencies = [
+ "arcstr",
  "bytes",
  "cfg-if",
  "combine",
  "crc16",
- "futures-sink",
  "futures-util",
  "itoa",
  "log",
@@ -10467,6 +10519,7 @@ dependencies = [
  "tokio-rustls 0.26.4",
  "tokio-util",
  "url",
+ "xxhash-rust",
 ]
 
 [[package]]
@@ -10905,7 +10958,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "itertools 0.14.0",
- "parking_lot 0.12.5",
+ "madsim-tokio",
  "prost 0.13.4",
  "risingwave_common",
  "risingwave_hummock_sdk",
@@ -10998,7 +11051,6 @@ dependencies = [
  "risingwave_storage",
  "rw_futures_util",
  "tempfile",
- "thiserror-ext",
  "tikv-jemallocator",
  "tokio-postgres",
  "tokio-stream 0.1.15",
@@ -11192,7 +11244,7 @@ dependencies = [
  "tinyvec",
  "tokio-retry",
  "tokio-util",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tower-layer",
  "tower-service",
  "tracing",
@@ -11451,6 +11503,7 @@ name = "risingwave_connector"
 version = "2.8.0-alpha"
 dependencies = [
  "adbc_core",
+ "adbc_snowflake",
  "anyhow",
  "apache-avro 0.16.0",
  "assert_matches",
@@ -11876,6 +11929,7 @@ dependencies = [
  "risingwave_batch",
  "risingwave_batch_executors",
  "risingwave_common",
+ "risingwave_common_estimate_size",
  "risingwave_common_heap_profiling",
  "risingwave_common_service",
  "risingwave_connector",
@@ -11903,7 +11957,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -12114,7 +12168,6 @@ dependencies = [
  "rand 0.9.2",
  "risingwave_backup",
  "risingwave_common",
- "risingwave_common_heap_profiling",
  "risingwave_connector",
  "risingwave_hummock_sdk",
  "risingwave_license",
@@ -12138,7 +12191,7 @@ dependencies = [
  "thiserror-ext",
  "tokio-retry",
  "tokio-stream 0.1.15",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tower 0.5.2",
  "tower-http",
  "tracing",
@@ -12533,7 +12586,7 @@ dependencies = [
  "serde_with",
  "tokio-postgres",
  "tokio-stream 0.1.15",
- "toml 0.9.6",
+ "toml 0.9.8",
  "tracing",
  "workspace-hack",
 ]
@@ -12651,6 +12704,7 @@ dependencies = [
  "moka",
  "multimap 0.10.0",
  "parking_lot 0.12.5",
+ "paste",
  "pin-project",
  "pretty_assertions",
  "prometheus",
@@ -13832,11 +13886,12 @@ dependencies = [
 
 [[package]]
 name = "serial_test"
-version = "3.2.0"
+version = "3.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b258109f244e1d6891bf1053a55d63a5cd4f8f4c30cf9a1280989f80e7a1fa9"
+checksum = "0d0b343e184fc3b7bb44dff0705fffcf4b3756ba6aff420dddd8b24ca145e555"
 dependencies = [
- "futures",
+ "futures-executor",
+ "futures-util",
  "log",
  "once_cell",
  "parking_lot 0.12.5",
@@ -13846,9 +13901,9 @@ dependencies = [
 
 [[package]]
 name = "serial_test_derive"
-version = "3.2.0"
+version = "3.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5d69265a08751de7844521fd15003ae0a888e035773ba05695c5c759a6f89eef"
+checksum = "6f50427f258fb77356e4cd4aa0e87e2bd2c66dbcee41dc405282cae2bfc26c83"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -15311,9 +15366,9 @@ dependencies = [
 
 [[package]]
 name = "toml"
-version = "0.9.6"
+version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ae2a4cf385da23d1d53bc15cdfa5c2109e93d8d362393c801e87da2f72f0e201"
+checksum = "f0dc8b1fb61449e27716ec0e1bdf0f6b8f3e8f6b05391e8497b8b6d7804ea6d8"
 dependencies = [
  "indexmap 2.12.0",
  "serde_core",

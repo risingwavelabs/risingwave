@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -113,6 +113,7 @@ pub mod privilege;
 pub mod query;
 mod recover;
 mod refresh;
+mod reset_source;
 pub mod show;
 mod transaction;
 mod use_db;
@@ -1321,6 +1322,9 @@ pub async fn handle(
                     StatementType::ALTER_SOURCE,
                 )
                 .await
+            }
+            AlterSourceOperation::ResetSource => {
+                reset_source::handle_reset_source(handler_args, name).await
             }
         },
         Statement::AlterFunction {

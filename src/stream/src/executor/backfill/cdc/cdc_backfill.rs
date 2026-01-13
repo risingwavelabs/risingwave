@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -448,10 +448,10 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 is_snapshot_paused = false;
                                                 snapshot_valve.resume();
                                             }
-                                            Mutation::Throttle {
-                                                actor_throttle: some,
-                                            } => {
-                                                if let Some(entry) = some.get(&self.actor_ctx.id)
+                                            Mutation::Throttle (
+                                                some,
+                                            ) => {
+                                                if let Some(entry) = some.get(&self.actor_ctx.fragment_id)
                                                     && entry.throttle_type == ThrottleType::Backfill
                                                     && entry.rate_limit != self.rate_limit_rps
                                                 {

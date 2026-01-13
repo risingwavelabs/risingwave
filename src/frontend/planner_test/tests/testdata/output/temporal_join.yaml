@@ -76,8 +76,9 @@
     create table version(id2 int, a2 int, b2 int, primary key (id2, a2));
     select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2 where a2 < 10;
   stream_error: |-
-    Not supported: Temporal join requires the lookup table's primary key contained exactly in the equivalence condition
-    HINT: Please add the primary key of the lookup table to the join condition and remove any other conditions
+    Not supported: Temporal join requires the equivalence join condition includes the key columns that form the distribution key of the lookup table
+    HINT: Use DESCRIBE <table_name> to view the table's key information.
+    You can create an index on the lookup table to facilitate the temporal join if necessary.
 - name: Temporal join append only test
   sql: |
     create table stream(id1 int, a1 int, b1 int) append only;
@@ -301,8 +302,9 @@
     create index idx2 on version (a2, b2);
     select id1, a1, id2, a2 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on c1 = c2;
   stream_error: |-
-    Not supported: Temporal join requires the lookup table's primary key contained exactly in the equivalence condition
-    HINT: Please add the primary key of the lookup table to the join condition and remove any other conditions
+    Not supported: Temporal join requires the equivalence join condition includes the key columns that form the distribution key of the lookup table
+    HINT: Use DESCRIBE <table_name> to view the table's key information.
+    You can create an index on the lookup table to facilitate the temporal join if necessary.
 - name: use CTE as temporal join right table. https://github.com/risingwavelabs/risingwave/issues/18703
   sql: |
     create table stream(id1 int, a1 int, b1 int, c1 int);
@@ -315,6 +317,11 @@
     create table stream(id1 int, a1 int, b1 int, v1 timestamp with time zone, watermark for v1 as v1 - INTERVAL '10' SECOND) APPEND ONLY;
     create table version(id2 int, a2 int, b2 int, primary key (id2));
     select id1, a1, id2, v1 from stream left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
-  stream_error: |-
-    Not supported: Temporal join with snapshot backfill not supported
-    HINT: Please use arrangement backfill
+  stream_plan: |-
+    StreamMaterialize { columns: [id1, a1, id2, v1, stream._row_id(hidden)], stream_key: [stream._row_id, id1], pk_columns: [stream._row_id, id1], pk_conflict: NoCheck, watermark_columns: [v1] }
+    └─StreamExchange { dist: HashShard(stream.id1, stream._row_id) }
+      └─StreamTemporalJoin { type: LeftOuter, append_only: true, predicate: stream.id1 = version.id2, nested_loop: false, output_watermarks: [[stream.v1]], output: [stream.id1, stream.a1, version.id2, stream.v1, stream._row_id] }
+        ├─StreamExchange { dist: HashShard(stream.id1) }
+        │ └─StreamTableScan { table: stream, columns: [stream.id1, stream.a1, stream.v1, stream._row_id], stream_scan_type: ArrangementBackfill, stream_key: [stream._row_id], pk: [_row_id], dist: UpstreamHashShard(stream._row_id) }
+        └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(version.id2) }
+          └─StreamTableScan { table: version, columns: [version.id2], stream_scan_type: UpstreamOnly, stream_key: [version.id2], pk: [id2], dist: UpstreamHashShard(version.id2) }

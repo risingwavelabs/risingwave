@@ -34,7 +34,7 @@ else
   RUNTIME_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-monitoring'
   MINIO_RATE_LIMIT_CLUSTER_PROFILE='ci-backfill-3cn-1fe-with-monitoring-and-minio-rate-limit'
 fi
-export RUST_LOG="info,risingwave_stream=info,risingwave_stream::executor::backfill=debug,risingwave_batch=info,risingwave_storage=info,risingwave_meta::barrier=debug" \
+export RUST_LOG="info,risingwave_stream=info,risingwave_stream::executor::backfill=debug,risingwave_batch=info,risingwave_storage=info,risingwave_meta::barrier=debug,risingwave_stream::executor::stream_reader=warn" \
 
 run_sql_file() {
   psql -h localhost -p 4566 -d dev -U root -f "$@"
@@ -110,11 +110,13 @@ test_snapshot_and_upstream_read() {
   # Provide snapshot
   run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql
 
+  run_sql "alter table t1 set dml_rate_limit = 10"
+
   # Provide updates ...
   run_sql_file "$PARENT_PATH"/sql/backfill/basic/insert.sql &
 
   # ... and concurrently create mv.
-  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql &
+  run_sql_file "$PARENT_PATH"/sql/backfill/basic/create_mv.sql && run_sql "alter table t1 set dml_rate_limit = default" &
 
   wait
 
@@ -306,17 +308,17 @@ test_snapshot_backfill() {
 
   wait
 
+  TEST_NAME=nexmark_q3 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/scale.slt' &
+  TEST_NAME=nexmark_q7 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/scale.slt' &
+
+  wait
+
   psql -h localhost -p 4566 -d dev -U root -c 'RECOVER'
 
   sleep 3
 
   TEST_NAME=nexmark_q3 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/check_data_equal.slt.part' &
   TEST_NAME=nexmark_q7 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/check_data_equal.slt.part' &
-
-  wait
-
-  TEST_NAME=nexmark_q3 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/scale.slt' &
-  TEST_NAME=nexmark_q7 sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/scale.slt' &
 
   wait
 
@@ -327,7 +329,7 @@ test_snapshot_backfill() {
 
   sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/drop_nexmark_table.slt'
 
-  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/failed_tests.slt'
+  sqllogictest -p 4566 -d dev 'e2e_test/backfill/snapshot_backfill/failed_tests.slt' --label snapshot-backfill
 
   kill_cluster
 }

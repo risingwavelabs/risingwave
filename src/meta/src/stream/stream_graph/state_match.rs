@@ -23,6 +23,7 @@ use risingwave_common::catalog::{TableDesc, TableId};
 use risingwave_common::id::FragmentId;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_tables_inner;
 use risingwave_pb::catalog::PbTable;
+use risingwave_pb::id::StreamNodeLocalOperatorId;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbStreamScanType, StreamNode};
 use strum::IntoDiscriminant;
@@ -185,7 +186,7 @@ pub(crate) struct MatchResult {
     /// The mapping from source table id to target table within the fragment.
     pub table_matches: HashMap<TableId, PbTable>,
     /// The mapping from source `operator_id` to snapshot epoch
-    pub snapshot_backfill_epochs: HashMap<u64, u64>,
+    pub snapshot_backfill_epochs: HashMap<StreamNodeLocalOperatorId, u64>,
 }
 
 /// The match result of a fragment in the source graph to a fragment in the target graph.
@@ -459,7 +460,7 @@ pub(crate) fn match_graph(g1: &Graph, g2: &Graph) -> Result<MatchResult> {
 
         let mut last_error = None;
 
-        for &v in &u_cands {
+        'cand_v: for &v in &u_cands {
             // Skip if v is already used.
             if matches.target_matched(v) {
                 continue;
@@ -472,7 +473,7 @@ pub(crate) fn match_graph(g1: &Graph, g2: &Graph) -> Result<MatchResult> {
                     && !g2.upstreams(v).contains(&v_upstream)
                 {
                     // Not a valid match.
-                    continue;
+                    continue 'cand_v;
                 }
             }
             // Same for downstream of u.
@@ -482,7 +483,7 @@ pub(crate) fn match_graph(g1: &Graph, g2: &Graph) -> Result<MatchResult> {
                     && !g2.downstreams(v).contains(&v_downstream)
                 {
                     // Not a valid match.
-                    continue;
+                    continue 'cand_v;
                 }
             }
 

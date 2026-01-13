@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -170,6 +170,10 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism: ConfigParallelism,
 
+    /// Specific parallelism for backfill. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_backfill: ConfigParallelism,
+
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_table: ConfigParallelism,
@@ -218,9 +222,11 @@ pub struct SessionConfig {
     #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
 
-    /// Enable materialized expressions for impure functions (typically UDF).
-    #[parameter(default = true)]
-    streaming_enable_materialized_expressions: bool,
+    /// Unsafe: allow impure expressions on non-append-only streams without materialization.
+    ///
+    /// This may lead to inconsistent results or panics due to re-evaluation on updates/retracts.
+    #[parameter(default = false)]
+    streaming_unsafe_allow_unmaterialized_impure_expr: bool,
 
     /// Separate consecutive `StreamHashJoin` by no-shuffle `StreamExchange`
     #[parameter(default = false)]
@@ -450,6 +456,15 @@ pub struct SessionConfig {
     /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
     #[parameter(default = false)]
     enable_datafusion_engine: bool,
+
+    /// Emit chunks in upsert format for `UPDATE` and `DELETE` DMLs.
+    /// May lead to undefined behavior if the table is created with `ON CONFLICT DO NOTHING`.
+    ///
+    /// When enabled:
+    /// - `UPDATE` will only emit `Insert` records for new rows, instead of `Update` records.
+    /// - `DELETE` will only include key columns and pad the rest with NULL, instead of emitting complete rows.
+    #[parameter(default = false)]
+    upsert_dml: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {

@@ -2908,7 +2908,12 @@ impl Parser<'_> {
             let column = self.parse_identifier_non_reserved()?;
             self.expect_keyword(Keyword::AS)?;
             let expr = self.parse_expr()?;
-            Ok(Some(SourceWatermark { column, expr }))
+            let with_ttl = self.parse_keywords(&[Keyword::WITH, Keyword::TTL]);
+            Ok(Some(SourceWatermark {
+                column,
+                expr,
+                with_ttl,
+            }))
         } else {
             Ok(None)
         }
@@ -3750,7 +3755,8 @@ impl Parser<'_> {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterSourceOperation::ResetConfig { keys }
             } else {
-                return self.expected("CONFIG after RESET");
+                // RESET without CONFIG means reset CDC source offset to latest
+                AlterSourceOperation::ResetSource
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();

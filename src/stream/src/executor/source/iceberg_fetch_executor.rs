@@ -500,12 +500,11 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                         match mutation {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
-                                            Mutation::Throttle { actor_throttle } => {
+                                            Mutation::Throttle(fragment_to_apply) => {
                                                 if let Some(entry) =
-                                                    actor_throttle.get(&self.actor_ctx.id)
+                                                    fragment_to_apply.get(&self.actor_ctx.fragment_id)
                                                     && entry.throttle_type == ThrottleType::Source
-                                                    && entry.rate_limit != self.rate_limit_rps
-                                                {
+                                                    && entry.rate_limit != self.rate_limit_rps {
                                                     tracing::debug!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,
@@ -528,13 +527,15 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                     // Propagate the barrier.
                                     yield Message::Barrier(barrier);
 
-                                    if let Some((_, cache_may_stale)) =
-                                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                                    if post_commit
+                                        .post_yield_barrier(update_vnode_bitmap)
+                                        .await?
+                                        .is_some()
                                     {
-                                        // if cache_may_stale, we must rebuild the stream to adjust vnode mappings
-                                        if cache_may_stale {
-                                            splits_on_fetch = 0;
-                                        }
+                                        // Vnode bitmap update changes which file assignments this executor
+                                        // should read. Rebuild the reader to avoid reading splits that no
+                                        // longer belong to this actor (e.g., during scale-out).
+                                        splits_on_fetch = 0;
                                     }
 
                                     if splits_on_fetch == 0 || need_rebuild_reader {
@@ -599,7 +600,7 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                     Arc::new(
                                         SerialArray::from_iter_bitmap(
                                             itertools::repeat_n(Serial::from(0), columns[0].len()),
-                                            Bitmap::ones(columns[0].len()),
+                                            Bitmap::zeros(columns[0].len()),
                                         )
                                         .into(),
                                     ),

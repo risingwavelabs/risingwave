@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -391,20 +391,21 @@ impl SkipWatermarkState for NonPkPrefixSkipWatermarkState {
                 read_watermarks
                     .vnode_watermarks
                     .iter()
-                    .map(move |(vnode, watermarks)| {
-                        (
+                    .flat_map(move |(vnode, watermarks)| {
+                        // TODO(ttl): if the watermark column is in the value, we may get a `None` here, support it.
+                        let watermark_serde = watermark_serde.as_ref()?;
+                        Some((
                             *table_id,
                             *vnode,
                             read_watermarks.direction,
                             {
-                                let watermark_serde = watermark_serde.as_ref().unwrap();
                                 let row = watermark_serde
                                 .deserialize(watermarks).unwrap_or_else(|_| {
                                     panic!("Failed to deserialize watermark {:?} serde data_types {:?} order_types {:?}", watermarks, watermark_serde.get_data_types(), watermark_serde.get_order_types());
                                 });
                                 row[0].clone()
                             },
-                        )
+                        ))
                     })
             })
             .collect();

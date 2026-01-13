@@ -1,0 +1,43 @@
+# Verify impure expressions must be materialized on retract streams.
+
+statement ok
+set streaming_unsafe_allow_unmaterialized_impure_expr to default;
+
+statement ok
+create table t (a int);
+
+# StreamFilter: impure in filter predicate on retract stream should error.
+# TODO: we should extract it and materialize it.
+statement error using an impure expression \(RANDOM\) in WHERE or HAVING
+create materialized view mv_impure_filter as
+select * from t where random() > 0.5;
+
+# Agg filter: impure in `FILTER (WHERE ...)` on retract stream should error.
+# TODO: we should extract it and materialize it.
+statement error using an impure expression \(RANDOM\) in AGGREGATE FILTER
+create materialized view mv_impure_agg_filter as
+select sum(a) filter (where random() > 0.5) from t;
+
+skipif madsim
+statement ok
+create function rand_series(n int) returns table (x int) language javascript as $$
+export function* rand_series(n) {
+    for (let i = 0; i < n; i++) {
+        yield { x: Math.floor(Math.random() * 100) };
+    }
+}
+$$;
+
+# StreamProjectSet: user-defined table function on retract stream should error.
+# TODO: we should extract it and materialize it.
+skipif madsim
+statement error using an impure expression \(user-defined table function `rand_series`\) in table function
+create materialized view mv_impure_udtf_select_list as
+select a, rand_series(a) from t;
+
+skipif madsim
+statement ok
+drop function rand_series(int);
+
+statement ok
+drop table t;

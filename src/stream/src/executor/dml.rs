@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -160,10 +160,8 @@ impl DmlExecutor {
                             match mutation {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
-                                Mutation::Throttle {
-                                    actor_throttle: actor_to_apply,
-                                } => {
-                                    if let Some(entry) = actor_to_apply.get(&self.actor_ctx.id)
+                                Mutation::Throttle(fragment_to_apply) => {
+                                    if let Some(entry) = fragment_to_apply.get(&self.actor_ctx.fragment_id)
                                         && entry.throttle_type == ThrottleType::Dml
                                     {
                                         let new_rate_limit = entry.rate_limit.into();

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,10 +24,7 @@ use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::controller::fragment::StreamingJobInfo;
 use risingwave_meta::controller::utils::FragmentDesc;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta::model::ActorId;
-use risingwave_meta::stream::{
-    GlobalRefreshManagerRef, SourceManagerRunningInfo, ThrottleActorConfig, ThrottleConfig,
-};
+use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
 use risingwave_meta::{MetaError, model};
 use risingwave_meta_model::{ConnectionId, FragmentId, StreamingParallelism};
 use risingwave_pb::common::ThrottleType;
@@ -44,6 +41,7 @@ use risingwave_pb::meta::table_fragments::PbState;
 use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -151,7 +149,8 @@ impl StreamManagerService for StreamServiceImpl {
             (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
                 self.metadata_manager
                     .update_source_rate_limit_by_source_id(request.id.into(), request.rate)
-                    .await?
+                    .await?;
+                raw_object_id = request.id;
             }
             (ThrottleType::Backfill, ThrottleTarget::Mv)
             | (ThrottleType::Backfill, ThrottleTarget::Sink)
@@ -168,13 +167,24 @@ impl StreamManagerService for StreamServiceImpl {
             (ThrottleType::Sink, ThrottleTarget::Sink) => {
                 self.metadata_manager
                     .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
-                    .await?
+                    .await?;
+                jobs = [request.id.into()].into_iter().collect();
+                raw_object_id = request.id;
             }
             // FIXME(kwannoel): specialize for throttle type x target
             (_, ThrottleTarget::Fragment) => {
                 self.metadata_manager
                     .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
-                    .await?
+                    .await?;
+                let fragment_id = request.id.into();
+                fragments = [fragment_id].into_iter().collect();
+                let job_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_fragment_streaming_job_id(fragment_id)
+                    .await?;
+                jobs = [job_id].into_iter().collect();
+                raw_object_id = job_id.as_raw_id();
             }
             _ => {
                 return Err(Status::invalid_argument(format!(
@@ -196,33 +206,25 @@ impl StreamManagerService for StreamServiceImpl {
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(job_id)
+            .get_object_database_id(raw_object_id)
             .await?;
+
         // TODO: check whether shared source is correct
-        let limits = actor_to_apply
-            .iter()
-            .map(|(fragment_id, actors)| {
-                let per_actor = actors
-                    .iter()
-                    .map(|actor_id| {
-                        (
-                            *actor_id,
-                            ThrottleActorConfig {
-                                rate_limit: request.rate,
-                            },
-                        )
-                    })
-                    .collect::<HashMap<ActorId, ThrottleActorConfig>>();
-                (*fragment_id, per_actor)
-            })
-            .collect::<HashMap<FragmentId, HashMap<ActorId, ThrottleActorConfig>>>();
-        let mutation = ThrottleConfig {
+        let throttle_config = ThrottleConfig {
+            rate_limit: request.rate,
             throttle_type,
-            limits,
         };
         let _i = self
             .barrier_scheduler
-            .run_command(database_id, Command::Throttle(mutation))
+            .run_command(
+                database_id,
+                Command::Throttle {
+                    config: fragments
+                        .into_iter()
+                        .map(|fragment_id| (fragment_id, throttle_config))
+                        .collect(),
+                },
+            )
             .await?;
 
         Ok(Response::new(ApplyThrottleResponse { status: None }))

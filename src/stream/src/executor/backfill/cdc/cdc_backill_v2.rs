@@ -421,13 +421,13 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                 is_snapshot_paused = false;
                                                 snapshot_valve.resume();
                                             }
-                                            Mutation::Throttle {
-                                                actor_throttle: some,
-                                            } => {
+                                            Mutation::Throttle (
+                                                some,
+                                            ) => {
                                                 // TODO(zw): optimization: improve throttle.
                                                 // 1. Handle rate limit 0. Currently, to resume the process, the actor must be rebuilt.
                                                 // 2. Apply new rate limit immediately.
-                                                if let Some(entry) = some.get(&self.actor_ctx.id)
+                                                if let Some(entry) = some.get(&self.actor_ctx.fragment_id)
                                                     && entry.throttle_type == ThrottleType::Backfill
                                                     && entry.rate_limit != self.rate_limit_rps
                                                 {

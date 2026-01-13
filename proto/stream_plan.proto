@@ -54,15 +54,11 @@ message StopMutation {
   repeated uint32 dropped_sink_fragments = 2;
 }
 
-message SinkAddColumns {
-  repeated plan_common.Field fields = 1;
-}
-
 message UpdateMutation {
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
     uint32 actor_id = 1;
-    uint64 dispatcher_id = 2;
+    uint32 dispatcher_id = 2;
     // The hash mapping for consistent hash.
     // For dispatcher types other than HASH, this is ignored.
     ActorMapping hash_mapping = 3;
@@ -101,7 +97,8 @@ message UpdateMutation {
   map<uint32, Dispatchers> actor_new_dispatchers = 6;
   // CDC table snapshot splits
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
-  map<uint32, SinkAddColumns> sink_add_columns = 8;
+  map<uint32, SinkSchemaChange> sink_schema_change = 8;
+  repeated SubscriptionUpstreamInfo subscriptions_to_drop = 9;
 }
 
 message SourceChangeSplitMutation {
@@ -114,13 +111,12 @@ message PauseMutation {}
 message ResumeMutation {}
 
 message ThrottleMutation {
-  message RateLimit {
+  message ThrottleConfig {
     optional uint32 rate_limit = 1;
     common.ThrottleType throttle_type = 2;
   }
 
-  // Actor -> RateLimit
-  map<uint32, RateLimit> actor_throttle = 1;
+  map<uint32, ThrottleConfig> fragment_throttle = 1;
 }
 
 message SubscriptionUpstreamInfo {
@@ -159,6 +155,11 @@ message LoadFinishMutation {
   uint32 associated_source_id = 1;
 }
 
+message ResetSourceMutation {
+  // Source ID to reset
+  uint32 source_id = 1;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -192,6 +193,8 @@ message BarrierMutation {
     LoadFinishMutation load_finish = 16;
     // List finish signal for refreshing tables
     ListFinishMutation list_finish = 17;
+    // Reset CDC source offset to latest
+    ResetSourceMutation reset_source = 18;
   }
 }
 
@@ -343,6 +346,10 @@ message SinkDesc {
   optional uint32 target_table = 14;
   optional uint64 extra_partition_col_idx = 15;
   map<string, secret.SecretRef> secret_refs = 16;
+  // Backward-compatible replacement for `SINK_TYPE_FORCE_APPEND_ONLY`.
+  //
+  // Should not directly access this field. Use method `ignore_delete()` instead.
+  bool raw_ignore_delete = 17;
 }
 
 enum SinkLogStoreType {
@@ -636,6 +643,8 @@ message DynamicFilterNode {
   // If this is false, we need to store RHS records which match the condition in the internal table.
   // When the condition changes, we will tell downstream to delete the LHS records which now no longer match the condition.
   bool condition_always_relax = 5 [deprecated = true];
+  // Whether the dynamic filter can clean its left state table by watermark.
+  bool cleaned_by_watermark = 6;
 }
 
 // Delta join with two indexes. This is a pseudo plan node generated on frontend. On meta
@@ -1187,7 +1196,7 @@ message Dispatcher {
   ActorMapping hash_mapping = 3;
   // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
   // This is exactly the same as its downstream fragment id.
-  uint64 dispatcher_id = 4;
+  uint32 dispatcher_id = 4;
   // Number of downstreams decides how many endpoints a dispatcher should dispatch.
   repeated uint32 downstream_actor_id = 5;
 }
@@ -1272,6 +1281,8 @@ message StreamFragmentGraph {
   StreamContext ctx = 5;
   // If none, default parallelism will be applied.
   Parallelism parallelism = 6;
+  // Parallelism to use during backfill. Falls back to `parallelism` if unset.
+  Parallelism backfill_parallelism = 9;
 
   // Specified max parallelism, i.e., expected vnode count for the graph.
   //
@@ -1286,4 +1297,36 @@ message StreamFragmentGraph {
 
   // The backfill order strategy for the fragments.
   BackfillOrder backfill_order = 8;
+}
+
+// Schema change operation for sink
+message SinkSchemaChange {
+  // Original schema before this change.
+  // Used for validation and conflict detection.
+  repeated plan_common.Field original_schema = 1;
+
+  // Schema change operation (mutually exclusive)
+  oneof op {
+    // Add new columns to the schema
+    SinkAddColumnsOp add_columns = 2;
+
+    // Drop columns from the schema
+    SinkDropColumnsOp drop_columns = 3;
+
+    // Future operations can be added here...
+    // RenameColumnsOp rename_columns = 4;
+    // AlterColumnTypeOp alter_column_type = 5;
+  }
+}
+
+// Add columns operation
+message SinkAddColumnsOp {
+  // Columns to add
+  repeated plan_common.Field fields = 1;
+}
+
+// Drop columns operation
+message SinkDropColumnsOp {
+  // Column names to drop
+  repeated string column_names = 1;
 }

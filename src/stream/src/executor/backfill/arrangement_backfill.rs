@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -558,10 +558,10 @@ where
                                 backfill_paused = false;
                             }
                         }
-                        Mutation::Throttle {
-                            actor_throttle: actor_to_apply,
-                        } => {
-                            let entry = actor_to_apply.get(&self.actor_id);
+                        Mutation::Throttle (
+                            fragment_to_apply,
+                        ) => {
+                            let entry = fragment_to_apply.get(&self.fragment_id);
                             if let Some(entry) = entry
                                 && entry.throttle_type == ThrottleType::Backfill
                             {

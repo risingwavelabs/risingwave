@@ -10,6 +10,8 @@ repository = { workspace = true }
 [features]
 default = []
 datafusion = ["dep:datafusion", "dep:datafusion-common"]
+all-sources = ["source-adbc_snowflake"]
+source-adbc_snowflake = ["risingwave_connector/source-adbc_snowflake"]
 
 [dependencies]
 anyhow = "1"
@@ -68,6 +70,7 @@ quick-xml = { version = "0.38", features = ["serialize"] }
 rand = { version = "0.9", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_connector = { workspace = true }

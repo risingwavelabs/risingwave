@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,7 +30,8 @@ use crate::task::{ActorId, FragmentId};
 pub type AlignedMessageStreamItem = StreamExecutorResult<AlignedMessage>;
 pub trait AlignedMessageStream = futures::Stream<Item = AlignedMessageStreamItem> + Send;
 
-#[derive(Debug, EnumAsInner, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, EnumAsInner)]
 pub enum AlignedMessage {
     Barrier(Barrier),
     WatermarkLeft(Watermark),

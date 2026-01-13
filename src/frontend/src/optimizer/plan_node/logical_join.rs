@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -1032,6 +1032,10 @@ impl LogicalJoin {
         }
     }
 
+    pub fn should_be_temporal_join(&self) -> bool {
+        self.temporal_join_on().is_some()
+    }
+
     fn temporal_join_on(&self) -> Option<TemporalJoinScan<'_>> {
         if let Some(logical_scan) = self.core.right.as_logical_scan() {
             matches!(logical_scan.as_of(), Some(AsOf::ProcessTime))
@@ -1234,10 +1238,12 @@ impl LogicalJoin {
             }
         }
         if reorder_idx.len() < shortest_prefix_len {
-            // TODO: support index selection for temporal join and refine this error message.
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires the lookup table's primary key contained exactly in the equivalence condition".into(),
-                "Please add the primary key of the lookup table to the join condition and remove any other conditions".into(),
+                "Temporal join requires the equivalence join condition includes the key columns that form the distribution key of the lookup table".into(),
+                concat!(
+                    "Use DESCRIBE <table_name> to view the table's key information.\n",
+                    "You can create an index on the lookup table to facilitate the temporal join if necessary."
+                ).into(),
             )));
         }
         let lookup_prefix_len = reorder_idx.len();

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -442,7 +442,10 @@ pub enum BeMessage<'a> {
     ParameterStatus(BeParameterStatusMessage<'a>),
     ReadyForQuery(TransactionStatus),
     RowDescription(&'a [PgFieldDescriptor]),
-    ErrorResponse(&'a (dyn std::error::Error + Send + Sync + 'static)),
+    ErrorResponse {
+        error: &'a (dyn std::error::Error + Send + Sync + 'static),
+        pretty: bool,
+    },
     CloseComplete,
 
     // Copy
@@ -713,11 +716,11 @@ impl BeMessage<'_> {
                 buf.put_i32(4);
             }
 
-            BeMessage::ErrorResponse(error) => {
+            BeMessage::ErrorResponse { error, pretty } => {
                 // 'E' signalizes ErrorResponse messages
                 buf.put_u8(b'E');
                 // Format the error as a pretty report.
-                write_err_or_notice(buf, &ErrorOrNoticeMessage::error(error))?;
+                write_err_or_notice(buf, &ErrorOrNoticeMessage::error(error, pretty))?;
             }
 
             BeMessage::BackendKeyData((process_id, secret_key)) => {

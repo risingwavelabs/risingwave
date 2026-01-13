@@ -17,5 +17,18 @@ jobs:
     name: license-header-check
     steps:
     - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    - uses: taiki-e/install-action@v2
+      with:
+        tool: hawkeye@6.3
     - name: Check License Header
-      uses: apache/skywalking-eyes@v0.8.0
+      run: |
+        hawkeye check || {
+          echo "::error::License header check failed."
+          echo "Note: the copyright year is now required to match the file's creation date."
+          echo "Hint: rebase latest main, then auto-fix:"
+          echo "  git fetch origin main && git rebase origin/main"
+          echo "  ./risedev fix-license-header"
+          exit 1
+        }

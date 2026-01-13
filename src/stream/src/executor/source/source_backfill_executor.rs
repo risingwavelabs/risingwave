@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -594,9 +594,9 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 );
                                             }
                                         }
-                                        Mutation::Throttle { actor_throttle } => {
+                                        Mutation::Throttle(fragment_to_apply) => {
                                             if let Some(entry) =
-                                                actor_throttle.get(&self.actor_ctx.id)
+                                                fragment_to_apply.get(&self.actor_ctx.fragment_id)
                                                 && entry.throttle_type == ThrottleType::Backfill
                                                 && entry.rate_limit != self.rate_limit_rps
                                             {

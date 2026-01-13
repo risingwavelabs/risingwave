@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,12 +60,14 @@ use risingwave_connector::source::datagen::DATAGEN_CONNECTOR;
 use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
 use risingwave_connector::source::nexmark::source::{EventType, get_event_data_types_with_names};
 use risingwave_connector::source::test_source::TEST_CONNECTOR;
+pub use risingwave_connector::source::{
+    ADBC_SNOWFLAKE_CONNECTOR, UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR,
+};
 use risingwave_connector::source::{
     AZBLOB_CONNECTOR, ConnectorProperties, GCS_CONNECTOR, GOOGLE_PUBSUB_CONNECTOR, KAFKA_CONNECTOR,
     KINESIS_CONNECTOR, LEGACY_S3_CONNECTOR, MQTT_CONNECTOR, NATS_CONNECTOR, NEXMARK_CONNECTOR,
     OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
-pub use risingwave_connector::source::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR};
 use risingwave_connector::{AUTO_SCHEMA_CHANGE_KEY, WithPropertiesExt};
 use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo, WatermarkDesc};
@@ -697,6 +699,7 @@ pub(super) fn bind_source_watermark(
                 Ok::<_, RwError>(WatermarkDesc {
                     watermark_idx: watermark_idx as u32,
                     expr: Some(expr_proto),
+                    with_ttl: source_watermark.with_ttl,
                 })
             }
         })
@@ -892,6 +895,20 @@ pub async fn bind_create_source_or_table_with_connector(
 HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<columns>) WITH (...)`."#.to_owned(),
         )));
     }
+
+    // Same for ADBC Snowflake connector - schema is automatically inferred
+    if with_properties.is_batch_connector()
+        && with_properties
+            .get(UPSTREAM_SOURCE_KEY)
+            .is_some_and(|s| s.eq_ignore_ascii_case(ADBC_SNOWFLAKE_CONNECTOR))
+        && !sql_columns_defs.is_empty()
+    {
+        return Err(RwError::from(InvalidInputSyntax(
+            r#"Schema is automatically inferred for ADBC Snowflake source and should not be specified
+
+HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<columns>) WITH (...)`."#.to_owned(),
+        )));
+    }
     let columns_from_sql = bind_sql_columns(sql_columns_defs, false)?;
 
     let mut columns = bind_all_columns(
@@ -1014,6 +1031,13 @@ HINT: use `CREATE SOURCE <name> WITH (...)` instead of `CREATE SOURCE <name> (<c
         bind_source_watermark(session, source_name.clone(), source_watermarks, &columns)?;
     // TODO(yuhao): allow multiple watermark on source.
     assert!(watermark_descs.len() <= 1);
+    if is_create_source && watermark_descs.iter().any(|d| d.with_ttl) {
+        return Err(ErrorCode::NotSupported(
+            "WITH TTL is not supported in WATERMARK clause for CREATE SOURCE.".to_owned(),
+            "Use `CREATE TABLE ... WATERMARK ... WITH TTL` instead.".to_owned(),
+        )
+        .into());
+    }
 
     let append_only = row_id_index.is_some();
     if is_create_source && !append_only && !watermark_descs.is_empty() {

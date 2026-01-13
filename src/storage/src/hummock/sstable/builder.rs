@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use std::time::SystemTime;
 use bytes::{Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::row_serde::OrderedRowSerde;
-use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, user_key};
+use risingwave_hummock_sdk::key::{FullKey, MAX_KEY_LEN, TABLE_PREFIX_LEN, user_key};
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
@@ -39,6 +39,7 @@ use crate::hummock::sstable::{FilterBuilder, utils};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     Block, BlockHolder, BlockIterator, HummockResult, MemoryLimiter, Xor16FilterBuilder,
+    try_shorten_block_smallest_key,
 };
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
@@ -61,6 +62,8 @@ pub struct SstableBuilderOptions {
     /// Compression algorithm.
     pub compression_algorithm: CompressionAlgorithm,
     pub max_sst_size: u64,
+    /// If set, block metadata keys will be shortened when their length exceeds this threshold.
+    pub shorten_block_meta_key_threshold: Option<usize>,
 }
 
 impl From<&StorageOpts> for SstableBuilderOptions {
@@ -73,6 +76,7 @@ impl From<&StorageOpts> for SstableBuilderOptions {
             bloom_false_positive: options.bloom_false_positive,
             compression_algorithm: CompressionAlgorithm::None,
             max_sst_size: options.compactor_max_sst_size,
+            shorten_block_meta_key_threshold: options.shorten_block_meta_key_threshold,
         }
     }
 }
@@ -86,6 +90,7 @@ impl Default for SstableBuilderOptions {
             bloom_false_positive: DEFAULT_BLOOM_FALSE_POSITIVE,
             compression_algorithm: CompressionAlgorithm::None,
             max_sst_size: DEFAULT_MAX_SST_SIZE,
+            shorten_block_meta_key_threshold: None,
         }
     }
 }
@@ -353,6 +358,21 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
 
         // Rotate block builder if the previous one has been built.
         if self.block_builder.is_empty() {
+            let smallest_key = if let Some(threshold) =
+                self.options.shorten_block_meta_key_threshold
+                && !self.last_full_key.is_empty()
+                && full_key.encoded_len() >= threshold
+            {
+                let prev = FullKey::decode(&self.last_full_key);
+                if let Some(shortened) = try_shorten_block_smallest_key(&prev, &full_key) {
+                    shortened.encode()
+                } else {
+                    full_key.encode()
+                }
+            } else {
+                full_key.encode()
+            };
+
             self.block_metas.push(BlockMeta {
                 offset: utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
                     panic!(
@@ -364,7 +384,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                     )
                 }),
                 len: 0,
-                smallest_key: full_key.encode(),
+                smallest_key,
                 uncompressed_size: 0,
                 total_key_count: 0,
                 stale_key_count: 0,
@@ -379,7 +399,12 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.filter_builder
                 .add_key(extract_key, table_id.as_raw_id());
         }
-        self.block_builder.add(full_key, self.raw_value.as_ref());
+        // Use pre-encoded key to avoid redundant encoding
+        self.block_builder.add(
+            table_id,
+            &self.raw_key[TABLE_PREFIX_LEN..],
+            self.raw_value.as_ref(),
+        );
         self.block_metas.last_mut().unwrap().total_key_count += 1;
         if !is_new_user_key || value.is_delete() {
             self.block_metas.last_mut().unwrap().stale_key_count += 1;

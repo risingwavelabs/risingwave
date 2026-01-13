@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -399,7 +399,7 @@ impl StreamTableScan {
                 // Snapshot read
                 PbStreamNode {
                     node_body: Some(PbNodeBody::BatchPlan(Box::new(batch_plan_node))),
-                    operator_id: self.batch_plan_id.0 as u64,
+                    operator_id: self.batch_plan_id.to_stream_node_operator_id(),
                     identity: "BatchPlanNode".into(),
                     fields: snapshot_schema,
                     stream_key: vec![], // not used
@@ -428,7 +428,7 @@ impl StreamTableScan {
             input,
             node_body: Some(node_body),
             stream_key,
-            operator_id: self.base.id().0 as u64,
+            operator_id: self.base.id().to_stream_node_operator_id(),
             identity: self.distill_to_string(),
             stream_kind: self.stream_kind().to_protobuf() as i32,
         })
