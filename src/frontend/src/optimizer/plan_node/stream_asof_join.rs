@@ -31,7 +31,7 @@ use super::{
 use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::GenericPlanNode;
+use crate::optimizer::plan_node::generic::{GenericPlanNode, JoinOn};
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
@@ -42,10 +42,6 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamAsOfJoin {
     pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
-
-    /// The join condition must be equivalent to `logical.on`, but separated into equal and
-    /// non-equal parts to facilitate execution later
-    eq_join_predicate: EqJoinPredicate,
 
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
@@ -61,6 +57,8 @@ impl StreamAsOfJoin {
         eq_join_predicate: EqJoinPredicate,
         inequality_desc: AsOfJoinDesc,
     ) -> Result<Self> {
+        let mut core = core;
+        core.on = JoinOn::EqPredicate(eq_join_predicate);
         assert!(core.join_type == JoinType::AsofInner || core.join_type == JoinType::AsofLeftOuter);
 
         let stream_kind = core.stream_kind()?;
@@ -70,6 +68,11 @@ impl StreamAsOfJoin {
             core.right.distribution(),
             &core,
         );
+
+        let eq_join_predicate = core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamAsOfJoin requires JoinOn::EqPredicate in core");
 
         let watermark_columns = {
             let l2i = core.l2i_col_mapping();
@@ -121,7 +124,6 @@ impl StreamAsOfJoin {
         Ok(Self {
             base,
             core,
-            eq_join_predicate,
             is_append_only: stream_kind.is_append_only(),
             inequality_desc,
         })
@@ -134,7 +136,10 @@ impl StreamAsOfJoin {
 
     /// Get a reference to the `AsOf` join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
-        &self.eq_join_predicate
+        self.core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamAsOfJoin should store predicate as EqJoinPredicate")
     }
 
     pub fn derive_dist_key_in_join_key(&self) -> Vec<usize> {
@@ -202,7 +207,7 @@ impl StreamAsOfJoin {
 impl Distill for StreamAsOfJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let (ljk, rjk) = self
-            .eq_join_predicate
+            .eq_join_predicate()
             .eq_indexes()
             .first()
             .cloned()
@@ -252,7 +257,7 @@ impl PlanTreeNodeBinary<Stream> for StreamAsOfJoin {
         core.left = left;
         core.right = right;
 
-        Self::new(core, self.eq_join_predicate.clone(), self.inequality_desc).unwrap()
+        Self::new(core, self.eq_join_predicate().clone(), self.inequality_desc).unwrap()
     }
 }
 
@@ -260,8 +265,8 @@ impl_plan_tree_node_for_binary! { Stream, StreamAsOfJoin }
 
 impl StreamNode for StreamAsOfJoin {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
-        let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
-        let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
+        let left_jk_indices = self.eq_join_predicate().left_eq_indexes();
+        let right_jk_indices = self.eq_join_predicate().right_eq_indexes();
         let left_jk_indices_prost = left_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
         let right_jk_indices_prost = right_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
 
@@ -293,7 +298,7 @@ impl StreamNode for StreamAsOfJoin {
         let left_table = left_table.with_id(state.gen_table_id_wrapped());
         let right_table = right_table.with_id(state.gen_table_id_wrapped());
 
-        let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
+        let null_safe_prost = self.eq_join_predicate().null_safes().into_iter().collect();
 
         let asof_join_type = match self.core.join_type {
             JoinType::AsofInner => AsOfJoinType::Inner,
@@ -327,7 +332,11 @@ impl ExprRewritable<Stream> for StreamAsOfJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        let eq_join_predicate = self.eq_join_predicate.rewrite_exprs(r);
+        let eq_join_predicate = core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamAsOfJoin should store predicate as EqJoinPredicate")
+            .clone();
         let desc = LogicalJoin::get_inequality_desc_from_predicate(
             eq_join_predicate.other_cond().clone(),
             core.left.schema().len(),

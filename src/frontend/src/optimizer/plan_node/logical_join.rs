@@ -127,7 +127,10 @@ impl LogicalJoin {
 
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
-        &self.core.on
+        self.core
+            .on
+            .as_condition_ref()
+            .expect("logical join should store predicate as Condition")
     }
 
     pub fn core(&self) -> &generic::Join<PlanRef> {
@@ -139,6 +142,8 @@ impl LogicalJoin {
         let input_refs = self
             .core
             .on
+            .as_condition_ref()
+            .expect("logical join should store predicate as Condition")
             .collect_input_refs(self.core.left.schema().len() + self.core.right.schema().len());
         let index_group = input_refs
             .ones()
@@ -182,7 +187,7 @@ impl LogicalJoin {
     /// Clone with new `on` condition
     pub fn clone_with_cond(&self, on: Condition) -> Self {
         Self::with_core(generic::Join {
-            on,
+            on: generic::JoinOn::Condition(on),
             ..self.core.clone()
         })
     }
@@ -1011,7 +1016,7 @@ impl LogicalJoin {
                 self.left().schema().len(),
                 self.right().schema().len(),
             );
-            core.on = eq_cond.eq_cond();
+            core.on = generic::JoinOn::Condition(eq_cond.eq_cond());
             let hash_join = StreamHashJoin::new(core, eq_cond)?.into();
             let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();

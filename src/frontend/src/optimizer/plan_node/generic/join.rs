@@ -29,6 +29,59 @@ use crate::optimizer::plan_node::utils::TableCatalogBuilder;
 use crate::optimizer::property::{FunctionalDependencySet, StreamKind};
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 
+/// Join predicate stored in the join core.
+///
+/// - Logical joins keep the original [`Condition`] for optimizer rules.
+/// - Physical joins keep a fixed [`EqJoinPredicate`] (eq keys are already extracted and must be
+///   preserved even if condition simplification would otherwise drop them).
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum JoinOn {
+    Condition(Condition),
+    EqPredicate(EqJoinPredicate),
+}
+
+impl JoinOn {
+    pub fn as_condition(&self) -> Condition {
+        match self {
+            JoinOn::Condition(cond) => cond.clone(),
+            JoinOn::EqPredicate(pred) => pred.all_cond_no_simplify(),
+        }
+    }
+
+    pub fn as_condition_ref(&self) -> Option<&Condition> {
+        match self {
+            JoinOn::Condition(cond) => Some(cond),
+            JoinOn::EqPredicate(_) => None,
+        }
+    }
+
+    pub fn as_eq_predicate_ref(&self) -> Option<&EqJoinPredicate> {
+        match self {
+            JoinOn::Condition(_) => None,
+            JoinOn::EqPredicate(pred) => Some(pred),
+        }
+    }
+
+    pub fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
+        match self {
+            JoinOn::Condition(cond) => {
+                *cond = cond.clone().rewrite_expr(r);
+            }
+            JoinOn::EqPredicate(pred) => {
+                *pred = pred.rewrite_exprs(r);
+            }
+        }
+    }
+
+    pub fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
+        match self {
+            JoinOn::Condition(cond) => cond.visit_expr(v),
+            // eq keys are fixed and contain only input refs; only visit non-eq conditions.
+            JoinOn::EqPredicate(pred) => pred.visit_exprs(v),
+        }
+    }
+}
+
 /// [`Join`] combines two relations according to some condition.
 ///
 /// Each output row has fields from the left and right inputs. The set of output rows is a subset
@@ -39,7 +92,7 @@ use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, Condition};
 pub struct Join<PlanRef> {
     pub left: PlanRef,
     pub right: PlanRef,
-    pub on: Condition,
+    pub on: JoinOn,
     pub join_type: JoinType,
     pub output_indices: Vec<usize>,
 }
@@ -64,18 +117,22 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
     }
 
     pub(crate) fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
-        self.on = self.on.clone().rewrite_expr(r);
+        self.on.rewrite_exprs(r);
     }
 
     pub(crate) fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        self.on.visit_expr(v);
+        self.on.visit_exprs(v);
     }
 
     pub fn eq_indexes(&self) -> Vec<(usize, usize)> {
         let left_len = self.left.schema().len();
         let right_len = self.right.schema().len();
-        let eq_predicate = EqJoinPredicate::create(left_len, right_len, self.on.clone());
-        eq_predicate.eq_indexes()
+        match &self.on {
+            JoinOn::Condition(on) => {
+                EqJoinPredicate::create(left_len, right_len, on.clone()).eq_indexes()
+            }
+            JoinOn::EqPredicate(pred) => pred.eq_indexes(),
+        }
     }
 
     pub fn new(
@@ -90,7 +147,24 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
         Self {
             left,
             right,
-            on,
+            on: JoinOn::Condition(on),
+            join_type,
+            output_indices,
+        }
+    }
+
+    pub fn new_with_eq_predicate(
+        left: PlanRef,
+        right: PlanRef,
+        eq_join_predicate: EqJoinPredicate,
+        join_type: JoinType,
+        output_indices: Vec<usize>,
+    ) -> Self {
+        debug_assert!(!has_repeated_element(&output_indices));
+        Self {
+            left,
+            right,
+            on: JoinOn::EqPredicate(eq_join_predicate),
             join_type,
             output_indices,
         }
@@ -302,7 +376,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Join<PlanRef> {
         let fd_set: FunctionalDependencySet = match self.join_type {
             JoinType::Inner | JoinType::AsofInner => {
                 let mut fd_set = FunctionalDependencySet::new(full_out_col_num);
-                for i in &self.on.conjunctions {
+                for i in &self.on.as_condition().conjunctions {
                     if let Some((col, _)) = i.as_eq_const() {
                         fd_set.add_constant_columns(&[col.index()])
                     } else if let Some((left, right)) = i.as_eq_cond() {
@@ -340,7 +414,7 @@ impl<PlanRef> Join<PlanRef> {
         (
             self.left,
             self.right,
-            self.on,
+            self.on.as_condition(),
             self.join_type,
             self.output_indices,
         )
@@ -374,7 +448,24 @@ impl<PlanRef: GenericPlanRef> Join<PlanRef> {
             left,
             right,
             join_type,
-            on,
+            on: JoinOn::Condition(on),
+            output_indices: (0..out_column_num).collect(),
+        }
+    }
+
+    pub fn with_full_output_eq_predicate(
+        left: PlanRef,
+        right: PlanRef,
+        join_type: JoinType,
+        eq_join_predicate: EqJoinPredicate,
+    ) -> Self {
+        let out_column_num =
+            Self::full_out_col_num(left.schema().len(), right.schema().len(), join_type);
+        Self {
+            left,
+            right,
+            join_type,
+            on: JoinOn::EqPredicate(eq_join_predicate),
             output_indices: (0..out_column_num).collect(),
         }
     }
