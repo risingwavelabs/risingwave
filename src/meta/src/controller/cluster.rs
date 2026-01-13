@@ -16,7 +16,7 @@ use std::cmp::{self, Ordering, max};
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::ops::Add;
 use std::sync::Arc;
-use std::time::{Duration, SystemTime};
+use std::time::{Duration, Instant, SystemTime};
 
 use itertools::Itertools;
 use risingwave_common::RW_VERSION;
@@ -230,11 +230,19 @@ impl ClusterController {
 
     /// Invoked when it receives a heartbeat from a worker node.
     pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
+        const SLOW_HEARTBEAT_LOCK_THRESHOLD: Duration = Duration::from_millis(200);
         tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
-        self.inner
-            .write()
-            .await
-            .heartbeat(worker_id, self.max_heartbeat_interval)
+        let start = Instant::now();
+        let mut inner = self.inner.write().await;
+        let waited = start.elapsed();
+        if waited > SLOW_HEARTBEAT_LOCK_THRESHOLD {
+            tracing::warn!(
+                %worker_id,
+                ?waited,
+                "heartbeat wait for cluster write lock is slow"
+            );
+        }
+        inner.heartbeat(worker_id, self.max_heartbeat_interval)
     }
 
     pub fn start_heartbeat_checker(
