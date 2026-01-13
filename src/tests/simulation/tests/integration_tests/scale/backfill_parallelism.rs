@@ -15,9 +15,9 @@
 use std::time::Duration;
 
 use anyhow::{Result, bail};
+use risingwave_common::error::AsReport;
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
-use thiserror_ext::AsReport;
 use tokio::time::sleep;
 
 use crate::scale::auto_parallelism::MAX_HEARTBEAT_INTERVAL_SECS_CONFIG_FOR_AUTO_SCALE;
