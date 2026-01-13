@@ -1603,12 +1603,12 @@ impl DdlService for DdlServiceImpl {
         {
             let OptionalAssociatedSourceId::AssociatedSourceId(source_id) =
                 table_catalog.optional_associated_source_id.unwrap();
-            let (jobs, fragments) = self
+            let (_, fragments) = self
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
                 .await?;
             let throttle_config = ThrottleConfig {
-                throttle_type: risingwave_pb::common::ThrottleType::Source,
+                throttle_type: risingwave_pb::common::ThrottleType::Source.into(),
                 rate_limit: source_rate_limit,
             };
             let _ = self

@@ -42,6 +42,7 @@ use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::{Expression, NonStrictExpression};
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
@@ -1064,9 +1065,7 @@ impl Mutation {
             }
             PbMutation::Pause(_) => Mutation::Pause,
             PbMutation::Resume(_) => Mutation::Resume,
-            PbMutation::Throttle(changes) => {
-                Mutation::Throttle(changes.fragment_throttle.clone())
-            },
+            PbMutation::Throttle(changes) => Mutation::Throttle(changes.fragment_throttle.clone()),
             PbMutation::DropSubscriptions(drop) => Mutation::DropSubscriptions {
                 subscriptions_to_drop: drop.info.clone(),
             },

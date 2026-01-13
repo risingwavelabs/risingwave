@@ -33,10 +33,12 @@ use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
 };
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
+use risingwave_pb::common::ThrottleType;
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 use tracing::Instrument;
 
+use crate::executor::UpdateMutation;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
@@ -48,7 +50,6 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
-use crate::executor::{ThrottleType, UpdateMutation};
 use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
@@ -448,11 +449,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                                 is_snapshot_paused = false;
                                                 snapshot_valve.resume();
                                             }
-                                            Mutation::Throttle (
-                                                some,
-                                            ) => {
-                                                if let Some(entry) = some.get(&self.actor_ctx.fragment_id)
-                                                    && entry.throttle_type == ThrottleType::Backfill
+                                            Mutation::Throttle(some) => {
+                                                if let Some(entry) =
+                                                    some.get(&self.actor_ctx.fragment_id)
+                                                    && entry.throttle_type()
+                                                        == ThrottleType::Backfill
                                                     && entry.rate_limit != self.rate_limit_rps
                                                 {
                                                     self.rate_limit_rps = entry.rate_limit;

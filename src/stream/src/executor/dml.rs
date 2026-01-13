@@ -23,8 +23,8 @@ use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::codegen::BoxStream;
+use risingwave_pb::common::ThrottleType;
 
-use crate::executor::ThrottleType;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
@@ -161,8 +161,9 @@ impl DmlExecutor {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
                                 Mutation::Throttle(fragment_to_apply) => {
-                                    if let Some(entry) = fragment_to_apply.get(&self.actor_ctx.fragment_id)
-                                        && entry.throttle_type == ThrottleType::Dml
+                                    if let Some(entry) =
+                                        fragment_to_apply.get(&self.actor_ctx.fragment_id)
+                                        && entry.throttle_type() == ThrottleType::Dml
                                     {
                                         let new_rate_limit = entry.rate_limit.into();
                                         let old_rate_limit =

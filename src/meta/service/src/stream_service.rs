@@ -145,12 +145,12 @@ impl StreamManagerService for StreamServiceImpl {
         let throttle_target = request.throttle_target();
         let throttle_type = request.throttle_type();
 
-        let actor_to_apply = match (throttle_type, throttle_target) {
+        let fragments_to_apply: HashSet<FragmentId> = match (throttle_type, throttle_target) {
             (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
                 self.metadata_manager
                     .update_source_rate_limit_by_source_id(request.id.into(), request.rate)
-                    .await?;
-                raw_object_id = request.id;
+                    .await?
+                    .1
             }
             (ThrottleType::Backfill, ThrottleTarget::Mv)
             | (ThrottleType::Backfill, ThrottleTarget::Sink)
@@ -167,24 +167,14 @@ impl StreamManagerService for StreamServiceImpl {
             (ThrottleType::Sink, ThrottleTarget::Sink) => {
                 self.metadata_manager
                     .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
-                    .await?;
-                jobs = [request.id.into()].into_iter().collect();
-                raw_object_id = request.id;
+                    .await?
             }
             // FIXME(kwannoel): specialize for throttle type x target
             (_, ThrottleTarget::Fragment) => {
                 self.metadata_manager
                     .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
                     .await?;
-                let fragment_id = request.id.into();
-                fragments = [fragment_id].into_iter().collect();
-                let job_id = self
-                    .metadata_manager
-                    .catalog_controller
-                    .get_fragment_streaming_job_id(fragment_id)
-                    .await?;
-                jobs = [job_id].into_iter().collect();
-                raw_object_id = job_id.as_raw_id();
+                HashSet::from_iter([request.id.into()])
             }
             _ => {
                 return Err(Status::invalid_argument(format!(
@@ -206,20 +196,20 @@ impl StreamManagerService for StreamServiceImpl {
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(raw_object_id)
+            .get_object_database_id(job_id)
             .await?;
 
         // TODO: check whether shared source is correct
         let throttle_config = ThrottleConfig {
             rate_limit: request.rate,
-            throttle_type,
+            throttle_type: throttle_type.into(),
         };
         let _i = self
             .barrier_scheduler
             .run_command(
                 database_id,
                 Command::Throttle {
-                    config: fragments
+                    config: fragments_to_apply
                         .into_iter()
                         .map(|fragment_id| (fragment_id, throttle_config))
                         .collect(),

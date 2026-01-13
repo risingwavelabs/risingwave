@@ -38,6 +38,7 @@ use risingwave_connector::sink::{
     GLOBAL_SINK_METRICS, LogSinker, SINK_USER_FORCE_COMPACTION, Sink, SinkImpl, SinkParam,
     SinkWriterParam,
 };
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_plan::stream_node::StreamKind;
 use thiserror_ext::AsReport;
@@ -49,7 +50,6 @@ use crate::common::change_buffer::{OutputKind, output_kind};
 use crate::common::compact_chunk::{
     InconsistencyBehavior, StreamChunkCompactor, compact_chunk_inline,
 };
-use crate::executor::ThrottleType;
 use crate::executor::prelude::*;
 pub struct SinkExecutor<F: LogStoreFactory> {
     actor_context: ActorContextRef,
@@ -492,7 +492,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                             }
                             Mutation::Throttle(fragment_to_apply) => {
                                 if let Some(entry) = fragment_to_apply.get(&fragment_id)
-                                    && entry.throttle_type == ThrottleType::Sink
+                                    && entry.throttle_type() == ThrottleType::Sink
                                 {
                                     tracing::info!(
                                         rate_limit = entry.rate_limit,

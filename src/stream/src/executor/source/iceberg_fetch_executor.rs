@@ -31,12 +31,12 @@ use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
 use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
 use super::{SourceStateTableHandler, StreamSourceCore, prune_additional_cols};
 use crate::common::rate_limit::limited_chunk_size;
-use crate::executor::ThrottleType;
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
 
@@ -501,10 +501,11 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
                                             Mutation::Throttle(fragment_to_apply) => {
-                                                if let Some(entry) =
-                                                    fragment_to_apply.get(&self.actor_ctx.fragment_id)
-                                                    && entry.throttle_type == ThrottleType::Source
-                                                    && entry.rate_limit != self.rate_limit_rps {
+                                                if let Some(entry) = fragment_to_apply
+                                                    .get(&self.actor_ctx.fragment_id)
+                                                    && entry.throttle_type() == ThrottleType::Source
+                                                    && entry.rate_limit != self.rate_limit_rps
+                                                {
                                                     tracing::debug!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,

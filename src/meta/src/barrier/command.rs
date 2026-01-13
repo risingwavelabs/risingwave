@@ -358,8 +358,8 @@ pub enum Command {
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
-    Throttle { 
-        config: HashMap<FragmentId, ThrottleConfig>
+    Throttle {
+        config: HashMap<FragmentId, ThrottleConfig>,
     },
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
@@ -898,7 +898,9 @@ impl Command {
 
             Command::Throttle { config, .. } => {
                 let config = config.clone();
-                Some(Mutation::Throttle(ThrottleMutation { fragment_throttle: config }))
+                Some(Mutation::Throttle(ThrottleMutation {
+                    fragment_throttle: config,
+                }))
             }
 
             Command::DropStreamingJobs {

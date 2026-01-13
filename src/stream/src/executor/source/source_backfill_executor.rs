@@ -34,6 +34,7 @@ use risingwave_connector::source::{
     SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -42,9 +43,9 @@ use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
 use super::{apply_rate_limit, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
-use crate::executor::{ThrottleType, UpdateMutation};
 use crate::task::CreateMviewProgressReporter;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -597,7 +598,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         Mutation::Throttle(fragment_to_apply) => {
                                             if let Some(entry) =
                                                 fragment_to_apply.get(&self.actor_ctx.fragment_id)
-                                                && entry.throttle_type == ThrottleType::Backfill
+                                                && entry.throttle_type() == ThrottleType::Backfill
                                                 && entry.rate_limit != self.rate_limit_rps
                                             {
                                                 tracing::info!(
