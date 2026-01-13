@@ -1,0 +1,56 @@
+# Benchmark configuration
+benchmark_name: unaligned_join_backpressure_slow_finish
+
+setup_sql: |
+  set streaming_enable_unaligned_join = true;
+  set streaming_parallelism = 1;
+
+  -- 让 sync_kv_log_store 更容易进入 flush/堆积状态（可选）
+  set streaming_sync_log_store_buffer_size = 2048;
+
+  drop sink if exists s_join;
+  drop table if exists dim;
+  drop table if exists fact;
+
+  create table dim(v1 int);
+  create table fact(v0 int primary key, v1 int, v2 varchar, v3 varchar);
+
+  insert into dim values (1), (2);
+
+  -- 规模别太大，否则会卡很久；先用 40 万行感受一下
+  insert into fact
+    select x as v0, 1 as v1, 'abcdefgakjandjkw' as v2, 'jkb1ku1bu' as v3
+    from generate_series(1, 200000) t(x);
+  insert into fact
+    select x as v0, 2 as v1, 'abcdefgakjandjkw' as v2, 'jkb1ku1bu' as v3
+    from generate_series(200001, 400000) t(x);
+
+  flush;
+
+  create sink s_join as
+    select v0, count(*) as cnt
+    from fact join dim on fact.v1 = dim.v1
+    group by v0
+    with (connector = 'blackhole');
+
+  flush;
+
+prepare_sql: |
+  alter sink s_join set sink_rate_limit to 500;
+  flush;
+
+benchmark_sql: |
+  delete from dim;
+  flush;
+
+conclude_sql: |
+  alter sink s_join set sink_rate_limit to default;
+  insert into dim values (1), (2);
+  flush;
+
+cleanup_sql: |
+  drop sink if exists s_join;
+  drop table if exists dim;
+  drop table if exists fact;
+
+runs: 3
