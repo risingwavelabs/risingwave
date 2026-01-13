@@ -40,6 +40,7 @@ use crate::hummock::iterator::{
     IteratorFactory, MergeIterator, UserIterator,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::shared_buffer::TableMemoryMetrics;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchIterator, SharedBufferBatchOldValues, SharedBufferItem,
     SharedBufferValue,
@@ -98,6 +99,8 @@ pub struct LocalHummockStorage {
     hummock_version_reader: HummockVersionReader,
 
     stats: Arc<HummockStateStoreMetrics>,
+
+    table_memory_metrics: Arc<TableMemoryMetrics>,
 
     write_limiter: WriteLimiterRef,
 
@@ -699,7 +702,7 @@ impl LocalHummockStorage {
                 old_values,
                 size,
                 table_id,
-                Some(tracker),
+                Some((tracker, self.table_memory_metrics.clone())),
             );
             self.spill_offset += 1;
             let imm_size = imm.size();
@@ -760,6 +763,7 @@ impl LocalHummockStorage {
             event_sender,
             memory_limiter,
             hummock_version_reader,
+            table_memory_metrics: Arc::new(TableMemoryMetrics::new(&stats, option.table_id)),
             stats,
             write_limiter,
             version_update_notifier_tx,

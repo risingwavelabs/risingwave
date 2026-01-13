@@ -21,10 +21,7 @@ use prometheus::{
     register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::config::MetricLevel;
-use risingwave_common::metrics::{
-    RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
-    RelabeledGuardedIntGaugeVec, RelabeledHistogramVec, RelabeledMetricVec, UintGauge,
-};
+use risingwave_common::metrics::{LabelGuardedIntGaugeVec, RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec, RelabeledHistogramVec, RelabeledMetricVec, UintGauge};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
@@ -86,6 +83,12 @@ pub struct HummockStateStoreMetrics {
     pub uploader_upload_task_latency: Histogram,
     pub uploader_syncing_epoch_count: IntGauge,
     pub uploader_wait_poll_latency: Histogram,
+    pub uploader_per_table_imm_size: LabelGuardedIntGaugeVec,
+    pub uploader_per_table_imm_count: LabelGuardedIntGaugeVec,
+
+
+    pub per_table_imm_size: LabelGuardedIntGaugeVec,
+    pub per_table_imm_count: LabelGuardedIntGaugeVec,
 
     // memory
     pub mem_table_spill_counts: RelabeledCounterVec,
@@ -439,6 +442,38 @@ impl HummockStateStoreMetrics {
         )
         .unwrap();
 
+        let uploader_per_table_imm_size = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_uploader_per_table_imm_size",
+            "Total uploader-tracked imm size per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let uploader_per_table_imm_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_uploader_per_table_imm_count",
+            "Total uploader-tracked imm count per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let per_table_imm_size = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_per_table_imm_size",
+            "Total imm size per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let per_table_imm_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_per_table_imm_count",
+            "Total imm count per table",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
         let read_req_bloom_filter_positive_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request with at least one SST bloom filter check returns positive",
@@ -578,6 +613,10 @@ impl HummockStateStoreMetrics {
             uploader_upload_task_latency,
             uploader_syncing_epoch_count,
             uploader_wait_poll_latency,
+            uploader_per_table_imm_size,
+            uploader_per_table_imm_count,
+            per_table_imm_size,
+            per_table_imm_count,
             mem_table_spill_counts,
             old_value_size,
 

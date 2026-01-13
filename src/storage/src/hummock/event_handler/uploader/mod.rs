@@ -113,7 +113,7 @@ mod uploader_imm {
     use std::fmt::Formatter;
     use std::ops::Deref;
 
-    use risingwave_common::metrics::UintGauge;
+    use risingwave_common::metrics::{LabelGuardedIntGauge, UintGauge};
 
     use crate::hummock::event_handler::uploader::UploaderContext;
     use crate::mem_table::ImmutableMemtable;
@@ -121,16 +121,31 @@ mod uploader_imm {
     pub(super) struct UploaderImm {
         inner: ImmutableMemtable,
         size_guard: UintGauge,
+        per_table_size_guard: LabelGuardedIntGauge,
+        per_table_count_guard: LabelGuardedIntGauge,
     }
 
     impl UploaderImm {
         pub(super) fn new(imm: ImmutableMemtable, context: &UploaderContext) -> Self {
             let size = imm.size();
+            let table_id_str = imm.table_id().to_string();
             let size_guard = context.stats.uploader_imm_size.clone();
+            let per_table_size_guard = context
+                .stats
+                .uploader_per_table_imm_size
+                .with_guarded_label_values(&[&table_id_str]);
+            let per_table_count_guard = context
+                .stats
+                .uploader_per_table_imm_count
+                .with_guarded_label_values(&[&table_id_str]);
             size_guard.add(size as _);
+            per_table_size_guard.add(size as _);
+            per_table_count_guard.add(1 as _);
             Self {
                 inner: imm,
                 size_guard,
+                per_table_size_guard,
+                per_table_count_guard,
             }
         }
 
@@ -139,6 +154,8 @@ mod uploader_imm {
             Self {
                 inner: imm,
                 size_guard: UintGauge::new("test", "test").unwrap(),
+                per_table_size_guard: LabelGuardedIntGauge::test_int_gauge::<1>(),
+                per_table_count_guard: LabelGuardedIntGauge::test_int_gauge::<1>(),
             }
         }
     }
@@ -160,6 +177,8 @@ mod uploader_imm {
     impl Drop for UploaderImm {
         fn drop(&mut self) {
             self.size_guard.sub(self.inner.size() as _);
+            self.per_table_size_guard.sub(self.inner.size() as _);
+            self.per_table_count_guard.dec();
         }
     }
 }
