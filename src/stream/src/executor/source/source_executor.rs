@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::time::Duration;
 
 use anyhow::anyhow;
@@ -886,14 +886,27 @@ impl<S: StateStore> SourceExecutor<S> {
                                         "UNSAFE: Injecting source offsets - this may cause data duplication or loss"
                                     );
 
+                                    // Only inject offsets for splits that this actor currently owns
+                                    // to prevent duplicate writes from parallel actors
+                                    let owned_splits: HashSet<_> = self
+                                        .stream_source_core
+                                        .latest_split_info
+                                        .keys()
+                                        .map(|s| s.as_ref())
+                                        .collect();
+
                                     // Store the injected offsets as JSON in the state table
                                     let json_states: Vec<(String, JsonbVal)> = split_offsets
                                         .iter()
+                                        .filter(|(split_id, _)| {
+                                            owned_splits.contains(split_id.as_str())
+                                        })
                                         .map(|(split_id, offset)| {
                                             tracing::info!(
+                                                actor_id = %self.actor_ctx.id,
                                                 split_id = %split_id,
                                                 offset = %offset,
-                                                "Injecting offset for split"
+                                                "Injecting offset for owned split"
                                             );
                                             // Parse the offset as JSON and store it
                                             let json_value: serde_json::Value =
@@ -904,7 +917,8 @@ impl<S: StateStore> SourceExecutor<S> {
                                         })
                                         .collect();
 
-                                    if !json_states.is_empty() {
+                                    let num_injected = json_states.len();
+                                    if num_injected > 0 {
                                         self.stream_source_core
                                             .split_state_store
                                             .set_states_json(json_states)
@@ -913,7 +927,14 @@ impl<S: StateStore> SourceExecutor<S> {
                                         tracing::info!(
                                             actor_id = %self.actor_ctx.id,
                                             source_id = source_id.as_raw_id(),
-                                            "Offset injection completed"
+                                            num_injected = num_injected,
+                                            "Offset injection completed for owned splits"
+                                        );
+                                    } else {
+                                        tracing::info!(
+                                            actor_id = %self.actor_ctx.id,
+                                            source_id = source_id.as_raw_id(),
+                                            "No owned splits to inject offsets for"
                                         );
                                     }
                                 } else {
