@@ -238,78 +238,7 @@ pub async fn handle_create_mv_bound(
         return Ok(resp);
     }
 
-    let mut with_options = get_with_options(handler_args.clone());
-    let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
-
-    if resource_group.is_some() {
-        risingwave_common::license::Feature::ResourceGroup.check_available()?;
-    }
-
-    let is_serverless_backfill = with_options
-        .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
-        .unwrap_or_default()
-        .parse::<bool>()
-        .unwrap_or(false);
-
-    if resource_group.is_some() && is_serverless_backfill {
-        return Err(RwError::from(InvalidInputSyntax(
-            "Please do not specify serverless backfilling and resource group together".to_owned(),
-        )));
-    }
-
-    if resource_group.is_some()
-        && !handler_args
-            .session
-            .config()
-            .streaming_use_arrangement_backfill()
-    {
-        return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
-    }
-
-    if !with_options.is_empty() {
-        // get other useful fields by `remove`, the logic here is to reject unknown options.
-        return Err(RwError::from(ProtocolError(format!(
-            "unexpected options in WITH clause: {:?}",
-            with_options.keys()
-        ))));
-    }
-
-    let sbc_addr = match SESSION_MANAGER.get() {
-        Some(manager) => manager.env().sbc_address(),
-        None => "",
-    }
-    .to_owned();
-
-    if is_serverless_backfill && sbc_addr.is_empty() {
-        return Err(RwError::from(InvalidInputSyntax(
-            "Serverless Backfill is disabled on-premise. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature".to_owned(),
-        )));
-    }
-
-    let resource_type = if is_serverless_backfill {
-        assert_eq!(resource_group, None);
-        match provision_resource_group(sbc_addr).await {
-            Err(e) => {
-                return Err(RwError::from(ProtocolError(format!(
-                    "failed to provision serverless backfill nodes: {}",
-                    e.as_report()
-                ))));
-            }
-            Ok(group) => {
-                tracing::info!(
-                    resource_group = resource_group,
-                    "provisioning serverless backfill resource group"
-                );
-                streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group)
-            }
-        }
-    } else if let Some(group) = resource_group {
-        streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
-    } else {
-        streaming_job_resource_type::ResourceType::Regular(true)
-    };
-
-    let (table, graph, dependencies) = {
+    let (table, graph, dependencies, resource_type) = {
         gen_create_mv_graph(
             handler_args,
             name,
@@ -318,7 +247,8 @@ pub async fn handle_create_mv_bound(
             dependent_udfs,
             columns,
             emit_mode,
-        )?
+        )
+        .await?
     };
 
     // Ensure writes to `StreamJobTracker` are atomic.
@@ -353,7 +283,7 @@ pub async fn handle_create_mv_bound(
     ))
 }
 
-pub(crate) fn gen_create_mv_graph(
+pub(crate) async fn gen_create_mv_graph(
     handler_args: HandlerArgs,
     name: ObjectName,
     query: BoundQuery,
@@ -361,13 +291,88 @@ pub(crate) fn gen_create_mv_graph(
     dependent_udfs: HashSet<FunctionId>,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-) -> Result<(TableCatalog, PbStreamFragmentGraph, HashSet<ObjectId>)> {
+) -> Result<(
+    TableCatalog,
+    PbStreamFragmentGraph,
+    HashSet<ObjectId>,
+    streaming_job_resource_type::ResourceType,
+)> {
+    let mut with_options = get_with_options(handler_args.clone());
+    let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+
+    if resource_group.is_some() {
+        risingwave_common::license::Feature::ResourceGroup.check_available()?;
+    }
+
+    let is_serverless_backfill = with_options
+        .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
+        .unwrap_or_default()
+        .parse::<bool>()
+        .unwrap_or(false);
+
+    if resource_group.is_some() && is_serverless_backfill {
+        return Err(RwError::from(InvalidInputSyntax(
+            "Please do not specify serverless backfilling and resource group together".to_owned(),
+        )));
+    }
+
+    if !with_options.is_empty() {
+        // get other useful fields by `remove`, the logic here is to reject unknown options.
+        return Err(RwError::from(ProtocolError(format!(
+            "unexpected options in WITH clause: {:?}",
+            with_options.keys()
+        ))));
+    }
+
+    let sbc_addr = match SESSION_MANAGER.get() {
+        Some(manager) => manager.env().sbc_address(),
+        None => "",
+    }
+    .to_owned();
+
+    if is_serverless_backfill && sbc_addr.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            "Serverless Backfill is disabled on-premise. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature".to_owned(),
+        )));
+    }
+
+    let resource_type = if is_serverless_backfill {
+        assert_eq!(resource_group, None);
+        match provision_resource_group(sbc_addr).await {
+            Err(e) => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "failed to provision serverless backfill nodes: {}",
+                    e.as_report()
+                ))));
+            }
+            Ok(group) => {
+                tracing::info!(
+                    resource_group = group,
+                    "provisioning serverless backfill resource group"
+                );
+                streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group)
+            }
+        }
+    } else if let Some(group) = resource_group {
+        streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
+    } else {
+        streaming_job_resource_type::ResourceType::Regular(true)
+    };
     let context = OptimizerContext::from_handler_args(handler_args);
     let has_order_by = !query.order.is_empty();
     if has_order_by {
         context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
 It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
 "#.to_owned());
+    }
+
+    if resource_type.resource_group().is_some()
+        && !context
+            .session_ctx()
+            .config()
+            .streaming_use_arrangement_backfill()
+    {
+        return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
     }
 
     let context: OptimizerContextRef = context.into();
@@ -395,7 +400,7 @@ It only indicates the physical clustering of the data, which may improve the per
         Some(backfill_order),
     )?;
 
-    Ok((table, graph, dependencies))
+    Ok((table, graph, dependencies, resource_type))
 }
 
 #[cfg(test)]

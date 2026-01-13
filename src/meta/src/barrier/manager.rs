@@ -27,6 +27,7 @@ use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
+use tracing::warn;
 
 use crate::MetaResult;
 use crate::barrier::cdc_progress::CdcProgress;
@@ -72,13 +73,14 @@ impl GlobalBarrierManager {
                     progress,
                     is_serverless,
                     backfill_type,
-                } = backfill_progress
-                    .remove(&job_id)
-                    .unwrap_or_else(|| BackfillProgress {
+                } = backfill_progress.remove(&job_id).unwrap_or_else(|| {
+                    warn!(%job_id, "background job has no ddl progress");
+                    BackfillProgress {
                         progress: "0.0%".into(),
                         is_serverless: false,
                         backfill_type: PbBackfillType::NormalBackfill,
-                    });
+                    }
+                });
                 DdlProgress {
                     id: job_id.as_raw_id() as u64,
                     statement: definition,
