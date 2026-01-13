@@ -123,10 +123,9 @@ pub async fn handle_alter_streaming_rate_limit(
                 reader.get_any_sink_by_name(db_name, schema_path, &real_table_name)?;
             session.check_privilege_for_drop_alter(schema_name, &**sink)?;
             if sink.target_table.is_some() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "ALTER BACKFILL_RATE_LIMIT is unsupported for sink into table",
-                ))
-                .into());
+                bail!(ErrorCode::InvalidInputSyntax(
+                    "ALTER BACKFILL_RATE_LIMIT is unsupported for sink into table".into(),
+                ));
             }
             (StatementType::ALTER_SINK, sink.id.as_raw_id())
         }
