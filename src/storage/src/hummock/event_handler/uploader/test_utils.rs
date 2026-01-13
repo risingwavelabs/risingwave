@@ -25,7 +25,7 @@ use bytes::Bytes;
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use itertools::Itertools;
-use prometheus::core::GenericGauge;
+use prometheus::{Histogram, HistogramOpts};
 use risingwave_common::catalog::TableId;
 use risingwave_common::must_match;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
@@ -55,6 +55,7 @@ use crate::hummock::shared_buffer::TableMemoryMetrics;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchId, SharedBufferValue,
 };
+use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
 use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::HummockStateStoreMetrics;
@@ -118,31 +119,65 @@ pub(super) fn dummy_table_key() -> Vec<u8> {
 
 pub(super) async fn gen_imm_with_limiter(
     epoch: HummockEpoch,
-    limiter: Option<&MemoryLimiter>,
-) -> ImmutableMemtable {
-    gen_imm_inner(TEST_TABLE_ID, epoch, 0, limiter).await
+    limiter: &MemoryLimiter,
+) -> (ImmutableMemtable, MemoryTracker) {
+    gen_imm_inner_with_tracker(TEST_TABLE_ID, epoch, 0, Some(limiter)).await
 }
 
-pub(crate) async fn gen_imm_inner(
+pub(crate) async fn gen_imm_inner_with_tracker(
     table_id: TableId,
     epoch: HummockEpoch,
     spill_offset: u16,
     limiter: Option<&MemoryLimiter>,
+) -> (ImmutableMemtable, MemoryTracker) {
+    let imm = gen_imm_inner(table_id, epoch, spill_offset);
+    let tracker = match limiter {
+        Some(limiter) => limiter.require_memory(imm.size() as _).await,
+        None => MemoryLimiter::unlimit()
+            .try_require_memory(imm.size() as _)
+            .expect("unlimited limiter should always succeed"),
+    };
+    (imm, tracker)
+}
+
+pub(crate) fn gen_imm_with_unlimit(epoch: HummockEpoch) -> (ImmutableMemtable, MemoryTracker) {
+    gen_imm_inner_with_unlimit(TEST_TABLE_ID, epoch, 0)
+}
+
+pub(crate) fn gen_imm_inner_with_unlimit(
+    table_id: TableId,
+    epoch: HummockEpoch,
+    spill_offset: u16,
+) -> (ImmutableMemtable, MemoryTracker) {
+    let imm = gen_imm_inner(table_id, epoch, spill_offset);
+    let tracker = MemoryLimiter::unlimit()
+        .try_require_memory(imm.size() as _)
+        .expect("unlimited limiter should always succeed");
+    (imm, tracker)
+}
+
+pub(crate) async fn tracker_for_test(
+    imm: &ImmutableMemtable,
+    limiter: Option<&MemoryLimiter>,
+) -> MemoryTracker {
+    match limiter {
+        Some(limiter) => limiter.require_memory(imm.size() as _).await,
+        None => MemoryLimiter::unlimit()
+            .try_require_memory(imm.size() as _)
+            .expect("unlimited limiter should always succeed"),
+    }
+}
+
+pub(crate) fn gen_imm_inner(
+    table_id: TableId,
+    epoch: HummockEpoch,
+    spill_offset: u16,
 ) -> ImmutableMemtable {
     let sorted_items = vec![(
         TableKey(Bytes::from(dummy_table_key())),
         SharedBufferValue::Delete,
     )];
     let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
-    let tracker = match limiter {
-        Some(limiter) => {
-            let tracker = limiter.require_memory(size as u64).await;
-            let per_table_tracker =
-                TableMemoryMetrics::new(&HummockStateStoreMetrics::unused(), table_id).into();
-            Some((tracker, per_table_tracker))
-        }
-        None => None,
-    };
     SharedBufferBatch::build_shared_buffer_batch(
         epoch,
         spill_offset,
@@ -150,12 +185,12 @@ pub(crate) async fn gen_imm_inner(
         None,
         size,
         table_id,
-        tracker,
+        TableMemoryMetrics::for_test(),
     )
 }
 
-pub(crate) async fn gen_imm(epoch: HummockEpoch) -> ImmutableMemtable {
-    gen_imm_with_limiter(epoch, None).await
+pub(crate) fn gen_imm(epoch: HummockEpoch) -> ImmutableMemtable {
+    gen_imm_inner(TEST_TABLE_ID, epoch, 0)
 }
 
 pub(super) fn gen_sstable_info(
@@ -273,6 +308,10 @@ impl HummockUploader {
             self.start_epoch(epoch, HashSet::from_iter([TEST_TABLE_ID]));
         }
     }
+
+    pub(super) fn may_flush_for_test(&mut self) -> bool {
+        self.may_flush(&Histogram::with_opts(HistogramOpts::new("test", "test")).unwrap())
+    }
 }
 
 #[expect(clippy::type_complexity)]
@@ -342,11 +381,11 @@ pub(crate) fn prepare_uploader_order_test(
     + use<>,
 ) {
     let (spawn_fn, new_task_notifier) = prepare_uploader_order_test_spawn_task_fn(skip_schedule);
-    let gauge = GenericGauge::new("test", "test").unwrap();
-    let buffer_tracker = BufferTracker::from_storage_opts(config, gauge);
+    let metrics = Arc::new(HummockStateStoreMetrics::unused());
+    let buffer_tracker = BufferTracker::from_storage_opts(config, &metrics);
 
     let uploader = HummockUploader::new(
-        Arc::new(HummockStateStoreMetrics::unused()),
+        metrics,
         initial_pinned_version(),
         spawn_fn,
         buffer_tracker.clone(),

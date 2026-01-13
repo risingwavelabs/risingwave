@@ -51,8 +51,8 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::{SstableIteratorReadOptions, SstableIteratorType};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::utils::{
-    filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts, range_overlap,
-    search_sst_idx,
+    MemoryTracker, filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts,
+    range_overlap, search_sst_idx,
 };
 use crate::hummock::vector::file::{FileVectorStore, FileVectorStoreCtx};
 use crate::hummock::vector::monitor::{VectorStoreCacheStats, report_hnsw_stat};
@@ -145,7 +145,6 @@ pub enum VersionUpdate {
     },
 }
 
-#[derive(Clone)]
 pub struct StagingVersion {
     pending_imm_size: usize,
     /// It contains the imms added but not sent to the uploader of hummock event handler.
@@ -154,7 +153,7 @@ pub struct StagingVersion {
     /// It will be sent to the uploader when `pending_imm_size` exceed threshold or on `seal_current_epoch`.
     ///
     /// newer data comes last
-    pub pending_imms: Vec<ImmutableMemtable>,
+    pub pending_imms: Vec<(ImmutableMemtable, MemoryTracker)>,
     /// It contains the imms already sent to uploader of hummock event handler.
     /// Note: Currently, building imm and writing to staging version is not atomic, and therefore
     /// imm of smaller batch id may be added later than one with greater batch id
@@ -184,6 +183,7 @@ impl StagingVersion {
         let overlapped_imms = self
             .pending_imms
             .iter()
+            .map(|(imm, _)| imm)
             .rev() // rev to let newer imm come first
             .chain(self.uploading_imms.iter())
             .filter(move |imm| {
@@ -224,7 +224,6 @@ impl StagingVersion {
     }
 }
 
-#[derive(Clone)]
 /// A container of information required for reading from hummock.
 pub struct HummockReadVersion {
     table_id: TableId,
@@ -319,29 +318,44 @@ impl HummockReadVersion {
         self.is_initialized = true;
     }
 
-    pub fn add_imm(&mut self, imm: ImmutableMemtable) {
+    pub fn add_pending_imm(&mut self, imm: ImmutableMemtable, tracker: MemoryTracker) {
         assert!(self.is_initialized);
+        assert!(!self.is_replicated);
         if let Some(item) = self
             .staging
             .pending_imms
             .last()
+            .map(|(imm, _)| imm)
             .or_else(|| self.staging.uploading_imms.front())
         {
             // check batch_id order from newest to old
-            debug_assert!(item.batch_id() < imm.batch_id());
+            assert!(item.batch_id() < imm.batch_id());
         }
 
         self.staging.pending_imm_size += imm.size();
-        self.staging.pending_imms.push(imm);
+        self.staging.pending_imms.push((imm, tracker));
+    }
+
+    pub fn add_replicated_imm(&mut self, imm: ImmutableMemtable) {
+        assert!(self.is_initialized);
+        assert!(self.is_replicated);
+        assert!(self.staging.pending_imms.is_empty());
+        if let Some(item) = self.staging.uploading_imms.front() {
+            // check batch_id order from newest to old
+            assert!(item.batch_id() < imm.batch_id());
+        }
+        self.staging.uploading_imms.push_front(imm);
     }
 
     pub fn pending_imm_size(&self) -> usize {
         self.staging.pending_imm_size
     }
 
-    pub fn start_upload_pending_imms(&mut self) -> Vec<ImmutableMemtable> {
+    pub fn start_upload_pending_imms(&mut self) -> Vec<(ImmutableMemtable, MemoryTracker)> {
+        assert!(self.is_initialized);
+        assert!(!self.is_replicated);
         let pending_imms = std::mem::take(&mut self.staging.pending_imms);
-        for imm in &pending_imms {
+        for (imm, _) in &pending_imms {
             self.staging.uploading_imms.push_front(imm.clone());
         }
         self.staging.pending_imm_size = 0;
@@ -361,6 +375,7 @@ impl HummockReadVersion {
         match info {
             VersionUpdate::Sst(staging_sst_ref) => {
                 {
+                    assert!(!self.is_replicated);
                     let Some(imms) = staging_sst_ref.imm_ids.get(&self.instance_id) else {
                         warn!(
                             instance_id = self.instance_id,
@@ -400,7 +415,7 @@ impl HummockReadVersion {
                             self.staging
                                 .pending_imms
                                 .iter()
-                                .map(|imm| imm.batch_id())
+                                .map(|(imm, _)| imm.batch_id())
                                 .collect_vec(),
                             self.staging
                                 .uploading_imms
@@ -429,11 +444,12 @@ impl HummockReadVersion {
                             .retain(|imm| imm.min_epoch() > committed_epoch);
                         self.staging
                             .pending_imms
-                            .retain(|imm| imm.min_epoch() > committed_epoch);
+                            .retain(|(imm, _)| imm.min_epoch() > committed_epoch);
                     } else {
                         self.staging
                             .pending_imms
                             .iter()
+                            .map(|(imm, _)| imm)
                             .chain(self.staging.uploading_imms.iter())
                             .for_each(|imm| {
                                 assert!(

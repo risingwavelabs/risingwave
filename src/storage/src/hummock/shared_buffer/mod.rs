@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::fmt::Debug;
-
+use std::sync::Arc;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::id::TableId;
 
@@ -37,6 +37,10 @@ impl TableMemoryMetrics {
                 .per_table_imm_count
                 .with_guarded_label_values(&[&table_id_string]),
         }
+    }
+
+    pub(super) fn for_test() -> Arc<Self> {
+        Self::new(&HummockStateStoreMetrics::unused(), TableId::new(233)).into()
     }
 
     pub(super) fn inc(&self, imm_size: usize) {
