@@ -67,6 +67,7 @@ impl SqlMetaStore {
     /// Connect to the SQL meta store based on the given configuration.
     pub async fn connect(backend: MetaStoreBackend) -> MetaResult<Self> {
         const MAX_DURATION: Duration = Duration::new(u64::MAX / 4, 0);
+        const SQLX_SLOW_LOG_THRESHOLD: Duration = Duration::from_millis(500);
 
         #[easy_ext::ext]
         impl ConnectOptions {
@@ -83,6 +84,14 @@ impl SqlMetaStore {
                     .acquire_timeout(MAX_DURATION)
                     .connect_timeout(MAX_DURATION)
             }
+
+            fn enable_sqlx_slow_query_log(&mut self) -> &mut Self {
+                self.sqlx_logging(true)
+                    .sqlx_slow_statements_logging_settings(
+                        tracing::log::LevelFilter::Warn,
+                        SQLX_SLOW_LOG_THRESHOLD,
+                    )
+            }
         }
 
         Ok(match backend {
@@ -93,6 +102,7 @@ impl SqlMetaStore {
 
                 options
                     .sqlite_common()
+                    .enable_sqlx_slow_query_log()
                     // Releasing the connection to in-memory SQLite database is unacceptable
                     // because it will clear the database. Set a large enough timeout to prevent it.
                     // `sqlx` actually supports disabling these timeouts by passing a `None`, but
@@ -123,6 +133,7 @@ impl SqlMetaStore {
                     }
                     options.sqlite_common();
                 }
+                options.enable_sqlx_slow_query_log();
 
                 let conn = sea_orm::Database::connect(options).await?;
                 Self { conn, endpoint }
