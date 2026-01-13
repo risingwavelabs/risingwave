@@ -40,6 +40,7 @@ fancy-regex = "0.16.1"
 fixedbitset = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
+globset = { workspace = true }
 iana-time-zone = "0.1"
 iceberg = { workspace = true }
 itertools = { workspace = true }

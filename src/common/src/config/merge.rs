@@ -102,7 +102,7 @@ pub fn merge_streaming_config_section(
     base: &StreamingConfig,
     partial: &str,
 ) -> Result<Option<StreamingConfig>, ConfigMergeError> {
-    merge_config(base, partial, ["streaming"])
+    merge_config(base, partial, ["streaming", "refill"])
 }
 
 #[cfg(test)]

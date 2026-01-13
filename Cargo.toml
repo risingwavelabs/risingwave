@@ -156,6 +156,7 @@ faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 # TODO(MrCroxx): Switch to a release version.
 foyer = { version = "0.21.0", features = ["serde", "tracing", "nightly"] }
 futures-async-stream = "0.2.13"
+globset = "0.4"
 governor = { version = "0.10", default-features = false, features = ["std"] }
 hashbrown = { version = "0.16", features = [
     "default-hasher",

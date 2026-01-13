@@ -13,8 +13,10 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::LazyLock;
 
 use anyhow::Context;
+use globset::{GlobBuilder, GlobSet, GlobSetBuilder};
 use pgwire::pg_response::StatementType;
 use risingwave_sqlparser::ast::{ObjectName, SqlOption, SqlOptionValue, Value as AstValue};
 use toml::Value as TomlValue;
@@ -24,19 +26,63 @@ use crate::error::{Result, bail_invalid_input_syntax};
 use crate::handler::alter_utils::resolve_streaming_job_id_for_alter;
 use crate::handler::{HandlerArgs, RwPgResponse};
 
+struct AlterStreamingConfigRule {
+    glob_str: &'static str,
+    need_recover: bool,
+}
+
+const ALTER_STREAMING_CONFIG_RULES: &[AlterStreamingConfigRule] = &[
+    AlterStreamingConfigRule {
+        glob_str: "streaming.*",
+        need_recover: true,
+    },
+    AlterStreamingConfigRule {
+        glob_str: "refill.*",
+        need_recover: false,
+    },
+];
+
+static ALTER_STREAMING_CONFIG_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
+    let mut builder = GlobSetBuilder::new();
+    for rule in ALTER_STREAMING_CONFIG_RULES {
+        builder.add(
+            GlobBuilder::new(rule.glob_str)
+                .case_insensitive(true)
+                .build()
+                .unwrap(),
+        );
+    }
+    builder.build().unwrap()
+});
+
 /// A diff of a TOML map. `None` means the key should be removed.
 type TomlMapDiff = TomlMap<String, Option<TomlValue>>;
 
-fn collect_options(entries: Vec<SqlOption>) -> Result<TomlMapDiff> {
+struct ConfigDiff {
+    map: TomlMapDiff,
+    need_recover: bool,
+}
+
+fn collect_options(entries: Vec<SqlOption>) -> Result<ConfigDiff> {
     let mut map = TomlMap::new();
+    let mut need_recover = false;
 
     for SqlOption { name, value } in entries {
         let name = name.real_value();
-        if !name.starts_with("streaming.") {
+
+        let matches = ALTER_STREAMING_CONFIG_GLOBSET.matches(&name);
+        if matches.is_empty() {
             bail_invalid_input_syntax!(
-                "ALTER CONFIG only accepts options starting with `streaming.`"
+                "ALTER CONFIG only accepts options starting with `streaming.` or `refill.`",
             );
         }
+        for m in matches {
+            if ALTER_STREAMING_CONFIG_RULES[m].need_recover {
+                need_recover = true;
+                break;
+            }
+        }
+
         let SqlOptionValue::Value(value) = value else {
             bail_invalid_input_syntax!("ALTER CONFIG only accepts value options");
         };
@@ -60,7 +106,7 @@ fn collect_options(entries: Vec<SqlOption>) -> Result<TomlMapDiff> {
         }
     }
 
-    Ok(map)
+    Ok(ConfigDiff { map, need_recover })
 }
 
 pub async fn handle_alter_streaming_set_config(
@@ -72,12 +118,12 @@ pub async fn handle_alter_streaming_set_config(
     let session = handler_args.session;
 
     let job_id = resolve_streaming_job_id_for_alter(&session, obj_name, stmt_type, "config")?;
-    let map_diff = collect_options(entries)?;
+    let ConfigDiff { map, need_recover } = collect_options(entries)?;
 
     let mut entries_to_add = HashMap::new();
     let mut keys_to_remove = Vec::new();
 
-    for (k, v) in map_diff {
+    for (k, v) in map {
         if let Some(v) = v {
             entries_to_add.insert(k, v.to_string());
         } else {
@@ -90,9 +136,15 @@ pub async fn handle_alter_streaming_set_config(
         .alter_config(job_id, entries_to_add, keys_to_remove)
         .await?;
 
-    Ok(RwPgResponse::builder(stmt_type)
-        .notice("ALTER CONFIG requires a RECOVER on the specified streaming job to take effect.")
-        .into())
+    if need_recover {
+        Ok(RwPgResponse::builder(stmt_type)
+            .notice(
+                "Some ALTER CONFIG rules requires a RECOVER on the specified streaming job to take effect.",
+            )
+            .into())
+    } else {
+        Ok(RwPgResponse::empty_result(stmt_type))
+    }
 }
 
 pub async fn handle_alter_streaming_reset_config(
