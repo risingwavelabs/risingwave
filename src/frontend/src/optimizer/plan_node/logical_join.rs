@@ -989,11 +989,7 @@ impl LogicalJoin {
         // materialization of rows only to be filtered later.
 
         let stream_hash_join = StreamHashJoin::new(core.clone())?;
-        let predicate = core
-            .on
-            .as_eq_predicate_ref()
-            .expect("core predicate must exist")
-            .clone();
+        let predicate = stream_hash_join.eq_join_predicate().clone();
 
         let force_filter_inside_join = self
             .base
