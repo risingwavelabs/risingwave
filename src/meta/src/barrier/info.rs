@@ -1210,13 +1210,19 @@ impl InflightFragmentInfo {
             .flat_map(|info| info.state_table_ids.iter().cloned())
     }
 
-    pub fn contains_worker(infos: impl IntoIterator<Item = &Self>, worker_id: WorkerId) -> bool {
-        infos.into_iter().any(|fragment| {
-            fragment
-                .actors
-                .values()
-                .any(|actor| (actor.worker_id) == worker_id)
-        })
+    pub fn workers<'a>(
+        infos: impl IntoIterator<Item = &'a Self> + 'a,
+    ) -> impl Iterator<Item = WorkerId> + 'a {
+        infos
+            .into_iter()
+            .flat_map(|fragment| fragment.actors.values().map(|actor| actor.worker_id))
+    }
+
+    pub fn contains_worker<'a>(
+        infos: impl IntoIterator<Item = &'a Self> + 'a,
+        worker_id: WorkerId,
+    ) -> bool {
+        Self::workers(infos).any(|existing_worker_id| existing_worker_id == worker_id)
     }
 }
 
