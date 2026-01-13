@@ -16,12 +16,17 @@ use std::sync::{Arc, OnceLock};
 
 use prometheus::core::{AtomicU64, Collector, Desc, GenericCounter};
 use prometheus::{
-    Gauge, Histogram, HistogramVec, IntGauge, Opts, Registry, exponential_buckets, histogram_opts,
-    proto, register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_with_registry,
+    Gauge, Histogram, HistogramVec, IntGauge, IntGaugeVec, Opts, Registry, exponential_buckets,
+    histogram_opts, proto, register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry,
 };
 use risingwave_common::config::MetricLevel;
-use risingwave_common::metrics::{LabelGuardedIntGaugeVec, RelabeledCounterVec, RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec, RelabeledHistogramVec, RelabeledMetricVec, UintGauge};
+use risingwave_common::metrics::{
+    LabelGuardedIntGaugeVec, RelabeledCounterVec, RelabeledGuardedHistogramVec,
+    RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec, RelabeledHistogramVec,
+    RelabeledMetricVec, UintGauge,
+};
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
@@ -86,7 +91,6 @@ pub struct HummockStateStoreMetrics {
     pub uploader_per_table_imm_size: LabelGuardedIntGaugeVec,
     pub uploader_per_table_imm_count: LabelGuardedIntGaugeVec,
 
-
     pub per_table_imm_size: LabelGuardedIntGaugeVec,
     pub per_table_imm_count: LabelGuardedIntGaugeVec,
 
@@ -97,7 +101,7 @@ pub struct HummockStateStoreMetrics {
     // block statistics
     pub block_efficiency_histogram: Histogram,
 
-    pub event_handler_pending_event: IntGauge,
+    pub event_handler_pending_event: IntGaugeVec,
     pub event_handler_latency: HistogramVec,
 
     pub safe_version_hit: GenericCounter<AtomicU64>,
@@ -545,9 +549,10 @@ impl HummockStateStoreMetrics {
         );
         let block_efficiency_histogram = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let event_handler_pending_event = register_int_gauge_with_registry!(
+        let event_handler_pending_event = register_int_gauge_vec_with_registry!(
             "state_store_event_handler_pending_event",
             "The number of sent but unhandled events",
+            &["event_type"],
             registry,
         )
         .unwrap();
