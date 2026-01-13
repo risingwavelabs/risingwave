@@ -120,6 +120,7 @@ fi
 # Add a semver tag for non-release branches
 if [ "$BUILDKITE_BRANCH" != "main" ] && [[ ! "$BUILDKITE_BRANCH" =~ "^release-.*" ]]; then
   postfix=$(echo ${BUILDKITE_BRANCH} | md5sum | cut -c1-8)
+  pip install toml-cli
   TAG="v$(toml get --toml-path Cargo.toml workspace.package.version)-${postfix}"
   pushGchr "${TAG}"
   if [[ "${PUSH_DOCKERHUB:-false}" == "true" ]]; then
