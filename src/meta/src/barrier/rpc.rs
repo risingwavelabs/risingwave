@@ -415,7 +415,7 @@ impl ControlStreamManager {
                             let result = result
                                 .ok_or_else(|| (false, anyhow!("end of stream").into()))
                                 .and_then(|result| {
-                                    result.map_err(|err| -> (bool, MetaError) {(false, err.into())}).and_then(|resp| {
+                                    result.map_err(|err| -> (bool, MetaError) { (false, err.into()) }).and_then(|resp| {
                                         match resp
                                             .response
                                             .ok_or_else(|| (false, anyhow!("empty response").into()))?
@@ -433,7 +433,7 @@ impl ControlStreamManager {
                                                     assert_eq!(worker_id, barrier_resp.worker_id);
                                                 }
                                                 Ok(resp)
-                                            },
+                                            }
                                         }
                                     })
                                 });
@@ -570,7 +570,7 @@ impl DatabaseInitialBarrierCollector {
             );
         } else {
             assert_eq!(resp.epoch, self.committed_epoch);
-            assert!(self.node_to_collect.remove(&resp.worker_id).is_some());
+            assert!(self.node_to_collect.remove(&resp.worker_id));
         }
     }
 
@@ -585,11 +585,11 @@ impl DatabaseInitialBarrierCollector {
         )
     }
 
-    pub(super) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
-        is_valid_after_worker_err(&mut self.node_to_collect, worker_id)
+    pub(super) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
+        is_valid_after_worker_err(&self.node_to_collect, worker_id)
             && self
                 .creating_streaming_job_controls
-                .values_mut()
+                .values()
                 .all(|job| job.is_valid_after_worker_err(worker_id))
     }
 }
@@ -894,6 +894,7 @@ impl ControlStreamManager {
                 &barrier_info,
                 &nodes_actors,
                 InflightFragmentInfo::existing_table_ids(database_jobs.values().flatten()),
+                nodes_actors.keys().copied(),
                 Some(new_actors),
             )?;
             debug!(
@@ -1011,35 +1012,42 @@ impl ControlStreamManager {
         barrier_info: &BarrierInfo,
         node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
         table_ids_to_sync: impl Iterator<Item = TableId>,
+        nodes_to_sync_table: impl Iterator<Item = WorkerId>,
         mut new_actors: Option<StreamJobActorsToCreate>,
     ) -> MetaResult<NodeToCollect> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
         ));
 
+        let nodes_to_sync_table: HashSet<_> = nodes_to_sync_table.collect();
+
         let partial_graph_id = to_partial_graph_id(creating_job_id);
 
-        for worker_id in node_actors.keys() {
-            if let Some((_, worker_state)) = self.workers.get(worker_id)
-                && let WorkerNodeState::Connected { .. } = worker_state
-            {
-            } else {
-                return Err(anyhow!("unconnected worker node {}", worker_id).into());
-            }
-        }
+        nodes_to_sync_table.iter().for_each(|worker_id| {
+            assert!(node_actors.contains_key(worker_id), "worker_id {worker_id} in nodes_to_sync_table {nodes_to_sync_table:?} but not in node_actors {node_actors:?}");
+        });
 
-        let mut node_need_collect = HashMap::new();
+        let mut node_need_collect = NodeToCollect::new();
         let table_ids_to_sync = table_ids_to_sync.collect_vec();
 
-        self.connected_workers()
-            .try_for_each(|(node_id, node)| {
-                let actor_ids_to_collect = node_actors
-                    .get(&node_id)
-                    .map(|actors| actors.iter().cloned())
-                    .into_iter()
-                    .flatten()
-                    .collect_vec();
-                let is_empty = actor_ids_to_collect.is_empty();
+        node_actors.iter()
+            .try_for_each(|(worker_id, actor_ids_to_collect)| {
+                assert!(!actor_ids_to_collect.is_empty(), "empty actor_ids_to_collect on worker {worker_id} in node_actors {node_actors:?}");
+                let table_ids_to_sync = if nodes_to_sync_table.contains(worker_id) {
+                    table_ids_to_sync.clone()
+                } else {
+                    vec![]
+                };
+
+                let node = if let Some((_, worker_state)) = self.workers.get(worker_id)
+                    &&
+                    let WorkerNodeState::Connected { control_stream, .. } = worker_state
+                {
+                    control_stream
+                } else {
+                    return Err(anyhow!("unconnected worker node {}", worker_id).into());
+                };
+
                 {
                     let mutation = mutation.clone();
                     let barrier = Barrier {
@@ -1062,12 +1070,12 @@ impl ControlStreamManager {
                                         request_id: Uuid::new_v4().to_string(),
                                         barrier: Some(barrier),
                                         database_id,
-                                        actor_ids_to_collect,
-                                        table_ids_to_sync: table_ids_to_sync.clone(),
+                                        actor_ids_to_collect: actor_ids_to_collect.iter().copied().collect(),
+                                        table_ids_to_sync,
                                         partial_graph_id,
                                         actors_to_build: new_actors
                                             .as_mut()
-                                            .map(|new_actors| new_actors.remove(&(node_id as _)))
+                                            .map(|new_actors| new_actors.remove(worker_id))
                                             .into_iter()
                                             .flatten()
                                             .flatten()
@@ -1117,7 +1125,7 @@ impl ControlStreamManager {
                             ))
                         })?;
 
-                    node_need_collect.insert(node_id as WorkerId, is_empty);
+                    node_need_collect.insert(*worker_id);
                     Result::<_, MetaError>::Ok(())
                 }
             })

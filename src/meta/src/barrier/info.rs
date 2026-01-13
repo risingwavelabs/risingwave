@@ -575,6 +575,29 @@ impl InflightDatabaseInfo {
                 }
             }
         }
+        if let Some(Command::RescheduleFragment { reschedules, .. }) = command {
+            // During reschedule we expect fragments to be rebuilt with new actors and no vnode bitmap update.
+            debug_assert!(
+                reschedules
+                    .values()
+                    .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
+                "RescheduleFragment should not carry vnode bitmap updates when actors are rebuilt"
+            );
+
+            // Collect jobs that own the rescheduled fragments; de-duplicate via HashSet.
+            let related_job_ids = reschedules
+                .keys()
+                .filter_map(|fragment_id| self.fragment_location.get(fragment_id))
+                .cloned()
+                .collect::<HashSet<_>>();
+            for job_id in related_job_ids {
+                if let Some(job) = self.jobs.get_mut(&job_id)
+                    && let CreateStreamingJobStatus::Creating(tracker) = &mut job.status
+                {
+                    tracker.refresh_after_reschedule(&job.fragment_infos, version_stats);
+                }
+            }
+        }
         for progress in resps.iter().flat_map(|resp| &resp.create_mview_progress) {
             let Some(job_id) = self.fragment_location.get(&progress.fragment_id) else {
                 warn!(
@@ -1187,13 +1210,19 @@ impl InflightFragmentInfo {
             .flat_map(|info| info.state_table_ids.iter().cloned())
     }
 
-    pub fn contains_worker(infos: impl IntoIterator<Item = &Self>, worker_id: WorkerId) -> bool {
-        infos.into_iter().any(|fragment| {
-            fragment
-                .actors
-                .values()
-                .any(|actor| (actor.worker_id) == worker_id)
-        })
+    pub fn workers<'a>(
+        infos: impl IntoIterator<Item = &'a Self> + 'a,
+    ) -> impl Iterator<Item = WorkerId> + 'a {
+        infos
+            .into_iter()
+            .flat_map(|fragment| fragment.actors.values().map(|actor| actor.worker_id))
+    }
+
+    pub fn contains_worker<'a>(
+        infos: impl IntoIterator<Item = &'a Self> + 'a,
+        worker_id: WorkerId,
+    ) -> bool {
+        Self::workers(infos).any(|existing_worker_id| existing_worker_id == worker_id)
     }
 }
 
