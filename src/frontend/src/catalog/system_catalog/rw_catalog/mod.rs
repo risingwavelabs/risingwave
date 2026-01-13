@@ -54,6 +54,7 @@ mod rw_streaming_parallelism;
 mod rw_subscriptions;
 mod rw_system_tables;
 mod rw_table_fragments;
+mod rw_table_refill;
 mod rw_table_stats;
 mod rw_tables;
 pub(super) mod rw_types;

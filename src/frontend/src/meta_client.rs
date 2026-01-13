@@ -147,6 +147,9 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
 
+    async fn list_table_refill_config(&self)
+    -> Result<Vec<risingwave_pb::meta::TableRefillConfig>>;
+
     async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>>;
 
     async fn list_refresh_table_states(&self) -> Result<Vec<RefreshTableState>>;
@@ -405,6 +408,12 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>> {
         self.0.list_rate_limits().await
+    }
+
+    async fn list_table_refill_config(
+        &self,
+    ) -> Result<Vec<risingwave_pb::meta::TableRefillConfig>> {
+        self.0.list_table_refill_config().await
     }
 
     async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>> {

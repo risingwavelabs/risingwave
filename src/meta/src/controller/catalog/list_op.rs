@@ -30,6 +30,11 @@ impl CatalogController {
         Ok(RefreshJob::find().all(&inner.db).await?)
     }
 
+    pub async fn list_table_refill_configs(&self) -> MetaResult<Vec<table_refill::Model>> {
+        let inner = self.inner.read().await;
+        Ok(TableRefill::find().all(&inner.db).await?)
+    }
+
     pub async fn get_refresh_job_state_by_table_id(
         &self,
         table_id: TableId,

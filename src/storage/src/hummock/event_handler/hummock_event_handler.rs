@@ -47,7 +47,7 @@ use crate::hummock::event_handler::uploader::{
 };
 use crate::hummock::event_handler::{
     HummockEvent, HummockReadVersionRef, HummockVersionUpdate, ReadOnlyReadVersionMapping,
-    ReadOnlyRwLockRef,
+    ReadOnlyRwLockRef, TableRefillConfigEntry, TableRefillConfigUpdate,
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
@@ -205,6 +205,7 @@ pub struct HummockEventHandler {
 
     uploader: HummockUploader,
     refiller: CacheRefiller,
+    table_refill_configs: HashMap<TableId, String>,
 
     last_instance_id: LocalInstanceId,
 
@@ -352,6 +353,7 @@ impl HummockEventHandler {
             local_read_version_mapping: Default::default(),
             uploader,
             refiller,
+            table_refill_configs: HashMap::new(),
             last_instance_id: 0,
             metrics,
         }
@@ -502,20 +504,50 @@ impl HummockEventHandler {
             .metrics
             .event_handler_on_recv_version_update
             .start_timer();
-        let pinned_version = self
-            .refiller
-            .last_new_pinned_version()
-            .cloned()
-            .unwrap_or_else(|| self.uploader.hummock_version().clone());
+        match version_payload {
+            HummockVersionUpdate::TableRefillConfigSnapshot(configs) => {
+                self.handle_table_refill_config_snapshot(configs);
+                return;
+            }
+            HummockVersionUpdate::TableRefillConfigUpdate(update) => {
+                self.handle_table_refill_config_update(update);
+                return;
+            }
+            version_payload => {
+                let pinned_version = self
+                    .refiller
+                    .last_new_pinned_version()
+                    .cloned()
+                    .unwrap_or_else(|| self.uploader.hummock_version().clone());
 
-        let mut sst_delta_infos = vec![];
-        if let Some(new_pinned_version) = Self::resolve_version_update_info(
-            &pinned_version,
-            version_payload,
-            Some(&mut sst_delta_infos),
-        ) {
-            self.refiller
-                .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
+                let mut sst_delta_infos = vec![];
+                if let Some(new_pinned_version) = Self::resolve_version_update_info(
+                    &pinned_version,
+                    version_payload,
+                    Some(&mut sst_delta_infos),
+                ) {
+                    self.refiller.start_cache_refill(
+                        sst_delta_infos,
+                        pinned_version,
+                        new_pinned_version,
+                    );
+                }
+            }
+        }
+    }
+
+    fn handle_table_refill_config_snapshot(&mut self, configs: Vec<TableRefillConfigEntry>) {
+        self.table_refill_configs = configs
+            .into_iter()
+            .map(|config| (config.table_id, config.mode))
+            .collect();
+    }
+
+    fn handle_table_refill_config_update(&mut self, update: TableRefillConfigUpdate) {
+        if let Some(mode) = update.mode {
+            self.table_refill_configs.insert(update.table_id, mode);
+        } else {
+            self.table_refill_configs.remove(&update.table_id);
         }
     }
 
@@ -570,6 +602,8 @@ impl HummockEventHandler {
             HummockVersionUpdate::PinnedVersion(version) => {
                 pinned_version.new_pin_version(*version)
             }
+            HummockVersionUpdate::TableRefillConfigSnapshot(_)
+            | HummockVersionUpdate::TableRefillConfigUpdate(_) => None,
         }
     }
 

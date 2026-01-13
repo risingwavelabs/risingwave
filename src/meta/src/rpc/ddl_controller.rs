@@ -187,6 +187,7 @@ pub enum DdlCommand {
     DropSubscription(SubscriptionId, DropMode),
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
     AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
+    AlterTableRefillConfig(TableId, Option<String>),
 }
 
 impl DdlCommand {
@@ -223,6 +224,7 @@ impl DdlCommand {
             DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
             DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
+            DdlCommand::AlterTableRefillConfig(table_id, _) => Right(table_id.as_object_id()),
         }
     }
 
@@ -250,7 +252,8 @@ impl DdlCommand {
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
             | DdlCommand::AlterDatabaseParam(_, _)
-            | DdlCommand::AlterStreamingJobConfig(_, _, _) => true,
+            | DdlCommand::AlterStreamingJobConfig(_, _, _)
+            | DdlCommand::AlterTableRefillConfig(_, _) => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
             | DdlCommand::ReplaceStreamJob(_)
@@ -464,6 +467,9 @@ impl DdlController {
                 DdlCommand::AlterStreamingJobConfig(job_id, entries_to_add, keys_to_remove) => {
                     ctrl.alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
                         .await
+                }
+                DdlCommand::AlterTableRefillConfig(table_id, mode) => {
+                    ctrl.alter_table_refill_config(table_id, mode).await
                 }
             }
         }
@@ -2291,6 +2297,17 @@ impl DdlController {
         self.metadata_manager
             .catalog_controller
             .alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
+            .await
+    }
+
+    async fn alter_table_refill_config(
+        &self,
+        table_id: TableId,
+        mode: Option<String>,
+    ) -> MetaResult<NotificationVersion> {
+        self.metadata_manager
+            .catalog_controller
+            .alter_table_refill_mode(table_id, mode)
             .await
     }
 }

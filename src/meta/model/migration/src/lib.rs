@@ -64,6 +64,7 @@ mod m20251130_120000_streaming_job_backfill_parallelism;
 mod m20251208_134652_clean_watermark_indices;
 mod m20251224_142321_sink_schema_change;
 mod m20251231_000000_sink_ignore_delete;
+mod m20260113_120000_table_refill;
 mod utils;
 
 pub struct Migrator;
@@ -166,6 +167,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20251208_134652_clean_watermark_indices::Migration),
             Box::new(m20251224_142321_sink_schema_change::Migration),
             Box::new(m20251231_000000_sink_ignore_delete::Migration),
+            Box::new(m20260113_120000_table_refill::Migration),
         ]
     }
 }

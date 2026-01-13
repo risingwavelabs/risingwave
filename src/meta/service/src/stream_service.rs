@@ -624,6 +624,24 @@ impl StreamManagerService for StreamServiceImpl {
         Ok(Response::new(ListRateLimitsResponse { rate_limits }))
     }
 
+    async fn list_table_refill_config(
+        &self,
+        _request: Request<ListTableRefillConfigRequest>,
+    ) -> Result<Response<ListTableRefillConfigResponse>, Status> {
+        let configs = self
+            .metadata_manager
+            .catalog_controller
+            .list_table_refill_configs()
+            .await?
+            .into_iter()
+            .map(|config| TableRefillConfig {
+                table_id: config.table_id.as_raw_id(),
+                mode: Some(config.mode),
+            })
+            .collect();
+        Ok(Response::new(ListTableRefillConfigResponse { configs }))
+    }
+
     #[cfg_attr(coverage, coverage(off))]
     async fn refresh(
         &self,

@@ -65,6 +65,7 @@ pub mod streaming_job;
 pub mod subscription;
 pub mod system_parameter;
 pub mod table;
+pub mod table_refill;
 pub mod user;
 pub mod user_default_privilege;
 pub mod user_privilege;

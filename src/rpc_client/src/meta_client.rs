@@ -662,6 +662,20 @@ impl MetaClient {
         Ok(())
     }
 
+    pub async fn alter_table_refill_config(
+        &self,
+        table_id: TableId,
+        mode: Option<String>,
+    ) -> Result<()> {
+        let request = AlterTableRefillConfigRequest {
+            table_id: table_id.as_raw_id(),
+            mode,
+        };
+
+        self.inner.alter_table_refill_config(request).await?;
+        Ok(())
+    }
+
     pub async fn alter_fragment_parallelism(
         &self,
         fragment_ids: Vec<FragmentId>,
@@ -1844,6 +1858,14 @@ impl MetaClient {
         Ok(resp.rate_limits)
     }
 
+    pub async fn list_table_refill_config(
+        &self,
+    ) -> Result<Vec<risingwave_pb::meta::TableRefillConfig>> {
+        let request = ListTableRefillConfigRequest {};
+        let resp = self.inner.list_table_refill_config(request).await?;
+        Ok(resp.configs)
+    }
+
     pub async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>> {
         let request = ListCdcProgressRequest {};
         let resp = self.inner.list_cdc_progress(request).await?;
@@ -2508,6 +2530,7 @@ macro_rules! for_all_meta_rpc {
             ,{ stream_client, list_rate_limits, ListRateLimitsRequest, ListRateLimitsResponse }
             ,{ stream_client, list_cdc_progress, ListCdcProgressRequest, ListCdcProgressResponse }
             ,{ stream_client, list_refresh_table_states, ListRefreshTableStatesRequest, ListRefreshTableStatesResponse }
+            ,{ stream_client, list_table_refill_config, ListTableRefillConfigRequest, ListTableRefillConfigResponse }
             ,{ stream_client, alter_connector_props, AlterConnectorPropsRequest, AlterConnectorPropsResponse }
             ,{ stream_client, get_fragment_by_id, GetFragmentByIdRequest, GetFragmentByIdResponse }
             ,{ stream_client, get_fragment_vnodes, GetFragmentVnodesRequest, GetFragmentVnodesResponse }
@@ -2521,6 +2544,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_set_schema, AlterSetSchemaRequest, AlterSetSchemaResponse }
             ,{ ddl_client, alter_parallelism, AlterParallelismRequest, AlterParallelismResponse }
             ,{ ddl_client, alter_streaming_job_config, AlterStreamingJobConfigRequest, AlterStreamingJobConfigResponse }
+            ,{ ddl_client, alter_table_refill_config, AlterTableRefillConfigRequest, AlterTableRefillConfigResponse }
             ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }

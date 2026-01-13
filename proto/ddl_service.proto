@@ -649,6 +649,13 @@ message AlterStreamingJobConfigRequest {
 
 message AlterStreamingJobConfigResponse {}
 
+message AlterTableRefillConfigRequest {
+  uint32 table_id = 1;
+  optional string mode = 2;
+}
+
+message AlterTableRefillConfigResponse {}
+
 service DdlService {
   rpc CreateDatabase(CreateDatabaseRequest) returns (CreateDatabaseResponse);
   rpc DropDatabase(DropDatabaseRequest) returns (DropDatabaseResponse);
@@ -699,4 +706,5 @@ service DdlService {
   rpc ExpireIcebergTableSnapshots(ExpireIcebergTableSnapshotsRequest) returns (ExpireIcebergTableSnapshotsResponse);
   rpc AlterCdcTableBackfillParallelism(AlterCdcTableBackfillParallelismRequest) returns (AlterCdcTableBackfillParallelismResponse);
   rpc AlterStreamingJobConfig(AlterStreamingJobConfigRequest) returns (AlterStreamingJobConfigResponse);
+  rpc AlterTableRefillConfig(AlterTableRefillConfigRequest) returns (AlterTableRefillConfigResponse);
 }

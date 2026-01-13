@@ -47,10 +47,23 @@ pub struct BufferWriteRequest {
     pub grant_sender: oneshot::Sender<()>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Debug, Clone)]
+pub struct TableRefillConfigEntry {
+    pub table_id: TableId,
+    pub mode: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct TableRefillConfigUpdate {
+    pub table_id: TableId,
+    pub mode: Option<String>,
+}
+
 pub enum HummockVersionUpdate {
     VersionDeltas(Vec<HummockVersionDelta>),
     PinnedVersion(Box<HummockVersion>),
+    TableRefillConfigSnapshot(Vec<TableRefillConfigEntry>),
+    TableRefillConfigUpdate(TableRefillConfigUpdate),
 }
 
 pub enum HummockEvent {

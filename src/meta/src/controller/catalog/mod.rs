@@ -45,7 +45,7 @@ use risingwave_meta_model::{
     StreamNode, StreamSourceInfo, StreamingParallelism, SubscriptionId, TableId, TableIdArray,
     UserId, ViewId, connection, database, fragment, function, index, object, object_dependency,
     pending_sink_state, schema, secret, sink, source, streaming_job, subscription, table,
-    user_privilege, view,
+    table_refill, user_privilege, view,
 };
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
 use risingwave_pb::catalog::subscription::SubscriptionState;

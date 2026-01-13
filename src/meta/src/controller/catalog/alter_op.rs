@@ -19,9 +19,10 @@ use risingwave_common::config::{StreamingConfig, merge_streaming_config_section}
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_meta_model::refresh_job::{self, RefreshState};
+use risingwave_pb::meta::TableRefillConfig;
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
-use sea_orm::sea_query::Expr;
+use sea_orm::sea_query::{Expr, OnConflict};
 use sea_orm::{ActiveModelTrait, DatabaseTransaction};
 
 use super::*;
@@ -1055,6 +1056,66 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
+
+        Ok(IGNORED_NOTIFICATION_VERSION)
+    }
+
+    pub async fn alter_table_refill_mode(
+        &self,
+        table_id: TableId,
+        mode: Option<String>,
+    ) -> MetaResult<NotificationVersion> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let exists: Option<(TableId,)> = Table::find_by_id(table_id)
+            .select_only()
+            .column(table::Column::TableId)
+            .into_tuple()
+            .one(&txn)
+            .await?;
+        if exists.is_none() {
+            return Err(MetaError::catalog_id_not_found("table", table_id));
+        }
+
+        let normalized_mode = mode.map(|value| value.to_lowercase());
+        if let Some(mode) = normalized_mode.as_deref() {
+            if mode != "streaming" && mode != "serving" {
+                bail_invalid_parameter!(
+                    "invalid refill mode: {}, expected streaming or serving",
+                    mode
+                );
+            }
+            let active = table_refill::ActiveModel {
+                table_id: Set(table_id),
+                mode: Set(mode.to_owned()),
+            };
+            TableRefill::insert(active)
+                .on_conflict(
+                    OnConflict::column(table_refill::Column::TableId)
+                        .update_columns([table_refill::Column::Mode])
+                        .to_owned(),
+                )
+                .exec(&txn)
+                .await?;
+        } else {
+            TableRefill::delete_by_id(table_id).exec(&txn).await?;
+        }
+
+        txn.commit().await?;
+
+        let operation = if normalized_mode.is_some() {
+            NotificationOperation::Update
+        } else {
+            NotificationOperation::Delete
+        };
+        let info = Info::TableRefillConfig(TableRefillConfig {
+            table_id: table_id.as_raw_id(),
+            mode: normalized_mode,
+        });
+        self.env
+            .notification_manager()
+            .notify_hummock_without_version(operation, info);
 
         Ok(IGNORED_NOTIFICATION_VERSION)
     }

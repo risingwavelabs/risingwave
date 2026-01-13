@@ -27,7 +27,7 @@ use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
 use risingwave_pb::meta::{
     FragmentWorkerSlotMapping, GetSessionParamsResponse, MetaSnapshot, SubscribeRequest,
-    SubscribeType,
+    SubscribeType, TableRefillConfig,
 };
 use risingwave_pb::user::UserInfo;
 use tokio::sync::mpsc;
@@ -325,6 +325,17 @@ impl NotificationServiceImpl {
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
         let cluster_resource = self.get_cluster_resource().await;
+        let table_refill_configs = self
+            .metadata_manager
+            .catalog_controller
+            .list_table_refill_configs()
+            .await?
+            .into_iter()
+            .map(|config| TableRefillConfig {
+                table_id: config.table_id.as_raw_id(),
+                mode: Some(config.mode),
+            })
+            .collect();
 
         Ok(MetaSnapshot {
             tables,
@@ -340,6 +351,7 @@ impl NotificationServiceImpl {
                 write_limits: hummock_write_limits,
             }),
             cluster_resource: Some(cluster_resource),
+            table_refill_configs,
             ..Default::default()
         })
     }

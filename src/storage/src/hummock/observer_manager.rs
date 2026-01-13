@@ -12,19 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::catalog::TableId;
 use risingwave_common::license::LicenseManager;
 use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::meta::SubscribeResponse;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::{SubscribeResponse, TableRefillConfig};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::backup_reader::BackupReaderRef;
-use crate::hummock::event_handler::HummockVersionUpdate;
+use crate::hummock::event_handler::{
+    HummockVersionUpdate, TableRefillConfigEntry, TableRefillConfigUpdate,
+};
 use crate::hummock::write_limiter::WriteLimiterRef;
 
 pub struct HummockObserverNode {
@@ -93,6 +96,9 @@ impl ObserverState for HummockObserverNode {
             Info::ClusterResource(resource) => {
                 LicenseManager::get().update_cluster_resource(resource);
             }
+            Info::TableRefillConfig(config) => {
+                self.handle_table_refill_notification(resp.operation(), config);
+            }
 
             info => {
                 panic!("invalid notification info: {info}");
@@ -135,6 +141,7 @@ impl ObserverState for HummockObserverNode {
             });
         let snapshot_version = snapshot.version.unwrap();
         self.version = snapshot_version.catalog_version;
+        self.handle_table_refill_snapshot(snapshot.table_refill_configs);
         LicenseManager::get().update_cluster_resource(snapshot.cluster_resource.unwrap());
     }
 }
@@ -173,5 +180,46 @@ impl HummockObserverNode {
 
             _ => panic!("receive an unsupported notify {:?}", operation),
         }
+    }
+
+    fn handle_table_refill_notification(
+        &mut self,
+        operation: Operation,
+        config: TableRefillConfig,
+    ) {
+        let mode = match operation {
+            Operation::Add | Operation::Update => config.mode,
+            Operation::Delete => None,
+            _ => panic!("receive an unsupported notify {:?}", operation),
+        };
+        let update = TableRefillConfigUpdate {
+            table_id: TableId::new(config.table_id),
+            mode,
+        };
+        let _ = self
+            .version_update_sender
+            .send(HummockVersionUpdate::TableRefillConfigUpdate(update))
+            .inspect_err(|e| {
+                tracing::error!(event = ?e.0, "unable to send table refill update");
+            });
+    }
+
+    fn handle_table_refill_snapshot(&mut self, configs: Vec<TableRefillConfig>) {
+        let snapshot = configs
+            .into_iter()
+            .filter_map(|config| {
+                let mode = config.mode?;
+                Some(TableRefillConfigEntry {
+                    table_id: TableId::new(config.table_id),
+                    mode,
+                })
+            })
+            .collect();
+        let _ = self
+            .version_update_sender
+            .send(HummockVersionUpdate::TableRefillConfigSnapshot(snapshot))
+            .inspect_err(|e| {
+                tracing::error!(event = ?e.0, "unable to send table refill snapshot");
+            });
     }
 }

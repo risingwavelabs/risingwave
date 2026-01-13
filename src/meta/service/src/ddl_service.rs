@@ -1109,6 +1109,22 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(AlterStreamingJobConfigResponse {}))
     }
 
+    async fn alter_table_refill_config(
+        &self,
+        request: Request<AlterTableRefillConfigRequest>,
+    ) -> Result<Response<AlterTableRefillConfigResponse>, Status> {
+        let AlterTableRefillConfigRequest { table_id, mode } = request.into_inner();
+
+        self.ddl_controller
+            .run_command(DdlCommand::AlterTableRefillConfig(
+                TableId::new(table_id),
+                mode,
+            ))
+            .await?;
+
+        Ok(Response::new(AlterTableRefillConfigResponse {}))
+    }
+
     /// Auto schema change for cdc sources,
     /// called by the source parser when a schema change is detected.
     async fn auto_schema_change(

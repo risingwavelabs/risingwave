@@ -237,18 +237,7 @@ pub trait CatalogWriter: Send + Sync {
         keys_to_remove: Vec<String>,
     ) -> Result<()>;
 
-    async fn alter_resource_group(
-        &self,
-        table_id: TableId,
-        resource_group: Option<String>,
-        deferred: bool,
-    ) -> Result<()>;
-
-    async fn alter_set_schema(
-        &self,
-        object: alter_set_schema_request::Object,
-        new_schema_id: SchemaId,
-    ) -> Result<()>;
+    async fn alter_table_refill(&self, table_id: TableId, mode: Option<String>) -> Result<()>;
 
     async fn alter_swap_rename(&self, object: alter_swap_rename_request::Object) -> Result<()>;
 
@@ -646,6 +635,13 @@ impl CatalogWriter for CatalogWriterImpl {
     ) -> Result<()> {
         self.meta_client
             .alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
+            .await?;
+        Ok(())
+    }
+
+    async fn alter_table_refill(&self, table_id: TableId, mode: Option<String>) -> Result<()> {
+        self.meta_client
+            .alter_table_refill_config(table_id, mode)
             .await?;
         Ok(())
     }
