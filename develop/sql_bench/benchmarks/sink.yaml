@@ -1,0 +1,31 @@
+# Benchmark configuration
+benchmark_name: unaligned_join_backpressure_slow_finish
+
+setup_sql: |
+  set streaming_enable_unaligned_join = true;
+  set sink_decouple=true;
+
+  create table t(v0 int primary key, v1 int, v2 varchar, v3 varchar);
+  
+  create table t2(v0 int primary key, v1 int, v2 varchar, v3 varchar);
+
+  create sink s2 into t from t2;
+  insert into t2
+  select x as v0, 3 as v1, 't2data' as v2, 'shhsfdffk' as v3
+  from generate_series(4001, 6000) t(x);
+  flush;
+
+prepare_sql: |
+
+benchmark_sql: |
+  delete from t2;
+  flush;
+
+conclude_sql: |
+
+cleanup_sql: |
+  drop sink if exists s2;
+  drop table if exists t2;
+  drop table if exists t;
+
+runs: 1
