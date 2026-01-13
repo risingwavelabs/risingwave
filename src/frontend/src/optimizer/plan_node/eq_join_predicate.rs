@@ -144,18 +144,6 @@ impl EqJoinPredicate {
         cond.and(self.non_eq_cond())
     }
 
-    /// Build a `Condition` equivalent to [`Self::all_cond`] but **without** applying
-    /// `Condition::simplify`.
-    ///
-    /// This is useful when the predicate is already analyzed and `eq_keys` must be preserved
-    /// verbatim even if `other_cond` contains a constant `false` (where normal simplification would
-    /// drop the equality keys and leave only `false`).
-    pub fn all_cond_no_simplify(&self) -> Condition {
-        let mut conjunctions = self.eq_cond().conjunctions;
-        conjunctions.extend(self.other_cond.conjunctions.clone());
-        Condition { conjunctions }
-    }
-
     pub fn has_eq(&self) -> bool {
         !self.eq_keys.is_empty()
     }

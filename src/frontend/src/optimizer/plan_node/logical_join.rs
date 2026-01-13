@@ -477,10 +477,10 @@ impl LogicalJoin {
         let new_logical_scan: LogicalScan = new_scan.into();
 
         // Construct a new logical join, because we have change its RHS.
-        let new_logical_join = generic::Join::new(
+        let new_logical_join = generic::Join::new_with_eq_predicate(
             logical_join.left,
             new_logical_scan.to_batch()?,
-            new_join_on,
+            new_predicate,
             logical_join.join_type,
             new_join_output_indices,
         );
@@ -496,7 +496,6 @@ impl LogicalJoin {
 
         Ok(Some(BatchLookupJoin::new(
             new_logical_join,
-            new_predicate,
             table.clone(),
             new_scan_output_column_ids,
             lookup_prefix_len,
@@ -981,7 +980,9 @@ impl LogicalJoin {
         assert!(predicate.has_eq());
         let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
 
-        let core = self.core.clone_with_inputs(left, right);
+        let mut core = self.core.clone_with_inputs(left, right);
+        let predicate = StreamHashJoin::reorder_eq_join_predicate_by_watermark(&core, predicate);
+        core.on = generic::JoinOn::EqPredicate(predicate.clone());
 
         // Convert to Hash Join for equal joins
         // For inner joins, pull non-equal conditions to a filter operator on top of it by default.
@@ -991,7 +992,7 @@ impl LogicalJoin {
         // session variable `streaming_force_filter_inside_join` as it can save unnecessary
         // materialization of rows only to be filtered later.
 
-        let stream_hash_join = StreamHashJoin::new(core.clone(), predicate.clone())?;
+        let stream_hash_join = StreamHashJoin::new(core.clone())?;
 
         let force_filter_inside_join = self
             .base
@@ -1016,8 +1017,8 @@ impl LogicalJoin {
                 self.left().schema().len(),
                 self.right().schema().len(),
             );
-            core.on = generic::JoinOn::Condition(eq_cond.eq_cond());
-            let hash_join = StreamHashJoin::new(core, eq_cond)?.into();
+            core.on = generic::JoinOn::EqPredicate(eq_cond);
+            let hash_join = StreamHashJoin::new(core)?.into();
             let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
@@ -1303,7 +1304,9 @@ impl LogicalJoin {
 
         let new_predicate = new_predicate.retain_prefix_eq_key(lookup_prefix_len);
 
-        StreamTemporalJoin::new(new_logical_join, new_predicate, false)
+        let mut new_logical_join = new_logical_join;
+        new_logical_join.on = generic::JoinOn::EqPredicate(new_predicate);
+        StreamTemporalJoin::new(new_logical_join, false)
     }
 
     fn to_stream_nested_loop_temporal_join(
@@ -1354,7 +1357,9 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate, true)?.into())
+        let mut new_logical_join = new_logical_join;
+        new_logical_join.on = generic::JoinOn::EqPredicate(new_predicate);
+        Ok(StreamTemporalJoin::new(new_logical_join, true)?.into())
     }
 
     fn to_stream_dynamic_filter(
@@ -1484,12 +1489,19 @@ impl LogicalJoin {
 
         let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
         let left_len = left.schema().len();
-        let core = self.core.clone_with_inputs(left, right);
+        let mut core = self.core.clone_with_inputs(left, right);
+        core.on = generic::JoinOn::EqPredicate(predicate);
 
-        let inequality_desc =
-            Self::get_inequality_desc_from_predicate(predicate.other_cond().clone(), left_len)?;
+        let inequality_desc = Self::get_inequality_desc_from_predicate(
+            core.on
+                .as_eq_predicate_ref()
+                .expect("core predicate must exist")
+                .other_cond()
+                .clone(),
+            left_len,
+        )?;
 
-        Ok(StreamAsOfJoin::new(core, predicate, inequality_desc)?.into())
+        Ok(StreamAsOfJoin::new(core, inequality_desc)?.into())
     }
 
     /// Convert the logical join to a Hash join.
@@ -1511,7 +1523,11 @@ impl LogicalJoin {
             })
             .transpose()?;
 
-        let batch_join = BatchHashJoin::new(logical_join, predicate, asof_desc);
+        let logical_join = generic::Join {
+            on: generic::JoinOn::EqPredicate(predicate),
+            ..logical_join
+        };
+        let batch_join = BatchHashJoin::new(logical_join, asof_desc);
         Ok(batch_join.into())
     }
 

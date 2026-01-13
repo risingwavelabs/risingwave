@@ -41,13 +41,25 @@ pub enum JoinOn {
 }
 
 impl JoinOn {
+    /// Get the join predicate as a [`Condition`].
+    ///
+    /// - For [`JoinOn::Condition`], this returns the stored condition.
+    /// - For [`JoinOn::EqPredicate`], this converts the stored [`EqJoinPredicate`] back to a
+    ///   condition.
+    ///
+    /// Prefer [`JoinOn::as_condition_ref`] if you only want the original logical condition and
+    /// don't want any conversion.
     pub fn as_condition(&self) -> Condition {
         match self {
             JoinOn::Condition(cond) => cond.clone(),
-            JoinOn::EqPredicate(pred) => pred.all_cond_no_simplify(),
+            JoinOn::EqPredicate(pred) => pred.all_cond(),
         }
     }
 
+    /// Borrow the original logical join condition, if any.
+    ///
+    /// Returns `None` for [`JoinOn::EqPredicate`], because physical plans store a fixed
+    /// [`EqJoinPredicate`] instead of the original condition.
     pub fn as_condition_ref(&self) -> Option<&Condition> {
         match self {
             JoinOn::Condition(cond) => Some(cond),
@@ -55,6 +67,11 @@ impl JoinOn {
         }
     }
 
+    /// Borrow the fixed [`EqJoinPredicate`], if any.
+    ///
+    /// Returns `None` for [`JoinOn::Condition`]. If the caller needs eq keys, it should extract
+    /// them via [`EqJoinPredicate::create`] (potentially after rewriting/simplifying the
+    /// condition).
     pub fn as_eq_predicate_ref(&self) -> Option<&EqJoinPredicate> {
         match self {
             JoinOn::Condition(_) => None,
@@ -62,6 +79,10 @@ impl JoinOn {
         }
     }
 
+    /// Rewrite expressions inside the predicate.
+    ///
+    /// For [`JoinOn::EqPredicate`], eq keys are treated as fixed (they are expected to be plain
+    /// input refs), so only the "other" condition is rewritten.
     pub fn rewrite_exprs(&mut self, r: &mut dyn ExprRewriter) {
         match self {
             JoinOn::Condition(cond) => {
@@ -73,6 +94,9 @@ impl JoinOn {
         }
     }
 
+    /// Visit expressions inside the predicate.
+    ///
+    /// For [`JoinOn::EqPredicate`], only non-eq conditions are visited.
     pub fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         match self {
             JoinOn::Condition(cond) => cond.visit_expr(v),

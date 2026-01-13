@@ -63,7 +63,6 @@ pub struct BatchLookupJoin {
 impl BatchLookupJoin {
     pub fn new(
         core: generic::Join<PlanRef>,
-        eq_join_predicate: EqJoinPredicate,
         right_table: Arc<TableCatalog>,
         right_output_column_ids: Vec<ColumnId>,
         lookup_prefix_len: usize,
@@ -71,8 +70,6 @@ impl BatchLookupJoin {
         as_of: Option<AsOf>,
         asof_desc: Option<AsOfJoinDesc>,
     ) -> Self {
-        let mut core = core;
-        core.on = generic::JoinOn::EqPredicate(eq_join_predicate);
         // We cannot create a `BatchLookupJoin` without any eq keys. We require eq keys to do the
         // lookup.
         let eq_join_predicate = core
@@ -171,7 +168,6 @@ impl PlanTreeNodeUnary<Batch> for BatchLookupJoin {
         core.left = input;
         Self::new(
             core,
-            self.eq_join_predicate().clone(),
             self.right_table.clone(),
             self.right_output_column_ids.clone(),
             self.lookup_prefix_len,

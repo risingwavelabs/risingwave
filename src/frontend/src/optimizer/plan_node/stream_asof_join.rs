@@ -31,7 +31,7 @@ use super::{
 use crate::TableCatalog;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{GenericPlanNode, JoinOn};
+use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
 use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
@@ -52,13 +52,7 @@ pub struct StreamAsOfJoin {
 }
 
 impl StreamAsOfJoin {
-    pub fn new(
-        core: generic::Join<PlanRef>,
-        eq_join_predicate: EqJoinPredicate,
-        inequality_desc: AsOfJoinDesc,
-    ) -> Result<Self> {
-        let mut core = core;
-        core.on = JoinOn::EqPredicate(eq_join_predicate);
+    pub fn new(core: generic::Join<PlanRef>, inequality_desc: AsOfJoinDesc) -> Result<Self> {
         assert!(core.join_type == JoinType::AsofInner || core.join_type == JoinType::AsofLeftOuter);
 
         let stream_kind = core.stream_kind()?;
@@ -257,7 +251,7 @@ impl PlanTreeNodeBinary<Stream> for StreamAsOfJoin {
         core.left = left;
         core.right = right;
 
-        Self::new(core, self.eq_join_predicate().clone(), self.inequality_desc).unwrap()
+        Self::new(core, self.inequality_desc).unwrap()
     }
 }
 
@@ -343,7 +337,7 @@ impl ExprRewritable<Stream> for StreamAsOfJoin {
         )
         .unwrap();
 
-        Self::new(core, eq_join_predicate, desc).unwrap().into()
+        Self::new(core, desc).unwrap().into()
     }
 }
 

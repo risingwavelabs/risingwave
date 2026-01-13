@@ -43,13 +43,10 @@ pub struct BatchHashJoin {
 }
 
 impl BatchHashJoin {
-    pub fn new(
-        core: generic::Join<PlanRef>,
-        eq_join_predicate: EqJoinPredicate,
-        asof_desc: Option<AsOfJoinDesc>,
-    ) -> Self {
-        let mut core = core;
-        core.on = generic::JoinOn::EqPredicate(eq_join_predicate);
+    pub fn new(core: generic::Join<PlanRef>, asof_desc: Option<AsOfJoinDesc>) -> Self {
+        core.on
+            .as_eq_predicate_ref()
+            .expect("BatchHashJoin requires JoinOn::EqPredicate in core");
         let dist = Self::derive_dist(core.left.distribution(), core.right.distribution(), &core);
         let base = PlanBase::new_batch_with_core(&core, dist, Order::any());
 
@@ -139,7 +136,7 @@ impl PlanTreeNodeBinary<Batch> for BatchHashJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate().clone(), self.asof_desc)
+        Self::new(core, self.asof_desc)
     }
 }
 
@@ -255,8 +252,7 @@ impl ExprRewritable<Batch> for BatchHashJoin {
         let eq_join_predicate = core
             .on
             .as_eq_predicate_ref()
-            .expect("BatchHashJoin should store predicate as EqJoinPredicate")
-            .clone();
+            .expect("BatchHashJoin should store predicate as EqJoinPredicate");
         let desc = self.asof_desc.map(|_| {
             LogicalJoin::get_inequality_desc_from_predicate(
                 eq_join_predicate.other_cond().clone(),
@@ -264,7 +260,7 @@ impl ExprRewritable<Batch> for BatchHashJoin {
             )
             .unwrap()
         });
-        Self::new(core, eq_join_predicate, desc).into()
+        Self::new(core, desc).into()
     }
 }
 

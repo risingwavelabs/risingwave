@@ -21,7 +21,7 @@ use risingwave_pb::stream_plan::{
     DeltaExpression, HashJoinNode, PbInequalityPair, PbJoinEncodingType,
 };
 
-use super::generic::{GenericPlanNode, Join, JoinOn};
+use super::generic::{GenericPlanNode, Join};
 use super::stream::prelude::*;
 use super::stream_join_common::StreamJoinCommon;
 use super::utils::{Distill, childless_record, plan_node_name, watermark_pretty};
@@ -64,20 +64,40 @@ pub struct StreamHashJoin {
 }
 
 impl StreamHashJoin {
-    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Result<Self> {
-        let mut core = core;
-        core.on = JoinOn::EqPredicate(eq_join_predicate);
-        Self::new_with_core(core)
+    pub(super) fn reorder_eq_join_predicate_by_watermark(
+        core: &generic::Join<PlanRef>,
+        predicate: EqJoinPredicate,
+    ) -> EqJoinPredicate {
+        let mut reorder_idx = vec![];
+        for (i, (left_key, right_key)) in predicate.eq_indexes().iter().enumerate() {
+            if core.left.watermark_columns().contains(*left_key)
+                && core.right.watermark_columns().contains(*right_key)
+            {
+                reorder_idx.push(i);
+            }
+        }
+
+        if reorder_idx.is_empty() {
+            predicate
+        } else {
+            predicate.reorder(&reorder_idx)
+        }
     }
 
-    fn new_with_core(core: generic::Join<PlanRef>) -> Result<Self> {
+    pub fn new(core: generic::Join<PlanRef>) -> Result<Self> {
         let ctx = core.ctx();
 
-        let mut eq_join_predicate = core
+        let eq_join_predicate = core
             .on
             .as_eq_predicate_ref()
             .expect("StreamHashJoin requires JoinOn::EqPredicate in core")
             .clone();
+        debug_assert_eq!(
+            Self::reorder_eq_join_predicate_by_watermark(&core, eq_join_predicate.clone()),
+            eq_join_predicate,
+            "StreamHashJoin expects watermark eq keys to be placed first; call \
+             StreamHashJoin::reorder_eq_join_predicate_by_watermark at the caller side"
+        );
 
         let stream_kind = core.stream_kind()?;
 
@@ -90,19 +110,6 @@ impl StreamHashJoin {
         let mut inequality_pairs = vec![];
         let mut clean_left_state_conjunction_idx = None;
         let mut clean_right_state_conjunction_idx = None;
-
-        // Reorder `eq_join_predicate` by placing the watermark column at the beginning.
-        let mut reorder_idx = vec![];
-        for (i, (left_key, right_key)) in eq_join_predicate.eq_indexes().iter().enumerate() {
-            if core.left.watermark_columns().contains(*left_key)
-                && core.right.watermark_columns().contains(*right_key)
-            {
-                reorder_idx.push(i);
-            }
-        }
-        eq_join_predicate = eq_join_predicate.reorder(&reorder_idx);
-        let mut core = core;
-        core.on = JoinOn::EqPredicate(eq_join_predicate.clone());
 
         let watermark_columns = {
             let l2i = core.l2i_col_mapping();
@@ -331,7 +338,7 @@ impl PlanTreeNodeBinary<Stream> for StreamHashJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate().clone()).unwrap()
+        Self::new(core).unwrap()
     }
 }
 
@@ -457,7 +464,7 @@ impl ExprRewritable<Stream> for StreamHashJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new_with_core(core).unwrap().into()
+        Self::new(core).unwrap().into()
     }
 }
 

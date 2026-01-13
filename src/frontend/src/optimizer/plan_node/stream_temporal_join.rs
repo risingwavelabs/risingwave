@@ -26,7 +26,7 @@ use super::{ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamPlanRef as PlanR
 use crate::TableCatalog;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::{GenericPlanNode, JoinOn};
+use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::plan_tree_node::PlanTreeNodeUnary;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::plan_node::{
@@ -45,13 +45,10 @@ pub struct StreamTemporalJoin {
 }
 
 impl StreamTemporalJoin {
-    pub fn new(
-        core: generic::Join<PlanRef>,
-        eq_join_predicate: EqJoinPredicate,
-        is_nested_loop: bool,
-    ) -> Result<Self> {
-        let mut core = core;
-        core.on = JoinOn::EqPredicate(eq_join_predicate);
+    pub fn new(core: generic::Join<PlanRef>, is_nested_loop: bool) -> Result<Self> {
+        core.on
+            .as_eq_predicate_ref()
+            .expect("StreamTemporalJoin requires JoinOn::EqPredicate in core");
         assert!(core.join_type == JoinType::Inner || core.join_type == JoinType::LeftOuter);
         // TODO(kind): theoretically, the impl can handle upsert stream.
         let stream_kind = reject_upsert_input!(core.left);
@@ -127,7 +124,7 @@ impl StreamTemporalJoin {
     }
 
     pub fn is_nested_loop(&self) -> bool {
-        self.eq_join_predicate().has_eq()
+        self.is_nested_loop
     }
 
     /// Return memo-table catalog and its `pk_indices`.
@@ -223,7 +220,7 @@ impl PlanTreeNodeBinary<Stream> for StreamTemporalJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate().clone(), self.is_nested_loop).unwrap()
+        Self::new(core, self.is_nested_loop).unwrap()
     }
 }
 
@@ -291,14 +288,7 @@ impl ExprRewritable<Stream> for StreamTemporalJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        let eq_join_predicate = core
-            .on
-            .as_eq_predicate_ref()
-            .expect("StreamTemporalJoin should store predicate as EqJoinPredicate")
-            .clone();
-        Self::new(core, eq_join_predicate, self.is_nested_loop)
-            .unwrap()
-            .into()
+        Self::new(core, self.is_nested_loop).unwrap().into()
     }
 }
 
