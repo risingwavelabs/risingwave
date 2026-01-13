@@ -41,8 +41,9 @@ use risingwave_pb::task_service::stream_exchange_service_client::StreamExchangeS
 use risingwave_pb::task_service::task_service_client::TaskServiceClient;
 use risingwave_pb::task_service::{
     CancelTaskRequest, CancelTaskResponse, CreateTaskRequest, ExecuteRequest, FastInsertRequest,
-    FastInsertResponse, GetDataRequest, GetDataResponse, GetStreamRequest, GetStreamResponse,
-    PbPermits, TaskInfoResponse, permits,
+    FastInsertResponse, GetDataRequest, GetDataResponse, GetMuxStreamRequest, GetMuxStreamResponse,
+    GetStreamRequest, GetStreamResponse, PbPermits, TaskInfoResponse, get_mux_stream_request,
+    permits,
 };
 use tokio::sync::mpsc;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -115,6 +116,42 @@ impl ComputeClient {
             .await
             .map_err(RpcError::from_compute_status)?
             .into_inner())
+    }
+
+    pub async fn get_mux_stream(
+        &self,
+        init: get_mux_stream_request::Init,
+    ) -> Result<(
+        Streaming<GetMuxStreamResponse>,
+        mpsc::UnboundedSender<GetMuxStreamRequest>,
+    )> {
+        use risingwave_pb::task_service::get_mux_stream_request::*;
+
+        // Create channel used for future requests (including register new actor pairs and add permits) to the upstream.
+        let (request_sender, request_receiver) = mpsc::unbounded_channel();
+        request_sender
+            .send(GetMuxStreamRequest {
+                value: Some(Value::Init(init.clone())),
+            })
+            .unwrap();
+
+        let response_stream = self
+            .stream_exchange_client
+            .clone()
+            .get_mux_stream(UnboundedReceiverStream::new(request_receiver))
+            .await
+            .inspect_err(|_| {
+                tracing::error!(
+                    "failed to create mux stream from remote_input {} from fragment {} to fragment {}",
+                    self.addr,
+                    init.up_fragment_id,
+                    init.down_fragment_id
+                )
+            })
+            .map_err(RpcError::from_compute_status)?
+            .into_inner();
+
+        Ok((response_stream, request_sender))
     }
 
     pub async fn get_stream(

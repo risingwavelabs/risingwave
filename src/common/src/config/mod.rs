@@ -221,6 +221,15 @@ pub mod default {
             0
         }
 
+        pub fn stream_exchange_force_remote() -> bool {
+            false
+        }
+
+        pub fn stream_exchange_remote_use_multiplexing() -> bool {
+            // TODO(mux): default to false until it's tested to be stable
+            true
+        }
+
         pub fn stream_dml_channel_initial_permits() -> usize {
             32768
         }

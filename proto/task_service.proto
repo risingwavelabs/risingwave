@@ -140,6 +140,35 @@ message GetStreamRequest {
   }
 }
 
+message GetMuxStreamRequest {
+  message Init {
+    uint32 up_fragment_id = 1;
+    uint32 down_fragment_id = 2;
+    uint32 database_id = 3;
+    string term_id = 4;
+  }
+
+  message Register {
+    uint32 up_actor_id = 1;
+    uint32 down_actor_id = 2;
+  }
+
+  message AddPermits {
+    uint32 up_actor_id = 1;
+    uint32 down_actor_id = 2;
+    Permits permits = 3;
+  }
+
+  oneof value {
+    // The first message, which tells the upstream which fragment pair this exchange stream is for.
+    Init init = 1;
+    // The following messages, which registers a new actor pair to this multiplexed stream.
+    Register register = 2;
+    // The following messages, which adds the permits back to the upstream to achieve back-pressure.
+    AddPermits add_permits = 3;
+  }
+}
+
 message GetStreamResponse {
   stream_plan.StreamMessageBatch message = 1;
   // The number of permits acquired for this message, which should be sent back to the upstream with `add_permits`.
@@ -148,10 +177,19 @@ message GetStreamResponse {
   Permits permits = 2;
 }
 
+message GetMuxStreamResponse {
+  // TODO(mux): batch the same message (typically barrier) for different actor pairs.
+  stream_plan.StreamMessageBatch message = 1;
+  Permits permits = 2;
+  uint32 up_actor_id = 3;
+  uint32 down_actor_id = 4;
+}
+
 service BatchExchangeService {
   rpc GetData(GetDataRequest) returns (stream GetDataResponse);
 }
 
 service StreamExchangeService {
   rpc GetStream(stream GetStreamRequest) returns (stream GetStreamResponse);
+  rpc GetMuxStream(stream GetMuxStreamRequest) returns (stream GetMuxStreamResponse);
 }

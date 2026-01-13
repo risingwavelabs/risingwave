@@ -12,16 +12,23 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub use mux_remote_input::MuxExchangeWorkers;
+
+mod mux_remote_input;
+
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
-use either::Either;
+use futures::future::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
+use risingwave_pb::common::ActorInfo;
 
 use super::permit::Receiver;
+use crate::executor::exchange::input::mux_remote_input::MuxRemoteInputStream;
+use crate::executor::exchange::input::remote_input::RemoteInputStream;
 use crate::executor::prelude::*;
 use crate::executor::{
     BarrierInner, DispatcherMessage, DispatcherMessageBatch, DispatcherMessageStreamItem,
@@ -88,7 +95,6 @@ impl LocalInput {
 
 mod local_input {
     use await_tree::InstrumentAwait;
-    use either::Either;
 
     use crate::executor::exchange::error::ExchangeChannelClosed;
     use crate::executor::exchange::permit::Receiver;
@@ -107,15 +113,8 @@ mod local_input {
     async fn run_inner(mut channel: Receiver, upstream_actor_id: ActorId) {
         let span = await_tree::span!("LocalInput (actor {upstream_actor_id})").verbose();
         while let Some(msg) = channel.recv().instrument_await(span.clone()).await {
-            match msg.into_messages() {
-                Either::Left(barriers) => {
-                    for b in barriers {
-                        yield b;
-                    }
-                }
-                Either::Right(m) => {
-                    yield m;
-                }
+            for msg in msg.into_messages() {
+                yield msg;
             }
         }
         // Always emit an error outside the loop. This is because we use barrier as the control
@@ -145,18 +144,47 @@ impl Input for LocalInput {
 #[pin_project]
 pub struct RemoteInput {
     #[pin]
-    inner: RemoteInputStreamInner,
+    inner: Either<RemoteInputStream, MuxRemoteInputStream>,
 
     actor_id: ActorId,
 }
-
-use remote_input::RemoteInputStreamInner;
-use risingwave_pb::common::ActorInfo;
 
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
     /// compute client of where the actor is placed.
     pub async fn new(
+        local_barrier_manager: &LocalBarrierManager,
+        upstream_addr: HostAddr,
+        up_down_ids: UpDownActorIds,
+        up_down_frag: UpDownFragmentIds,
+        metrics: Arc<StreamingMetrics>,
+        actor_config: Arc<StreamingConfig>,
+    ) -> StreamExecutorResult<Self> {
+        if actor_config.developer.exchange_remote_use_multiplexing {
+            RemoteInput::new_mux(
+                local_barrier_manager,
+                upstream_addr,
+                up_down_ids,
+                up_down_frag,
+                metrics,
+                actor_config,
+            )
+            .await
+        } else {
+            RemoteInput::new_simple(
+                local_barrier_manager,
+                upstream_addr,
+                up_down_ids,
+                up_down_frag,
+                metrics,
+                actor_config,
+            )
+            .await
+        }
+    }
+
+    /// Create a remote input with the simple, per actor-pair implementation.
+    pub(crate) async fn new_simple(
         local_barrier_manager: &LocalBarrierManager,
         upstream_addr: HostAddr,
         up_down_ids: UpDownActorIds,
@@ -171,6 +199,7 @@ impl RemoteInput {
             .client_pool()
             .get_by_addr(upstream_addr)
             .await?;
+
         let (stream, permits_tx) = client
             .get_stream(
                 up_down_ids.0,
@@ -184,14 +213,14 @@ impl RemoteInput {
 
         Ok(Self {
             actor_id,
-            inner: remote_input::run(
+            inner: Either::Left(remote_input::run(
                 stream,
                 permits_tx,
                 up_down_ids,
                 up_down_frag,
                 metrics,
                 actor_config.developer.exchange_batched_permits,
-            ),
+            )),
         })
     }
 }
@@ -201,7 +230,6 @@ mod remote_input {
 
     use anyhow::Context;
     use await_tree::InstrumentAwait;
-    use either::Either;
     use risingwave_pb::task_service::{GetStreamResponse, permits};
     use tokio::sync::mpsc;
     use tonic::Streaming;
@@ -212,9 +240,9 @@ mod remote_input {
     use crate::executor::{DispatcherMessage, StreamExecutorError};
     use crate::task::{UpDownActorIds, UpDownFragmentIds};
 
-    pub(super) type RemoteInputStreamInner = impl crate::executor::DispatcherMessageStream;
+    pub(super) type RemoteInputStream = impl crate::executor::DispatcherMessageStream;
 
-    #[define_opaque(RemoteInputStreamInner)]
+    #[define_opaque(RemoteInputStream)]
     pub(super) fn run(
         stream: Streaming<GetStreamResponse>,
         permits_tx: mpsc::UnboundedSender<permits::Value>,
@@ -222,7 +250,7 @@ mod remote_input {
         up_down_frag: UpDownFragmentIds,
         metrics: Arc<StreamingMetrics>,
         batched_permits_limit: usize,
-    ) -> RemoteInputStreamInner {
+    ) -> RemoteInputStream {
         run_inner(
             stream,
             permits_tx,
@@ -286,15 +314,8 @@ mod remote_input {
                     }
 
                     let msg = msg_res.context("RemoteInput decode message error")?;
-                    match msg.into_messages() {
-                        Either::Left(barriers) => {
-                            for b in barriers {
-                                yield b;
-                            }
-                        }
-                        Either::Right(m) => {
-                            yield m;
-                        }
+                    for msg in msg.into_messages() {
+                        yield msg;
                     }
                 }
 
@@ -335,10 +356,14 @@ pub(crate) async fn new_input(
     upstream_fragment_id: FragmentId,
     actor_config: Arc<StreamingConfig>,
 ) -> StreamExecutorResult<BoxedActorInput> {
+    let force_remote = actor_config.developer.exchange_force_remote;
+
     let upstream_actor_id = upstream_actor_info.actor_id;
     let upstream_addr = upstream_actor_info.get_host()?.into();
 
-    let input = if is_local_address(local_barrier_manager.env.server_address(), &upstream_addr) {
+    let input = if !force_remote
+        && is_local_address(local_barrier_manager.env.server_address(), &upstream_addr)
+    {
         LocalInput::new(
             local_barrier_manager.register_local_upstream_output(actor_id, upstream_actor_id),
             upstream_actor_id,
@@ -361,13 +386,20 @@ pub(crate) async fn new_input(
 }
 
 impl DispatcherMessageBatch {
-    fn into_messages(self) -> Either<impl Iterator<Item = DispatcherMessage>, DispatcherMessage> {
+    /// Split the batch into multiple messages.
+    fn into_messages(self) -> impl ExactSizeIterator<Item = DispatcherMessage> {
+        use either::Either;
+
         match self {
             DispatcherMessageBatch::BarrierBatch(barriers) => {
                 Either::Left(barriers.into_iter().map(DispatcherMessage::Barrier))
             }
-            DispatcherMessageBatch::Chunk(c) => Either::Right(DispatcherMessage::Chunk(c)),
-            DispatcherMessageBatch::Watermark(w) => Either::Right(DispatcherMessage::Watermark(w)),
+            DispatcherMessageBatch::Chunk(c) => {
+                Either::Right(std::iter::once(DispatcherMessage::Chunk(c)))
+            }
+            DispatcherMessageBatch::Watermark(w) => {
+                Either::Right(std::iter::once(DispatcherMessage::Watermark(w)))
+            }
         }
     }
 }
