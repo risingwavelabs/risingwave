@@ -52,8 +52,7 @@ public abstract class AbstractHistoryRecordComparator extends HistoryRecordCompa
     @Override
     @VisibleForTesting
     public boolean isPositionAtOrBefore(Document recorded, Document desired) {
-        logger.debug("test log level");
-        logger.info("!!!compare: " + recorded + ";" + desired);
+        // logger.info("!!!compare: " + recorded + ";" + desired);
         String recordedGtidSetStr = recorded.getString(MySqlOffsetContext.GTID_SET_KEY);
         String desiredGtidSetStr = desired.getString(MySqlOffsetContext.GTID_SET_KEY);
         if (desiredGtidSetStr != null) {

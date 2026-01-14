@@ -97,11 +97,7 @@ public class MySqlOffsetContext extends CommonOffsetContext<SourceInfo> {
         // logger.info("sourceInfo: " + sourceInfo);
         // logger.info("transactionContext: " + transactionContext);
         final Map<String, Object> map = new HashMap<>();
-        if (sourceInfo.getServerId() != 0) {
-            map.put(SourceInfo.SERVER_ID_KEY, sourceInfo.getServerId());
-        } else {
-            map.put(SourceInfo.SERVER_ID_KEY, this.serverIdFromOffset);
-        }
+        map.put(SourceInfo.SERVER_ID_KEY, this.serverIdFromOffset);
         if (restartGtidSet != null) {
             // Put the previously-completed GTID set in the offset along with the event number ...
             map.put(GTID_SET_KEY, restartGtidSet);
@@ -114,11 +110,7 @@ public class MySqlOffsetContext extends CommonOffsetContext<SourceInfo> {
         if (rowsToSkip != 0) {
             map.put(SourceInfo.BINLOG_ROW_IN_EVENT_OFFSET_KEY, rowsToSkip);
         }
-        if (sourceInfo.timestamp() != null) {
-            map.put(TIMESTAMP_KEY, sourceInfo.timestamp().getEpochSecond());
-        } else {
-            map.put(TIMESTAMP_KEY, this.tsSecFromOffset);
-        }
+        map.put(TIMESTAMP_KEY, this.tsSecFromOffset);
         return map;
     }
 
