@@ -109,7 +109,7 @@ pub struct IndexCatalog {
 
     pub primary_table: Arc<TableCatalog>,
 
-    /// Indicate whether to create table in background or foreground.
+    /// Indicate whether to create index in background or foreground.
     pub create_type: CreateType,
 
     pub created_at_epoch: Option<Epoch>,
