@@ -142,6 +142,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                     sequenceNumber.get());
 
         } catch (Exception e) {
+            LOGGER.error("Failed to initialize schema history: {}", e.getMessage(), e);
             throw new SchemaHistoryException("Failed to initialize schema history", e);
         }
     }
@@ -185,6 +186,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                         nextSequence);
             }
         } catch (Exception e) {
+            LOGGER.error("Failed to store schema history record: {}", e.getMessage(), e);
             throw new SchemaHistoryException("Failed to store schema history record", e);
         }
     }
@@ -236,6 +238,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             writer.flush();
             return outputStream.toByteArray();
         } catch (Exception e) {
+            LOGGER.error("Failed to serialize history records: {}", e.getMessage(), e);
             throw new SchemaHistoryException("Failed to serialize history records", e);
         }
     }
@@ -255,6 +258,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                 }
             }
         } catch (Exception e) {
+            LOGGER.error("Failed to deserialize history records: {}", e.getMessage(), e);
             throw new SchemaHistoryException("Failed to deserialize history records", e);
         }
         return result;
