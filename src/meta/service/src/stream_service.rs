@@ -145,36 +145,58 @@ impl StreamManagerService for StreamServiceImpl {
         let throttle_target = request.throttle_target();
         let throttle_type = request.throttle_type();
 
-        let fragments_to_apply: HashSet<FragmentId> = match (throttle_type, throttle_target) {
+        let raw_object_id: u32;
+        let jobs: HashSet<JobId>;
+        let fragments: HashSet<FragmentId>;
+
+        match (throttle_type, throttle_target) {
             (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
-                self.metadata_manager
+                (jobs, fragments) = self
+                    .metadata_manager
                     .update_source_rate_limit_by_source_id(request.id.into(), request.rate)
-                    .await?
-                    .1
+                    .await?;
+                raw_object_id = request.id;
             }
             (ThrottleType::Backfill, ThrottleTarget::Mv)
             | (ThrottleType::Backfill, ThrottleTarget::Sink)
             | (ThrottleType::Backfill, ThrottleTarget::Table) => {
-                self.metadata_manager
+                fragments = self
+                    .metadata_manager
                     .update_backfill_rate_limit_by_job_id(JobId::from(request.id), request.rate)
-                    .await?
+                    .await?;
+                jobs = [request.id.into()].into_iter().collect();
+                raw_object_id = request.id;
             }
             (ThrottleType::Dml, ThrottleTarget::Table) => {
-                self.metadata_manager
+                fragments = self
+                    .metadata_manager
                     .update_dml_rate_limit_by_job_id(JobId::from(request.id), request.rate)
-                    .await?
+                    .await?;
+                jobs = [request.id.into()].into_iter().collect();
+                raw_object_id = request.id;
             }
             (ThrottleType::Sink, ThrottleTarget::Sink) => {
-                self.metadata_manager
+                fragments = self
+                    .metadata_manager
                     .update_sink_rate_limit_by_sink_id(request.id.into(), request.rate)
-                    .await?
+                    .await?;
+                jobs = [request.id.into()].into_iter().collect();
+                raw_object_id = request.id;
             }
             // FIXME(kwannoel): specialize for throttle type x target
             (_, ThrottleTarget::Fragment) => {
                 self.metadata_manager
                     .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
                     .await?;
-                HashSet::from_iter([request.id.into()])
+                let fragment_id = request.id.into();
+                fragments = [fragment_id].into_iter().collect();
+                let job_id = self
+                    .metadata_manager
+                    .catalog_controller
+                    .get_fragment_streaming_job_id(fragment_id)
+                    .await?;
+                jobs = [job_id].into_iter().collect();
+                raw_object_id = job_id.as_raw_id();
             }
             _ => {
                 return Err(Status::invalid_argument(format!(
@@ -184,19 +206,10 @@ impl StreamManagerService for StreamServiceImpl {
             }
         };
 
-        let job_id = if throttle_target == ThrottleTarget::Fragment {
-            self.metadata_manager
-                .catalog_controller
-                .get_fragment_streaming_job_id(request.id.into())
-                .await?
-        } else {
-            request.id.into()
-        };
-
         let database_id = self
             .metadata_manager
             .catalog_controller
-            .get_object_database_id(job_id)
+            .get_object_database_id(raw_object_id)
             .await?;
 
         let throttle_config = ThrottleConfig {
@@ -208,7 +221,8 @@ impl StreamManagerService for StreamServiceImpl {
             .run_command(
                 database_id,
                 Command::Throttle {
-                    config: fragments_to_apply
+                    jobs,
+                    config: fragments
                         .into_iter()
                         .map(|fragment_id| (fragment_id, throttle_config))
                         .collect(),
