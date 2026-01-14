@@ -648,21 +648,22 @@ impl ToStream for LogicalScan {
     ) -> Result<(PlanRef, ColIndexMapping)> {
         match self.base.stream_key().is_none() {
             true => {
-                let mut col_ids = HashSet::new();
-
-                for &idx in self.output_col_idx() {
-                    col_ids.insert(self.table().columns[idx].column_id);
-                }
-                let mut key_col_indices = self.table().stream_key();
-                key_col_indices.extend(self.table().pk.iter().map(|c| c.column_index));
-                let col_need_to_add = key_col_indices
-                    .into_iter()
-                    .unique()
-                    .filter(|&idx| !col_ids.contains(&self.table().columns[idx].column_id))
-                    .collect_vec();
-
                 let mut output_col_idx = self.output_col_idx().clone();
-                output_col_idx.extend(col_need_to_add);
+
+                // Ensure pk columns are in the output.
+                for i in self.table().pk.iter().map(|c| c.column_index) {
+                    if !output_col_idx.contains(&i) {
+                        output_col_idx.push(i);
+                    }
+                }
+                // Ensure stream key columns are in the output.
+                // For tables with watermark TTL, stream key may contain extra watermark columns.
+                for i in self.table().stream_key() {
+                    if !output_col_idx.contains(&i) {
+                        output_col_idx.push(i);
+                    }
+                }
+
                 let new_len = output_col_idx.len();
                 Ok((
                     self.clone_with_output_indices(output_col_idx).into(),
