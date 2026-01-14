@@ -645,6 +645,7 @@ message SubscribeResponse {
     FragmentWorkerSlotMappings serving_worker_slot_mappings = 28;
     catalog.Secret secret = 29;
     common.ClusterResource cluster_resource = 31;
+    TableCacheRefillPolicies table_cache_refill_policies = 32;
   }
   reserved 12;
   reserved "parallel_unit_mapping";
@@ -653,6 +654,23 @@ message SubscribeResponse {
   reserved 30;
   reserved "compute_node_total_cpu_count";
 }
+
+message TableCacheRefillPolicies {
+  repeated TableCacheRefillPolicy policies = 1;
+}
+
+message TableCacheRefillPolicy {
+  uint32 table_id = 1;  
+  CacheRefillPolicy policy = 2;
+}
+
+enum CacheRefillPolicy {
+  DEFAULT = 0;
+  STREAMING = 1;
+  SERVING = 2;
+  BOTH = 3;
+}
+
 
 service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);

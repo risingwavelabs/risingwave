@@ -93,7 +93,9 @@ impl ObserverState for HummockObserverNode {
             Info::ClusterResource(resource) => {
                 LicenseManager::get().update_cluster_resource(resource);
             }
-
+            Info::TableCacheRefillPolicies(policies) => {
+                tracing::trace!("todo: handle table cache refill policies: {:?}", policies);
+            }
             info => {
                 panic!("invalid notification info: {info}");
             }

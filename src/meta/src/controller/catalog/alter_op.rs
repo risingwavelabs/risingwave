@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::str::FromStr;
+
 use anyhow::Context;
 use risingwave_common::catalog::{AlterDatabaseParam, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_common::config::mutate::TomlTableMutateExt as _;
+use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
 use risingwave_meta_model::refresh_job::{self, RefreshState};
+use risingwave_pb::meta::{PbTableCacheRefillPolicies, PbTableCacheRefillPolicy};
 use sea_orm::ActiveValue::{NotSet, Set};
 use sea_orm::prelude::DateTime;
 use sea_orm::sea_query::Expr;
@@ -1054,7 +1058,41 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
+        let internal_tables: Vec<TableId> = Table::find()
+            .select_only()
+            .column(table::Column::TableId)
+            .filter(table::Column::BelongsToJobId.eq(job_id))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
         txn.commit().await?;
+
+        // Notify compute nodes cache refill policy at once.
+        let cache_refill_policy = table
+            .get("cache_refill_policy")
+            .map(|v| {
+                CacheRefillPolicy::from_str(v.as_str().unwrap_or_default()).unwrap_or_default()
+            })
+            .unwrap_or_default();
+        let table_refill_policies = PbTableCacheRefillPolicies {
+            policies: internal_tables
+                .into_iter()
+                .map(|table_id| {
+                    let mut p = PbTableCacheRefillPolicy::default();
+                    p.set_policy(cache_refill_policy.to_protobuf());
+                    p.table_id = table_id.as_raw_id();
+                    p
+                })
+                .collect(),
+        };
+
+        self.env
+            .notification_manager()
+            .notify_hummock_without_version(
+                Operation::Update,
+                Info::TableCacheRefillPolicies(table_refill_policies),
+            );
 
         Ok(IGNORED_NOTIFICATION_VERSION)
     }
