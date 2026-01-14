@@ -97,6 +97,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         }
         sourceId = config.getString(SOURCE_ID);
         if (sourceId == null || sourceId.isEmpty()) {
+            LOGGER.error("Source ID is required for schema history but was not provided");
             throw new DebeziumException(
                     "Source ID is required for schema history. Please provide a unique source ID to avoid path conflicts between multiple sources.");
         }
@@ -145,6 +146,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                     sequenceNumber.get());
 
         } catch (Exception e) {
+            LOGGER.error("Failed to initialize schema history: {}", e.getMessage(), e);
             throw new SchemaHistoryException("Failed to initialize schema history", e);
         }
     }
@@ -191,6 +193,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                         nextSequence);
             }
         } catch (Exception e) {
+            LOGGER.error("Failed to store schema history record: {}", e.getMessage(), e);
             throw new SchemaHistoryException("Failed to store schema history record", e);
         }
     }
@@ -242,6 +245,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             writer.flush();
             return outputStream.toByteArray();
         } catch (Exception e) {
+            LOGGER.error("Failed to serialize history records: {}", e.getMessage(), e);
             throw new SchemaHistoryException("Failed to serialize history records", e);
         }
     }
@@ -261,6 +265,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                 }
             }
         } catch (Exception e) {
+            LOGGER.error("Failed to deserialize history records: {}", e.getMessage(), e);
             throw new SchemaHistoryException("Failed to deserialize history records", e);
         }
         return result;
@@ -273,6 +278,9 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
             return Long.parseLong(m.group(1));
         }
         // This should never happen as files are pre-filtered, but throw exception for safety
+        LOGGER.error(
+                "Invalid schema history file name format: {}, expected: schema_history_<number>.dat",
+                fileName);
         throw new SchemaHistoryException(
                 String.format(
                         "Invalid schema history file name format: %s. Expected format: schema_history_<number>.dat",
