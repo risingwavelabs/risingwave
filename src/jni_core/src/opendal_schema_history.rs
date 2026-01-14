@@ -15,12 +15,13 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use jni::objects::{JByteArray, JObject, JString};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::{DATA_DIRECTORY, STATE_STORE_URL};
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store};
+use thiserror_ext::AsReport;
 use tokio::sync::OnceCell;
 
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
@@ -111,12 +112,17 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
         let object_name = prepend_data_directory(&object_name);
         let data_guard = to_guarded_slice(&data, env).map_err(|e| anyhow!(e))?;
         let data: Vec<u8> = data_guard.slice.to_vec();
+
         JAVA_BINDING_ASYNC_RUNTIME
             .block_on(async {
                 let object_store = get_object_store().await;
                 object_store.upload(&object_name, data.into()).await
             })
-            .map_err(|e| anyhow!(e))?;
+            .map_err(|e| {
+                tracing::error!(path = %object_name, error = %e.as_report(), "putObject failed");
+                anyhow::Error::from(e)
+                    .context(format!("Failed to upload object to {}", object_name))
+            })?;
         Ok(())
     });
 }
@@ -133,14 +139,19 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
         // Security check: validate file extension before any operation
         validate_dat_file_extension(&object_name).map_err(|e| anyhow!(e))?;
         let object_name = prepend_data_directory(&object_name);
-        let result = JAVA_BINDING_ASYNC_RUNTIME
+
+        let data = JAVA_BINDING_ASYNC_RUNTIME
             .block_on(async {
                 let object_store = get_object_store().await;
                 object_store.read(&object_name, ..).await
             })
-            .map_err(|e| anyhow!(e))?;
+            .map_err(|e| {
+                tracing::error!(path = %object_name, error = %e.as_report(), "getObject failed");
+                anyhow::Error::from(e)
+                    .context(format!("Failed to read object from {}", object_name))
+            })?;
 
-        Ok(env.byte_array_from_slice(&result)?)
+        Ok(env.byte_array_from_slice(&data)?)
     })
 }
 
@@ -189,28 +200,33 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
 
         let dir = prepend_data_directory(&dir);
 
-        let files: Vec<String> = JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
-            let object_store = get_object_store().await;
-            let mut prefix_stripped_paths = Vec::new();
-            let mut stream = object_store
-                .list(&dir, None, None)
-                .await
-                .map_err(|e| anyhow!(e))?;
-            use futures::StreamExt;
-            while let Some(obj) = stream.next().await {
-                let obj = obj.map_err(|e| anyhow!(e))?;
-                // Additional security: only return files that pass validation
-                // Remove the data directory prefix for validation
-                let relative_path =
-                    strip_data_directory_prefix(&obj.key).map_err(|e| anyhow!(e))?;
-                if validate_dat_file_extension(&relative_path).is_ok() {
-                    prefix_stripped_paths.push(relative_path);
-                } else {
-                    tracing::warn!("Filtering out non-.dat file from list: {}", obj.key);
+        let files = JAVA_BINDING_ASYNC_RUNTIME
+            .block_on(async {
+                let object_store = get_object_store().await;
+                let mut prefix_stripped_paths = Vec::new();
+                let mut stream = object_store
+                    .list(&dir, None, None)
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                use futures::StreamExt;
+                while let Some(obj) = stream.next().await {
+                    let obj = obj.map_err(|e| anyhow!(e))?;
+                    // Additional security: only return files that pass validation
+                    // Remove the data directory prefix for validation
+                    let relative_path =
+                        strip_data_directory_prefix(&obj.key).map_err(|e| anyhow!(e))?;
+                    if validate_dat_file_extension(&relative_path).is_ok() {
+                        prefix_stripped_paths.push(relative_path);
+                    } else {
+                        tracing::warn!("Filtering out non-.dat file from list: {}", obj.key);
+                    }
                 }
-            }
-            Ok::<_, anyhow::Error>(prefix_stripped_paths)
-        })?;
+                Ok::<_, anyhow::Error>(prefix_stripped_paths)
+            })
+            .map_err(|e| {
+                tracing::error!(dir = %dir, error = %e.as_report(), "listObject failed");
+                e.context(format!("Failed to list objects in directory {}", dir))
+            })?;
 
         let string_class = env.find_class("java/lang/String").map_err(|e| anyhow!(e))?;
         let array = env
@@ -238,33 +254,37 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a
 
         let dir = prepend_data_directory(&dir);
 
-        JAVA_BINDING_ASYNC_RUNTIME.block_on(async {
-            let object_store = get_object_store().await;
-            let mut keys = Vec::new();
-            let mut stream = object_store
-                .list(&dir, None, None)
-                .await
-                .map_err(|e| anyhow!(e))?;
-            use futures::StreamExt;
-            while let Some(obj) = stream.next().await {
-                let obj = obj.map_err(|e| anyhow!(e))?;
-                // Additional security: only delete files that pass validation
-                // Remove the data directory prefix for validation
-                let relative_path =
-                    strip_data_directory_prefix(&obj.key).map_err(|e| anyhow!(e))?;
-                if validate_dat_file_extension(&relative_path).is_ok() {
-                    keys.push(obj.key);
-                } else {
-                    tracing::warn!("Skipping deletion of non-.dat file: {}", obj.key);
+        JAVA_BINDING_ASYNC_RUNTIME
+            .block_on(async {
+                let object_store = get_object_store().await;
+                let mut keys = Vec::new();
+                let mut stream = object_store
+                    .list(&dir, None, None)
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                use futures::StreamExt;
+                while let Some(obj) = stream.next().await {
+                    let obj = obj.map_err(|e| anyhow!(e))?;
+                    // Additional security: only delete files that pass validation
+                    // Remove the data directory prefix for validation
+                    let relative_path =
+                        strip_data_directory_prefix(&obj.key).map_err(|e| anyhow!(e))?;
+                    if validate_dat_file_extension(&relative_path).is_ok() {
+                        keys.push(obj.key);
+                    } else {
+                        tracing::warn!("Skipping deletion of non-.dat file: {}", obj.key);
+                    }
                 }
-            }
-            tracing::debug!(?keys, "Deleting schema history files");
-            object_store
-                .delete_objects(&keys)
-                .await
-                .map_err(|e| anyhow!(e))?;
-            Ok::<_, anyhow::Error>(())
-        })?;
+                object_store
+                    .delete_objects(&keys)
+                    .await
+                    .map_err(|e| anyhow!(e))?;
+                Ok::<_, anyhow::Error>(())
+            })
+            .map_err(|e| {
+                tracing::error!(dir = %dir, error = %e.as_report(), "deleteObjects failed");
+                e.context(format!("Failed to delete objects in directory {}", dir))
+            })?;
         Ok(())
     });
 }
