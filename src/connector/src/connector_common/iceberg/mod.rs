@@ -186,7 +186,7 @@ pub struct IcebergCommon {
     /// OAuth scopes for Google authentication.
     /// Comma-separated list of OAuth scopes to request.
     /// Only applicable when `catalog.security` is set to `google`.
-    /// Default: https://www.googleapis.com/auth/cloud-platform
+    /// Default: <https://www.googleapis.com/auth/cloud-platform>
     #[serde(rename = "gcp.auth.scopes")]
     pub gcp_auth_scopes: Option<String>,
 }
