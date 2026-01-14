@@ -287,15 +287,17 @@ pub struct XorFilterReader {
 impl XorFilterReader {
     /// Creates an xor filter from a byte slice
     pub fn new(data: &[u8], metas: &[BlockMeta]) -> Self {
-        // 🔍 OOM Debug: Log filter data size before parsing
+        // 🔍 OOM Debug: Log filter data size before parsing (only if > 64MB)
         let data_size_mb = data.len() / 1024 / 1024;
-        tracing::warn!(
-            target: "oom_debug",
-            filter_data_size_mb = data_size_mb,
-            filter_data_size_bytes = data.len(),
-            block_metas_count = metas.len(),
-            "[OOM_DEBUG] XorFilterReader::new: about to parse filter data"
-        );
+        if data.len() > 64 * 1024 * 1024 {
+            tracing::warn!(
+                target: "oom_debug",
+                filter_data_size_mb = data_size_mb,
+                filter_data_size_bytes = data.len(),
+                block_metas_count = metas.len(),
+                "[OOM_DEBUG] XorFilterReader::new: about to parse large filter data"
+            );
+        }
 
         if data.len() <= 1 {
             return Self {
@@ -309,32 +311,40 @@ impl XorFilterReader {
 
         let kind = *data.last().unwrap();
         let filter = if kind == FOOTER_BLOCKED_XOR16 {
-            tracing::warn!(
-                target: "oom_debug",
-                "[OOM_DEBUG] XorFilterReader::new: creating BlockXor16 filter"
-            );
+            if data.len() > 64 * 1024 * 1024 {
+                tracing::warn!(
+                    target: "oom_debug",
+                    "[OOM_DEBUG] XorFilterReader::new: creating large BlockXor16 filter"
+                );
+            }
             let block_filter = Self::to_block_xor16(data, metas);
             XorFilter::BlockXor16(block_filter)
         } else if kind == FOOTER_XOR16 {
-            tracing::warn!(
-                target: "oom_debug",
-                "[OOM_DEBUG] XorFilterReader::new: creating Xor16 filter"
-            );
+            if data.len() > 64 * 1024 * 1024 {
+                tracing::warn!(
+                    target: "oom_debug",
+                    "[OOM_DEBUG] XorFilterReader::new: creating large Xor16 filter"
+                );
+            }
             let xor16 = Self::to_xor16(data);
             XorFilter::Xor16(xor16)
         } else {
-            tracing::warn!(
-                target: "oom_debug",
-                "[OOM_DEBUG] XorFilterReader::new: creating Xor8 filter"
-            );
+            if data.len() > 64 * 1024 * 1024 {
+                tracing::warn!(
+                    target: "oom_debug",
+                    "[OOM_DEBUG] XorFilterReader::new: creating large Xor8 filter"
+                );
+            }
             let xor8 = Self::to_xor8(data);
             XorFilter::Xor8(xor8)
         };
 
-        tracing::warn!(
-            target: "oom_debug",
-            "[OOM_DEBUG] XorFilterReader::new: filter created successfully"
-        );
+        if data.len() > 64 * 1024 * 1024 {
+            tracing::warn!(
+                target: "oom_debug",
+                "[OOM_DEBUG] XorFilterReader::new: large filter created successfully"
+            );
+        }
 
         Self { filter }
     }
@@ -372,24 +382,28 @@ impl XorFilterReader {
         // 🔍 OOM Debug: Critical - about to allocate fingerprints array via collect_vec()
         let allocation_size_bytes = len * 2;
         let allocation_size_mb = allocation_size_bytes / 1024 / 1024;
-        tracing::warn!(
-            target: "oom_debug",
-            fingerprint_count = len,
-            allocation_size_mb = allocation_size_mb,
-            allocation_size_bytes = allocation_size_bytes,
-            "[OOM_DEBUG] XorFilterReader::to_xor16: about to allocate fingerprints array via collect_vec() (LARGE ALLOCATION)"
-        );
+        if allocation_size_bytes > 64 * 1024 * 1024 {
+            tracing::warn!(
+                target: "oom_debug",
+                fingerprint_count = len,
+                allocation_size_mb = allocation_size_mb,
+                allocation_size_bytes = allocation_size_bytes,
+                "[OOM_DEBUG] XorFilterReader::to_xor16: about to allocate fingerprints array via collect_vec() (LARGE ALLOCATION)"
+            );
+        }
 
         let xor_filter_fingerprints = (0..len)
             .map(|_| buf.get_u16_le())
             .collect_vec()
             .into_boxed_slice();
 
-        tracing::warn!(
-            target: "oom_debug",
-            allocation_size_mb = allocation_size_mb,
-            "[OOM_DEBUG] XorFilterReader::to_xor16: fingerprints allocated successfully"
-        );
+        if allocation_size_bytes > 64 * 1024 * 1024 {
+            tracing::warn!(
+                target: "oom_debug",
+                allocation_size_mb = allocation_size_mb,
+                "[OOM_DEBUG] XorFilterReader::to_xor16: large fingerprints allocated successfully"
+            );
+        }
 
         Xor16 {
             seed: xor_filter_seed,

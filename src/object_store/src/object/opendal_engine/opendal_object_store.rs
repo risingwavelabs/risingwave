@@ -134,17 +134,17 @@ impl ObjectStore for OpendalObjectStore {
 
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         let range = range.clone();
-        if range.is_full() {
-            if let Ok(meta) = self.op.stat(path).await {
-                let total_size = meta.content_length() as usize;
-                if total_size >= LARGE_OBJECT_READ_LOG_BYTES {
-                    tracing::info!(
-                        media_type = %self.media_type.as_str(),
-                        path,
-                        total_size,
-                        "opendal large object read start"
-                    );
-                }
+        if range.is_full()
+            && let Ok(meta) = self.op.stat(path).await
+        {
+            let total_size = meta.content_length() as usize;
+            if total_size >= LARGE_OBJECT_READ_LOG_BYTES {
+                tracing::info!(
+                    media_type = %self.media_type.as_str(),
+                    path,
+                    total_size,
+                    "opendal large object read start"
+                );
             }
         }
 
@@ -198,15 +198,17 @@ impl ObjectStore for OpendalObjectStore {
         // 🔍 OOM Debug: Log before creating reader to track potential large allocations
         let range_size = range.end - range.start;
         let range_size_mb = range_size / 1024 / 1024;
-        tracing::warn!(
-            target: "oom_debug",
-            path = %path,
-            range_start = range.start,
-            range_end = range.end,
-            range_size_mb = range_size_mb,
-            media_type = %self.media_type.as_str(),
-            "[OOM_DEBUG] streaming_read: about to create reader for range"
-        );
+        if range_size > 64 * 1024 * 1024 {
+            tracing::warn!(
+                target: "oom_debug",
+                path = %path,
+                range_start = range.start,
+                range_end = range.end,
+                range_size_mb = range_size_mb,
+                media_type = %self.media_type.as_str(),
+                "[OOM_DEBUG] streaming_read: about to create reader for large range"
+            );
+        }
 
         // The layer specified first will be executed first.
         // `TimeoutLayer` must be specified before `RetryLayer`.
@@ -234,12 +236,14 @@ impl ObjectStore for OpendalObjectStore {
             .await?;
 
         // 🔍 OOM Debug: Critical point - into_bytes_stream may allocate huge buffer based on Content-Length
-        tracing::warn!(
-            target: "oom_debug",
-            path = %path,
-            range_size_mb = range_size_mb,
-            "[OOM_DEBUG] streaming_read: about to call into_bytes_stream (POTENTIAL LARGE ALLOCATION)"
-        );
+        if range_size > 64 * 1024 * 1024 {
+            tracing::warn!(
+                target: "oom_debug",
+                path = %path,
+                range_size_mb = range_size_mb,
+                "[OOM_DEBUG] streaming_read: about to call into_bytes_stream (LARGE ALLOCATION)"
+            );
+        }
 
         let stream = reader.into_bytes_stream(range).await?.map(|item| {
             item.map(|b| Bytes::copy_from_slice(b.as_ref()))
@@ -249,11 +253,13 @@ impl ObjectStore for OpendalObjectStore {
         });
 
         // 🔍 OOM Debug: Stream created successfully
-        tracing::warn!(
-            target: "oom_debug",
-            path = %path,
-            "[OOM_DEBUG] streaming_read: stream created successfully"
-        );
+        if range_size > 64 * 1024 * 1024 {
+            tracing::warn!(
+                target: "oom_debug",
+                path = %path,
+                "[OOM_DEBUG] streaming_read: large stream created successfully"
+            );
+        }
 
         Ok(Box::pin(stream))
     }

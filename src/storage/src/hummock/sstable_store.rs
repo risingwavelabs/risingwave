@@ -718,16 +718,18 @@ impl SstableStore {
     ) -> impl Future<Output = HummockResult<TableHolder>> + Send + 'static + use<> {
         let object_id = sstable_info_ref.object_id;
 
-        // 🔍 OOM Debug: Log SSTable loading start
+        // 🔍 OOM Debug: Log SSTable loading start (only if SST is large > 64MB)
         let meta_offset = sstable_info_ref.meta_offset as usize;
         let sst_size = sstable_info_ref.sst_size;
-        tracing::warn!(
-            target: "oom_debug",
-            object_id = %object_id,  // Use Display formatting
-            meta_offset = meta_offset,
-            sst_size = sst_size,
-            "[OOM_DEBUG] sstable: about to load SSTable metadata"
-        );
+        if sst_size > 64 * 1024 * 1024 {
+            tracing::warn!(
+                target: "oom_debug",
+                object_id = %object_id,
+                meta_offset = meta_offset,
+                sst_size = sst_size,
+                "[OOM_DEBUG] sstable: about to load large SSTable metadata"
+            );
+        }
 
         let entry = self.meta_cache.fetch(object_id, || {
             let store = self.store.clone();
@@ -738,13 +740,15 @@ impl SstableStore {
                 let now = Instant::now();
 
                 // 🔍 OOM Debug: About to read metadata from object store
-                tracing::warn!(
-                    target: "oom_debug",
-                    object_id = %object_id,  // Use Display formatting
-                    meta_path = %meta_path,
-                    range_start = meta_offset,
-                    "[OOM_DEBUG] sstable: about to read metadata from object store"
-                );
+                if sst_size > 64 * 1024 * 1024 {
+                    tracing::warn!(
+                        target: "oom_debug",
+                        object_id = %object_id,
+                        meta_path = %meta_path,
+                        range_start = meta_offset,
+                        "[OOM_DEBUG] sstable: about to read large metadata from object store"
+                    );
+                }
 
                 let buf = store
                     .read(&meta_path, range)
@@ -753,34 +757,40 @@ impl SstableStore {
 
                 // 🔍 OOM Debug: Metadata read complete, about to decode
                 let buf_size_mb = buf.len() / 1024 / 1024;
-                tracing::warn!(
-                    target: "oom_debug",
-                    object_id = %object_id,  // Use Display formatting
-                    buf_size_mb = buf_size_mb,
-                    buf_size_bytes = buf.len(),
-                    "[OOM_DEBUG] sstable: metadata read complete, about to decode (POTENTIAL LARGE ALLOCATION)"
-                );
+                if buf.len() > 64 * 1024 * 1024 {
+                    tracing::warn!(
+                        target: "oom_debug",
+                        object_id = %object_id,
+                        buf_size_mb = buf_size_mb,
+                        buf_size_bytes = buf.len(),
+                        "[OOM_DEBUG] sstable: large metadata read complete, about to decode (POTENTIAL LARGE ALLOCATION)"
+                    );
+                }
 
                 let meta = SstableMeta::decode(&buf[..]).map_err(foyer::Error::other)?;
 
                 // 🔍 OOM Debug: Metadata decoded, about to create Sstable
-                tracing::warn!(
-                    target: "oom_debug",
-                    object_id = %object_id,  // Use Display formatting
-                    block_count = meta.block_metas.len(),
-                    "[OOM_DEBUG] sstable: metadata decoded, about to create Sstable object"
-                );
+                if sst_size > 64 * 1024 * 1024 {
+                    tracing::warn!(
+                        target: "oom_debug",
+                        object_id = %object_id,
+                        block_count = meta.block_metas.len(),
+                        "[OOM_DEBUG] sstable: large metadata decoded, about to create Sstable object"
+                    );
+                }
 
                 let sst = Sstable::new(object_id, meta);
 
                 // 🔍 OOM Debug: Sstable created successfully
                 let elapsed_ms = now.elapsed().as_millis();
-                tracing::warn!(
-                    target: "oom_debug",
-                    object_id = %object_id,  // Use Display formatting
-                    elapsed_ms = elapsed_ms,
-                    "[OOM_DEBUG] sstable: SSTable object created successfully"
-                );
+                if sst_size > 64 * 1024 * 1024 {
+                    tracing::warn!(
+                        target: "oom_debug",
+                        object_id = %object_id,
+                        elapsed_ms = elapsed_ms,
+                        "[OOM_DEBUG] sstable: large SSTable object created successfully"
+                    );
+                }
 
                 let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
                 stats_ptr.fetch_add(add as u64, Ordering::Relaxed);
