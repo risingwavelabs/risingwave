@@ -799,7 +799,7 @@ impl HummockEventHandler {
                 let table_id = self
                     .local_read_version_mapping
                     .get(&instance_id)
-                    .expect(format!("query inexist instance instance_id {instance_id}").as_str())
+                    .unwrap_or_else(|| panic!("query inexist instance instance_id {instance_id}"))
                     .0;
                 self.refiller.update_table_cache_refill_vnodes(table_id);
                 self.uploader.may_destroy_instance(instance_id);

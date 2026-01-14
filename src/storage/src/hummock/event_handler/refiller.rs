@@ -362,7 +362,7 @@ impl CacheRefiller {
         }
         self.table_cache_refill_vnodes.remove(&table_id);
         if let Some(mapping) = self.read_version_mapping.read().get(&table_id) {
-            for (_instance_id, read_version) in mapping {
+            for read_version in mapping.values() {
                 let vnodes = read_version.read().vnodes();
                 self.table_cache_refill_vnodes.insert(table_id, vnodes);
             }
@@ -373,7 +373,10 @@ impl CacheRefiller {
         if !self.role.for_serving() {
             return;
         }
-        // TODO: add serving vnodes update
+        tracing::warn!(
+            ?table_id,
+            "update_table_cache_refill_vnodes_for_serving is not implemented yet for table_id",
+        );
     }
 }
 
