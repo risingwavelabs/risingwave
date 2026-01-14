@@ -2922,6 +2922,9 @@ mod test {
                 adlsgen2_account_key: None,
                 adlsgen2_endpoint: None,
                 vended_credentials: None,
+                catalog_security: None,
+                gcp_credentials_path: None,
+                gcp_auth_scopes: None,
             },
             table: IcebergTableIdentifier {
                 database_name: Some("demo_db".to_owned()),
@@ -3072,6 +3075,198 @@ mod test {
         .collect();
 
         test_create_catalog(values).await;
+    }
+
+    /// Test parsing Google authentication configuration with custom scopes.
+    /// This test verifies that Google authentication with custom OAuth scopes works correctly.
+    #[test]
+    fn test_parse_google_auth_with_custom_scopes() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "biglake-catalog"),
+            ("catalog.type", "rest"),
+            (
+                "catalog.uri",
+                "https://biglake.googleapis.com/iceberg/v1/restcatalog",
+            ),
+            ("warehouse.path", "bq://projects/my-gcp-project"),
+            ("catalog.security", "google"),
+            ("gcp.auth.scopes", "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"),
+            ("database.name", "my_dataset"),
+            ("table.name", "my_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify Google-specific options
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("google")
+        );
+        assert_eq!(
+            iceberg_config.common.gcp_auth_scopes.as_deref(),
+            Some("https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery")
+        );
+
+        // Verify warehouse path with bq:// prefix
+        assert_eq!(
+            iceberg_config.common.warehouse_path.as_deref(),
+            Some("bq://projects/my-gcp-project")
+        );
+    }
+
+    /// Test parsing BigLake/Google Cloud REST catalog configuration.
+    /// This test verifies that the new Google authentication options are correctly parsed.
+    #[test]
+    fn test_parse_biglake_google_auth_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "biglake-catalog"),
+            ("catalog.type", "rest"),
+            (
+                "catalog.uri",
+                "https://biglake.googleapis.com/iceberg/v1/restcatalog",
+            ),
+            ("warehouse.path", "bq://projects/my-gcp-project"),
+            (
+                "catalog.header",
+                "x-goog-user-project=my-gcp-project",
+            ),
+            ("catalog.security", "google"),
+            ("gcp.credentials.path", "/path/to/service-account.json"),
+            ("gcp.auth.scopes", "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"),
+            ("database.name", "my_dataset"),
+            ("table.name", "my_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify Google-specific options
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("google")
+        );
+        assert_eq!(
+            iceberg_config.common.gcp_credentials_path.as_deref(),
+            Some("/path/to/service-account.json")
+        );
+        assert_eq!(
+            iceberg_config.common.gcp_auth_scopes.as_deref(),
+            Some("https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery")
+        );
+
+        // Verify warehouse path with bq:// prefix
+        assert_eq!(
+            iceberg_config.common.warehouse_path.as_deref(),
+            Some("bq://projects/my-gcp-project")
+        );
+
+        // Verify custom header
+        assert_eq!(
+            iceberg_config.common.catalog_header.as_deref(),
+            Some("x-goog-user-project=my-gcp-project")
+        );
+    }
+
+    /// Test parsing OAuth2 security configuration.
+    /// This test verifies that OAuth2 authentication options work correctly.
+    #[test]
+    fn test_parse_oauth2_security_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "oauth2-catalog"),
+            ("catalog.type", "rest"),
+            ("catalog.uri", "https://example.com/iceberg/rest"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("catalog.security", "oauth2"),
+            ("catalog.credential", "client_id:client_secret"),
+            ("catalog.token", "bearer-token"),
+            ("catalog.oauth2_server_uri", "https://oauth.example.com/token"),
+            ("catalog.scope", "read write"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify OAuth2-specific options
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("oauth2")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_credential.as_deref(),
+            Some("client_id:client_secret")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_token.as_deref(),
+            Some("bearer-token")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_oauth2_server_uri.as_deref(),
+            Some("https://oauth.example.com/token")
+        );
+        assert_eq!(
+            iceberg_config.common.catalog_scope.as_deref(),
+            Some("read write")
+        );
+    }
+
+    /// Test parsing invalid security configuration.
+    /// This test verifies that invalid security types are handled gracefully.
+    #[test]
+    fn test_parse_invalid_security_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "invalid-catalog"),
+            ("catalog.type", "rest"),
+            ("catalog.uri", "https://example.com/iceberg/rest"),
+            ("warehouse.path", "s3://my-bucket/warehouse"),
+            ("catalog.security", "invalid_security_type"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        // This should still parse successfully, but with a warning for unknown security type
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify that the invalid security type is still stored
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("invalid_security_type")
+        );
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
     }
 
     #[test]
