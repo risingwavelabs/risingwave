@@ -10,9 +10,6 @@ SET streaming_parallelism TO 1;
 # ------------------------------------------
 
 statement ok
-drop table if exists ttl_ao_rowid_ev cascade;
-
-statement ok
 create table ttl_ao_rowid_ev (
     ts int,
     v varchar,
@@ -92,9 +89,6 @@ drop table ttl_ao_rowid_ev cascade;
 # ------------------------------------------
 # Append-only + no PK (row_id) + processing-time TTL
 # ------------------------------------------
-
-statement ok
-drop table if exists ttl_ao_rowid_pt cascade;
 
 statement ok
 create table ttl_ao_rowid_pt (
