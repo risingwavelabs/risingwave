@@ -195,6 +195,19 @@ impl ObjectStore for OpendalObjectStore {
         ));
         let range: Range<u64> = (range.start as u64)..(range.end as u64);
 
+        // 🔍 OOM Debug: Log before creating reader to track potential large allocations
+        let range_size = range.end - range.start;
+        let range_size_mb = range_size / 1024 / 1024;
+        tracing::warn!(
+            target: "oom_debug",
+            path = %path,
+            range_start = range.start,
+            range_end = range.end,
+            range_size_mb = range_size_mb,
+            media_type = %self.media_type.as_str(),
+            "[OOM_DEBUG] streaming_read: about to create reader for range"
+        );
+
         // The layer specified first will be executed first.
         // `TimeoutLayer` must be specified before `RetryLayer`.
         // Otherwise, it will lead to bad state inside OpenDAL and panic.
@@ -219,12 +232,28 @@ impl ObjectStore for OpendalObjectStore {
             )
             .reader_with(path)
             .await?;
+
+        // 🔍 OOM Debug: Critical point - into_bytes_stream may allocate huge buffer based on Content-Length
+        tracing::warn!(
+            target: "oom_debug",
+            path = %path,
+            range_size_mb = range_size_mb,
+            "[OOM_DEBUG] streaming_read: about to call into_bytes_stream (POTENTIAL LARGE ALLOCATION)"
+        );
+
         let stream = reader.into_bytes_stream(range).await?.map(|item| {
             item.map(|b| Bytes::copy_from_slice(b.as_ref()))
                 .map_err(|e| {
                     ObjectError::internal(format!("reader into_stream fail {}", e.as_report()))
                 })
         });
+
+        // 🔍 OOM Debug: Stream created successfully
+        tracing::warn!(
+            target: "oom_debug",
+            path = %path,
+            "[OOM_DEBUG] streaming_read: stream created successfully"
+        );
 
         Ok(Box::pin(stream))
     }

@@ -79,8 +79,30 @@ pub fn put_length_prefixed_slice(mut buf: impl BufMut, slice: &[u8]) {
 
 pub fn get_length_prefixed_slice(buf: &mut &[u8]) -> Vec<u8> {
     let len = buf.get_u32_le() as usize;
+
+    // 🔍 OOM Debug: Log large allocations (> 10MB)
+    let len_mb = len / 1024 / 1024;
+    if len_mb > 10 {
+        tracing::warn!(
+            target: "oom_debug",
+            allocation_size_mb = len_mb,
+            allocation_size_bytes = len,
+            remaining_buf_len = buf.len(),
+            "[OOM_DEBUG] get_length_prefixed_slice: about to allocate large Vec via to_vec() (LARGE ALLOCATION)"
+        );
+    }
+
     let v = buf[..len].to_vec();
     buf.advance(len);
+
+    if len_mb > 10 {
+        tracing::warn!(
+            target: "oom_debug",
+            allocation_size_mb = len_mb,
+            "[OOM_DEBUG] get_length_prefixed_slice: Vec allocated successfully"
+        );
+    }
+
     v
 }
 
