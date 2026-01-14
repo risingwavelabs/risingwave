@@ -33,6 +33,8 @@ use crate::object::{
     ObjectResult, ObjectStore, OperationType, StreamingUploader, prefix,
 };
 
+const LARGE_OBJECT_READ_LOG_BYTES: usize = 64 * 1024 * 1024;
+
 /// Opendal object storage.
 #[derive(Clone)]
 pub struct OpendalObjectStore {
@@ -131,6 +133,21 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     async fn read(&self, path: &str, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
+        let range = range.clone();
+        if range.is_full() {
+            if let Ok(meta) = self.op.stat(path).await {
+                let total_size = meta.content_length() as usize;
+                if total_size >= LARGE_OBJECT_READ_LOG_BYTES {
+                    tracing::info!(
+                        media_type = %self.media_type.as_str(),
+                        path,
+                        total_size,
+                        "opendal large object read start"
+                    );
+                }
+            }
+        }
+
         let data = if range.is_full() {
             self.op.read(path).await?
         } else {
@@ -150,6 +167,16 @@ impl ObjectStore for OpendalObjectStore {
                 path,
                 range,
             )));
+        }
+
+        if data.len() >= LARGE_OBJECT_READ_LOG_BYTES {
+            tracing::info!(
+                media_type = %self.media_type.as_str(),
+                path,
+                range = ?range,
+                size = data.len(),
+                "opendal large object read finish"
+            );
         }
 
         Ok(data.to_bytes())
