@@ -87,6 +87,11 @@ impl<S: StateStore> SyncLogStoreDispatchExecutor<S> {
             inner.dispatchers.push(dispatcher);
         }
         let DispatchExecutor { input, inner } = executor;
+
+        tracing::info!(
+            actor_id = %actor_context.id,
+            "synclogstore dispatch executor info"
+        );
         Ok(Self {
             input,
             inner,
@@ -540,16 +545,31 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
+        tracing::debug!("Starting SyncLogStoreDispatchExecutor::execute");
         let _max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
+        
         #[try_stream]
         async move {
             let actor_id = self.inner.actor_id;
             let log_store_config = self.log_store_config;
+            
+            // barriers serves as a queue to hold barriers waiting for dispatching
+            let mut barriers = VecDeque::<Message>::new();
             let mut input = self.input.execute();
             // The first barrier is kept for dispatch.
             let first_barrier = expect_first_barrier(&mut input).await?;
             let first_write_epoch = first_barrier.epoch;
             yield first_barrier.clone();
+
+            // Dispatch the first barrier before initializing the log store states
+            self.inner
+                .dispatch(MessageBatch::BarrierBatch(vec![first_barrier.clone()]))
+                .instrument(tracing::info_span!("dispatch_barrier_batch"))
+                .instrument_await("dispatch_barrier_batch")
+                .await?;
+            self.inner.metrics.metrics.barrier_batch_size.observe(1.0);
+
+            tracing::debug!("Get the first barrier: {:?}", first_barrier.epoch);
 
             let local_state_store = log_store_config
                 .state_store
@@ -564,7 +584,8 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                     upload_on_flush: false,
                 })
                 .await;
-
+            
+            tracing::debug!("Create local state store for log store dispatch executor.");
             let (mut read_state, mut initial_write_state) = new_log_store_state(
                 log_store_config.table_id,
                 local_state_store,
@@ -572,12 +593,12 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 log_store_config.chunk_size,
             );
             initial_write_state.init(first_write_epoch).await?;
+            tracing::debug!("Initialized log store write state at epoch {:?}", first_write_epoch);
 
             let mut initial_write_epoch = first_write_epoch;
             let mut pause_stream = first_barrier.is_pause_on_startup();
 
-            // barriers serves as a queue to hold barriers waiting for dispatching
-            let mut barriers = VecDeque::<Message>::new();
+            tracing::debug!("collect the first barrier");
 
             // Todo(yingzhu): add aligned mode here
             let mut seq_id = FIRST_SEQ_ID;
@@ -670,6 +691,8 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
 
                 match select_result {
                     Either::Left(_write_result) => {
+                        tracing::debug!("write future event ready");
+
                         drop(write_future_state);
                         let (stream, mut write_state, either) = _write_result?;
                         match either {
@@ -735,7 +758,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                                 _ => {}
                                             }
                                         }
-                                        let _write_state_post_write_barrier = write_barrier(
+                                        let write_state_post_write_barrier = write_barrier(
                                             actor_id,
                                             &mut write_state,
                                             barrier.clone(),
@@ -752,6 +775,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                         }
 
                                         barriers.push_front(Message::Barrier(barrier));
+                                        write_state_post_write_barrier.post_yield_barrier(None).await?;
                                         write_future_state = WriteFuture::receive_from_upstream(
                                                 stream,
                                                 write_state,
@@ -789,6 +813,8 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                         }
                     }
                     Either::Right(consumer_result) => {
+                        tracing::debug!("consumer future event ready");
+
                         drop(consumer_future_state);
                         let (inner, event, read_future) = consumer_result?;
                         match event {
@@ -1030,12 +1056,21 @@ mod tests {
         tx.send(Message::Barrier(barrier1.clone().into_dispatcher()).into())
             .await
             .unwrap();
+
         let observed1 = timeout(Duration::from_secs(1), barrier_out_rx.recv())
             .await
             .unwrap()
             .unwrap()
             .unwrap();
         assert_eq!(observed1.epoch.curr, test_epoch(1));
+
+        let msg = timeout(Duration::from_secs(1), down_rx.recv())
+            .await
+            .unwrap()
+            .expect("downstream should receive barrier(1)");
+        let barriers = msg.as_barrier_batch().unwrap();
+        assert_eq!(barriers.len(), 1);
+        assert_eq!(barriers[0].epoch.curr, test_epoch(1));
 
         // chunk(1), chunk(2)
         let chunk_1 = StreamChunk::from_pretty(
