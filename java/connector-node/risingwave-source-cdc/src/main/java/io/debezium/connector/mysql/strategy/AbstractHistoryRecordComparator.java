@@ -125,8 +125,8 @@ public abstract class AbstractHistoryRecordComparator extends HistoryRecordCompa
             // the only thing we can do
             // is compare timestamps, and we have to assume that the server timestamps can be
             // compared ...
-            long recordedTimestamp = recorded.getLong(SourceInfo.TIMESTAMP_KEY, 0);
-            long desiredTimestamp = desired.getLong(SourceInfo.TIMESTAMP_KEY, 0);
+            long recordedTimestamp = recorded.getLong(MySqlOffsetContext.TIMESTAMP_KEY, 0);
+            long desiredTimestamp = desired.getLong(MySqlOffsetContext.TIMESTAMP_KEY, 0);
             return recordedTimestamp <= desiredTimestamp;
         }
 
