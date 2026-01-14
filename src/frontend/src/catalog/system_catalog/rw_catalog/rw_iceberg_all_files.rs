@@ -90,6 +90,9 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
                     .get_manifest_list(snapshot, &metadata)
                     .await
                     .map_err(|e| anyhow!(e))?;
+                manifest_list.entries().iter().for_each(|e| {
+                    reachable_manifests.insert(e.clone());
+                });
                 reachable_manifests.extend(manifest_list.entries().iter().cloned());
             }
             for entry in reachable_manifests {
