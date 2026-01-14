@@ -970,6 +970,41 @@ service EventLogService {
   rpc AddEventLog(AddEventLogRequest) returns (AddEventLogResponse);
 }
 
+message AuditLog {
+  uint64 id = 1;
+  uint64 event_time = 2;
+  string user_name = 3;
+  string action = 4;
+  optional string object_type = 5;
+  optional uint32 object_id = 6;
+  optional string object_name = 7;
+  optional uint32 database_id = 8;
+  optional string details_json = 9;
+}
+
+message ListAuditLogRequest {}
+
+message ListAuditLogResponse {
+  repeated AuditLog audit_logs = 1;
+}
+
+message AddAuditLogRequest {
+  string user_name = 1;
+  string action = 2;
+  optional string object_type = 3;
+  optional uint32 object_id = 4;
+  optional string object_name = 5;
+  optional uint32 database_id = 6;
+  optional string details_json = 7;
+}
+
+message AddAuditLogResponse {}
+
+service AuditLogService {
+  rpc ListAuditLog(ListAuditLogRequest) returns (ListAuditLogResponse);
+  rpc AddAuditLog(AddAuditLogRequest) returns (AddAuditLogResponse);
+}
+
 message ActorIds {
   repeated uint32 ids = 1;
 }

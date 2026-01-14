@@ -16,7 +16,9 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::bail;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
+use serde_json::json;
 
+use super::audit_log::record_audit_log;
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
@@ -75,6 +77,7 @@ pub async fn handle_alter_resource_group(
         .map(resolve_resource_group)
         .transpose()?
         .flatten();
+    let resource_group_summary = resource_group.clone();
 
     let mut builder = RwPgResponse::builder(stmt_type);
 
@@ -82,6 +85,19 @@ pub async fn handle_alter_resource_group(
     catalog_writer
         .alter_resource_group(table_id, resource_group, deferred)
         .await?;
+
+    record_audit_log(
+        &session,
+        "ALTER RESOURCE GROUP",
+        Some("MATERIALIZED_VIEW"),
+        Some(table_id as u32),
+        Some(obj_name.to_string()),
+        json!({
+            "resource_group": resource_group_summary,
+            "deferred": deferred,
+        }),
+    )
+    .await;
 
     if deferred {
         builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());

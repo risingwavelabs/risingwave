@@ -17,7 +17,9 @@ use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::system_param::{NOTICE_BARRIER_INTERVAL_MS, NOTICE_CHECKPOINT_FREQUENCY};
 use risingwave_sqlparser::ast::{Ident, SetVariableValue};
+use serde_json::json;
 
+use super::audit_log::record_audit_log;
 use super::variable::set_var_to_param_str;
 use super::{HandlerArgs, RwPgResponse};
 use crate::error::{ErrorCode, Result};
@@ -34,6 +36,7 @@ pub async fn handle_alter_system(
 
     // Currently session params are separated from system params. If the param exist in session params, we set it. Otherwise
     // we try to set it as a system param.
+    let value_summary = value.as_ref().map(|_| "SET").unwrap_or("DEFAULT");
     if SessionConfig::contains_param(&param_name) {
         if SessionConfig::check_no_alter_sys(&param_name)? {
             return Err(ErrorCode::InternalError(format!(
@@ -59,6 +62,15 @@ pub async fn handle_alter_system(
             ));
             handler_args.session.reset_config(param_name.as_str())?;
         }
+        record_audit_log(
+            &handler_args.session,
+            "ALTER SYSTEM",
+            Some("SESSION_PARAM"),
+            None,
+            Some(param_name.clone()),
+            json!({ "value": value_summary }),
+        )
+        .await;
     } else {
         if !handler_args.session.is_super_user() {
             return Err(ErrorCode::PermissionDenied(
@@ -79,6 +91,15 @@ pub async fn handle_alter_system(
                              params.checkpoint_frequency(), NOTICE_CHECKPOINT_FREQUENCY));
             }
         }
+        record_audit_log(
+            &handler_args.session,
+            "ALTER SYSTEM",
+            Some("SYSTEM_PARAM"),
+            None,
+            Some(param_name.clone()),
+            json!({ "value": value_summary }),
+        )
+        .await;
     }
     Ok(builder.into())
 }

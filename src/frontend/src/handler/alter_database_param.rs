@@ -16,7 +16,9 @@ use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::AlterDatabaseParam;
 use risingwave_common::system_param::{NOTICE_BARRIER_INTERVAL_MS, NOTICE_CHECKPOINT_FREQUENCY};
 use risingwave_sqlparser::ast::ObjectName;
+use serde_json::json;
 
+use super::audit_log::record_audit_log;
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
 use crate::error::Result;
@@ -65,10 +67,21 @@ pub async fn handle_alter_database_param(
         _ => {}
     }
 
+    let param_summary = format!("{:?}", param);
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_database_param(database_id, param)
         .await?;
+
+    record_audit_log(
+        &session,
+        "ALTER DATABASE",
+        Some("DATABASE"),
+        Some(database_id as u32),
+        Some(database_name),
+        json!({ "param": param_summary }),
+    )
+    .await;
 
     Ok(builder.into())
 }

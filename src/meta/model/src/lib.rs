@@ -25,6 +25,7 @@ use serde::{Deserialize, Serialize};
 
 pub mod prelude;
 
+pub mod audit_log;
 pub mod catalog_version;
 pub mod cdc_table_snapshot_split;
 pub mod cluster;
@@ -353,6 +354,7 @@ derive_array_from_blob!(
     PbFieldArray
 );
 derive_from_json_struct!(Property, BTreeMap<String, String>);
+derive_from_json_struct!(AuditDetails, serde_json::Value);
 derive_from_blob!(ColumnCatalog, risingwave_pb::plan_common::PbColumnCatalog);
 derive_array_from_blob!(
     ColumnCatalogArray,

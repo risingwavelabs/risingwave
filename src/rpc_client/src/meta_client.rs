@@ -82,6 +82,7 @@ use risingwave_pb::id::{ActorId, FragmentId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
+use risingwave_pb::meta::audit_log_service_client::AuditLogServiceClient;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -1708,6 +1709,17 @@ impl MetaClient {
         Ok(resp.event_logs)
     }
 
+    pub async fn list_audit_log(&self) -> Result<Vec<AuditLog>> {
+        let req = ListAuditLogRequest::default();
+        let resp = self.inner.list_audit_log(req).await?;
+        Ok(resp.audit_logs)
+    }
+
+    pub async fn add_audit_log(&self, req: AddAuditLogRequest) -> Result<()> {
+        self.inner.add_audit_log(req).await?;
+        Ok(())
+    }
+
     pub async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
         let req = ListCompactTaskProgressRequest {};
         let resp = self.inner.list_compact_task_progress(req).await?;
@@ -2097,6 +2109,7 @@ struct GrpcMetaClientCore {
     cloud_client: CloudServiceClient<Channel>,
     sink_coordinate_client: SinkCoordinationRpcClient,
     event_log_client: EventLogServiceClient<Channel>,
+    audit_log_client: AuditLogServiceClient<Channel>,
     cluster_limit_client: ClusterLimitServiceClient<Channel>,
     hosted_iceberg_catalog_service_client: HostedIcebergCatalogServiceClient<Channel>,
     monitor_client: MonitorServiceClient<Channel>,
@@ -2128,6 +2141,7 @@ impl GrpcMetaClientCore {
         let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone())
             .max_decoding_message_size(usize::MAX);
         let event_log_client = EventLogServiceClient::new(channel.clone());
+        let audit_log_client = AuditLogServiceClient::new(channel.clone());
         let cluster_limit_client = ClusterLimitServiceClient::new(channel.clone());
         let hosted_iceberg_catalog_service_client =
             HostedIcebergCatalogServiceClient::new(channel.clone());
@@ -2151,6 +2165,7 @@ impl GrpcMetaClientCore {
             cloud_client,
             sink_coordinate_client,
             event_log_client,
+            audit_log_client,
             cluster_limit_client,
             hosted_iceberg_catalog_service_client,
             monitor_client,
@@ -2616,6 +2631,8 @@ macro_rules! for_all_meta_rpc {
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
             ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }
             ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }
+            ,{ audit_log_client, list_audit_log, ListAuditLogRequest, ListAuditLogResponse }
+            ,{ audit_log_client, add_audit_log, AddAuditLogRequest, AddAuditLogResponse }
             ,{ cluster_limit_client, get_cluster_limits, GetClusterLimitsRequest, GetClusterLimitsResponse }
             ,{ hosted_iceberg_catalog_service_client, list_iceberg_tables, ListIcebergTablesRequest, ListIcebergTablesResponse }
             ,{ monitor_client, stack_trace, StackTraceRequest, StackTraceResponse }

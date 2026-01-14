@@ -16,7 +16,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
 use risingwave_pb::meta::ThrottleTarget as PbThrottleTarget;
 use risingwave_sqlparser::ast::ObjectName;
+use serde_json::json;
 
+use super::audit_log::record_audit_log;
 use super::{HandlerArgs, RwPgResponse};
 use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
@@ -134,6 +136,26 @@ pub async fn handle_alter_streaming_rate_limit_by_id(
     };
 
     meta_client.apply_throttle(kind, id, rate_limit).await?;
+
+    let object_type = match kind {
+        PbThrottleTarget::Mv => "MATERIALIZED_VIEW",
+        PbThrottleTarget::Source | PbThrottleTarget::TableWithSource => "SOURCE",
+        PbThrottleTarget::CdcTable => "CDC_TABLE",
+        PbThrottleTarget::TableDml => "TABLE",
+        PbThrottleTarget::Sink => "SINK",
+        PbThrottleTarget::Fragment => "FRAGMENT",
+        PbThrottleTarget::Unspecified => "UNKNOWN",
+    };
+
+    record_audit_log(
+        session,
+        "ALTER RATE LIMIT",
+        Some(object_type),
+        Some(id),
+        None,
+        json!({ "rate_limit": rate_limit }),
+    )
+    .await;
 
     Ok(PgResponse::empty_result(stmt_type))
 }

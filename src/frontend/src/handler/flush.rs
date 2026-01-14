@@ -13,14 +13,25 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use serde_json::json;
 
 use super::RwPgResponse;
+use super::audit_log::record_audit_log;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::session::SessionImpl;
 
 pub(super) async fn handle_flush(handler_args: HandlerArgs) -> Result<RwPgResponse> {
     do_flush(&handler_args.session).await?;
+    record_audit_log(
+        &handler_args.session,
+        "FLUSH",
+        Some("DATABASE"),
+        None,
+        Some(handler_args.session.database().to_owned()),
+        json!({}),
+    )
+    .await;
     Ok(PgResponse::empty_result(StatementType::FLUSH))
 }
 

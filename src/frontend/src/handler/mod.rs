@@ -66,6 +66,7 @@ pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 mod alter_utils;
+mod audit_log;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;

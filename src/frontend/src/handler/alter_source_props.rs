@@ -14,8 +14,10 @@
 
 use risingwave_common::id::{ConnectionId, SourceId};
 use risingwave_pb::catalog::connection::Info::ConnectionParams;
+use serde_json::json;
 
 use super::RwPgResponse;
+use super::audit_log::record_audit_log;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
@@ -37,7 +39,7 @@ pub async fn handle_alter_table_connector_props(
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let source_id = {
+    let (source_id, table_id) = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
@@ -66,10 +68,27 @@ pub async fn handle_alter_table_connector_props(
             associate_source_id
         );
 
-        associate_source_id
+        (associate_source_id, table.id)
     };
 
+    let audit_keys = alter_props
+        .iter()
+        .map(|opt| opt.name.real_value())
+        .collect::<Vec<_>>();
     handle_alter_source_props_inner(&session, alter_props, source_id).await?;
+
+    record_audit_log(
+        &session,
+        "ALTER TABLE CONNECTOR",
+        Some("TABLE"),
+        Some(table_id.as_raw_id()),
+        Some(real_table_name.clone()),
+        json!({
+            "source_id": source_id.as_raw_id(),
+            "keys": audit_keys,
+        }),
+    )
+    .await;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
 }
@@ -164,7 +183,21 @@ pub async fn handle_alter_source_connector_props(
         source.id
     };
 
+    let audit_keys = alter_props
+        .iter()
+        .map(|opt| opt.name.real_value())
+        .collect::<Vec<_>>();
     handle_alter_source_props_inner(&session, alter_props, source_id).await?;
+
+    record_audit_log(
+        &session,
+        "ALTER SOURCE CONNECTOR",
+        Some("SOURCE"),
+        Some(source_id.as_raw_id()),
+        Some(real_source_name.to_string()),
+        json!({ "keys": audit_keys }),
+    )
+    .await;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }
