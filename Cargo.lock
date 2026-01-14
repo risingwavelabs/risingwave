@@ -2113,6 +2113,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "btoi"
+version = "0.5.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3b5ab9db53bcda568284df0fd39f6eac24ad6f7ba7ff1168b9e76eba6576b976"
+dependencies = [
+ "num-traits",
+]
+
+[[package]]
 name = "bumpalo"
 version = "3.15.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8092,7 +8101,7 @@ dependencies = [
  "futures-util",
  "keyed_priority_queue",
  "lru 0.14.0",
- "mysql_common",
+ "mysql_common 0.35.5",
  "native-tls",
  "pem",
  "percent-encoding",
@@ -8116,10 +8125,9 @@ checksum = "fbb9f371618ce723f095c61fbcdc36e8936956d2b62832f9c7648689b338e052"
 dependencies = [
  "base64 0.22.1",
  "bitflags 2.10.0",
- "btoi",
+ "btoi 0.4.3",
  "byteorder",
  "bytes",
- "chrono",
  "crc32fast",
  "flate2",
  "getrandom 0.3.1",
@@ -8128,6 +8136,33 @@ dependencies = [
  "num-traits",
  "regex",
  "rust_decimal",
+ "saturating",
+ "serde",
+ "serde_json",
+ "sha1",
+ "sha2",
+ "thiserror 2.0.17",
+ "uuid",
+]
+
+[[package]]
+name = "mysql_common"
+version = "0.36.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3a60f8a117791e13294d44e308ff1f051b82f198cd2c6c66a44572a494584354"
+dependencies = [
+ "base64 0.22.1",
+ "bitflags 2.10.0",
+ "btoi 0.5.0",
+ "byteorder",
+ "bytes",
+ "chrono",
+ "crc32fast",
+ "flate2",
+ "getrandom 0.3.1",
+ "num-bigint",
+ "num-traits",
+ "regex",
  "saturating",
  "serde",
  "serde_json",
@@ -11562,7 +11597,7 @@ dependencies = [
  "moka",
  "mongodb",
  "mysql_async",
- "mysql_common",
+ "mysql_common 0.36.1",
  "nexmark",
  "num-bigint",
  "opendal 0.53.3",
@@ -11908,7 +11943,7 @@ dependencies = [
  "md-5",
  "memcomparable",
  "mysql_async",
- "mysql_common",
+ "mysql_common 0.36.1",
  "num-integer",
  "parking_lot 0.12.5",
  "parse-display",
