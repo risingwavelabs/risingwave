@@ -1647,6 +1647,7 @@ mod tests {
             config_override: None,
             adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
             parallelism: StreamingParallelism::Adaptive,
+            backfill_parallelism: None,
             max_parallelism: 8,
             specific_resource_group: None,
         };
@@ -1703,12 +1704,14 @@ mod tests {
         let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
         };
 
         // Global strategy is FULL (would give 4 actors), but job strategy is BOUNDED(2)
@@ -1758,6 +1761,7 @@ mod tests {
             config_override: None,
             adaptive_parallelism_strategy: None, // No custom strategy
             parallelism: StreamingParallelism::Adaptive,
+            backfill_parallelism: None,
             max_parallelism: 8,
             specific_resource_group: None,
         };
@@ -1814,12 +1818,14 @@ mod tests {
         let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
         };
 
         // Global strategy is BOUNDED(3)
@@ -1870,6 +1876,7 @@ mod tests {
             config_override: None,
             adaptive_parallelism_strategy: Some("BOUNDED(2)".to_owned()),
             parallelism: StreamingParallelism::Fixed(5),
+            backfill_parallelism: None,
             max_parallelism: 8,
             specific_resource_group: None,
         };
@@ -1940,12 +1947,14 @@ mod tests {
         let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
@@ -1994,6 +2003,7 @@ mod tests {
             config_override: None,
             adaptive_parallelism_strategy: Some("RATIO(0.5)".to_owned()),
             parallelism: StreamingParallelism::Adaptive,
+            backfill_parallelism: None,
             max_parallelism: 16,
             specific_resource_group: None,
         };
@@ -2078,12 +2088,14 @@ mod tests {
         let fragment_splits: HashMap<FragmentId, Vec<SplitImpl>> = HashMap::new();
         let streaming_job_databases = HashMap::from([(job_id, database_id)]);
         let database_map = HashMap::from([(database_id, database_model)]);
+        let backfill_jobs = HashSet::new();
 
         let context = RenderActorsContext {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
             database_map: &database_map,
+            backfill_jobs: &backfill_jobs,
         };
 
         let result = render_actors(
