@@ -2379,7 +2379,7 @@ impl StreamingJobExtraInfo {
     }
 }
 
-/// Tuple of (job_id, timezone, config_override, adaptive_parallelism_strategy, backfill_orders)
+/// Tuple of (`job_id`, `timezone`, `config_override`, `adaptive_parallelism_strategy`, `backfill_orders`)
 type StreamingJobExtraInfoRow = (
     JobId,
     Option<String>,
