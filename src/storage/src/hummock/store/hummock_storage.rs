@@ -22,6 +22,7 @@ use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::VectorRef;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::Role;
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
@@ -150,6 +151,7 @@ impl HummockStorage {
     /// Creates a [`HummockStorage`].
     #[allow(clippy::too_many_arguments)]
     pub async fn new(
+        role: Role,
         options: Arc<StorageOpts>,
         sstable_store: SstableStoreRef,
         hummock_meta_client: Arc<dyn HummockMetaClient>,
@@ -172,6 +174,7 @@ impl HummockStorage {
         .map_err(HummockError::read_backup_error)?;
         let write_limiter = Arc::new(WriteLimiter::default());
         let (version_update_tx, mut version_update_rx) = unbounded_channel();
+        let (cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
 
         let observer_manager = ObserverManager::new(
             notification_client,
@@ -179,6 +182,7 @@ impl HummockStorage {
                 compaction_catalog_manager_ref.clone(),
                 backup_reader.clone(),
                 version_update_tx.clone(),
+                cache_refill_policy_tx,
                 write_limiter.clone(),
             ),
         )
@@ -210,7 +214,9 @@ impl HummockStorage {
         );
 
         let hummock_event_handler = HummockEventHandler::new(
+            role,
             version_update_rx,
+            cache_refill_policy_rx,
             pinned_version,
             compactor_context.clone(),
             compaction_catalog_manager_ref.clone(),
@@ -960,6 +966,7 @@ impl HummockStorage {
         )));
 
         Self::new(
+            Role::Both,
             options,
             sstable_store,
             hummock_meta_client,

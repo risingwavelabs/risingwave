@@ -26,11 +26,13 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::{Histogram, IntGauge};
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::Role;
 use risingwave_common::metrics::UintGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::{HummockVersionCommon, LocalHummockVersionDelta};
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
+use risingwave_pb::meta::TableCacheRefillPolicies;
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -229,7 +231,9 @@ async fn flush_imms(
 
 impl HummockEventHandler {
     pub fn new(
+        role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
+        cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
         pinned_version: PinnedVersion,
         compactor_context: CompactorContext,
         compaction_catalog_manager_ref: CompactionCatalogManagerRef,
@@ -251,6 +255,7 @@ impl HummockEventHandler {
             state_store_metrics.uploader_uploading_task_size.clone(),
         );
         Self::new_inner(
+            role,
             version_update_rx,
             compactor_context.sstable_store.clone(),
             state_store_metrics,
@@ -306,6 +311,7 @@ impl HummockEventHandler {
     }
 
     fn new_inner(
+        role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
@@ -340,7 +346,7 @@ impl HummockEventHandler {
             spawn_upload_task,
             buffer_tracker,
         );
-        let refiller = CacheRefiller::new(refill_config, sstable_store, spawn_refill_task);
+        let refiller = CacheRefiller::new(role, refill_config, sstable_store, spawn_refill_task);
 
         Self {
             hummock_event_tx,
@@ -887,6 +893,7 @@ mod tests {
     use parking_lot::Mutex;
     use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::config::Role;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
@@ -944,6 +951,7 @@ mod tests {
         let metrics = Arc::new(HummockStateStoreMetrics::unused());
 
         let event_handler = HummockEventHandler::new_inner(
+            Role::None,
             version_update_rx,
             mock_sstable_store().await,
             metrics.clone(),
@@ -1124,6 +1132,7 @@ mod tests {
         let (spawn_task, new_task_notifier) = prepare_uploader_order_test_spawn_task_fn(false);
 
         let event_handler = HummockEventHandler::new_inner(
+            Role::None,
             version_update_rx,
             mock_sstable_store().await,
             metrics.clone(),

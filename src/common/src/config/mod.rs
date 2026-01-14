@@ -40,6 +40,8 @@ pub mod merge;
 pub mod mutate;
 pub mod system;
 pub mod utils;
+pub mod role;
+pub use role::*;
 
 use std::collections::BTreeMap;
 use std::fs;

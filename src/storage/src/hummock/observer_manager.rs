@@ -17,9 +17,9 @@ use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
-use risingwave_pb::meta::SubscribeResponse;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_pb::meta::{SubscribeResponse, TableCacheRefillPolicies};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
@@ -32,6 +32,7 @@ pub struct HummockObserverNode {
     backup_reader: BackupReaderRef,
     write_limiter: WriteLimiterRef,
     version_update_sender: UnboundedSender<HummockVersionUpdate>,
+    cache_refill_policy_sender: UnboundedSender<TableCacheRefillPolicies>,
     version: u64,
 }
 
@@ -94,7 +95,13 @@ impl ObserverState for HummockObserverNode {
                 LicenseManager::get().update_cluster_resource(resource);
             }
             Info::TableCacheRefillPolicies(policies) => {
-                tracing::trace!("todo: handle table cache refill policies: {:?}", policies);
+                tracing::info!(?policies, "receive table cache refill policies updates");
+                let _ = self
+                    .cache_refill_policy_sender
+                    .send(policies)
+                    .inspect_err(|e| {
+                        tracing::error!(?e, "unable to send table cache refill policies");
+                    });
             }
             info => {
                 panic!("invalid notification info: {info}");
@@ -146,12 +153,14 @@ impl HummockObserverNode {
         compaction_catalog_manager: CompactionCatalogManagerRef,
         backup_reader: BackupReaderRef,
         version_update_sender: UnboundedSender<HummockVersionUpdate>,
+        cache_refill_policy_sender: UnboundedSender<TableCacheRefillPolicies>,
         write_limiter: WriteLimiterRef,
     ) -> Self {
         Self {
             compaction_catalog_manager,
             backup_reader,
             version_update_sender,
+            cache_refill_policy_sender,
             version: 0,
             write_limiter,
         }

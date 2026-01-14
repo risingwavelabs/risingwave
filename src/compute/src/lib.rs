@@ -32,14 +32,13 @@ use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
 
-use clap::{Parser, ValueEnum};
-use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
+use clap::Parser;
+use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig, Role};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
-use serde::{Deserialize, Serialize};
 
 /// If `total_memory_bytes` is not specified, the default memory limit will be set to
 /// the system memory limit multiplied by this proportion
@@ -174,32 +173,6 @@ impl risingwave_common::opts::Opts for ComputeNodeOpts {
 
     fn meta_addr(&self) -> MetaAddressStrategy {
         self.meta_address.clone()
-    }
-}
-
-#[derive(Copy, Clone, Debug, Default, ValueEnum, Serialize, Deserialize)]
-pub enum Role {
-    Serving,
-    Streaming,
-    #[default]
-    Both,
-}
-
-impl Role {
-    pub fn for_streaming(&self) -> bool {
-        match self {
-            Role::Serving => false,
-            Role::Streaming => true,
-            Role::Both => true,
-        }
-    }
-
-    pub fn for_serving(&self) -> bool {
-        match self {
-            Role::Serving => true,
-            Role::Streaming => false,
-            Role::Both => true,
-        }
     }
 }
 

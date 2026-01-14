@@ -28,6 +28,7 @@ use prometheus::{
     Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
+use risingwave_common::config::Role;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
@@ -253,6 +254,7 @@ pub(crate) struct CacheRefiller {
 
 impl CacheRefiller {
     pub(crate) fn new(
+        role: Role,
         config: CacheRefillConfig,
         sstable_store: SstableStoreRef,
         spawn_refill_task: SpawnRefillTask,

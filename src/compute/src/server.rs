@@ -232,6 +232,7 @@ pub async fn compute_node_serve(
     LicenseManager::get().refresh(system_params.license_key());
     let state_store = Box::pin(StateStoreImpl::new(
         state_store_url,
+        opts.role,
         storage_opts.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),

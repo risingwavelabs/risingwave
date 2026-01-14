@@ -64,7 +64,8 @@ pub async fn prepare_first_valid_version(
     UnboundedSender<HummockVersionUpdate>,
     UnboundedReceiver<HummockVersionUpdate>,
 ) {
-    let (tx, mut rx) = unbounded_channel();
+    let (version_update_tx, mut version_update_rx) = unbounded_channel();
+    let (cache_refill_policy_tx, _cache_refill_policy_rx) = unbounded_channel();
     let notification_client = get_notification_client_for_test(
         env,
         hummock_manager_ref.clone(),
@@ -79,21 +80,22 @@ pub async fn prepare_first_valid_version(
         HummockObserverNode::new(
             Arc::new(CompactionCatalogManager::default()),
             backup_manager,
-            tx.clone(),
+            version_update_tx.clone(),
+            cache_refill_policy_tx,
             write_limiter,
         ),
     )
     .await;
     observer_manager.start().await;
-    let hummock_version = match rx.recv().await {
+    let hummock_version = match version_update_rx.recv().await {
         Some(HummockVersionUpdate::PinnedVersion(version)) => version,
         _ => unreachable!("should be full version"),
     };
 
     (
         PinnedVersion::new(*hummock_version, unbounded_channel().0),
-        tx,
-        rx,
+        version_update_tx,
+        version_update_rx,
     )
 }
 
