@@ -2,7 +2,6 @@
 benchmark_name: unaligned_join_backpressure_slow_finish
 
 setup_sql: |
-  set streaming_enable_unaligned_join = true;
   set sink_decouple=true;
 
   create table t(v0 int primary key, v1 int, v2 varchar, v3 varchar);

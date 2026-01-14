@@ -541,15 +541,18 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
         let _max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
+        
         #[try_stream]
         async move {
             let actor_id = self.inner.actor_id;
             let log_store_config = self.log_store_config;
+            
+            // barriers serves as a queue to hold barriers waiting for dispatching
+            let mut barriers = VecDeque::<Message>::new();
             let mut input = self.input.execute();
             // The first barrier is kept for dispatch.
             let first_barrier = expect_first_barrier(&mut input).await?;
             let first_write_epoch = first_barrier.epoch;
-            yield first_barrier.clone();
 
             let local_state_store = log_store_config
                 .state_store
@@ -576,9 +579,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
             let mut initial_write_epoch = first_write_epoch;
             let mut pause_stream = first_barrier.is_pause_on_startup();
 
-            // barriers serves as a queue to hold barriers waiting for dispatching
-            let mut barriers = VecDeque::<Message>::new();
-
+            barriers.push_front(Message::Barrier(first_barrier));
             // Todo(yingzhu): add aligned mode here
             let mut seq_id = FIRST_SEQ_ID;
             let mut buffer = SyncedLogStoreBuffer {
@@ -1030,12 +1031,21 @@ mod tests {
         tx.send(Message::Barrier(barrier1.clone().into_dispatcher()).into())
             .await
             .unwrap();
+
         let observed1 = timeout(Duration::from_secs(1), barrier_out_rx.recv())
             .await
             .unwrap()
             .unwrap()
             .unwrap();
         assert_eq!(observed1.epoch.curr, test_epoch(1));
+
+        let msg = timeout(Duration::from_secs(1), down_rx.recv())
+            .await
+            .unwrap()
+            .expect("downstream should receive barrier(1)");
+        let barriers = msg.as_barrier_batch().unwrap();
+        assert_eq!(barriers.len(), 1);
+        assert_eq!(barriers[0].epoch.curr, test_epoch(1));
 
         // chunk(1), chunk(2)
         let chunk_1 = StreamChunk::from_pretty(
