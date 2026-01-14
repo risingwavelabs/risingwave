@@ -45,8 +45,16 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
         let versioned = table.version.is_some();
         let refreshable = table.refreshable;
 
-        let conflict_behavior =
+        let mut conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
+        if params
+            .config
+            .developer
+            .materialize_force_overwrite_on_no_check
+            && conflict_behavior == ConflictBehavior::NoCheck
+        {
+            conflict_behavior = ConflictBehavior::Overwrite;
+        }
         let version_column_indices: Vec<u32> = table.version_column_indices.clone();
 
         let exec = if refreshable {
