@@ -179,7 +179,7 @@ auth_method = "password"
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
-unsafe_enable_strict_consistency = true
+unsafe_disable_strict_consistency = false
 
 [streaming.developer]
 enable_executor_row_count = false

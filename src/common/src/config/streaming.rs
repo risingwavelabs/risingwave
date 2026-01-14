@@ -48,9 +48,9 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
-    /// Control the strictness of stream consistency.
-    #[serde(default = "default::streaming::unsafe_enable_strict_consistency")]
-    pub unsafe_enable_strict_consistency: bool,
+    /// Disable strict stream consistency checks.
+    #[serde(default = "default::streaming::unsafe_disable_strict_consistency")]
+    pub unsafe_disable_strict_consistency: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -309,8 +309,8 @@ pub mod default {
             10
         }
 
-        pub fn unsafe_enable_strict_consistency() -> bool {
-            true
+        pub fn unsafe_disable_strict_consistency() -> bool {
+            false
         }
 
         pub fn default_enable_mem_preload_state_table() -> bool {
