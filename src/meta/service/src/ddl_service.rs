@@ -1603,7 +1603,7 @@ impl DdlService for DdlServiceImpl {
         {
             let OptionalAssociatedSourceId::AssociatedSourceId(source_id) =
                 table_catalog.optional_associated_source_id.unwrap();
-            let (_, fragments) = self
+            let (jobs, fragments) = self
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
                 .await?;
@@ -1616,6 +1616,7 @@ impl DdlService for DdlServiceImpl {
                 .run_command(
                     database_id,
                     Command::Throttle {
+                        jobs,
                         config: fragments
                             .into_iter()
                             .map(|fragment_id| (fragment_id, throttle_config))

@@ -359,6 +359,7 @@ pub enum Command {
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
     Throttle {
+        jobs: HashSet<JobId>,
         config: HashMap<FragmentId, ThrottleConfig>,
     },
 

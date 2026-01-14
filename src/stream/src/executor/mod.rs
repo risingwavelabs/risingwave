@@ -737,7 +737,6 @@ impl Mutation {
             ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplitsWithGeneration,
         };
         use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
-        use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
         use risingwave_pb::stream_plan::{
             PbAddMutation, PbConnectorPropsChangeMutation, PbDispatchers,
             PbDropSubscriptionsMutation, PbPauseMutation, PbResumeMutation,
