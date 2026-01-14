@@ -21,6 +21,7 @@ use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::{DATA_DIRECTORY, STATE_STORE_URL};
 use risingwave_object_store::object::object_metrics::GLOBAL_OBJECT_STORE_METRICS;
 use risingwave_object_store::object::{ObjectStoreImpl, build_remote_object_store};
+use thiserror_ext::AsReport;
 use tokio::sync::OnceCell;
 
 use crate::{EnvParam, JAVA_BINDING_ASYNC_RUNTIME, execute_and_catch, to_guarded_slice};
@@ -118,7 +119,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_putObject(
                 object_store.upload(&object_name, data.into()).await
             })
             .map_err(|e| {
-                tracing::error!("putObject failed: path={}, error={:?}", object_name, e);
+                tracing::error!(path = %object_name, error = %e.as_report(), "putObject failed");
                 anyhow::Error::from(e)
                     .context(format!("Failed to upload object to {}", object_name))
             })?;
@@ -145,7 +146,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_getObject<'a>(
                 object_store.read(&object_name, ..).await
             })
             .map_err(|e| {
-                tracing::error!("getObject failed: path={}, error={:?}", object_name, e);
+                tracing::error!(path = %object_name, error = %e.as_report(), "getObject failed");
                 anyhow::Error::from(e)
                     .context(format!("Failed to read object from {}", object_name))
             })?;
@@ -223,7 +224,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_listObject<'a>(
                 Ok::<_, anyhow::Error>(prefix_stripped_paths)
             })
             .map_err(|e| {
-                tracing::error!("listObject failed: dir={}, error={:?}", dir, e);
+                tracing::error!(dir = %dir, error = %e.as_report(), "listObject failed");
                 e.context(format!("Failed to list objects in directory {}", dir))
             })?;
 
@@ -281,7 +282,7 @@ pub extern "system" fn Java_com_risingwave_java_binding_Binding_deleteObjects<'a
                 Ok::<_, anyhow::Error>(())
             })
             .map_err(|e| {
-                tracing::error!("deleteObjects failed: dir={}, error={:?}", dir, e);
+                tracing::error!(dir = %dir, error = %e.as_report(), "deleteObjects failed");
                 e.context(format!("Failed to delete objects in directory {}", dir))
             })?;
         Ok(())
