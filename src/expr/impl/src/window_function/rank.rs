@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::BTreeSet;
 use std::marker::PhantomData;
 
 use risingwave_common::types::Datum;
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedVecDeque;
-use risingwave_expr::Result;
 use risingwave_expr::window_function::{
-    StateEvictHint, StateKey, StatePos, WindowFuncCall, WindowState,
+    StateEvictHint, StateKey, StatePos, WindowFuncCall, WindowState, WindowStateSnapshot,
 };
+use risingwave_expr::{ExprError, Result};
 use smallvec::SmallVec;
 
 use self::private::RankFuncCount;
@@ -30,7 +31,16 @@ mod private {
     use super::*;
 
     pub trait RankFuncCount: Default + EstimateSize {
+        /// Count and return the rank for the given key, updating internal state.
         fn count(&mut self, curr_key: StateKey) -> i64;
+
+        /// Encode the function state to bytes for persistence.
+        fn encode(&self) -> Vec<u8>;
+
+        /// Decode the function state from bytes during recovery.
+        fn decode(bytes: &[u8]) -> Result<Self>
+        where
+            Self: Sized;
     }
 }
 
@@ -44,6 +54,21 @@ impl RankFuncCount for RowNumber {
         let curr_rank = self.prev_rank + 1;
         self.prev_rank = curr_rank;
         curr_rank
+    }
+
+    fn encode(&self) -> Vec<u8> {
+        self.prev_rank.to_le_bytes().to_vec()
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.len() != 8 {
+            return Err(ExprError::Internal(anyhow::anyhow!(
+                "invalid RowNumber snapshot: expected 8 bytes, got {}",
+                bytes.len()
+            )));
+        }
+        let prev_rank = i64::from_le_bytes(bytes.try_into().unwrap());
+        Ok(Self { prev_rank })
     }
 }
 
@@ -81,6 +106,69 @@ impl RankFuncCount for Rank {
         self.prev_pos_in_peer_group = curr_pos_in_group;
         curr_rank
     }
+
+    fn encode(&self) -> Vec<u8> {
+        // Format: has_order_key (u8) + order_key_len (u32) + order_key bytes + prev_rank (i64) + prev_pos_in_peer_group (i64)
+        let mut bytes = Vec::new();
+        if let Some(order_key) = &self.prev_order_key {
+            bytes.push(1u8);
+            bytes.extend_from_slice(&(order_key.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(order_key);
+        } else {
+            bytes.push(0u8);
+        }
+        bytes.extend_from_slice(&self.prev_rank.to_le_bytes());
+        bytes.extend_from_slice(&self.prev_pos_in_peer_group.to_le_bytes());
+        bytes
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.is_empty() {
+            return Err(ExprError::Internal(anyhow::anyhow!(
+                "invalid Rank snapshot: empty bytes"
+            )));
+        }
+        let mut offset = 0;
+        let has_order_key = bytes[offset];
+        offset += 1;
+
+        let prev_order_key = if has_order_key == 1 {
+            if bytes.len() < offset + 4 {
+                return Err(ExprError::Internal(anyhow::anyhow!(
+                    "invalid Rank snapshot: missing order_key length"
+                )));
+            }
+            let order_key_len =
+                u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += 4;
+            if bytes.len() < offset + order_key_len {
+                return Err(ExprError::Internal(anyhow::anyhow!(
+                    "invalid Rank snapshot: missing order_key bytes"
+                )));
+            }
+            let order_key = bytes[offset..offset + order_key_len].to_vec().into();
+            offset += order_key_len;
+            Some(order_key)
+        } else {
+            None
+        };
+
+        if bytes.len() < offset + 16 {
+            return Err(ExprError::Internal(anyhow::anyhow!(
+                "invalid Rank snapshot: missing prev_rank or prev_pos_in_peer_group"
+            )));
+        }
+        let prev_rank = i64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+        offset += 8;
+        let prev_pos_in_peer_group =
+            i64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+
+        Ok(Self {
+            prev_order_key,
+            prev_rank,
+            prev_pos_in_peer_group,
+        })
+    }
 }
 
 #[derive(Default, EstimateSize)]
@@ -104,6 +192,64 @@ impl RankFuncCount for DenseRank {
         self.prev_rank = curr_rank;
         curr_rank
     }
+
+    fn encode(&self) -> Vec<u8> {
+        // Format: has_order_key (u8) + order_key_len (u32) + order_key bytes + prev_rank (i64)
+        let mut bytes = Vec::new();
+        if let Some(order_key) = &self.prev_order_key {
+            bytes.push(1u8);
+            bytes.extend_from_slice(&(order_key.len() as u32).to_le_bytes());
+            bytes.extend_from_slice(order_key);
+        } else {
+            bytes.push(0u8);
+        }
+        bytes.extend_from_slice(&self.prev_rank.to_le_bytes());
+        bytes
+    }
+
+    fn decode(bytes: &[u8]) -> Result<Self> {
+        if bytes.is_empty() {
+            return Err(ExprError::Internal(anyhow::anyhow!(
+                "invalid DenseRank snapshot: empty bytes"
+            )));
+        }
+        let mut offset = 0;
+        let has_order_key = bytes[offset];
+        offset += 1;
+
+        let prev_order_key = if has_order_key == 1 {
+            if bytes.len() < offset + 4 {
+                return Err(ExprError::Internal(anyhow::anyhow!(
+                    "invalid DenseRank snapshot: missing order_key length"
+                )));
+            }
+            let order_key_len =
+                u32::from_le_bytes(bytes[offset..offset + 4].try_into().unwrap()) as usize;
+            offset += 4;
+            if bytes.len() < offset + order_key_len {
+                return Err(ExprError::Internal(anyhow::anyhow!(
+                    "invalid DenseRank snapshot: missing order_key bytes"
+                )));
+            }
+            let order_key = bytes[offset..offset + order_key_len].to_vec().into();
+            offset += order_key_len;
+            Some(order_key)
+        } else {
+            None
+        };
+
+        if bytes.len() < offset + 8 {
+            return Err(ExprError::Internal(anyhow::anyhow!(
+                "invalid DenseRank snapshot: missing prev_rank"
+            )));
+        }
+        let prev_rank = i64::from_le_bytes(bytes[offset..offset + 8].try_into().unwrap());
+
+        Ok(Self {
+            prev_order_key,
+            prev_rank,
+        })
+    }
 }
 
 /// Generic state for rank window functions including `row_number`, `rank` and `dense_rank`.
@@ -115,6 +261,12 @@ pub(super) struct RankState<RF: RankFuncCount> {
     buffer: EstimatedVecDeque<StateKey>,
     /// Function-specific state.
     func_state: RF,
+    /// Whether persistence is enabled for this state.
+    persistence_enabled: bool,
+    /// The key of the last output row (for snapshot).
+    last_output_key: Option<StateKey>,
+    /// During recovery, skip updating `func_state` for rows up to and including this key.
+    recover_skip_until: Option<StateKey>,
     _phantom: PhantomData<RF>,
 }
 
@@ -124,6 +276,9 @@ impl<RF: RankFuncCount> RankState<RF> {
             first_key: None,
             buffer: Default::default(),
             func_state: Default::default(),
+            persistence_enabled: false,
+            last_output_key: None,
+            recover_skip_until: None,
             _phantom: PhantomData,
         }
     }
@@ -133,14 +288,68 @@ impl<RF: RankFuncCount> RankState<RF> {
             .buffer
             .pop_front()
             .expect("should not slide forward when the current window is not ready");
-        let rank = self.func_state.count(curr_key);
-        // can't evict any state key in EOWC mode, because we can't recover from previous output now
-        let evict_hint = StateEvictHint::CannotEvict(
-            self.first_key
-                .clone()
-                .expect("should have appended some rows"),
-        );
+        let rank = self.func_state.count(curr_key.clone());
+
+        // Track last output key for persistence
+        self.last_output_key = Some(curr_key.clone());
+
+        let evict_hint = if self.persistence_enabled {
+            // When persistence is enabled, we can evict the just-output key
+            let mut evict_set = BTreeSet::new();
+            evict_set.insert(curr_key);
+            StateEvictHint::CanEvict(evict_set)
+        } else {
+            // Can't evict any state key in EOWC mode without persistence,
+            // because we can't recover from previous output
+            StateEvictHint::CannotEvict(
+                self.first_key
+                    .clone()
+                    .expect("should have appended some rows"),
+            )
+        };
         (rank, evict_hint)
+    }
+
+    fn slide_no_output_inner(&mut self) -> StateEvictHint {
+        let curr_key = self
+            .buffer
+            .pop_front()
+            .expect("should not slide forward when the current window is not ready");
+
+        // Check if we should skip counting (during recovery)
+        let should_skip = self
+            .recover_skip_until
+            .as_ref()
+            .is_some_and(|skip_key| &curr_key <= skip_key);
+
+        if !should_skip {
+            // Normal counting
+            self.func_state.count(curr_key.clone());
+        }
+
+        // Clear recover_skip_until when we've processed the target key
+        if self
+            .recover_skip_until
+            .as_ref()
+            .is_some_and(|skip_key| &curr_key == skip_key)
+        {
+            self.recover_skip_until = None;
+        }
+
+        // Track last output key for persistence
+        self.last_output_key = Some(curr_key.clone());
+
+        if self.persistence_enabled {
+            let mut evict_set = BTreeSet::new();
+            evict_set.insert(curr_key);
+            StateEvictHint::CanEvict(evict_set)
+        } else {
+            StateEvictHint::CannotEvict(
+                self.first_key
+                    .clone()
+                    .expect("should have appended some rows"),
+            )
+        }
     }
 }
 
@@ -166,8 +375,30 @@ impl<RF: RankFuncCount> WindowState for RankState<RF> {
     }
 
     fn slide_no_output(&mut self) -> Result<StateEvictHint> {
-        let (_rank, evict_hint) = self.slide_inner();
+        let evict_hint = self.slide_no_output_inner();
         Ok(evict_hint)
+    }
+
+    fn enable_persistence(&mut self) {
+        self.persistence_enabled = true;
+    }
+
+    fn snapshot(&self) -> Option<WindowStateSnapshot> {
+        if !self.persistence_enabled {
+            return None;
+        }
+        Some(WindowStateSnapshot {
+            last_output_key: self.last_output_key.clone(),
+            payload: self.func_state.encode(),
+        })
+    }
+
+    fn restore(&mut self, snapshot: WindowStateSnapshot) -> Result<()> {
+        self.func_state = RF::decode(&snapshot.payload)?;
+        // Set recover_skip_until so that slide_no_output skips counting for rows
+        // that have already been counted before the snapshot was taken.
+        self.recover_skip_until = snapshot.last_output_key;
+        Ok(())
     }
 }
 
@@ -337,5 +568,251 @@ mod tests {
                 Some(4i64.into())
             ]
         );
+    }
+
+    fn create_call(kind: WindowFuncKind) -> WindowFuncCall {
+        WindowFuncCall {
+            kind,
+            return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
+            frame: Frame::rows(
+                FrameBound::UnboundedPreceding,
+                FrameBound::UnboundedFollowing,
+            ),
+        }
+    }
+
+    #[test]
+    fn test_row_number_snapshot_restore_roundtrip() {
+        let call = create_call(WindowFuncKind::RowNumber);
+        let mut state = RankState::<RowNumber>::new(&call);
+        state.enable_persistence();
+
+        // Process some rows
+        state.append(create_state_key(1, 100), SmallVec::new());
+        state.append(create_state_key(2, 101), SmallVec::new());
+        state.append(create_state_key(3, 102), SmallVec::new());
+
+        // Output first two rows
+        let (output1, _) = state.slide().unwrap();
+        assert_eq!(output1.unwrap(), 1i64.into());
+        let (output2, _) = state.slide().unwrap();
+        assert_eq!(output2.unwrap(), 2i64.into());
+
+        // Take snapshot
+        let snapshot = state.snapshot().unwrap();
+        assert!(snapshot.last_output_key.is_some());
+        assert_eq!(
+            snapshot.last_output_key.as_ref().unwrap(),
+            &create_state_key(2, 101)
+        );
+
+        // Create new state and restore
+        let mut new_state = RankState::<RowNumber>::new(&call);
+        new_state.enable_persistence();
+        new_state.restore(snapshot).unwrap();
+
+        // Continue from where we left off (row 3)
+        new_state.append(create_state_key(3, 102), SmallVec::new());
+        new_state.append(create_state_key(4, 103), SmallVec::new());
+
+        // Output should continue from rank 3
+        let (output3, _) = new_state.slide().unwrap();
+        assert_eq!(output3.unwrap(), 3i64.into());
+        let (output4, _) = new_state.slide().unwrap();
+        assert_eq!(output4.unwrap(), 4i64.into());
+    }
+
+    #[test]
+    fn test_rank_snapshot_restore_roundtrip() {
+        let call = create_call(WindowFuncKind::Rank);
+        let mut state = RankState::<Rank>::new(&call);
+        state.enable_persistence();
+
+        // Add rows with ties
+        state.append(create_state_key(1, 100), SmallVec::new());
+        state.append(create_state_key(2, 101), SmallVec::new());
+        state.append(create_state_key(2, 102), SmallVec::new()); // tie
+
+        // Output rows
+        let (output1, _) = state.slide().unwrap();
+        assert_eq!(output1.unwrap(), 1i64.into());
+        let (output2, _) = state.slide().unwrap();
+        assert_eq!(output2.unwrap(), 2i64.into()); // first in tie group
+        let (output3, _) = state.slide().unwrap();
+        assert_eq!(output3.unwrap(), 2i64.into()); // second in tie group
+
+        // Take snapshot
+        let snapshot = state.snapshot().unwrap();
+
+        // Create new state and restore
+        let mut new_state = RankState::<Rank>::new(&call);
+        new_state.enable_persistence();
+        new_state.restore(snapshot).unwrap();
+
+        // Add more rows
+        new_state.append(create_state_key(3, 103), SmallVec::new());
+
+        // Output should be rank 4 (since 2 items tied at rank 2)
+        let (output4, _) = new_state.slide().unwrap();
+        assert_eq!(output4.unwrap(), 4i64.into());
+    }
+
+    #[test]
+    fn test_dense_rank_snapshot_restore_roundtrip() {
+        let call = create_call(WindowFuncKind::DenseRank);
+        let mut state = RankState::<DenseRank>::new(&call);
+        state.enable_persistence();
+
+        // Add rows with ties
+        state.append(create_state_key(1, 100), SmallVec::new());
+        state.append(create_state_key(2, 101), SmallVec::new());
+        state.append(create_state_key(2, 102), SmallVec::new()); // tie
+
+        // Output rows
+        let (output1, _) = state.slide().unwrap();
+        assert_eq!(output1.unwrap(), 1i64.into());
+        let (output2, _) = state.slide().unwrap();
+        assert_eq!(output2.unwrap(), 2i64.into());
+        let (output3, _) = state.slide().unwrap();
+        assert_eq!(output3.unwrap(), 2i64.into()); // same rank due to tie
+
+        // Take snapshot
+        let snapshot = state.snapshot().unwrap();
+
+        // Create new state and restore
+        let mut new_state = RankState::<DenseRank>::new(&call);
+        new_state.enable_persistence();
+        new_state.restore(snapshot).unwrap();
+
+        // Add more rows
+        new_state.append(create_state_key(3, 103), SmallVec::new());
+
+        // Output should be rank 3 (dense rank increments by 1)
+        let (output4, _) = new_state.slide().unwrap();
+        assert_eq!(output4.unwrap(), 3i64.into());
+    }
+
+    #[test]
+    fn test_recovery_skip_logic() {
+        // Test that slide_no_output correctly skips counting for recovered rows
+        let call = create_call(WindowFuncKind::RowNumber);
+        let mut state = RankState::<RowNumber>::new(&call);
+        state.enable_persistence();
+
+        // Process initial rows
+        state.append(create_state_key(1, 100), SmallVec::new());
+        state.append(create_state_key(2, 101), SmallVec::new());
+        state.append(create_state_key(3, 102), SmallVec::new());
+
+        let (_, _) = state.slide().unwrap();
+        let (_, _) = state.slide().unwrap();
+
+        // Take snapshot after row 2
+        let snapshot = state.snapshot().unwrap();
+        assert_eq!(
+            snapshot.last_output_key.as_ref().unwrap(),
+            &create_state_key(2, 101)
+        );
+
+        // Create new state and restore
+        let mut new_state = RankState::<RowNumber>::new(&call);
+        new_state.enable_persistence();
+        new_state.restore(snapshot).unwrap();
+
+        // Simulate recovery: replay rows from state table
+        // First two rows should be skipped in slide_no_output
+        new_state.append(create_state_key(1, 100), SmallVec::new());
+        new_state.append(create_state_key(2, 101), SmallVec::new());
+        new_state.append(create_state_key(3, 102), SmallVec::new());
+        new_state.append(create_state_key(4, 103), SmallVec::new());
+
+        // Use slide_no_output for recovery (skips counting for rows <= snapshot key)
+        let _ = new_state.slide_no_output().unwrap();
+        let _ = new_state.slide_no_output().unwrap();
+
+        // Now output the remaining rows - should continue correctly
+        let (output3, _) = new_state.slide().unwrap();
+        assert_eq!(output3.unwrap(), 3i64.into());
+        let (output4, _) = new_state.slide().unwrap();
+        assert_eq!(output4.unwrap(), 4i64.into());
+    }
+
+    #[test]
+    fn test_eviction_hint_with_persistence() {
+        let call = create_call(WindowFuncKind::RowNumber);
+
+        // Test without persistence - should return CannotEvict
+        let mut state_no_persist = RankState::<RowNumber>::new(&call);
+        state_no_persist.append(create_state_key(1, 100), SmallVec::new());
+        let (_, evict_hint) = state_no_persist.slide().unwrap();
+        match evict_hint {
+            StateEvictHint::CannotEvict(_) => {}
+            StateEvictHint::CanEvict(_) => panic!("expected CannotEvict without persistence"),
+        }
+
+        // Test with persistence - should return CanEvict
+        let mut state_persist = RankState::<RowNumber>::new(&call);
+        state_persist.enable_persistence();
+        state_persist.append(create_state_key(1, 100), SmallVec::new());
+        let (_, evict_hint) = state_persist.slide().unwrap();
+        match evict_hint {
+            StateEvictHint::CanEvict(keys) => {
+                assert_eq!(keys.len(), 1);
+                assert!(keys.contains(&create_state_key(1, 100)));
+            }
+            StateEvictHint::CannotEvict(_) => panic!("expected CanEvict with persistence"),
+        }
+    }
+
+    #[test]
+    fn test_snapshot_returns_none_without_persistence() {
+        let call = create_call(WindowFuncKind::RowNumber);
+        let mut state = RankState::<RowNumber>::new(&call);
+        // Don't enable persistence
+        state.append(create_state_key(1, 100), SmallVec::new());
+        let (_, _) = state.slide().unwrap();
+
+        // Snapshot should return None
+        assert!(state.snapshot().is_none());
+    }
+
+    #[test]
+    fn test_restore_from_empty_starts_fresh() {
+        // Test that restoring with default state works correctly
+        let call = create_call(WindowFuncKind::RowNumber);
+        let mut state = RankState::<RowNumber>::new(&call);
+        state.enable_persistence();
+
+        // Create a snapshot with default func_state (prev_rank = 0)
+        let default_func_state = RowNumber::default();
+        let snapshot = WindowStateSnapshot {
+            last_output_key: None,
+            payload: default_func_state.encode(),
+        };
+
+        state.restore(snapshot).unwrap();
+
+        // Add rows and verify output starts from 1
+        state.append(create_state_key(1, 100), SmallVec::new());
+        let (output, _) = state.slide().unwrap();
+        assert_eq!(output.unwrap(), 1i64.into());
+    }
+
+    #[test]
+    fn test_corrupted_snapshot_bytes() {
+        // Test that invalid payload produces error
+        let invalid_bytes = vec![0u8, 1, 2]; // Too short for RowNumber
+
+        let result = RowNumber::decode(&invalid_bytes);
+        assert!(result.is_err());
+
+        // Test empty bytes
+        let empty_result = Rank::decode(&[]);
+        assert!(empty_result.is_err());
+
+        let empty_dense_result = DenseRank::decode(&[]);
+        assert!(empty_dense_result.is_err());
     }
 }

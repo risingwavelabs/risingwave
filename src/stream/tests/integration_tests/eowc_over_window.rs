@@ -80,6 +80,96 @@ async fn create_executor<S: StateStore>(
         order_key_index,
         state_table,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
+        rank_state_table: None,
+    });
+    (tx, executor.boxed().execute())
+}
+
+/// Create an executor with rank state table for testing persisted rank functions.
+async fn create_executor_with_rank_table<S: StateStore>(
+    calls: Vec<WindowFuncCall>,
+    store: S,
+) -> (MessageSender, BoxedMessageStream) {
+    let input_schema = Schema::new(vec![
+        Field::unnamed(DataType::Int64),   // order key
+        Field::unnamed(DataType::Varchar), // partition key
+        Field::unnamed(DataType::Int64),   // pk
+        Field::unnamed(DataType::Int32),   // x
+    ]);
+    let input_stream_key = vec![2];
+    let partition_key_indices = vec![1];
+    let order_key_index = 0;
+
+    let table_columns = vec![
+        ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64), // order key
+        ColumnDesc::unnamed(ColumnId::new(1), DataType::Varchar), // partition key
+        ColumnDesc::unnamed(ColumnId::new(2), DataType::Int64), // pk
+        ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32), // x
+    ];
+    let table_pk_indices = vec![1, 0, 2];
+    let table_order_types = vec![
+        OrderType::ascending(),
+        OrderType::ascending(),
+        OrderType::ascending(),
+    ];
+
+    let output_schema = {
+        let mut fields = input_schema.fields.clone();
+        calls.iter().for_each(|call| {
+            fields.push(Field::unnamed(call.return_type.clone()));
+        });
+        Schema { fields }
+    };
+
+    let state_table = StateTable::from_table_catalog_inconsistent_op(
+        &gen_pbtable(
+            TableId::new(1),
+            table_columns,
+            table_order_types,
+            table_pk_indices,
+            0,
+        ),
+        store.clone(),
+        None,
+    )
+    .await;
+
+    // Create rank state table: partition_key (Varchar) + call_index (Int32) + state (Bytea)
+    let rank_table_columns = vec![
+        ColumnDesc::unnamed(ColumnId::new(0), DataType::Varchar), // partition key
+        ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),   // call_index
+        ColumnDesc::unnamed(ColumnId::new(2), DataType::Bytea),   // state
+    ];
+    let rank_table_pk_indices = vec![0, 1];
+    let rank_table_order_types = vec![OrderType::ascending(), OrderType::ascending()];
+
+    let rank_state_table = StateTable::from_table_catalog_inconsistent_op(
+        &gen_pbtable(
+            TableId::new(2),
+            rank_table_columns,
+            rank_table_order_types,
+            rank_table_pk_indices,
+            1, // read_prefix_len_hint = partition key length
+        ),
+        store,
+        None,
+    )
+    .await;
+
+    let (tx, source) = MockSource::channel();
+    let source = source.into_executor(input_schema, input_stream_key.clone());
+    let executor = EowcOverWindowExecutor::new(EowcOverWindowExecutorArgs {
+        actor_ctx: ActorContext::for_test(123),
+
+        input: source,
+
+        schema: output_schema,
+        calls,
+        partition_key_indices,
+        order_key_index,
+        state_table,
+        watermark_epoch: Arc::new(AtomicU64::new(0)),
+        rank_state_table: Some(rank_state_table),
     });
     (tx, executor.boxed().execute())
 }
@@ -240,6 +330,403 @@ async fn test_over_window_aggregate() {
                 | + | 4 | p1 | 102 | 20 | 66 |
                 | + | 2 | p1 | 103 | 30 | 61 |
                 +---+---+----+-----+----+----+
+        "#]],
+        SnapshotOptions::default(),
+    )
+    .await;
+}
+
+/// Test EOWC row_number recovery continuity.
+/// After recovery, ranks should continue from where they left off, not restart from 1.
+#[tokio::test]
+async fn test_over_window_row_number_recovery() {
+    let store = MemoryStateStore::new();
+    let calls = vec![WindowFuncCall {
+        kind: WindowFuncKind::RowNumber,
+        return_type: DataType::Int64,
+        args: AggArgs::default(),
+        ignore_nulls: false,
+        frame: Frame::rows(FrameBound::CurrentRow, FrameBound::CurrentRow),
+    }];
+
+    check_with_script(
+        || create_executor_with_rank_table(calls.clone(), store.clone()),
+        r###"
+- !barrier 1
+- !chunk |2
+      I T  I   i
+    + 1 p1 100 10
+    + 2 p1 101 20
+    + 3 p1 102 30
+- !barrier 2
+- recovery
+- !barrier 2
+- !chunk |2
+      I T  I   i
+    + 4 p1 103 40
+    + 5 p1 104 50
+- !barrier 3
+"###,
+        expect![[r#"
+            - input: !barrier 1
+              output:
+              - !barrier 1
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 1 | p1 | 100 | 10 |
+                | + | 2 | p1 | 101 | 20 |
+                | + | 3 | p1 | 102 | 30 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+
+                | + | 1 | p1 | 100 | 10 | 1 |
+                | + | 2 | p1 | 101 | 20 | 2 |
+                | + | 3 | p1 | 102 | 30 | 3 |
+                +---+---+----+-----+----+---+
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: recovery
+              output: []
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 4 | p1 | 103 | 40 |
+                | + | 5 | p1 | 104 | 50 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+
+                | + | 4 | p1 | 103 | 40 | 4 |
+                | + | 5 | p1 | 104 | 50 | 5 |
+                +---+---+----+-----+----+---+
+            - input: !barrier 3
+              output:
+              - !barrier 3
+        "#]],
+        SnapshotOptions::default(),
+    )
+    .await;
+}
+
+/// Test EOWC with multiple numbering functions (row_number + rank) in one executor.
+/// Each function should have its own separate snapshot.
+#[tokio::test]
+async fn test_over_window_multiple_numbering_functions() {
+    let store = MemoryStateStore::new();
+    let calls = vec![
+        // row_number()
+        WindowFuncCall {
+            kind: WindowFuncKind::RowNumber,
+            return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::CurrentRow, FrameBound::CurrentRow),
+        },
+        // rank()
+        WindowFuncCall {
+            kind: WindowFuncKind::Rank,
+            return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::CurrentRow, FrameBound::CurrentRow),
+        },
+    ];
+
+    check_with_script(
+        || create_executor_with_rank_table(calls.clone(), store.clone()),
+        r###"
+- !barrier 1
+- !chunk |2
+      I T  I   i
+    + 1 p1 100 10
+    + 1 p1 101 20
+    + 2 p1 102 30
+- !barrier 2
+- recovery
+- !barrier 2
+- !chunk |2
+      I T  I   i
+    + 3 p1 103 40
+    + 3 p1 104 50
+- !barrier 3
+"###,
+        expect![[r#"
+            - input: !barrier 1
+              output:
+              - !barrier 1
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 1 | p1 | 100 | 10 |
+                | + | 1 | p1 | 101 | 20 |
+                | + | 2 | p1 | 102 | 30 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+---+
+                | + | 1 | p1 | 100 | 10 | 1 | 1 |
+                | + | 1 | p1 | 101 | 20 | 2 | 1 |
+                | + | 2 | p1 | 102 | 30 | 3 | 3 |
+                +---+---+----+-----+----+---+---+
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: recovery
+              output: []
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 3 | p1 | 103 | 40 |
+                | + | 3 | p1 | 104 | 50 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+---+
+                | + | 3 | p1 | 103 | 40 | 4 | 4 |
+                | + | 3 | p1 | 104 | 50 | 5 | 4 |
+                +---+---+----+-----+----+---+---+
+            - input: !barrier 3
+              output:
+              - !barrier 3
+        "#]],
+        SnapshotOptions::default(),
+    )
+    .await;
+}
+
+/// Test EOWC with interleaved partitions in one chunk.
+/// Per-partition snapshots should remain isolated.
+#[tokio::test]
+async fn test_over_window_interleaved_partitions() {
+    let store = MemoryStateStore::new();
+    let calls = vec![WindowFuncCall {
+        kind: WindowFuncKind::RowNumber,
+        return_type: DataType::Int64,
+        args: AggArgs::default(),
+        ignore_nulls: false,
+        frame: Frame::rows(FrameBound::CurrentRow, FrameBound::CurrentRow),
+    }];
+
+    check_with_script(
+        || create_executor_with_rank_table(calls.clone(), store.clone()),
+        r###"
+- !barrier 1
+- !chunk |2
+      I T  I   i
+    + 1 p1 100 10
+    + 1 p2 200 20
+    + 2 p1 101 11
+    + 2 p2 201 21
+- !barrier 2
+- recovery
+- !barrier 2
+- !chunk |2
+      I T  I   i
+    + 3 p1 102 12
+    + 3 p2 202 22
+- !barrier 3
+"###,
+        expect![[r#"
+            - input: !barrier 1
+              output:
+              - !barrier 1
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 1 | p1 | 100 | 10 |
+                | + | 1 | p2 | 200 | 20 |
+                | + | 2 | p1 | 101 | 11 |
+                | + | 2 | p2 | 201 | 21 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+
+                | + | 1 | p1 | 100 | 10 | 1 |
+                | + | 1 | p2 | 200 | 20 | 1 |
+                | + | 2 | p1 | 101 | 11 | 2 |
+                | + | 2 | p2 | 201 | 21 | 2 |
+                +---+---+----+-----+----+---+
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: recovery
+              output: []
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 3 | p1 | 102 | 12 |
+                | + | 3 | p2 | 202 | 22 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+
+                | + | 3 | p1 | 102 | 12 | 3 |
+                | + | 3 | p2 | 202 | 22 | 3 |
+                +---+---+----+-----+----+---+
+            - input: !barrier 3
+              output:
+              - !barrier 3
+        "#]],
+        SnapshotOptions::default(),
+    )
+    .await;
+}
+
+/// Test EOWC with mixed numbering + aggregate windows.
+/// Eviction hints should be merged correctly.
+#[tokio::test]
+async fn test_over_window_mixed_numbering_and_aggregate() {
+    let store = MemoryStateStore::new();
+    let calls = vec![
+        // row_number()
+        WindowFuncCall {
+            kind: WindowFuncKind::RowNumber,
+            return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::CurrentRow, FrameBound::CurrentRow),
+        },
+        // sum(x) ROWS BETWEEN 1 PRECEDING AND CURRENT ROW
+        WindowFuncCall {
+            kind: WindowFuncKind::Aggregate(PbAggKind::Sum.into()),
+            return_type: DataType::Int64,
+            args: AggArgs::from_iter([(DataType::Int32, 3)]),
+            ignore_nulls: false,
+            frame: Frame::rows(FrameBound::Preceding(1), FrameBound::CurrentRow),
+        },
+    ];
+
+    check_with_script(
+        || create_executor_with_rank_table(calls.clone(), store.clone()),
+        r###"
+- !barrier 1
+- !chunk |2
+      I T  I   i
+    + 1 p1 100 10
+    + 2 p1 101 20
+    + 3 p1 102 30
+- !barrier 2
+- recovery
+- !barrier 2
+- !chunk |2
+      I T  I   i
+    + 4 p1 103 40
+- !barrier 3
+"###,
+        expect![[r#"
+            - input: !barrier 1
+              output:
+              - !barrier 1
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 1 | p1 | 100 | 10 |
+                | + | 2 | p1 | 101 | 20 |
+                | + | 3 | p1 | 102 | 30 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+----+
+                | + | 1 | p1 | 100 | 10 | 1 | 10 |
+                | + | 2 | p1 | 101 | 20 | 2 | 30 |
+                | + | 3 | p1 | 102 | 30 | 3 | 50 |
+                +---+---+----+-----+----+---+----+
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: recovery
+              output: []
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 4 | p1 | 103 | 40 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+----+
+                | + | 4 | p1 | 103 | 40 | 4 | 70 |
+                +---+---+----+-----+----+---+----+
+            - input: !barrier 3
+              output:
+              - !barrier 3
+        "#]],
+        SnapshotOptions::default(),
+    )
+    .await;
+}
+
+/// Test EOWC without rank_state_table behaves exactly as before (legacy compatibility).
+/// Eviction hint should be CannotEvict when rank_state_table is absent.
+#[tokio::test]
+async fn test_over_window_legacy_without_rank_table() {
+    let store = MemoryStateStore::new();
+    // Use row_number without rank state table (legacy mode)
+    let calls = vec![WindowFuncCall {
+        kind: WindowFuncKind::RowNumber,
+        return_type: DataType::Int64,
+        args: AggArgs::default(),
+        ignore_nulls: false,
+        frame: Frame::rows(FrameBound::CurrentRow, FrameBound::CurrentRow),
+    }];
+
+    check_with_script(
+        || create_executor(calls.clone(), store.clone()),
+        r###"
+- !barrier 1
+- !chunk |2
+      I T  I   i
+    + 1 p1 100 10
+    + 2 p1 101 20
+- !barrier 2
+- recovery
+- !barrier 2
+- !chunk |2
+      I T  I   i
+    + 3 p1 102 30
+- !barrier 3
+"###,
+        expect![[r#"
+            - input: !barrier 1
+              output:
+              - !barrier 1
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 1 | p1 | 100 | 10 |
+                | + | 2 | p1 | 101 | 20 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+
+                | + | 1 | p1 | 100 | 10 | 1 |
+                | + | 2 | p1 | 101 | 20 | 2 |
+                +---+---+----+-----+----+---+
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: recovery
+              output: []
+            - input: !barrier 2
+              output:
+              - !barrier 2
+            - input: !chunk |-
+                +---+---+----+-----+----+
+                | + | 3 | p1 | 102 | 30 |
+                +---+---+----+-----+----+
+              output:
+              - !chunk |-
+                +---+---+----+-----+----+---+
+                | + | 3 | p1 | 102 | 30 | 3 |
+                +---+---+----+-----+----+---+
+            - input: !barrier 3
+              output:
+              - !barrier 3
         "#]],
         SnapshotOptions::default(),
     )
