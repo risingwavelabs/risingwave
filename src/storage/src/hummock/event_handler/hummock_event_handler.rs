@@ -27,6 +27,7 @@ use parking_lot::RwLock;
 use prometheus::{Histogram, IntGauge};
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::Role;
+use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::metrics::UintGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -198,6 +199,7 @@ pub struct HummockEventHandler {
     hummock_event_tx: HummockEventSender,
     hummock_event_rx: HummockEventReceiver,
     version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
+    cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
     local_read_version_mapping: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
@@ -257,6 +259,7 @@ impl HummockEventHandler {
         Self::new_inner(
             role,
             version_update_rx,
+            cache_refill_policy_rx,
             compactor_context.sstable_store.clone(),
             state_store_metrics,
             CacheRefillConfig::from_storage_opts(&compactor_context.storage_opts),
@@ -313,6 +316,7 @@ impl HummockEventHandler {
     fn new_inner(
         role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
+        cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         refill_config: CacheRefillConfig,
@@ -346,12 +350,19 @@ impl HummockEventHandler {
             spawn_upload_task,
             buffer_tracker,
         );
-        let refiller = CacheRefiller::new(role, refill_config, sstable_store, spawn_refill_task);
+        let refiller = CacheRefiller::new(
+            role,
+            refill_config,
+            sstable_store,
+            spawn_refill_task,
+            read_version_mapping.clone(),
+        );
 
         Self {
             hummock_event_tx,
             hummock_event_rx,
             version_update_rx,
+            cache_refill_policy_rx,
             version_update_notifier_tx,
             recent_versions: Arc::new(ArcSwap::from_pointee(recent_versions)),
             read_version_mapping,
@@ -648,6 +659,14 @@ impl HummockEventHandler {
                     };
                     self.handle_version_update(version_update);
                 }
+                cache_refill_policies = pin!(self.cache_refill_policy_rx.recv()) => {
+                    let Some(policies) = cache_refill_policies else {
+                        warn!("cache refill policy stream ends. event handle shutdown");
+                        return;
+                    };
+                    let policies = policies.policies.into_iter().map(|policy| (TableId::from(policy.table_id), CacheRefillPolicy::from_protobuf(policy.get_policy().unwrap()))).collect::<HashMap<_, _>>();
+                    self.refiller.update_table_cache_refill_policies(policies);
+                }
             }
         }
     }
@@ -941,6 +960,7 @@ mod tests {
         );
 
         let (_version_update_tx, version_update_rx) = unbounded_channel();
+        let (_cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
 
         let epoch1 = epoch0.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -953,6 +973,7 @@ mod tests {
         let event_handler = HummockEventHandler::new_inner(
             Role::None,
             version_update_rx,
+            cache_refill_policy_rx,
             mock_sstable_store().await,
             metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),
@@ -1105,6 +1126,7 @@ mod tests {
         );
 
         let (_version_update_tx, version_update_rx) = unbounded_channel();
+        let (_cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
 
         let epoch1 = epoch0.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -1134,6 +1156,7 @@ mod tests {
         let event_handler = HummockEventHandler::new_inner(
             Role::None,
             version_update_rx,
+            cache_refill_policy_rx,
             mock_sstable_store().await,
             metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),

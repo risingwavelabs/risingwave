@@ -23,20 +23,25 @@ use foyer::{HybridCacheEntry, RangeBoundsExt};
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
+use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
+use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
+use risingwave_pb::id::TableId;
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
+use crate::hummock::event_handler::ReadVersionMappingType;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{
     Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
@@ -250,6 +255,11 @@ pub(crate) struct CacheRefiller {
     context: CacheRefillContext,
 
     spawn_refill_task: SpawnRefillTask,
+
+    role: Role,
+    table_cache_refill_policies: HashMap<TableId, CacheRefillPolicy>,
+    table_cache_refill_vnodes: HashMap<TableId, Arc<Bitmap>>,
+    read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
 }
 
 impl CacheRefiller {
@@ -258,6 +268,7 @@ impl CacheRefiller {
         config: CacheRefillConfig,
         sstable_store: SstableStoreRef,
         spawn_refill_task: SpawnRefillTask,
+        read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
@@ -269,6 +280,10 @@ impl CacheRefiller {
                 sstable_store,
             },
             spawn_refill_task,
+            role,
+            table_cache_refill_policies: HashMap::new(),
+            table_cache_refill_vnodes: HashMap::new(),
+            read_version_mapping,
         }
     }
 
@@ -302,6 +317,62 @@ impl CacheRefiller {
 
     pub(crate) fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
         self.queue.back().map(|item| &item.event.new_pinned_version)
+    }
+
+    pub(crate) fn update_table_cache_refill_policies(
+        &mut self,
+        policies: HashMap<TableId, CacheRefillPolicy>,
+    ) {
+        for (table_id, policy) in policies {
+            if policy == CacheRefillPolicy::Default {
+                self.table_cache_refill_policies.remove(&table_id);
+            } else {
+                self.table_cache_refill_policies.insert(table_id, policy);
+            }
+            self.update_table_cache_refill_vnodes(table_id);
+        }
+    }
+
+    pub(crate) fn update_table_cache_refill_vnodes(&mut self, table_id: TableId) {
+        let policy = self
+            .table_cache_refill_policies
+            .get(&table_id)
+            .copied()
+            .unwrap_or_default();
+        match policy {
+            CacheRefillPolicy::Default => {
+                self.table_cache_refill_vnodes.remove(&table_id);
+            }
+            CacheRefillPolicy::Streaming => {
+                self.update_table_cache_refill_vnodes_for_streaming(table_id);
+            }
+            CacheRefillPolicy::Serving => {
+                self.update_table_cache_refill_vnodes_for_serving(table_id);
+            }
+            CacheRefillPolicy::Both => {
+                self.update_table_cache_refill_vnodes_for_streaming(table_id);
+                self.update_table_cache_refill_vnodes_for_serving(table_id);
+            }
+        }
+    }
+
+    fn update_table_cache_refill_vnodes_for_streaming(&mut self, table_id: TableId) {
+        if !self.role.for_streaming() {
+            return;
+        }
+        if let Some(mapping) = self.read_version_mapping.read().get(&table_id) {
+            for (_instance_id, read_version) in mapping {
+                let vnodes = read_version.read().vnodes();
+                self.table_cache_refill_vnodes.insert(table_id, vnodes);
+            }
+        }
+    }
+
+    fn update_table_cache_refill_vnodes_for_serving(&mut self, table_id: TableId) {
+        if !self.role.for_serving() {
+            return;
+        }
+        // TODO: add serving vnodes update
     }
 }
 
