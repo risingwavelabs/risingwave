@@ -1605,56 +1605,65 @@ pub async fn create_iceberg_engine_table(
                             )
                         })?;
                     let meta_store_backend = meta_store_endpoint.scheme().to_owned();
-                    let meta_store_user = meta_store_endpoint.username().to_owned();
-                    let meta_store_password = match meta_store_endpoint.password() {
-                        Some(password) => percent_decode_str(password)
-                            .decode_utf8()
-                            .map_err(|_| {
-                                ErrorCode::InternalError(
-                                    "failed to parse password from meta store endpoint".to_owned(),
-                                )
-                            })?
-                            .into_owned(),
-                        None => "".to_owned(),
-                    };
-                    let meta_store_host = meta_store_endpoint
-                        .host_str()
-                        .ok_or_else(|| {
-                            ErrorCode::InternalError(
-                                "failed to parse host from meta store endpoint".to_owned(),
-                            )
-                        })?
-                        .to_owned();
-                    let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
-                        ErrorCode::InternalError(
-                            "failed to parse port from meta store endpoint".to_owned(),
-                        )
-                    })?;
-                    let meta_store_database = meta_store_endpoint
-                        .path()
-                        .trim_start_matches('/')
-                        .to_owned();
-
                     let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
                         bail!("failed to parse meta backend: {}", meta_store_backend);
                     };
 
                     let catalog_uri = match meta_backend {
-                        MetaBackend::Postgres => {
-                            format!(
-                                "jdbc:postgresql://{}:{}/{}",
-                                meta_store_host, meta_store_port, meta_store_database
-                            )
-                        }
-                        MetaBackend::Mysql => {
-                            format!(
-                                "jdbc:mysql://{}:{}/{}",
-                                meta_store_host, meta_store_port, meta_store_database
-                            )
+                        MetaBackend::Postgres | MetaBackend::Mysql => {
+                            let meta_store_user = meta_store_endpoint.username().to_owned();
+                            let meta_store_password = match meta_store_endpoint.password() {
+                                Some(password) => percent_decode_str(password)
+                                    .decode_utf8()
+                                    .map_err(|_| {
+                                        ErrorCode::InternalError(
+                                            "failed to parse password from meta store endpoint"
+                                                .to_owned(),
+                                        )
+                                    })?
+                                    .into_owned(),
+                                None => "".to_owned(),
+                            };
+                            let meta_store_host = meta_store_endpoint
+                                .host_str()
+                                .ok_or_else(|| {
+                                    ErrorCode::InternalError(
+                                        "failed to parse host from meta store endpoint".to_owned(),
+                                    )
+                                })?
+                                .to_owned();
+                            let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
+                                ErrorCode::InternalError(
+                                    "failed to parse port from meta store endpoint".to_owned(),
+                                )
+                            })?;
+                            let meta_store_database = meta_store_endpoint
+                                .path()
+                                .trim_start_matches('/')
+                                .to_owned();
+
+                            let uri = match meta_backend {
+                                MetaBackend::Postgres => format!(
+                                    "jdbc:postgresql://{}:{}/{}",
+                                    meta_store_host, meta_store_port, meta_store_database
+                                ),
+                                MetaBackend::Mysql => format!(
+                                    "jdbc:mysql://{}:{}/{}",
+                                    meta_store_host, meta_store_port, meta_store_database
+                                ),
+                                _ => unreachable!("handled by outer match"),
+                            };
+
+                            with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user);
+                            with_common
+                                .insert("catalog.jdbc.password".to_owned(), meta_store_password);
+                            uri
                         }
                         MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
                             bail!(
-                                "Unsupported meta backend for iceberg engine table: {}",
+                                "Unsupported meta backend for iceberg engine hosted catalog: {}. \
+The hosted catalog requires a SQL meta store with network address (e.g. Postgres/MySQL). \
+If you are running with sqlite meta store, please switch to Postgres/MySQL, or set `hosted_catalog=false` and use an external Iceberg catalog.",
                                 meta_store_backend
                             );
                         }
@@ -1662,8 +1671,6 @@ pub async fn create_iceberg_engine_table(
 
                     with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
                     with_common.insert("catalog.uri".to_owned(), catalog_uri);
-                    with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user);
-                    with_common.insert("catalog.jdbc.password".to_owned(), meta_store_password);
                     with_common.insert("catalog.name".to_owned(), iceberg_catalog_name);
                 }
 
