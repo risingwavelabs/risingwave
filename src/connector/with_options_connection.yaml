@@ -154,7 +154,7 @@ IcebergConnection:
     comments: |-
       Security type for REST catalog authentication.
       Supported values: `none`, `oauth2`, `google`.
-      When set to `google`, uses Iceberg's GoogleAuthManager (requires Iceberg 1.10+)
+      When set to `google`, uses Iceberg's `GoogleAuthManager` (requires Iceberg 1.10+)
       for authentication using Google Application Default Credentials (ADC).
     required: false
   - name: gcp.credentials.path
@@ -166,10 +166,10 @@ IcebergConnection:
   - name: gcp.auth.scopes
     field_type: String
     comments: |-
-      OAuth scopes for Google authentication.
-      Comma-separated list of OAuth scopes to request.
+      OAuth-based scopes for Google authentication.
+      Comma-separated list of OAuth-based scopes to request.
       Only applicable when `catalog.security` is set to `google`.
-      Default: https://www.googleapis.com/auth/cloud-platform
+      Default: <https://www.googleapis.com/auth/cloud-platform>
     required: false
   - name: catalog.jdbc.user
     field_type: String
