@@ -32,7 +32,8 @@ use risingwave_pb::catalog::{
     PbSchema, PbSecret, PbSink, PbSinkType, PbSource, PbStreamJobStatus, PbSubscription, PbTable,
     PbView,
 };
-use sea_orm::{ConnectOptions, DatabaseConnection, DbBackend, ModelTrait};
+use sea_orm::{ConnectOptions, ConnectionTrait, DatabaseConnection, DbBackend, ModelTrait};
+use tracing::log::LevelFilter;
 
 use crate::{MetaError, MetaResult, MetaStoreBackend};
 
@@ -68,7 +69,47 @@ impl SqlMetaStore {
     /// Connect to the SQL meta store based on the given configuration.
     pub async fn connect(backend: MetaStoreBackend) -> MetaResult<Self> {
         const MAX_DURATION: Duration = Duration::new(u64::MAX / 4, 0);
-        const SQLX_SLOW_LOG_THRESHOLD: Duration = Duration::from_millis(500);
+        const SQLX_SLOW_LOG_THRESHOLD: Duration = Duration::from_millis(200);
+
+        fn parse_log_level(value: &str) -> Option<LevelFilter> {
+            match value.trim().to_ascii_lowercase().as_str() {
+                "off" => Some(LevelFilter::Off),
+                "error" => Some(LevelFilter::Error),
+                "warn" => Some(LevelFilter::Warn),
+                "info" => Some(LevelFilter::Info),
+                "debug" => Some(LevelFilter::Debug),
+                "trace" => Some(LevelFilter::Trace),
+                _ => None,
+            }
+        }
+
+        fn detect_sqlx_statement_log_level() -> Option<LevelFilter> {
+            if let Ok(level) = std::env::var("RW_META_SQLX_STATEMENT_LOG_LEVEL") {
+                return parse_log_level(&level);
+            }
+
+            let Ok(rust_log) = std::env::var("RUST_LOG") else {
+                return None;
+            };
+            if rust_log.contains("sqlx::query=trace") || rust_log.contains("sqlx=trace") {
+                return Some(LevelFilter::Trace);
+            }
+            if rust_log.contains("sqlx::query=debug") || rust_log.contains("sqlx=debug") {
+                return Some(LevelFilter::Debug);
+            }
+            if rust_log.contains("sqlx::query=info") || rust_log.contains("sqlx=info") {
+                return Some(LevelFilter::Info);
+            }
+            if rust_log.contains("sqlx::query=warn") || rust_log.contains("sqlx=warn") {
+                return Some(LevelFilter::Warn);
+            }
+            if rust_log.contains("sqlx::query=error") || rust_log.contains("sqlx=error") {
+                return Some(LevelFilter::Error);
+            }
+            None
+        }
+
+        let statement_log_level = detect_sqlx_statement_log_level();
 
         #[easy_ext::ext]
         impl ConnectOptions {
@@ -86,16 +127,20 @@ impl SqlMetaStore {
                     .connect_timeout(MAX_DURATION)
             }
 
-            fn enable_sqlx_slow_query_log(&mut self) -> &mut Self {
+            fn enable_sqlx_slow_query_log(
+                &mut self,
+                statement_log_level: Option<LevelFilter>,
+            ) -> &mut Self {
                 self.sqlx_logging(true)
+                    .sqlx_logging_level(statement_log_level.unwrap_or(LevelFilter::Info))
                     .sqlx_slow_statements_logging_settings(
-                        tracing::log::LevelFilter::Warn,
+                        LevelFilter::Warn,
                         SQLX_SLOW_LOG_THRESHOLD,
                     )
             }
         }
 
-        Ok(match backend {
+        let meta_store = match backend {
             MetaStoreBackend::Mem => {
                 const IN_MEMORY_STORE: &str = "sqlite::memory:";
 
@@ -103,7 +148,7 @@ impl SqlMetaStore {
 
                 options
                     .sqlite_common()
-                    .enable_sqlx_slow_query_log()
+                    .enable_sqlx_slow_query_log(statement_log_level)
                     // Releasing the connection to in-memory SQLite database is unacceptable
                     // because it will clear the database. Set a large enough timeout to prevent it.
                     // `sqlx` actually supports disabling these timeouts by passing a `None`, but
@@ -111,6 +156,12 @@ impl SqlMetaStore {
                     .idle_timeout(MAX_DURATION)
                     .max_lifetime(MAX_DURATION);
 
+                if let Some(level) = statement_log_level {
+                    tracing::info!(
+                        ?level,
+                        "SQLx statement logging enabled for in-memory sqlite"
+                    );
+                }
                 let conn = sea_orm::Database::connect(options).await?;
                 Self {
                     conn,
@@ -134,12 +185,21 @@ impl SqlMetaStore {
                     }
                     options.sqlite_common();
                 }
-                options.enable_sqlx_slow_query_log();
+                options.enable_sqlx_slow_query_log(statement_log_level);
 
+                if let Some(level) = statement_log_level {
+                    tracing::info!(?level, "SQLx statement logging enabled");
+                }
                 let conn = sea_orm::Database::connect(options).await?;
                 Self { conn, endpoint }
             }
-        })
+        };
+
+        if meta_store.conn.get_database_backend() == DbBackend::Sqlite {
+            apply_sqlite_pragmas(&meta_store).await;
+        }
+
+        Ok(meta_store)
     }
 
     #[cfg(any(test, feature = "test"))]
@@ -179,6 +239,45 @@ impl SqlMetaStore {
             .context("failed to upgrade models in meta store")?;
 
         Ok(cluster_first_launch)
+    }
+}
+
+async fn apply_sqlite_pragmas(meta_store: &SqlMetaStore) {
+    let endpoint = meta_store.endpoint.as_str();
+    let is_in_memory = endpoint.contains(":memory:") || endpoint.contains("mode=memory");
+
+    let busy_timeout_ms = std::env::var("RW_META_SQLITE_BUSY_TIMEOUT_MS")
+        .ok()
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(5000);
+    if busy_timeout_ms > 0 {
+        let sql = format!("PRAGMA busy_timeout = {}", busy_timeout_ms);
+        if let Err(err) = meta_store.conn.execute_unprepared(&sql).await {
+            tracing::warn!(
+                error = %err,
+                busy_timeout_ms,
+                "Failed to apply sqlite busy_timeout pragma"
+            );
+        } else {
+            tracing::info!(busy_timeout_ms, "Applied sqlite busy_timeout pragma");
+        }
+    }
+
+    if !is_in_memory {
+        let journal_mode =
+            std::env::var("RW_META_SQLITE_JOURNAL_MODE").unwrap_or_else(|_| "WAL".to_string());
+        if !journal_mode.trim().is_empty() {
+            let sql = format!("PRAGMA journal_mode = {}", journal_mode);
+            if let Err(err) = meta_store.conn.execute_unprepared(&sql).await {
+                tracing::warn!(
+                    error = %err,
+                    journal_mode,
+                    "Failed to apply sqlite journal_mode pragma"
+                );
+            } else {
+                tracing::info!(journal_mode, "Applied sqlite journal_mode pragma");
+            }
+        }
     }
 }
 

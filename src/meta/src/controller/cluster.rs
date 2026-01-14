@@ -95,6 +95,15 @@ impl From<WorkerInfo> for PbWorkerNode {
 }
 
 impl ClusterController {
+    fn write_lock_warn_threshold() -> Duration {
+        const DEFAULT_WARN_MS: u64 = 200;
+        std::env::var("RW_META_CLUSTER_WRITE_LOCK_WARN_MS")
+            .ok()
+            .and_then(|value| value.parse::<u64>().ok())
+            .map(Duration::from_millis)
+            .unwrap_or(Duration::from_millis(DEFAULT_WARN_MS))
+    }
+
     pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
         let inner = ClusterControllerInner::new(
             env.meta_store_ref().conn.clone(),
@@ -150,10 +159,9 @@ impl ClusterController {
         property: AddNodeProperty,
         resource: PbResource,
     ) -> MetaResult<WorkerId> {
-        let worker_id = self
-            .inner
-            .write()
-            .await
+        let mut inner = self.inner.write().await;
+        let hold_start = Instant::now();
+        let worker_id = inner
             .add_worker(
                 r#type,
                 host_address,
@@ -162,6 +170,11 @@ impl ClusterController {
                 self.max_heartbeat_interval,
             )
             .await?;
+        let held = hold_start.elapsed();
+        if held > Self::write_lock_warn_threshold() {
+            tracing::warn!(op = "add_worker", ?held, "cluster write lock held too long");
+        }
+        drop(inner);
 
         // Keep license manager in sync with the latest cluster resource.
         self.update_cluster_resource_for_license().await?;
@@ -171,7 +184,17 @@ impl ClusterController {
 
     pub async fn activate_worker(&self, worker_id: WorkerId) -> MetaResult<()> {
         let inner = self.inner.write().await;
+        let hold_start = Instant::now();
         let worker = inner.activate_worker(worker_id).await?;
+        let held = hold_start.elapsed();
+        if held > Self::write_lock_warn_threshold() {
+            tracing::warn!(
+                op = "activate_worker",
+                ?held,
+                "cluster write lock held too long"
+            );
+        }
+        drop(inner);
 
         // Notify frontends of new compute node and frontend node.
         // Always notify because a running worker's property may have been changed.
@@ -190,7 +213,18 @@ impl ClusterController {
     }
 
     pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
-        let worker = self.inner.write().await.delete_worker(host_address).await?;
+        let mut inner = self.inner.write().await;
+        let hold_start = Instant::now();
+        let worker = inner.delete_worker(host_address).await?;
+        let held = hold_start.elapsed();
+        if held > Self::write_lock_warn_threshold() {
+            tracing::warn!(
+                op = "delete_worker",
+                ?held,
+                "cluster write lock held too long"
+            );
+        }
+        drop(inner);
 
         if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
         {
@@ -213,6 +247,26 @@ impl ClusterController {
         Ok(worker)
     }
 
+    pub async fn update_schedulability(
+        &self,
+        worker_ids: Vec<WorkerId>,
+        schedulability: Schedulability,
+    ) -> MetaResult<()> {
+        let inner = self.inner.write().await;
+        let hold_start = Instant::now();
+        let result = inner
+            .update_schedulability(worker_ids, schedulability)
+            .await;
+        let held = hold_start.elapsed();
+        if held > Self::write_lock_warn_threshold() {
+            tracing::warn!(
+                op = "update_schedulability",
+                ?held,
+                "cluster write lock held too long"
+            );
+        }
+        result
+    }
     /// Invoked when it receives a heartbeat from a worker node.
     pub async fn heartbeat(
         &self,
@@ -231,7 +285,18 @@ impl ClusterController {
                 "heartbeat wait for cluster write lock is slow"
             );
         }
-        inner.heartbeat(worker_id, self.max_heartbeat_interval, resource)
+        let hold_start = Instant::now();
+        let result = inner.heartbeat(worker_id, self.max_heartbeat_interval, resource);
+        let held = hold_start.elapsed();
+        if held > Self::write_lock_warn_threshold() {
+            tracing::warn!(
+                op = "heartbeat",
+                %worker_id,
+                ?held,
+                "cluster write lock held too long"
+            );
+        }
+        result
     }
 
     pub fn start_heartbeat_checker(
@@ -254,6 +319,7 @@ impl ClusterController {
                 }
 
                 let mut inner = cluster_controller.inner.write().await;
+                let hold_start = Instant::now();
                 // 1. Initialize new workers' TTL.
                 for worker in inner
                     .worker_extra_info
@@ -290,6 +356,14 @@ impl ClusterController {
                         continue;
                     }
                 };
+                let held = hold_start.elapsed();
+                if held > ClusterController::write_lock_warn_threshold() {
+                    tracing::warn!(
+                        op = "heartbeat_checker",
+                        ?held,
+                        "cluster write lock held too long"
+                    );
+                }
                 drop(inner);
 
                 for (worker_id, worker_type, host, port) in worker_infos {
