@@ -22,10 +22,10 @@ services:
                     --advertise-addr 0.0.0.0:5688 \
                     --async-stack-trace verbose \
                     --parallelism 8 \
-                    --total-memory-bytes 10737418240 \
+                    --total-memory-bytes 21474836480 \
                     --role both \
                     --meta-address http://0.0.0.0:5690 \
-                    --memory-manager-target-bytes 10522669875 \" \
+                    --memory-manager-target-bytes 22333829939 \" \
                  --frontend-opts=\" \
                    --config-path /risingwave.toml \
                    --listen-addr 0.0.0.0:4566 \
@@ -33,13 +33,13 @@ services:
                    --prometheus-listener-addr 0.0.0.0:1250 \
                    --health-check-listener-addr 0.0.0.0:6786 \
                    --meta-addr http://0.0.0.0:5690 \
-                   --frontend-total-memory-bytes=2147483648\" \
+                   --frontend-total-memory-bytes=4294967296\" \
                  --compactor-opts=\" \
                    --listen-addr 0.0.0.0:6660 \
                    --prometheus-listener-addr 0.0.0.0:1250 \
                    --advertise-addr 0.0.0.0:6660 \
                    --meta-address http://0.0.0.0:5690 \
-                   --compactor-total-memory-bytes=2147483648\""
+                   --compactor-total-memory-bytes=4294967296\""
     expose:
       - "6660"
       - "4566"
@@ -76,9 +76,9 @@ services:
     deploy:
       resources:
         limits:
-          memory: 14G
+          memory: 28G
         reservations:
-          memory: 14G
+          memory: 28G
 
   grafana-0:
     image: "grafana/grafana-oss:latest"
