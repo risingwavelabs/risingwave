@@ -137,7 +137,7 @@ impl CatalogController {
             specific_resource_group: Set(specific_resource_group),
             is_serverless_backfill: Set(is_serverless_backfill),
         };
-        job.insert(txn).await?;
+        StreamingJobModel::insert(job).exec(txn).await?;
 
         Ok(job_id)
     }
