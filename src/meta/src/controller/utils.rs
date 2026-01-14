@@ -1321,31 +1321,35 @@ pub async fn insert_fragment_relations(
     db: &impl ConnectionTrait,
     downstream_fragment_relations: &FragmentDownstreamRelation,
 ) -> MetaResult<()> {
+    let mut relations = Vec::new();
     for (upstream_fragment_id, downstreams) in downstream_fragment_relations {
         for downstream in downstreams {
-            let relation = fragment_relation::Model {
-                source_fragment_id: *upstream_fragment_id as _,
-                target_fragment_id: downstream.downstream_fragment_id as _,
-                dispatcher_type: downstream.dispatcher_type,
-                dist_key_indices: downstream
-                    .dist_key_indices
-                    .iter()
-                    .map(|idx| *idx as i32)
-                    .collect_vec()
-                    .into(),
-                output_indices: downstream
-                    .output_mapping
-                    .indices
-                    .iter()
-                    .map(|idx| *idx as i32)
-                    .collect_vec()
-                    .into(),
-                output_type_mapping: Some(downstream.output_mapping.types.clone().into()),
-            };
-            FragmentRelation::insert(relation.into_active_model())
-                .exec(db)
-                .await?;
+            relations.push(
+                fragment_relation::Model {
+                    source_fragment_id: *upstream_fragment_id as _,
+                    target_fragment_id: downstream.downstream_fragment_id as _,
+                    dispatcher_type: downstream.dispatcher_type,
+                    dist_key_indices: downstream
+                        .dist_key_indices
+                        .iter()
+                        .map(|idx| *idx as i32)
+                        .collect_vec()
+                        .into(),
+                    output_indices: downstream
+                        .output_mapping
+                        .indices
+                        .iter()
+                        .map(|idx| *idx as i32)
+                        .collect_vec()
+                        .into(),
+                    output_type_mapping: Some(downstream.output_mapping.types.clone().into()),
+                }
+                .into_active_model(),
+            );
         }
+    }
+    if !relations.is_empty() {
+        FragmentRelation::insert_many(relations).exec(db).await?;
     }
     Ok(())
 }

@@ -130,7 +130,7 @@ impl CatalogController {
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
         };
-        job.insert(txn).await?;
+        StreamingJobModel::insert(job).exec(txn).await?;
 
         Ok(job_id)
     }
@@ -505,23 +505,38 @@ impl CatalogController {
         ensure_job_not_canceled(job_id, &txn).await?;
         let ensure_job_elapsed = ensure_job_start.elapsed();
 
+        let all_tables = if for_replace {
+            None
+        } else {
+            Some(StreamJobFragments::collect_tables(get_fragments()))
+        };
+
+        let fragment_insert_start = Instant::now();
+        if !fragments.is_empty() {
+            let fragment_models = fragments
+                .iter()
+                .cloned()
+                .map(|fragment| fragment.into_active_model())
+                .collect_vec();
+            Fragment::insert_many(fragment_models).exec(&txn).await?;
+        }
+        let fragment_insert_elapsed = fragment_insert_start.elapsed();
+
         let fragment_loop_start = Instant::now();
         for fragment in fragments {
             let fragment_id = fragment.fragment_id;
             let state_table_ids = fragment.state_table_ids.inner_ref().clone();
 
-            let fragment = fragment.into_active_model();
-            Fragment::insert(fragment).exec(&txn).await?;
-
             // Fields including `fragment_id` and `vnode_count` were placeholder values before.
             // After table fragments are created, update them for all tables.
             if !for_replace {
-                let all_tables = StreamJobFragments::collect_tables(get_fragments());
                 for state_table_id in state_table_ids {
                     // Table's vnode count is not always the fragment's vnode count, so we have to
                     // look up the table from `TableFragments`.
                     // See `ActorGraphBuilder::new`.
                     let table = all_tables
+                        .as_ref()
+                        .expect("table lookup should be initialized")
                         .get(&state_table_id)
                         .unwrap_or_else(|| panic!("table {} not found", state_table_id));
                     assert_eq!(table.id, state_table_id);
@@ -619,6 +634,7 @@ impl CatalogController {
             ?lock_wait,
             ?txn_begin_elapsed,
             ?ensure_job_elapsed,
+            ?fragment_insert_elapsed,
             ?fragment_loop_elapsed,
             ?relation_insert_elapsed,
             ?dml_update_elapsed,
