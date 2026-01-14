@@ -68,7 +68,7 @@ impl SqlMetaStore {
     /// Connect to the SQL meta store based on the given configuration.
     pub async fn connect(backend: MetaStoreBackend) -> MetaResult<Self> {
         const MAX_DURATION: Duration = Duration::new(u64::MAX / 4, 0);
-        const SQLX_SLOW_LOG_THRESHOLD: Duration = Duration::from_millis(200);
+        const SQLX_SLOW_LOG_THRESHOLD: Duration = Duration::from_millis(100);
 
         fn parse_log_level(value: &str) -> Option<LevelFilter> {
             match value.trim().to_ascii_lowercase().as_str() {
