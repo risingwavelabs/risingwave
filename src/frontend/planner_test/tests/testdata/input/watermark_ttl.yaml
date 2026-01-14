@@ -7,3 +7,43 @@
     );
   expected_outputs:
     - explain_output
+
+- id: watermark ttl append-only pk
+  sql: |
+    explain create table t_ao_pk (
+      id int primary key,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    ) append only;
+  expected_outputs:
+    - explain_output
+
+- id: watermark ttl non-append-only row-id
+  sql: |
+    explain create table t_nao_rowid (
+      id int,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    );
+  expected_outputs:
+    - explain_output
+
+- id: watermark ttl append-only row-id
+  sql: |
+    explain create table t_ao_rowid (
+      id int,
+      ts timestamp,
+      watermark for ts as ts - interval '1 minute' with ttl
+    ) append only;
+  expected_outputs:
+    - explain_output
+
+- id: watermark ttl append-only proctime generated column
+  sql: |
+    explain create table t_ao_proctime (
+      id int,
+      proc_time timestamptz as proctime(),
+      watermark for proc_time as proc_time with ttl
+    ) append only;
+  expected_outputs:
+    - explain_output
