@@ -532,8 +532,7 @@ impl IcebergCommon {
                                         .insert("credential".to_owned(), credential.clone());
                                 }
                                 if let Some(token) = &self.catalog_token {
-                                    java_catalog_configs
-                                        .insert("token".to_owned(), token.clone());
+                                    java_catalog_configs.insert("token".to_owned(), token.clone());
                                 }
                                 if let Some(oauth2_server_uri) = &self.catalog_oauth2_server_uri {
                                     java_catalog_configs.insert(

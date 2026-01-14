@@ -3113,7 +3113,9 @@ mod test {
         );
         assert_eq!(
             iceberg_config.common.gcp_auth_scopes.as_deref(),
-            Some("https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery")
+            Some(
+                "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"
+            )
         );
 
         // Verify warehouse path with bq:// prefix
@@ -3168,7 +3170,9 @@ mod test {
         );
         assert_eq!(
             iceberg_config.common.gcp_auth_scopes.as_deref(),
-            Some("https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery")
+            Some(
+                "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"
+            )
         );
 
         // Verify warehouse path with bq:// prefix
@@ -3199,7 +3203,10 @@ mod test {
             ("catalog.security", "oauth2"),
             ("catalog.credential", "client_id:client_secret"),
             ("catalog.token", "bearer-token"),
-            ("catalog.oauth2_server_uri", "https://oauth.example.com/token"),
+            (
+                "catalog.oauth2_server_uri",
+                "https://oauth.example.com/token",
+            ),
             ("catalog.scope", "read write"),
             ("database.name", "test_db"),
             ("table.name", "test_table"),
