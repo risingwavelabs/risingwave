@@ -162,6 +162,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                 byte[] data = getObject(cachedLatestFile);
                 List<HistoryRecord> records = toHistoryRecords(data);
                 records.add(record);
+                LOGGER.info("Uploading schema history file {}", cachedLatestFile);
                 putObject(cachedLatestFile, fromHistoryRecords(records));
 
                 // Update cache
@@ -176,6 +177,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                 // exist
                 long nextSequence = sequenceNumber.incrementAndGet();
                 String newFile = String.format("%s/schema_history_%d.dat", objectDir, nextSequence);
+                LOGGER.info("Uploading schema history file {}", newFile);
                 putObject(newFile, fromHistoryRecords(Collections.singletonList(record)));
 
                 // Update cache to point to new file
