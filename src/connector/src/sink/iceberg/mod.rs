@@ -3078,7 +3078,6 @@ mod test {
     }
 
     /// Test parsing Google authentication configuration with custom scopes.
-    /// This test verifies that Google authentication with custom OAuth scopes works correctly.
     #[test]
     fn test_parse_google_auth_with_custom_scopes() {
         let values: BTreeMap<String, String> = [
@@ -3126,7 +3125,6 @@ mod test {
     }
 
     /// Test parsing BigLake/Google Cloud REST catalog configuration.
-    /// This test verifies that the new Google authentication options are correctly parsed.
     #[test]
     fn test_parse_biglake_google_auth_config() {
         let values: BTreeMap<String, String> = [
@@ -3188,8 +3186,7 @@ mod test {
         );
     }
 
-    /// Test parsing OAuth2 security configuration.
-    /// This test verifies that OAuth2 authentication options work correctly.
+    /// Test parsing `oauth2` security configuration.
     #[test]
     fn test_parse_oauth2_security_config() {
         let values: BTreeMap<String, String> = [
@@ -3244,7 +3241,6 @@ mod test {
     }
 
     /// Test parsing invalid security configuration.
-    /// This test verifies that invalid security types are handled gracefully.
     #[test]
     fn test_parse_invalid_security_config() {
         let values: BTreeMap<String, String> = [

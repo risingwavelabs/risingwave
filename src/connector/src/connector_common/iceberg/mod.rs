@@ -173,7 +173,7 @@ pub struct IcebergCommon {
 
     /// Security type for REST catalog authentication.
     /// Supported values: `none`, `oauth2`, `google`.
-    /// When set to `google`, uses Iceberg's GoogleAuthManager (requires Iceberg 1.10+)
+    /// When set to `google`, uses Iceberg's `GoogleAuthManager` (requires Iceberg 1.10+)
     /// for authentication using Google Application Default Credentials (ADC).
     #[serde(rename = "catalog.security")]
     pub catalog_security: Option<String>,
@@ -183,8 +183,8 @@ pub struct IcebergCommon {
     #[serde(rename = "gcp.credentials.path")]
     pub gcp_credentials_path: Option<String>,
 
-    /// OAuth scopes for Google authentication.
-    /// Comma-separated list of OAuth scopes to request.
+    /// OAuth-based scopes for Google authentication.
+    /// Comma-separated list of OAuth-based scopes to request.
     /// Only applicable when `catalog.security` is set to `google`.
     /// Default: <https://www.googleapis.com/auth/cloud-platform>
     #[serde(rename = "gcp.auth.scopes")]
