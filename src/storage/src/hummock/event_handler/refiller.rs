@@ -360,6 +360,7 @@ impl CacheRefiller {
         if !self.role.for_streaming() {
             return;
         }
+        self.table_cache_refill_vnodes.remove(&table_id);
         if let Some(mapping) = self.read_version_mapping.read().get(&table_id) {
             for (_instance_id, read_version) in mapping {
                 let vnodes = read_version.read().vnodes();
