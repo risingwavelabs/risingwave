@@ -853,7 +853,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .state_table
                         .commit_may_switch_consistent_op(barrier.epoch, op_consistency_level)
                         .await?;
-                    if !post_commit.inner().is_consistent_op() {
+                    if !post_commit.inner().is_consistent_op() && !self.cleaned_by_ttl_watermark {
                         assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
                     }
 

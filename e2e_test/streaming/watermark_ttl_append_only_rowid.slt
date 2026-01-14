@@ -1,0 +1,134 @@
+statement ok
+SET implicit_flush TO true;
+
+# Ensure deterministic behavior for watermark.
+statement ok
+SET streaming_parallelism TO 1;
+
+# ------------------------------------------
+# Append-only + no PK (row_id) + event-time TTL
+# ------------------------------------------
+
+statement ok
+drop table if exists ttl_ao_rowid_ev cascade;
+
+statement ok
+create table ttl_ao_rowid_ev (
+    ts int,
+    v varchar,
+    watermark for ts as ts - 10 with ttl
+) append only;
+
+query TT
+show create table ttl_ao_rowid_ev;
+----
+public.ttl_ao_rowid_ev CREATE TABLE ttl_ao_rowid_ev (ts INT, v CHARACTER VARYING, WATERMARK FOR ts AS ts - 10 WITH TTL) APPEND ONLY
+
+statement ok
+create materialized view ttl_ao_rowid_ev_mv as
+select ts, v from ttl_ao_rowid_ev;
+
+statement ok
+insert into ttl_ao_rowid_ev values (1, 'a');
+
+statement ok
+insert into ttl_ao_rowid_ev values (20, 'b');
+
+query IV
+select ts, v from ttl_ao_rowid_ev_mv order by ts, v;
+----
+1 a
+20 b
+
+# Watermark bumped to 20 - 10 = 10
+# INSERT below the watermark should be invisible.
+statement ok
+insert into ttl_ao_rowid_ev values (5, 'c');
+
+query IV
+select ts, v from ttl_ao_rowid_ev_mv order by ts, v;
+----
+1 a
+20 b
+
+# INSERT above the watermark should be visible.
+statement ok
+insert into ttl_ao_rowid_ev values (15, 'd');
+
+query IV
+select ts, v from ttl_ao_rowid_ev_mv order by ts, v;
+----
+1 a
+15 d
+20 b
+
+# Watermark bumped to 30 - 10 = 20
+statement ok
+insert into ttl_ao_rowid_ev values (30, 'e');
+
+query IV
+select ts, v from ttl_ao_rowid_ev_mv order by ts, v;
+----
+1 a
+15 d
+20 b
+30 e
+
+# INSERT below the watermark should be invisible.
+statement ok
+insert into ttl_ao_rowid_ev values (18, 'f');
+
+query IV
+select ts, v from ttl_ao_rowid_ev_mv order by ts, v;
+----
+1 a
+15 d
+20 b
+30 e
+
+statement ok
+drop table ttl_ao_rowid_ev cascade;
+
+# ------------------------------------------
+# Append-only + no PK (row_id) + processing-time TTL
+# ------------------------------------------
+
+statement ok
+drop table if exists ttl_ao_rowid_pt cascade;
+
+statement ok
+create table ttl_ao_rowid_pt (
+    v int,
+    proc_time timestamptz as proctime(),
+    watermark for proc_time as proc_time with ttl
+) append only;
+
+query TT
+show create table ttl_ao_rowid_pt;
+----
+public.ttl_ao_rowid_pt CREATE TABLE ttl_ao_rowid_pt (v INT, proc_time timestamptz AS proctime(), WATERMARK FOR proc_time AS proc_time WITH TTL) APPEND ONLY
+
+statement ok
+create materialized view ttl_ao_rowid_pt_mv as
+select v from ttl_ao_rowid_pt;
+
+statement ok
+insert into ttl_ao_rowid_pt values (1);
+
+statement ok
+insert into ttl_ao_rowid_pt values (2);
+
+# For processing-time watermark, the filter should not drop rows.
+query I
+select count(*) from ttl_ao_rowid_pt_mv;
+----
+2
+
+statement ok
+drop table ttl_ao_rowid_pt cascade;
+
+statement ok
+SET streaming_parallelism TO DEFAULT;
+
+statement ok
+SET implicit_flush TO DEFAULT;

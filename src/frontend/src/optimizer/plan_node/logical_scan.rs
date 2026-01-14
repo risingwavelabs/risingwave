@@ -653,17 +653,12 @@ impl ToStream for LogicalScan {
                 for &idx in self.output_col_idx() {
                     col_ids.insert(self.table().columns[idx].column_id);
                 }
-                let col_need_to_add = self
-                    .table()
-                    .pk
-                    .iter()
-                    .filter_map(|c| {
-                        if !col_ids.contains(&self.table().columns[c.column_index].column_id) {
-                            Some(c.column_index)
-                        } else {
-                            None
-                        }
-                    })
+                let mut key_col_indices = self.table().stream_key();
+                key_col_indices.extend(self.table().pk.iter().map(|c| c.column_index));
+                let col_need_to_add = key_col_indices
+                    .into_iter()
+                    .unique()
+                    .filter(|&idx| !col_ids.contains(&self.table().columns[idx].column_id))
                     .collect_vec();
 
                 let mut output_col_idx = self.output_col_idx().clone();
