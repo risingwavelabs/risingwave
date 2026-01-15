@@ -998,9 +998,9 @@ message EowcOverWindowNode {
   repeated uint32 partition_by = 2;
   repeated common.ColumnOrder order_by = 3; // use `repeated` in case of future extension, now only one column is allowed
   catalog.Table state_table = 4;
-  // Optional state table for persisting rank function snapshots, keyed by (partition_key..., call_index).
-  // Only present when numbering functions (row_number/rank/dense_rank) are used.
-  optional catalog.Table rank_state_table = 5;
+  // Optional state table for persisting window function intermediate states.
+  // Currently used for numbering functions (row_number/rank/dense_rank).
+  optional catalog.Table intermediate_state_table = 5;
 }
 
 enum OverWindowCachePolicy {

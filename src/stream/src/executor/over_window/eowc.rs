@@ -41,9 +41,9 @@ use crate::executor::prelude::*;
 struct Partition {
     states: WindowStates,
     curr_row_buffer: EstimatedVecDeque<OwnedRow>,
-    /// Cached rank state row for this partition, used for upsert operations.
-    /// `None` means no prior row exists in the rank state table for this partition.
-    rank_state_row: Option<OwnedRow>,
+    /// Cached intermediate state row for this partition, used for upsert operations.
+    /// `None` means no prior row exists in the intermediate state table for this partition.
+    intermediate_state_row: Option<OwnedRow>,
 }
 
 impl EstimateSize for Partition {
@@ -52,7 +52,7 @@ impl EstimateSize for Partition {
         for state in self.states.iter() {
             total_size += state.estimated_heap_size();
         }
-        if let Some(row) = &self.rank_state_row {
+        if let Some(row) = &self.intermediate_state_row {
             total_size += row.estimated_heap_size();
         }
         total_size
@@ -239,11 +239,11 @@ struct ExecutorInner<S: StateStore> {
     state_table: StateTable<S>,
     state_table_schema_len: usize,
     watermark_sequence: AtomicU64Ref,
-    /// Optional state table for persisting rank function snapshots.
-    /// See `StreamEowcOverWindow::infer_rank_state_table` for schema definition.
-    rank_state_table: Option<StateTable<S>>,
-    /// Serde for input stream key (pk), used for encoding/decoding StateKey in rank snapshots.
-    /// Only initialized when `rank_state_table` is present.
+    /// Optional state table for persisting window function intermediate states.
+    /// See `StreamEowcOverWindow::infer_intermediate_state_table` for schema definition.
+    intermediate_state_table: Option<StateTable<S>>,
+    /// Serde for input stream key (pk), used for encoding/decoding StateKey in snapshots.
+    /// Only initialized when `intermediate_state_table` is present.
     pk_serde: Option<OrderedRowSerde>,
 }
 
@@ -269,17 +269,17 @@ pub struct EowcOverWindowExecutorArgs<S: StateStore> {
     pub order_key_index: usize,
     pub state_table: StateTable<S>,
     pub watermark_epoch: AtomicU64Ref,
-    /// Optional state table for persisting rank function snapshots.
-    /// See `StreamEowcOverWindow::infer_rank_state_table` for schema definition.
-    pub rank_state_table: Option<StateTable<S>>,
+    /// Optional state table for persisting window function intermediate states.
+    /// See `StreamEowcOverWindow::infer_intermediate_state_table` for schema definition.
+    pub intermediate_state_table: Option<StateTable<S>>,
 }
 
 impl<S: StateStore> EowcOverWindowExecutor<S> {
     pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
         let input_info = args.input.info().clone();
 
-        // Build pk_serde if rank_state_table is present
-        let pk_serde = args.rank_state_table.as_ref().map(|_| {
+        // Build pk_serde if intermediate_state_table is present
+        let pk_serde = args.intermediate_state_table.as_ref().map(|_| {
             let pk_data_types: Vec<_> = input_info
                 .stream_key
                 .iter()
@@ -305,33 +305,36 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 state_table: args.state_table,
                 state_table_schema_len: input_info.schema.len(),
                 watermark_sequence: args.watermark_epoch,
-                rank_state_table: args.rank_state_table,
+                intermediate_state_table: args.intermediate_state_table,
                 pk_serde,
             },
         }
     }
 
-    /// Load rank state snapshots from the rank state table and restore into partition states.
-    async fn load_rank_state(
+    /// Load intermediate state snapshots from the state table and restore into partition states.
+    async fn load_intermediate_state(
         this: &ExecutorInner<S>,
         partition: &mut Partition,
         partition_key: impl Row,
         encoded_partition_key: &MemcmpEncoded,
     ) -> StreamExecutorResult<()> {
-        let Some(rank_state_table) = &this.rank_state_table else {
+        let Some(intermediate_state_table) = &this.intermediate_state_table else {
             return Ok(());
         };
         let pk_serde = this
             .pk_serde
             .as_ref()
-            .expect("pk_serde must be set when rank_state_table is present");
+            .expect("pk_serde must be set when intermediate_state_table is present");
 
         for state in partition.states.iter_mut() {
             state.enable_persistence();
         }
 
         let partition_key_owned = partition_key.to_owned_row();
-        if let Some(row) = rank_state_table.get_row(&partition_key_owned).await? {
+        if let Some(row) = intermediate_state_table
+            .get_row(&partition_key_owned)
+            .await?
+        {
             let num_partition_key_cols = this.partition_key_indices.len();
             let num_calls = this.calls.len();
 
@@ -341,7 +344,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     if let Some(state_bytes) = row.datum_at(state_col) {
                         let snapshot = decode_snapshot(state_bytes.into_bytea(), pk_serde)?;
                         debug!(
-                            "Restoring rank state for partition {:?}, call_index {}, has_last_key: {}",
+                            "Restoring intermediate state for partition {:?}, call_index {}, has_last_key: {}",
                             encoded_partition_key,
                             call_index,
                             snapshot.last_output_key.is_some()
@@ -355,31 +358,31 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     }
                 } else {
                     tracing::warn!(
-                        "Rank state row has fewer columns ({}) than expected ({}), skipping call_index {}",
+                        "Intermediate state row has fewer columns ({}) than expected ({}), skipping call_index {}",
                         row.len(),
                         num_partition_key_cols + num_calls,
                         call_index
                     );
                 }
             }
-            partition.rank_state_row = Some(row);
+            partition.intermediate_state_row = Some(row);
         }
         Ok(())
     }
 
-    /// Persist rank state snapshots to the rank state table.
-    fn persist_rank_state(
+    /// Persist intermediate state snapshots to the state table.
+    fn persist_intermediate_state(
         this: &mut ExecutorInner<S>,
         partition: &mut Partition,
         partition_key: impl Row,
     ) {
-        let Some(rank_state_table) = &mut this.rank_state_table else {
+        let Some(intermediate_state_table) = &mut this.intermediate_state_table else {
             return;
         };
         let pk_serde = this
             .pk_serde
             .as_ref()
-            .expect("pk_serde must be set when rank_state_table is present");
+            .expect("pk_serde must be set when intermediate_state_table is present");
 
         let num_calls = partition.states.len();
         let num_partition_key_cols = partition_key.len();
@@ -395,7 +398,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             if let Some(snapshot) = state.snapshot() {
                 let snapshot_bytes = encode_snapshot(&snapshot, pk_serde);
                 new_row_values.push(Some(snapshot_bytes.into_boxed_slice().into()));
-            } else if let Some(ref old_row) = partition.rank_state_row {
+            } else if let Some(ref old_row) = partition.intermediate_state_row {
                 let state_col = num_partition_key_cols + call_index;
                 if state_col < old_row.len() {
                     new_row_values.push(old_row.datum_at(state_col).to_owned_datum());
@@ -409,12 +412,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         let new_row = OwnedRow::new(new_row_values);
 
         // Upsert: update if old row exists, otherwise insert
-        if let Some(old_row) = partition.rank_state_row.take() {
-            rank_state_table.update(old_row, new_row.clone());
+        if let Some(old_row) = partition.intermediate_state_row.take() {
+            intermediate_state_table.update(old_row, new_row.clone());
         } else {
-            rank_state_table.insert(new_row.clone());
+            intermediate_state_table.insert(new_row.clone());
         }
-        partition.rank_state_row = Some(new_row);
+        partition.intermediate_state_row = Some(new_row);
     }
 
     async fn ensure_key_in_cache(
@@ -430,11 +433,12 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         let mut partition = Partition {
             states: WindowStates::new(this.calls.iter().map(create_window_state).try_collect()?),
             curr_row_buffer: Default::default(),
-            rank_state_row: None,
+            intermediate_state_row: None,
         };
 
-        // If rank state table exists, load and restore rank state snapshots
-        Self::load_rank_state(this, &mut partition, &partition_key, encoded_partition_key).await?;
+        // If intermediate state table exists, load and restore intermediate state snapshots
+        Self::load_intermediate_state(this, &mut partition, &partition_key, encoded_partition_key)
+            .await?;
 
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         // Recover states from state table.
@@ -590,8 +594,8 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     }
                 }
 
-                // Persist rank state snapshots if rank_state_table exists
-                Self::persist_rank_state(this, partition, &partition_key);
+                // Persist intermediate state snapshots if intermediate_state_table exists
+                Self::persist_intermediate_state(this, partition, &partition_key);
             }
         }
 
@@ -628,8 +632,8 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
         let first_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
         this.state_table.init_epoch(first_epoch).await?;
-        if let Some(rank_state_table) = &mut this.rank_state_table {
-            rank_state_table.init_epoch(first_epoch).await?;
+        if let Some(intermediate_state_table) = &mut this.intermediate_state_table {
+            intermediate_state_table.init_epoch(first_epoch).await?;
         }
 
         #[for_await]
@@ -645,18 +649,19 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                         yield Message::Chunk(chunk);
                     }
                     this.state_table.try_flush().await?;
-                    if let Some(rank_state_table) = &mut this.rank_state_table {
-                        rank_state_table.try_flush().await?;
+                    if let Some(intermediate_state_table) = &mut this.intermediate_state_table {
+                        intermediate_state_table.try_flush().await?;
                     }
                 }
                 Message::Barrier(barrier) => {
                     let post_commit = this.state_table.commit(barrier.epoch).await?;
-                    let rank_post_commit =
-                        if let Some(rank_state_table) = &mut this.rank_state_table {
-                            Some(rank_state_table.commit(barrier.epoch).await?)
-                        } else {
-                            None
-                        };
+                    let intermediate_post_commit = if let Some(intermediate_state_table) =
+                        &mut this.intermediate_state_table
+                    {
+                        Some(intermediate_state_table.commit(barrier.epoch).await?)
+                    } else {
+                        None
+                    };
 
                     vars.partitions.evict();
 
@@ -670,8 +675,8 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                     {
                         cache_may_stale = cache_may_stale || stale;
                     }
-                    if let Some(rank_post_commit) = rank_post_commit {
-                        if let Some((_, stale)) = rank_post_commit
+                    if let Some(intermediate_post_commit) = intermediate_post_commit {
+                        if let Some((_, stale)) = intermediate_post_commit
                             .post_yield_barrier(update_vnode_bitmap)
                             .await?
                         {
