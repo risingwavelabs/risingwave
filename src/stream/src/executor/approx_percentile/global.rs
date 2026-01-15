@@ -65,9 +65,8 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
                     state.apply_chunk(chunk)?;
                 }
                 Message::Barrier(barrier) => {
-                    if let Some(output) = state.get_output() {
-                        yield Message::Chunk(output);
-                    }
+                    let output = state.get_output();
+                    yield Message::Chunk(output);
                     state.commit(barrier.epoch).await?;
                     yield Message::Barrier(barrier);
                 }

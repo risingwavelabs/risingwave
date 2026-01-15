@@ -117,15 +117,9 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
     }
 
     fn decode_row_count(row_count_state: &Option<OwnedRow>) -> Option<i64> {
-        if let Some(row) = row_count_state.as_ref() {
-            if let Some(datum) = row.datum_at(0) {
-                Some(datum.into_int64())
-            } else {
-                None
-            }
-        } else {
-            None
-        }
+        row_count_state
+            .as_ref()
+            .and_then(|row| row.datum_at(0).map(|datum| datum.into_int64()))
     }
 }
 
@@ -253,7 +247,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
 // Read
 impl<S: StateStore> GlobalApproxPercentileState<S> {
-    pub fn get_output(&mut self) -> Option<StreamChunk> {
+    pub fn get_output(&mut self) -> StreamChunk {
         let new_output = if !self.output_changed {
             if cfg!(debug_assertions) {
                 let new_output = if let Some(row_count) = self.row_count {
@@ -263,7 +257,16 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
                 };
                 assert_eq!(new_output, self.last_output);
             }
-            return None;
+            static EMPTY_DATUM: Datum = None;
+            let last_datum = self.last_output.as_ref().unwrap_or(&EMPTY_DATUM);
+            // we emit a trivial chunk to ensure that RowMerge has data in every epoch
+            return StreamChunk::from_rows(
+                &[
+                    (Op::UpdateDelete, std::slice::from_ref(&last_datum)),
+                    (Op::UpdateInsert, std::slice::from_ref(&last_datum)),
+                ],
+                &[DataType::Float64],
+            );
         } else {
             self.cache.get_output(
                 self.row_count
@@ -285,7 +288,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         };
         tracing::debug!("get_output: {:#?}", output_chunk,);
         self.output_changed = false;
-        Some(output_chunk)
+        output_chunk
     }
 }
 
