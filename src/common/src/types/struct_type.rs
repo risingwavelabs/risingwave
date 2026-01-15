@@ -20,11 +20,11 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use either::Either;
 use itertools::{Itertools, repeat_n};
+use risingwave_sqlparser::ast::QuoteIdent;
 
 use super::DataType;
 use crate::catalog::ColumnId;
 use crate::util::iter_util::ZipEqFast;
-use crate::util::quote_ident::QuoteIdent;
 
 /// A cheaply cloneable struct type.
 #[derive(Clone, PartialEq, Eq, Hash)]
