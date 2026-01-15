@@ -609,7 +609,7 @@ impl ControlStreamManager {
         fragment_relations: &FragmentDownstreamRelation,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
-        background_jobs: &mut HashMap<JobId, String>,
+        background_jobs: &mut HashSet<JobId>,
         mv_depended_subscriptions: &mut HashMap<TableId, HashMap<SubscriptionId, u64>>,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
@@ -700,19 +700,19 @@ impl ControlStreamManager {
         let mut snapshot_backfill_jobs = HashMap::new();
 
         for (job_id, job_fragments) in jobs {
-            if let Some(definition) = background_jobs.remove(&job_id) {
+            if background_jobs.remove(&job_id) {
                 if job_fragments.values().any(|fragment| {
                     fragment
                         .fragment_type_mask
                         .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
                 }) {
-                    debug!(%job_id, definition, "recovered snapshot backfill job");
-                    snapshot_backfill_jobs.insert(job_id, (job_fragments, definition));
+                    debug!(%job_id, "recovered snapshot backfill job");
+                    snapshot_backfill_jobs.insert(job_id, job_fragments);
                 } else {
-                    database_jobs.insert(job_id, (job_fragments, Some(definition)));
+                    database_jobs.insert(job_id, (job_fragments, true));
                 }
             } else {
-                database_jobs.insert(job_id, (job_fragments, None));
+                database_jobs.insert(job_id, (job_fragments, false));
             }
         }
 
@@ -739,7 +739,7 @@ impl ControlStreamManager {
         };
 
         let mut ongoing_snapshot_backfill_jobs: HashMap<JobId, _> = HashMap::new();
-        for (job_id, (fragment_infos, definition)) in snapshot_backfill_jobs {
+        for (job_id, fragment_infos) in snapshot_backfill_jobs {
             let committed_epoch =
                 resolve_jobs_committed_epoch(state_table_committed_epochs, fragment_infos.values());
             if committed_epoch == barrier_info.prev_epoch() {
@@ -748,7 +748,7 @@ impl ControlStreamManager {
                     job_id
                 );
                 database_jobs
-                    .try_insert(job_id, (fragment_infos, Some(definition)))
+                    .try_insert(job_id, (fragment_infos, true))
                     .expect("non-duplicate");
                 continue;
             }
@@ -797,7 +797,6 @@ impl ControlStreamManager {
                     job_id,
                     (
                         fragment_infos,
-                        definition,
                         upstream_table_ids,
                         committed_epoch,
                         snapshot_epoch,
@@ -812,15 +811,17 @@ impl ControlStreamManager {
         let database_jobs: HashMap<JobId, InflightStreamingJobInfo> = {
             database_jobs
                 .into_iter()
-                .map(|(job_id, (fragment_infos, background_job_definition))| {
-                    let status = if let Some(definition) = background_job_definition {
-                        CreateStreamingJobStatus::Creating(CreateMviewProgressTracker::recover(
-                            job_id,
-                            definition,
-                            &fragment_infos,
-                            Default::default(),
-                            hummock_version_stats,
-                        ))
+                .map(|(job_id, (fragment_infos, is_background_creating))| {
+                    let status = if is_background_creating {
+                        CreateStreamingJobStatus::Creating {
+                            tracker: CreateMviewProgressTracker::recover(
+                                job_id,
+                                &fragment_infos,
+                                Default::default(),
+                                hummock_version_stats,
+                            ),
+                            is_serverless: false, // serverless backfill not support background ddl yet
+                        }
                     } else {
                         CreateStreamingJobStatus::Created
                     };
@@ -929,7 +930,7 @@ impl ControlStreamManager {
 
         let mut creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl> =
             HashMap::new();
-        for (job_id, (info, definition, upstream_table_ids, committed_epoch, snapshot_epoch)) in
+        for (job_id, (info, upstream_table_ids, committed_epoch, snapshot_epoch)) in
             ongoing_snapshot_backfill_jobs
         {
             let node_actors = edges.collect_actors_to_create(info.values().map(|fragment_infos| {
@@ -966,7 +967,6 @@ impl ControlStreamManager {
                 CreatingStreamingJobControl::recover(
                     database_id,
                     job_id,
-                    definition,
                     upstream_table_ids,
                     &database_job_log_epochs,
                     snapshot_epoch,

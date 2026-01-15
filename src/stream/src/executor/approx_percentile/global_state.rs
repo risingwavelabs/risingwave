@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, Bound};
-use std::mem;
 
 use risingwave_common::array::Op;
 use risingwave_common::bail;
@@ -30,7 +29,7 @@ use crate::executor::prelude::*;
 pub struct GlobalApproxPercentileState<S: StateStore> {
     quantile: f64,
     base: f64,
-    row_count: i64,
+    row_count: Option<i64>,
     bucket_state_table: StateTable<S>,
     count_state_table: StateTable<S>,
     cache: BucketTableCache,
@@ -49,7 +48,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         Self {
             quantile,
             base,
-            row_count: 0,
+            row_count: None,
             bucket_state_table,
             count_state_table,
             cache: BucketTableCache::new(),
@@ -65,7 +64,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
         // Refill row_count
         let row_count_state = self.get_row_count_state().await?;
-        let row_count = Self::decode_row_count(&row_count_state)?;
+        let row_count = Self::decode_row_count(&row_count_state);
         self.row_count = row_count;
         tracing::debug!(?row_count, "recovered row_count");
 
@@ -73,10 +72,10 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         self.refill_cache().await?;
 
         // Update the last output downstream
-        let last_output = if row_count_state.is_none() {
-            None
-        } else {
+        let last_output = if let Some(row_count) = row_count {
             Some(self.cache.get_output(row_count, self.quantile, self.base))
+        } else {
+            None
         };
         tracing::debug!(?last_output, "recovered last_output");
         self.last_output = last_output;
@@ -117,15 +116,10 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         self.count_state_table.get_row(&[Datum::None; 0]).await
     }
 
-    fn decode_row_count(row_count_state: &Option<OwnedRow>) -> StreamExecutorResult<i64> {
-        if let Some(row) = row_count_state.as_ref() {
-            let Some(datum) = row.datum_at(0) else {
-                bail!("Invalid row count state: {:?}", row)
-            };
-            Ok(datum.into_int64())
-        } else {
-            Ok(0)
-        }
+    fn decode_row_count(row_count_state: &Option<OwnedRow>) -> Option<i64> {
+        row_count_state
+            .as_ref()
+            .and_then(|row| row.datum_at(0).map(|datum| datum.into_int64()))
     }
 }
 
@@ -160,8 +154,13 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         self.output_changed = true;
 
         // Updates
-        self.row_count = self.row_count.checked_add(delta as i64).unwrap();
-        tracing::debug!("updated row_count: {}", self.row_count);
+        self.row_count = Some(
+            self.row_count
+                .unwrap_or(0)
+                .checked_add(delta as i64)
+                .unwrap(),
+        );
+        tracing::debug!("updated row_count: {}", self.row_count.unwrap());
 
         let (is_new_entry, old_count, new_count) = match sign {
             -1 => {
@@ -227,7 +226,7 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
     pub async fn commit(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
         // Commit row count state.
-        let row_count_datum = Datum::from(ScalarImpl::Int64(self.row_count));
+        let row_count_datum = self.row_count.map(ScalarImpl::Int64);
         let row_count_row = &[row_count_datum];
         let last_row_count_state = self.count_state_table.get_row(&[Datum::None; 0]).await?;
         match last_row_count_state {
@@ -249,24 +248,36 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 // Read
 impl<S: StateStore> GlobalApproxPercentileState<S> {
     pub fn get_output(&mut self) -> StreamChunk {
-        let last_output = mem::take(&mut self.last_output);
         let new_output = if !self.output_changed {
-            tracing::debug!("last_output: {:#?}", last_output);
-            last_output.clone().flatten()
-        } else {
-            self.cache
-                .get_output(self.row_count, self.quantile, self.base)
-        };
-        self.last_output = Some(new_output.clone());
-        let output_chunk = match last_output {
-            None => StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[DataType::Float64]),
-            Some(last_output) if !self.output_changed => StreamChunk::from_rows(
+            if cfg!(debug_assertions) {
+                let new_output = if let Some(row_count) = self.row_count {
+                    Some(self.cache.get_output(row_count, self.quantile, self.base))
+                } else {
+                    None
+                };
+                assert_eq!(new_output, self.last_output);
+            }
+            static EMPTY_DATUM: Datum = None;
+            let last_datum = self.last_output.as_ref().unwrap_or(&EMPTY_DATUM);
+            // we emit a trivial chunk to ensure that RowMerge has data in every epoch
+            return StreamChunk::from_rows(
                 &[
-                    (Op::UpdateDelete, std::slice::from_ref(&last_output)),
-                    (Op::UpdateInsert, std::slice::from_ref(&last_output)),
+                    (Op::UpdateDelete, std::slice::from_ref(&last_datum)),
+                    (Op::UpdateInsert, std::slice::from_ref(&last_datum)),
                 ],
                 &[DataType::Float64],
-            ),
+            );
+        } else {
+            self.cache.get_output(
+                self.row_count
+                    .expect("should have row count when output changed"),
+                self.quantile,
+                self.base,
+            )
+        };
+        let last_output = self.last_output.replace(new_output.clone());
+        let output_chunk = match last_output {
+            None => StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[DataType::Float64]),
             Some(last_output) => StreamChunk::from_rows(
                 &[
                     (Op::UpdateDelete, std::slice::from_ref(&last_output)),

@@ -15,6 +15,7 @@
 use std::str::FromStr;
 
 use anyhow::Context;
+use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_common::catalog::{AlterDatabaseParam, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_common::config::mutate::TomlTableMutateExt as _;
 use risingwave_common::config::streaming::CacheRefillPolicy;
@@ -1137,7 +1138,7 @@ impl CatalogController {
             table_id: Set(table_id),
             current_status: Set(status),
             last_trigger_time: if trigger_time.is_some() {
-                Set(trigger_time.map(|t| t.and_utc().timestamp_millis()))
+                Set(trigger_time.map(datetime_to_timestamp_millis))
             } else {
                 NotSet
             },
