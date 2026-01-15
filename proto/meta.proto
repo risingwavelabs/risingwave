@@ -658,27 +658,26 @@ message SubscribeResponse {
 
 message ServingTableVnodeMappings {
   repeated ServingTableVnodeMapping mappings = 1;
-}
-
-message ServingTableVnodeMapping {
-  uint32 table_id = 1;
-  common.Buffer bitmap = 2;
+  message ServingTableVnodeMapping {
+    uint32 table_id = 1;
+    common.Buffer bitmap = 2;
+  }
 }
 
 message TableCacheRefillPolicies {
   repeated TableCacheRefillPolicy policies = 1;
-}
 
-message TableCacheRefillPolicy {
-  uint32 table_id = 1;
-  CacheRefillPolicy policy = 2;
-}
+  message TableCacheRefillPolicy {
+    uint32 table_id = 1;
+    CacheRefillPolicy policy = 2;
 
-enum CacheRefillPolicy {
-  DEFAULT = 0;
-  STREAMING = 1;
-  SERVING = 2;
-  BOTH = 3;
+    enum CacheRefillPolicy {
+      UNSPECIFIED = 0;
+      STREAMING = 1;
+      SERVING = 2;
+      BOTH = 3;
+    }
+  }
 }
 
 service NotificationService {

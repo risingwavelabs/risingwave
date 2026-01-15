@@ -16,7 +16,7 @@ use std::str::FromStr;
 
 use enum_as_inner::EnumAsInner;
 use parse_display::Display;
-use risingwave_pb::meta::PbCacheRefillPolicy;
+use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy::PbCacheRefillPolicy;
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 #[derive(
@@ -62,7 +62,7 @@ impl FromStr for CacheRefillPolicy {
 impl CacheRefillPolicy {
     pub fn to_protobuf(self) -> PbCacheRefillPolicy {
         match self {
-            Self::Default => PbCacheRefillPolicy::Default,
+            Self::Default => PbCacheRefillPolicy::Unspecified,
             Self::Streaming => PbCacheRefillPolicy::Streaming,
             Self::Serving => PbCacheRefillPolicy::Serving,
             Self::Both => PbCacheRefillPolicy::Both,
@@ -71,7 +71,7 @@ impl CacheRefillPolicy {
 
     pub fn from_protobuf(pb: PbCacheRefillPolicy) -> Self {
         match pb {
-            PbCacheRefillPolicy::Default => Self::Default,
+            PbCacheRefillPolicy::Unspecified => Self::Default,
             PbCacheRefillPolicy::Streaming => Self::Streaming,
             PbCacheRefillPolicy::Serving => Self::Serving,
             PbCacheRefillPolicy::Both => Self::Both,

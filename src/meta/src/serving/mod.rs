@@ -21,11 +21,11 @@ use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
 use risingwave_meta_model::{TableId, WorkerId};
 use risingwave_pb::common::{PbHostAddress, PbWorkerNode, WorkerNode, WorkerType};
+use risingwave_pb::meta::serving_table_vnode_mappings::PbServingTableVnodeMapping;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
 use risingwave_pb::meta::{
-    FragmentWorkerSlotMapping, FragmentWorkerSlotMappings, PbServingTableVnodeMapping,
-    PbServingTableVnodeMappings,
+    FragmentWorkerSlotMapping, FragmentWorkerSlotMappings, PbServingTableVnodeMappings,
 };
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
