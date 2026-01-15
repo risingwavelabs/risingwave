@@ -37,6 +37,7 @@ use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use risingwave_pb::id::TableId;
+use risingwave_pb::meta::subscribe_response::Operation;
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
@@ -258,8 +259,10 @@ pub(crate) struct CacheRefiller {
 
     role: Role,
     table_cache_refill_policies: HashMap<TableId, CacheRefillPolicy>,
-    table_cache_refill_vnodes: HashMap<TableId, Arc<Bitmap>>,
+    table_cache_refill_vnodes_for_streaming: HashMap<TableId, Arc<Bitmap>>,
+    table_cache_refill_vnodes_for_serving: HashMap<TableId, Bitmap>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
+    serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
 }
 
 impl CacheRefiller {
@@ -282,8 +285,10 @@ impl CacheRefiller {
             spawn_refill_task,
             role,
             table_cache_refill_policies: HashMap::new(),
-            table_cache_refill_vnodes: HashMap::new(),
+            table_cache_refill_vnodes_for_streaming: HashMap::new(),
+            table_cache_refill_vnodes_for_serving: HashMap::new(),
             read_version_mapping,
+            serving_table_vnode_mapping: HashMap::new(),
         }
     }
 
@@ -341,7 +346,8 @@ impl CacheRefiller {
             .unwrap_or_default();
         match policy {
             CacheRefillPolicy::Default => {
-                self.table_cache_refill_vnodes.remove(&table_id);
+                self.table_cache_refill_vnodes_for_streaming
+                    .remove(&table_id);
             }
             CacheRefillPolicy::Streaming => {
                 self.update_table_cache_refill_vnodes_for_streaming(table_id);
@@ -356,7 +362,11 @@ impl CacheRefiller {
         }
     }
 
-    pub(crate) fn update_serving_table_vnode_mapping(&mut self, mapping: HashMap<TableId, Bitmap>) {
+    pub(crate) fn update_serving_table_vnode_mapping(
+        &mut self,
+        op: Operation,
+        mapping: HashMap<TableId, Bitmap>,
+    ) {
         todo!();
         todo!();
         todo!();
@@ -370,11 +380,13 @@ impl CacheRefiller {
         if !self.role.for_streaming() {
             return;
         }
-        self.table_cache_refill_vnodes.remove(&table_id);
+        self.table_cache_refill_vnodes_for_streaming
+            .remove(&table_id);
         if let Some(mapping) = self.read_version_mapping.read().get(&table_id) {
             for read_version in mapping.values() {
                 let vnodes = read_version.read().vnodes();
-                self.table_cache_refill_vnodes.insert(table_id, vnodes);
+                self.table_cache_refill_vnodes_for_streaming
+                    .insert(table_id, vnodes);
             }
         }
     }

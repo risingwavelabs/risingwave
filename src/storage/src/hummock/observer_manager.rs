@@ -37,7 +37,7 @@ pub struct HummockObserverNode {
     write_limiter: WriteLimiterRef,
     version_update_sender: UnboundedSender<HummockVersionUpdate>,
     cache_refill_policy_sender: UnboundedSender<TableCacheRefillPolicies>,
-    serving_table_vnode_mapping_sender: UnboundedSender<HashMap<TableId, Bitmap>>,
+    serving_table_vnode_mapping_sender: UnboundedSender<(Operation, HashMap<TableId, Bitmap>)>,
     version: u64,
 }
 
@@ -124,11 +124,16 @@ impl ObserverState for HummockObserverNode {
                     })
                     .collect();
 
-                tracing::debug!("receive serving table vnode mappings updates");
+                let op = resp.operation();
+                tracing::debug!(
+                    ?op,
+                    ?mappings,
+                    "receive serving table vnode mappings updates"
+                );
 
                 let _ = self
                     .serving_table_vnode_mapping_sender
-                    .send(mappings)
+                    .send((op, mappings))
                     .inspect_err(|e| {
                         tracing::error!(?e, "unable to send serving table vnode mappings");
                     });
@@ -184,7 +189,7 @@ impl HummockObserverNode {
         backup_reader: BackupReaderRef,
         version_update_sender: UnboundedSender<HummockVersionUpdate>,
         cache_refill_policy_sender: UnboundedSender<TableCacheRefillPolicies>,
-        serving_table_vnode_mapping_sender: UnboundedSender<HashMap<TableId, Bitmap>>,
+        serving_table_vnode_mapping_sender: UnboundedSender<(Operation, HashMap<TableId, Bitmap>)>,
         write_limiter: WriteLimiterRef,
     ) -> Self {
         Self {

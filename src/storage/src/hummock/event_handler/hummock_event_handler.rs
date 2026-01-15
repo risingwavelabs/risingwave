@@ -35,6 +35,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::{HummockVersionCommon, LocalHummockVersionDelta};
 use risingwave_hummock_sdk::{HummockEpoch, SyncResult};
 use risingwave_pb::meta::TableCacheRefillPolicies;
+use risingwave_pb::meta::subscribe_response::Operation;
 use tokio::spawn;
 use tokio::sync::mpsc::error::SendError;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -201,7 +202,7 @@ pub struct HummockEventHandler {
     hummock_event_rx: HummockEventReceiver,
     version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
     cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
-    serving_table_vnode_mapping_rx: UnboundedReceiver<HashMap<TableId, Bitmap>>,
+    serving_table_vnode_mapping_rx: UnboundedReceiver<(Operation, HashMap<TableId, Bitmap>)>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
     local_read_version_mapping: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
@@ -238,7 +239,7 @@ impl HummockEventHandler {
         role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
         cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
-        serving_table_vnode_mapping_rx: UnboundedReceiver<HashMap<TableId, Bitmap>>,
+        serving_table_vnode_mapping_rx: UnboundedReceiver<(Operation, HashMap<TableId, Bitmap>)>,
         pinned_version: PinnedVersion,
         compactor_context: CompactorContext,
         compaction_catalog_manager_ref: CompactionCatalogManagerRef,
@@ -321,7 +322,7 @@ impl HummockEventHandler {
         role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
         cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
-        serving_table_vnode_mapping_rx: UnboundedReceiver<HashMap<TableId, Bitmap>>,
+        serving_table_vnode_mapping_rx: UnboundedReceiver<(Operation, HashMap<TableId, Bitmap>)>,
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         refill_config: CacheRefillConfig,
@@ -674,11 +675,11 @@ impl HummockEventHandler {
                     self.refiller.update_table_cache_refill_policies(policies);
                 }
                 serving_table_vnode_mapping = pin!(self.serving_table_vnode_mapping_rx.recv()) => {
-                    let Some(mapping) = serving_table_vnode_mapping else {
+                    let Some((op, mapping)) = serving_table_vnode_mapping else {
                         warn!("serving table vnode mapping stream ends. event handle shutdown");
                         return;
                     };
-                    self.refiller.update_serving_table_vnode_mapping(mapping);
+                    self.refiller.update_serving_table_vnode_mapping(op, mapping);
                 }
             }
         }
