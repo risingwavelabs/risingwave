@@ -21,7 +21,7 @@ use std::task::Poll;
 
 use anyhow::anyhow;
 use await_tree::{InstrumentAwait, SpanExt};
-use futures::future::{BoxFuture, join_all};
+use futures::future::{BoxFuture, join, join_all};
 use futures::stream::{BoxStream, FuturesOrdered};
 use futures::{FutureExt, StreamExt, TryFutureExt};
 use itertools::Itertools;
@@ -33,10 +33,10 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
 use thiserror_ext::AsReport;
-use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
+use tokio::{select, spawn};
 use tonic::{Code, Status};
 use tracing::warn;
 
@@ -56,7 +56,7 @@ mod tests;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
-    InitRequest, Request, ResetPartialGraphRequest,
+    InitRequest, Request, ResetPartialGraphsRequest,
 };
 use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ReportPartialGraphFailureResponse, ResetPartialGraphResponse, Response,
@@ -337,7 +337,7 @@ impl LocalBarrierWorker {
                             PartialGraphStatus::Suspended(state) => {
                                 (format!("suspended: {:?}", state.suspend_time), None)
                             }
-                            PartialGraphStatus::Resetting(_) => ("resetting".to_owned(), None),
+                            PartialGraphStatus::Resetting => ("resetting".to_owned(), None),
                             PartialGraphStatus::Unspecified => {
                                 unreachable!()
                             }
@@ -367,9 +367,10 @@ impl LocalBarrierWorker {
         loop {
             select! {
                 biased;
-                (partial_graph_id, event) = self.state.next_event() => {
+                event = self.state.next_event() => {
                     match event {
                         ManagedBarrierStateEvent::BarrierCollected{
+                            partial_graph_id,
                             barrier,
                         } => {
                             // update await_epoch_completed_futures
@@ -377,13 +378,16 @@ impl LocalBarrierWorker {
                             self.complete_barrier(partial_graph_id, barrier.epoch.prev);
                         }
                         ManagedBarrierStateEvent::ActorError{
+                            partial_graph_id,
                             actor_id,
                             err,
                         } => {
                             self.on_partial_graph_failure(partial_graph_id, Some(actor_id), err, "recv actor failure");
                         }
-                        ManagedBarrierStateEvent::PartialGraphReset(output, reset_request_id) => {
-                            self.ack_partial_graph_reset(partial_graph_id, Some(output), reset_request_id);
+                        ManagedBarrierStateEvent::PartialGraphsReset(output, reset_request_id) => {
+                            for (partial_graph_id, output) in output {
+                                self.ack_partial_graph_reset(partial_graph_id, Some(output), reset_request_id);
+                            }
                         }
                         ManagedBarrierStateEvent::RegisterLocalUpstreamOutput{
                             actor_id,
@@ -428,7 +432,7 @@ impl LocalBarrierWorker {
                                         PartialGraphStatus::Running(graph) => {
                                             !graph.actor_states.is_empty()
                                         }
-                                        PartialGraphStatus::Suspended(_) | PartialGraphStatus::Resetting(_) |
+                                        PartialGraphStatus::Suspended(_) | PartialGraphStatus::Resetting |
                                             PartialGraphStatus::ReceivedExchangeRequest(_) => {
                                             false
                                         }
@@ -485,8 +489,8 @@ impl LocalBarrierWorker {
                 self.add_partial_graph(req.partial_graph_id);
                 Ok(())
             }
-            Request::ResetPartialGraph(req) => {
-                self.reset_partial_graph(req);
+            Request::ResetPartialGraphs(req) => {
+                self.reset_partial_graphs(req);
                 Ok(())
             }
             Request::Init(_) => {
@@ -540,7 +544,7 @@ impl LocalBarrierWorker {
                             PartialGraphStatus::Suspended(_) => {
                                 anyhow!("partial graph suspended")
                             }
-                            PartialGraphStatus::Resetting(_) => {
+                            PartialGraphStatus::Resetting => {
                                 anyhow!("partial graph resetting")
                             }
                             PartialGraphStatus::Unspecified => {
@@ -594,13 +598,16 @@ impl LocalBarrierWorker {
                     )
                     .unwrap();
                 }
-                while let Some((partial_graph_id, event)) = self.state.next_event().now_or_never() {
+                while let Some(event) = self.state.next_event().now_or_never() {
                     match event {
-                        ManagedBarrierStateEvent::BarrierCollected { barrier } => {
+                        ManagedBarrierStateEvent::BarrierCollected {
+                            barrier,
+                            partial_graph_id,
+                        } => {
                             self.complete_barrier(partial_graph_id, barrier.epoch.prev);
                         }
                         ManagedBarrierStateEvent::ActorError { .. }
-                        | ManagedBarrierStateEvent::PartialGraphReset(..)
+                        | ManagedBarrierStateEvent::PartialGraphsReset { .. }
                         | ManagedBarrierStateEvent::RegisterLocalUpstreamOutput { .. } => {
                             unreachable!()
                         }
@@ -947,18 +954,44 @@ impl LocalBarrierWorker {
         };
     }
 
-    fn reset_partial_graph(&mut self, req: ResetPartialGraphRequest) {
-        let partial_graph_id = req.partial_graph_id;
-        if let Some(status) = self.state.partial_graphs.get_mut(&partial_graph_id) {
-            status.start_reset(
-                partial_graph_id,
-                req.clear_tables,
-                self.await_epoch_completed_futures.remove(&partial_graph_id),
-                req.reset_request_id,
-            );
-        } else {
-            self.ack_partial_graph_reset(partial_graph_id, None, req.reset_request_id);
+    fn reset_partial_graphs(&mut self, req: ResetPartialGraphsRequest) {
+        let mut table_ids_to_clear = HashSet::new();
+        let mut reset_futures = HashMap::new();
+        for partial_graph_id in req.partial_graph_ids {
+            if let Some(status) = self.state.partial_graphs.get_mut(&partial_graph_id) {
+                let reset_future = status.start_reset(
+                    partial_graph_id,
+                    self.await_epoch_completed_futures.remove(&partial_graph_id),
+                    req.reset_request_id,
+                    &mut table_ids_to_clear,
+                );
+                reset_futures.insert(partial_graph_id, reset_future);
+            } else {
+                self.ack_partial_graph_reset(partial_graph_id, None, req.reset_request_id);
+            }
         }
+        if reset_futures.is_empty() {
+            assert!(table_ids_to_clear.is_empty());
+            return;
+        }
+        let state_store = self.actor_manager.env.state_store();
+        self.state.resetting_graphs.push(spawn(async move {
+            let outputs =
+                join_all(
+                    reset_futures
+                        .into_iter()
+                        .map(|(partial_graph_id, future)| async move {
+                            (partial_graph_id, future.await)
+                        }),
+                )
+                .await;
+            if !table_ids_to_clear.is_empty()
+                && let Some(hummock) = state_store.as_hummock()
+            {
+                hummock.clear_tables(table_ids_to_clear).await;
+            }
+            (outputs, req.reset_request_id)
+        }));
     }
 
     fn ack_partial_graph_reset(
@@ -971,14 +1004,7 @@ impl LocalBarrierWorker {
             %partial_graph_id,
             "partial graph reset successfully"
         );
-        if let Some(reset_partial_graph) = self.state.partial_graphs.remove(&partial_graph_id) {
-            match reset_partial_graph {
-                PartialGraphStatus::Resetting(_) => {}
-                _ => {
-                    unreachable!("must be resetting previously")
-                }
-            }
-        }
+        assert!(!self.state.partial_graphs.contains_key(&partial_graph_id));
         self.await_epoch_completed_futures.remove(&partial_graph_id);
         self.control_stream_handle.ack_reset_partial_graph(
             partial_graph_id,
@@ -1013,11 +1039,18 @@ impl LocalBarrierWorker {
 
     /// Force stop all actors on this worker, and then drop their resources.
     async fn reset(&mut self, init_request: InitRequest) {
-        join_all(
-            self.state
-                .partial_graphs
-                .values_mut()
-                .map(|graph| graph.abort()),
+        join(
+            join_all(
+                self.state
+                    .partial_graphs
+                    .values_mut()
+                    .map(|graph| graph.abort()),
+            ),
+            async {
+                while let Some(join_result) = self.state.resetting_graphs.next().await {
+                    join_result.expect("failed to join reset partial graphs handle");
+                }
+            },
         )
         .await;
         if let Some(m) = self.actor_manager.await_tree_reg.as_ref() {

@@ -75,8 +75,8 @@
 //! 2. [`LocalBarrierManager`] sends error via `actor_failure_rx`
 //! 3. [`barrier_worker::managed_state::PartialGraphState::poll_next_event`] sends `ActorError` event
 //! 4. [`barrier_worker::LocalBarrierWorker::on_partial_graph_failure`] suspends partial graph and reports to Meta Service
-//! 5. Meta Service responds with [`risingwave_pb::stream_service::streaming_control_stream_request::ResetPartialGraphRequest`]
-//! 6. [`barrier_worker::LocalBarrierWorker::reset_partial_graph`] starts partial graph reset process
+//! 5. Meta Service responds with [`risingwave_pb::stream_service::streaming_control_stream_request::ResetPartialGraphsRequest`]
+//! 6. [`barrier_worker::LocalBarrierWorker::reset_partial_graphs`] starts partial graph reset process
 //! 7. [`barrier_worker::managed_state::SuspendedPartialGraphState::reset`] cleans up actors and state
 
 #[expect(unused_imports, reason = "used for doc-link")]

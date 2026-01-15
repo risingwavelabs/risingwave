@@ -135,12 +135,11 @@ message StreamingControlStreamRequest {
     repeated uint64 partial_graph_ids = 1;
   }
 
-  message ResetPartialGraphRequest {
-    uint64 partial_graph_id = 1;
+  message ResetPartialGraphsRequest {
+    repeated uint64 partial_graph_ids = 1;
     uint32 reset_request_id = 2;
     reserved 3;
     reserved "database_id";
-    bool clear_tables = 4;
   }
 
   oneof request {
@@ -148,7 +147,7 @@ message StreamingControlStreamRequest {
     InjectBarrierRequest inject_barrier = 2;
     RemovePartialGraphRequest remove_partial_graph = 3;
     CreatePartialGraphRequest create_partial_graph = 4;
-    ResetPartialGraphRequest reset_partial_graph = 5;
+    ResetPartialGraphsRequest reset_partial_graphs = 5;
   }
 }
 

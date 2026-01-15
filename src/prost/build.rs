@@ -756,8 +756,8 @@ for_all_wrapped_id_fields! (
         StreamingControlStreamRequest.RemovePartialGraphRequest {
             partial_graph_ids: PartialGraphId,
         }
-        StreamingControlStreamRequest.ResetPartialGraphRequest {
-            partial_graph_id: PartialGraphId,
+        StreamingControlStreamRequest.ResetPartialGraphsRequest {
+            partial_graph_ids: PartialGraphId,
         }
         StreamingControlStreamResponse.ReportPartialGraphFailureResponse {
             partial_graph_id: PartialGraphId,

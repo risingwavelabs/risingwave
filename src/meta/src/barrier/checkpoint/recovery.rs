@@ -35,6 +35,7 @@ use crate::barrier::checkpoint::{BarrierWorkerState, CheckpointControl};
 use crate::barrier::complete_task::BarrierCompleteOutput;
 use crate::barrier::rpc::{
     ControlStreamManager, DatabaseInitialBarrierCollector, from_partial_graph_id,
+    to_partial_graph_id,
 };
 use crate::barrier::worker::{
     RetryBackoffFuture, RetryBackoffStrategy, get_retry_backoff_strategy,
@@ -145,30 +146,7 @@ impl DatabaseRecoveryMetrics {
 pub(super) const INITIAL_RESET_REQUEST_ID: u32 = 0;
 
 impl DatabaseRecoveringState {
-    pub(super) fn reset_partial_graph(
-        database_id: DatabaseId,
-        creating_job_id: Option<JobId>,
-        clear_tables: bool,
-        control_stream_manager: &mut ControlStreamManager,
-        reset_request_id: u32,
-    ) -> ResetPartialGraphCollector {
-        let remaining_workers = control_stream_manager.reset_partial_graph(
-            database_id,
-            creating_job_id,
-            clear_tables,
-            reset_request_id,
-        );
-        ResetPartialGraphCollector {
-            reset_request_id,
-            remaining_workers,
-            reset_resps: Default::default(),
-        }
-    }
-
-    /// reset the partial graphs of database again in recovery state
-    /// should not call it when the database is running, because when database is running
-    /// we cannot determine whether to `clear_tables` or not.
-    fn reset_database_partial_graphs_again(
+    fn reset_database_partial_graphs(
         database_id: DatabaseId,
         creating_jobs: impl Iterator<Item = JobId>,
         control_stream_manager: &mut ControlStreamManager,
@@ -177,25 +155,33 @@ impl DatabaseRecoveringState {
         ResetPartialGraphCollector,
         HashMap<JobId, ResetPartialGraphCollector>,
     ) {
-        (
-            Self::reset_partial_graph(
-                database_id,
-                None,
-                true,
-                control_stream_manager,
-                reset_request_id,
-            ),
+        let creating_jobs = creating_jobs.collect_vec();
+        let remaining_workers = control_stream_manager.reset_partial_graphs(
             creating_jobs
+                .iter()
+                .copied()
+                .map(Some)
+                .chain([None])
+                .map(|creating_job_id| to_partial_graph_id(database_id, creating_job_id))
+                .collect(),
+            reset_request_id,
+        );
+        (
+            ResetPartialGraphCollector {
+                reset_request_id,
+                remaining_workers: remaining_workers.clone(),
+                reset_resps: Default::default(),
+            },
+            creating_jobs
+                .into_iter()
                 .map(|job_id| {
                     (
                         job_id,
-                        Self::reset_partial_graph(
-                            database_id,
-                            Some(job_id),
-                            true,
-                            control_stream_manager,
+                        ResetPartialGraphCollector {
                             reset_request_id,
-                        ),
+                            remaining_workers: remaining_workers.clone(),
+                            reset_resps: Default::default(),
+                        },
                     )
                 })
                 .collect(),
@@ -212,7 +198,7 @@ impl DatabaseRecoveringState {
         let metrics = DatabaseRecoveryMetrics::new(database_id);
         metrics.recovery_failure_cnt.inc();
         let (database_resp_collector, creating_job_collectors) =
-            Self::reset_database_partial_graphs_again(
+            Self::reset_database_partial_graphs(
                 database_id,
                 creating_jobs,
                 control_stream_manager,
@@ -432,21 +418,13 @@ impl DatabaseStatusAction<'_, EnterReset> {
             .expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(database) => {
-                let database_resp_collector = DatabaseRecoveringState::reset_partial_graph(
-                    self.database_id,
-                    None,
-                    true,
-                    control_stream_manager,
-                    INITIAL_RESET_REQUEST_ID,
-                );
-                let creating_job_collectors: HashMap<_, _> = database
-                    .creating_streaming_job_controls
-                    .drain()
-                    .map(|(job_id, job)| {
-                        let collector = job.reset(control_stream_manager);
-                        (job_id, collector)
-                    })
-                    .collect();
+                let (database_resp_collector, creating_job_collectors) =
+                    DatabaseRecoveringState::reset_database_partial_graphs(
+                        self.database_id,
+                        database.creating_streaming_job_controls.keys().copied(),
+                        control_stream_manager,
+                        INITIAL_RESET_REQUEST_ID,
+                    );
                 let next_reset_request_id = creating_job_collectors
                     .values()
                     .map(|collector| collector.reset_request_id)
@@ -482,7 +460,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                     )]);
                     let (backoff_future, reset_request_id) = state.next_retry();
                     let (database_resp_collector, creating_job_collectors) =
-                        DatabaseRecoveringState::reset_database_partial_graphs_again(
+                        DatabaseRecoveringState::reset_database_partial_graphs(
                             self.database_id,
                             creating_jobs.into_iter(),
                             control_stream_manager,
@@ -523,7 +501,7 @@ impl CheckpointControl {
                     let creating_jobs = initial_barrier_collector.creating_job_ids().collect_vec();
                     let (backoff_future, reset_request_id) = state.next_retry();
                     let (database_resp_collector, creating_job_collectors) =
-                        DatabaseRecoveringState::reset_database_partial_graphs_again(
+                        DatabaseRecoveringState::reset_database_partial_graphs(
                             database_id,
                             creating_jobs.into_iter(),
                             control_stream_manager,
@@ -610,7 +588,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 );
                 let (backoff_future, reset_request_id) = status.next_retry();
                 let (database_resp_collector, creating_job_collectors) =
-                    DatabaseRecoveringState::reset_database_partial_graphs_again(
+                    DatabaseRecoveringState::reset_database_partial_graphs(
                         self.database_id,
                         injected_creating_jobs.into_iter(),
                         control_stream_manager,

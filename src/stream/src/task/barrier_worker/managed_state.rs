@@ -21,8 +21,9 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
-use futures::FutureExt;
-use futures::stream::FuturesOrdered;
+use futures::future::BoxFuture;
+use futures::stream::{FuturesOrdered, FuturesUnordered};
+use futures::{FutureExt, StreamExt};
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::id::SourceId;
@@ -380,21 +381,11 @@ impl SuspendedPartialGraphState {
         }
     }
 
-    async fn reset(mut self, clear_tables: bool) -> ResetPartialGraphOutput {
+    async fn reset(mut self) -> ResetPartialGraphOutput {
         let root_err = self.inner.try_find_root_actor_failure(self.failure).await;
         self.inner.abort_and_wait_actors().await;
-        if clear_tables
-            && let Some(hummock) = self.inner.actor_manager.env.state_store().as_hummock()
-        {
-            hummock.clear_tables(self.inner.table_ids).await;
-        }
         ResetPartialGraphOutput { root_err }
     }
-}
-
-pub(crate) struct ResettingPartialGraphState {
-    join_handle: JoinHandle<ResetPartialGraphOutput>,
-    reset_request_id: u32,
 }
 
 pub(crate) struct ResetPartialGraphOutput {
@@ -405,7 +396,7 @@ pub(in crate::task) enum PartialGraphStatus {
     ReceivedExchangeRequest(Vec<(UpDownActorIds, TakeReceiverRequest)>),
     Running(PartialGraphState),
     Suspended(SuspendedPartialGraphState),
-    Resetting(ResettingPartialGraphState),
+    Resetting,
     /// temporary place holder
     Unspecified,
 }
@@ -426,11 +417,7 @@ impl PartialGraphStatus {
             PartialGraphStatus::Suspended(SuspendedPartialGraphState { inner: state, .. }) => {
                 state.abort_and_wait_actors().await;
             }
-            PartialGraphStatus::Resetting(state) => {
-                (&mut state.join_handle)
-                    .await
-                    .expect("failed to join reset partial graph join handle");
-            }
+            PartialGraphStatus::Resetting => {}
             PartialGraphStatus::Unspecified => {
                 unreachable!()
             }
@@ -444,7 +431,7 @@ impl PartialGraphStatus {
             }
             PartialGraphStatus::Running(state) => Some(state),
             PartialGraphStatus::Suspended(_) => None,
-            PartialGraphStatus::Resetting(_) => {
+            PartialGraphStatus::Resetting => {
                 unreachable!("should not receive further request during cleaning")
             }
             PartialGraphStatus::Unspecified => {
@@ -460,13 +447,7 @@ impl PartialGraphStatus {
         match self {
             PartialGraphStatus::ReceivedExchangeRequest(_) => Poll::Pending,
             PartialGraphStatus::Running(state) => state.poll_next_event(cx),
-            PartialGraphStatus::Suspended(_) => Poll::Pending,
-            PartialGraphStatus::Resetting(state) => {
-                state.join_handle.poll_unpin(cx).map(|result| {
-                    let output = result.expect("should be able to join");
-                    ManagedBarrierStateEvent::PartialGraphReset(output, state.reset_request_id)
-                })
-            }
+            PartialGraphStatus::Suspended(_) | PartialGraphStatus::Resetting => Poll::Pending,
             PartialGraphStatus::Unspecified => {
                 unreachable!()
             }
@@ -490,18 +471,18 @@ impl PartialGraphStatus {
     pub(super) fn start_reset(
         &mut self,
         partial_graph_id: PartialGraphId,
-        clear_tables: bool,
         completing_futures: Option<FuturesOrdered<AwaitEpochCompletedFuture>>,
         reset_request_id: u32,
-    ) {
-        let join_handle = match replace(self, PartialGraphStatus::Unspecified) {
+        table_ids_to_clear: &mut HashSet<TableId>,
+    ) -> BoxFuture<'static, ResetPartialGraphOutput> {
+        match replace(self, PartialGraphStatus::Resetting) {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
                 for (_, request) in pending_requests {
                     if let TakeReceiverRequest::Remote(sender) = request {
                         let _ = sender.send(Err(anyhow!("partial graph reset").into()));
                     }
                 }
-                tokio::spawn(async move { ResetPartialGraphOutput { root_err: None } })
+                async move { ResetPartialGraphOutput { root_err: None } }.boxed()
             }
             PartialGraphStatus::Running(state) => {
                 assert_eq!(partial_graph_id, state.partial_graph_id);
@@ -509,10 +490,10 @@ impl PartialGraphStatus {
                     %partial_graph_id,
                     reset_request_id, "start partial graph reset from Running"
                 );
-                tokio::spawn(
-                    SuspendedPartialGraphState::new(state, None, completing_futures)
-                        .reset(clear_tables),
-                )
+                table_ids_to_clear.extend(state.table_ids.iter().copied());
+                SuspendedPartialGraphState::new(state, None, completing_futures)
+                    .reset()
+                    .boxed()
             }
             PartialGraphStatus::Suspended(state) => {
                 assert!(
@@ -526,42 +507,38 @@ impl PartialGraphStatus {
                     suspend_elapsed = ?state.suspend_time.elapsed(),
                     "start partial graph reset after suspended"
                 );
-                tokio::spawn(state.reset(clear_tables))
+                table_ids_to_clear.extend(state.inner.table_ids.iter().copied());
+                state.reset().boxed()
             }
-            PartialGraphStatus::Resetting(state) => {
-                let prev_request_id = state.reset_request_id;
-                info!(
-                    %partial_graph_id,
-                    reset_request_id, prev_request_id, "receive duplicate reset request"
-                );
-                assert!(reset_request_id > prev_request_id);
-                state.join_handle
+            PartialGraphStatus::Resetting => {
+                unreachable!("should not reset for twice");
             }
             PartialGraphStatus::Unspecified => {
                 unreachable!()
             }
-        };
-        *self = PartialGraphStatus::Resetting(ResettingPartialGraphState {
-            join_handle,
-            reset_request_id,
-        });
+        }
     }
 }
 
 #[derive(Default)]
 pub(in crate::task) struct ManagedBarrierState {
     pub(super) partial_graphs: HashMap<PartialGraphId, PartialGraphStatus>,
+    #[expect(clippy::type_complexity)]
+    pub(super) resetting_graphs:
+        FuturesUnordered<JoinHandle<(Vec<(PartialGraphId, ResetPartialGraphOutput)>, u32)>>,
 }
 
 pub(super) enum ManagedBarrierStateEvent {
     BarrierCollected {
+        partial_graph_id: PartialGraphId,
         barrier: Barrier,
     },
     ActorError {
+        partial_graph_id: PartialGraphId,
         actor_id: ActorId,
         err: StreamError,
     },
-    PartialGraphReset(ResetPartialGraphOutput, u32),
+    PartialGraphsReset(Vec<(PartialGraphId, ResetPartialGraphOutput)>, u32),
     RegisterLocalUpstreamOutput {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
@@ -571,14 +548,28 @@ pub(super) enum ManagedBarrierStateEvent {
 }
 
 impl ManagedBarrierState {
-    pub(super) fn next_event(
-        &mut self,
-    ) -> impl Future<Output = (PartialGraphId, ManagedBarrierStateEvent)> + '_ {
+    pub(super) fn next_event(&mut self) -> impl Future<Output = ManagedBarrierStateEvent> + '_ {
         poll_fn(|cx| {
-            for (partial_graph_id, graphs) in &mut self.partial_graphs {
-                if let Poll::Ready(event) = graphs.poll_next_event(cx) {
-                    return Poll::Ready((*partial_graph_id, event));
+            for graph in self.partial_graphs.values_mut() {
+                if let Poll::Ready(event) = graph.poll_next_event(cx) {
+                    return Poll::Ready(event);
                 }
+            }
+            if let Poll::Ready(Some(result)) = self.resetting_graphs.poll_next_unpin(cx) {
+                let (outputs, reset_request_id) = result.expect("failed to join resetting future");
+                for (partial_graph_id, _) in &outputs {
+                    let PartialGraphStatus::Resetting = self
+                        .partial_graphs
+                        .remove(partial_graph_id)
+                        .expect("should exist")
+                    else {
+                        panic!("should be resetting")
+                    };
+                }
+                return Poll::Ready(ManagedBarrierStateEvent::PartialGraphsReset(
+                    outputs,
+                    reset_request_id,
+                ));
             }
             Poll::Pending
         })
@@ -838,19 +829,29 @@ impl PartialGraphState {
     ) -> Poll<ManagedBarrierStateEvent> {
         if let Poll::Ready(option) = self.actor_failure_rx.poll_recv(cx) {
             let (actor_id, err) = option.expect("non-empty when tx in local_barrier_manager");
-            return Poll::Ready(ManagedBarrierStateEvent::ActorError { actor_id, err });
+            return Poll::Ready(ManagedBarrierStateEvent::ActorError {
+                actor_id,
+                err,
+                partial_graph_id: self.partial_graph_id,
+            });
         }
         // yield some pending collected epochs
         {
             if let Some(barrier) = self.graph_state.may_have_collected_all() {
-                return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected { barrier });
+                return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected {
+                    barrier,
+                    partial_graph_id: self.partial_graph_id,
+                });
             }
         }
         while let Poll::Ready(event) = self.barrier_event_rx.poll_recv(cx) {
             match event.expect("non-empty when tx in local_barrier_manager") {
                 LocalBarrierEvent::ReportActorCollected { actor_id, epoch } => {
                     if let Some(barrier) = self.collect(actor_id, epoch) {
-                        return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected { barrier });
+                        return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected {
+                            barrier,
+                            partial_graph_id: self.partial_graph_id,
+                        });
                     }
                 }
                 LocalBarrierEvent::ReportCreateProgress {
@@ -900,7 +901,11 @@ impl PartialGraphState {
                     barrier_sender,
                 } => {
                     if let Err(err) = self.register_barrier_sender(actor_id, barrier_sender) {
-                        return Poll::Ready(ManagedBarrierStateEvent::ActorError { actor_id, err });
+                        return Poll::Ready(ManagedBarrierStateEvent::ActorError {
+                            actor_id,
+                            err,
+                            partial_graph_id: self.partial_graph_id,
+                        });
                     }
                 }
                 LocalBarrierEvent::RegisterLocalUpstreamOutput {

@@ -45,7 +45,7 @@ use risingwave_pb::stream_service::inject_barrier_request::{
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::{
     CreatePartialGraphRequest, PbCreatePartialGraphRequest, PbInitRequest,
-    RemovePartialGraphRequest, ResetPartialGraphRequest,
+    RemovePartialGraphRequest, ResetPartialGraphsRequest,
 };
 use risingwave_pb::stream_service::{
     BarrierCompleteResponse, InjectBarrierRequest, StreamingControlStreamRequest,
@@ -1235,11 +1235,9 @@ impl ControlStreamManager {
         })
     }
 
-    pub(super) fn reset_partial_graph(
+    pub(super) fn reset_partial_graphs(
         &mut self,
-        database_id: DatabaseId,
-        creating_job_ids: Option<JobId>,
-        clear_tables: bool,
+        partial_graph_ids: Vec<PartialGraphId>,
         reset_request_id: u32,
     ) -> HashSet<WorkerId> {
         self.connected_workers()
@@ -1249,14 +1247,10 @@ impl ControlStreamManager {
                     .request_sender
                     .send(StreamingControlStreamRequest {
                         request: Some(
-                            streaming_control_stream_request::Request::ResetPartialGraph(
-                                ResetPartialGraphRequest {
+                            streaming_control_stream_request::Request::ResetPartialGraphs(
+                                ResetPartialGraphsRequest {
                                     reset_request_id,
-                                    partial_graph_id: to_partial_graph_id(
-                                        database_id,
-                                        creating_job_ids,
-                                    ),
-                                    clear_tables,
+                                    partial_graph_ids: partial_graph_ids.clone(),
                                 },
                             ),
                         ),

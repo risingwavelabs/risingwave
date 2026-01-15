@@ -39,9 +39,6 @@ use tracing::{debug, info};
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
-use crate::barrier::checkpoint::recovery::{
-    DatabaseRecoveringState, INITIAL_RESET_REQUEST_ID, ResetPartialGraphCollector,
-};
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
@@ -774,30 +771,6 @@ impl CreatingStreamingJobControl {
                 unreachable!("expect finish")
             }
             CreatingStreamingJobStatus::Finishing(_, tracking_job) => tracking_job,
-        }
-    }
-
-    pub(super) fn reset(
-        self,
-        control_stream_manager: &mut ControlStreamManager,
-    ) -> ResetPartialGraphCollector {
-        match self.status {
-            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. }
-            | CreatingStreamingJobStatus::Finishing(_, _) => {
-                let clear_tables =
-                    !matches!(self.status, CreatingStreamingJobStatus::Finishing(_, _));
-                DatabaseRecoveringState::reset_partial_graph(
-                    self.database_id,
-                    Some(self.job_id),
-                    clear_tables,
-                    control_stream_manager,
-                    INITIAL_RESET_REQUEST_ID,
-                )
-            }
-            CreatingStreamingJobStatus::PlaceHolder => {
-                unreachable!()
-            }
         }
     }
 }
