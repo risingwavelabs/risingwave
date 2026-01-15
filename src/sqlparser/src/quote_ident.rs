@@ -79,6 +79,7 @@ fn is_keyword(ident: &str) -> bool {
 mod tests {
     use super::QuoteIdent;
 
+    #[track_caller]
     fn check(input: &str, expect: &str) {
         assert_eq!(QuoteIdent(input).to_string(), expect);
     }
