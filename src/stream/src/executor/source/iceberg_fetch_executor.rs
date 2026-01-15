@@ -186,6 +186,9 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                partition: None,
+                partition_spec: None,
+                name_mapping: None,
             }
         }
 
@@ -205,6 +208,7 @@ mod state {
                 sequence_number,
                 equality_ids,
                 file_size_in_bytes,
+                ..
             }: FileScanTask,
         ) -> Self {
             Self {

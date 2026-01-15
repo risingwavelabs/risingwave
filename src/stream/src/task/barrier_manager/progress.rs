@@ -104,8 +104,7 @@ impl DatabaseManagedBarrierState {
         state: BackfillState,
     ) {
         if let Some(actor_state) = self.actor_states.get(&actor)
-            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
-            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
+            && let Some(graph_state) = self.graph_states.get_mut(&actor_state.partial_graph_id)
         {
             if let Some((prev_fragment_id, _)) = graph_state
                 .create_mview_progress
@@ -127,8 +126,7 @@ impl DatabaseManagedBarrierState {
         state: CdcTableBackfillState,
     ) {
         if let Some(actor_state) = self.actor_states.get(&actor)
-            && let Some(partial_graph_id) = actor_state.inflight_barriers.get(&epoch.prev)
-            && let Some(graph_state) = self.graph_states.get_mut(partial_graph_id)
+            && let Some(graph_state) = self.graph_states.get_mut(&actor_state.partial_graph_id)
         {
             graph_state
                 .cdc_table_backfill_progress

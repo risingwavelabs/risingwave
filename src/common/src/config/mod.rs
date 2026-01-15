@@ -390,6 +390,10 @@ pub mod default {
             100_000
         }
 
+        pub fn materialize_force_overwrite_on_no_check() -> bool {
+            false
+        }
+
         pub fn refresh_scheduler_interval_sec() -> u64 {
             60
         }
