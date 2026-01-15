@@ -24,7 +24,7 @@ set iceberg_engine_connection = 'public.hosted_catalog_conn';
 statement ok
 create table t_v3(id int primary key, name varchar, v1 int)
 with(
-    commit_checkpoint_interval = 2,
+    commit_checkpoint_interval = 3,
     format_version = 3
 ) engine = iceberg;
 
@@ -43,7 +43,7 @@ delete from t_v3 where id = 2;
 statement ok
 FLUSH;
 
-query ?? retry 3 backoff 1s
+query ?? retry 6 backoff 1s
 select count(*) > 0 from rw_iceberg_files
 where schema_name = 'public'
   and source_name = '__iceberg_source_t_v3'
@@ -84,6 +84,47 @@ DROP TABLE t_v3;
 
 statement ok
 DROP CONNECTION hosted_catalog_conn;
+
+# Test storage catalog connection with format version 3
+statement ok
+create connection storage_catalog_conn
+with (
+    type = 'iceberg',
+    catalog.type = 'storage',
+    warehouse.path = 's3://hummock001/iceberg_v3_puffin',
+    s3.access.key = secret hosted_catalog_secret,
+    s3.secret.key = secret hosted_catalog_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2'
+);
+
+statement ok
+set iceberg_engine_connection = 'public.storage_catalog_conn';
+
+statement ok
+create table t_v3_storage(id int primary key, name varchar)
+with(
+    commit_checkpoint_interval = 2,
+    format_version = 3
+) engine = iceberg;
+
+statement ok
+insert into t_v3_storage values(1, 'alice'), (2, 'bob');
+
+statement ok
+flush;
+
+query ??? rowsort retry 3 backoff 1s
+select * from t_v3_storage;
+----
+1 alice
+2 bob
+
+statement ok
+DROP TABLE t_v3_storage;
+
+statement ok
+DROP CONNECTION storage_catalog_conn;
 
 statement ok
 DROP SECRET hosted_catalog_secret;

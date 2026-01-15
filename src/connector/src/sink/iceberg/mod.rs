@@ -729,6 +729,7 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
             None => None,
         };
 
+        // Put format-version into table properties, because catalog like jdbc extract format-version from table properties.
         let properties = HashMap::from([(
             TableProperties::PROPERTY_FORMAT_VERSION.to_owned(),
             config.format_version.to_string(),
