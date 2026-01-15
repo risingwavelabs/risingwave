@@ -449,6 +449,17 @@ impl IcebergConfig {
             }
         }
 
+        // Enforce merge-on-read for append-only sinks
+        // Copy-on-write is strictly worse than merge-on-read for append-only workloads
+        if config.r#type == SINK_TYPE_APPEND_ONLY
+            && config.write_mode == IcebergWriteMode::CopyOnWrite
+        {
+            return Err(SinkError::Config(anyhow!(
+                "'copy-on-write' mode is not supported for append-only iceberg sink. \
+                 Please use 'merge-on-read' instead, which is strictly better for append-only workloads."
+            )));
+        }
+
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = values
             .iter()
