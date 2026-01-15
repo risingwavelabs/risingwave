@@ -59,7 +59,7 @@ pub struct LogicalIcebergIntermediateScan {
 impl Eq for LogicalIcebergIntermediateScan {}
 
 impl LogicalIcebergIntermediateScan {
-    pub fn new(logical_source: &LogicalSource, time_travel: IcebergTimeTravelInfo) -> Self {
+    pub fn new(logical_source: &LogicalSource, time_travel_info: IcebergTimeTravelInfo) -> Self {
         assert!(logical_source.core.is_iceberg_connector());
 
         let core = logical_source.core.clone();
@@ -77,7 +77,7 @@ impl LogicalIcebergIntermediateScan {
             core,
             predicate: Predicate::AlwaysTrue,
             output_columns: output_column,
-            time_travel_info: time_travel,
+            time_travel_info,
         }
     }
 
@@ -144,6 +144,7 @@ impl Distill for LogicalIcebergIntermediateScan {
         if verbose {
             fields.push(("predicate", Pretty::debug(&self.predicate)));
             fields.push(("output_columns", Pretty::debug(&self.output_columns)));
+            fields.push(("time_travel_info", Pretty::debug(&self.time_travel_info)));
         }
 
         childless_record("LogicalIcebergIntermediateScan", fields)

@@ -55,7 +55,7 @@ impl Hash for LogicalIcebergScan {
     fn hash<H: Hasher>(&self, state: &mut H) {
         self.base.hash(state);
         self.core.hash(state);
-        self.scan_type().hash(state);
+        self.iceberg_scan_type().hash(state);
     }
 }
 
@@ -69,7 +69,7 @@ impl LogicalIcebergScan {
         self.core.catalog.as_deref()
     }
 
-    pub fn scan_type(&self) -> IcebergScanType {
+    pub fn iceberg_scan_type(&self) -> IcebergScanType {
         match &self.task {
             IcebergFileScanTask::Data(_) => IcebergScanType::DataScan,
             IcebergFileScanTask::EqualityDelete(_) => IcebergScanType::EqualityDeleteScan,
@@ -87,7 +87,10 @@ impl Distill for LogicalIcebergScan {
             vec![
                 ("source", src),
                 ("columns", column_names_pretty(self.schema())),
-                ("scan_type", Pretty::debug(&self.scan_type())),
+                (
+                    "iceberg_scan_type",
+                    Pretty::debug(&self.iceberg_scan_type()),
+                ),
             ]
         } else {
             vec![]

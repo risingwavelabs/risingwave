@@ -140,6 +140,10 @@ impl Distill for BatchIcebergScan {
         let mut fields = vec![
             ("source", src),
             ("columns", column_names_pretty(self.schema())),
+            (
+                "iceberg_scan_type",
+                Pretty::from(format!("{:?}", self.iceberg_scan_type())),
+            ),
         ];
         if let Some(predicate) = self.predicate() {
             fields.push(("predicate", Pretty::from(predicate)));

@@ -177,7 +177,11 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
 
             // Add projection if output columns differ from scan columns
             let schema_len = plan.schema().len();
-            if scan.output_columns.len() != schema_len {
+            let schema_names = plan.schema().fields.iter().map(|f| f.name.as_str());
+            let output_names = scan.output_columns.iter().map(|s| s.as_str());
+            if schema_len != scan.output_columns.len()
+                || !itertools::equal(schema_names, output_names)
+            {
                 let col_map: HashMap<&str, usize> = plan
                     .schema()
                     .fields
