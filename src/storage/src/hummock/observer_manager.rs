@@ -105,7 +105,10 @@ impl ObserverState for HummockObserverNode {
                     .cache_refill_policy_sender
                     .send(policies)
                     .inspect_err(|e| {
-                        tracing::error!(?e, "unable to send table cache refill policies");
+                        tracing::error!(
+                            policies = ?e.0,
+                            "unable to send table cache refill policies"
+                        );
                     });
             }
             Info::ServingTableVnodeMappings(mappings) => {
@@ -135,7 +138,11 @@ impl ObserverState for HummockObserverNode {
                     .serving_table_vnode_mapping_sender
                     .send((op, mappings))
                     .inspect_err(|e| {
-                        tracing::error!(?e, "unable to send serving table vnode mappings");
+                        tracing::error!(
+                            op = ?e.0.0,
+                            mappings = ?e.0.1,
+                            "unable to send serving table vnode mappings"
+                        );
                     });
             }
             info => {
