@@ -27,6 +27,7 @@ use risingwave_pb::compute::config_service_client::ConfigServiceClient;
 use risingwave_pb::compute::{
     ResizeCacheRequest, ResizeCacheResponse, ShowConfigRequest, ShowConfigResponse,
 };
+use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::plan_common::ExprContext;
 use risingwave_pb::task_service::batch_exchange_service_client::BatchExchangeServiceClient;
 use risingwave_pb::task_service::stream_exchange_service_client::StreamExchangeServiceClient;
