@@ -2570,27 +2570,36 @@ fn bind_webhook_info(
         (None, None)
     };
 
-    let secure_compare_context = SecureCompareContext {
-        column_name: columns_defs[0].name.real_value(),
-        secret_name,
-    };
-    let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
-    let expr = binder.bind_expr(&signature_expr)?;
+    let signature_expr = if let Some(signature_expr) = signature_expr {
+        let secure_compare_context = SecureCompareContext {
+            column_name: columns_defs[0].name.real_value(),
+            secret_name,
+        };
+        let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
+        let expr = binder.bind_expr(&signature_expr)?;
 
-    // validate expr, ensuring it is SECURE_COMPARE()
-    if expr.as_function_call().is_none()
-        || expr.as_function_call().unwrap().func_type()
-            != crate::optimizer::plan_node::generic::ExprType::SecureCompare
-    {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "The signature verification function must be SECURE_COMPARE()".to_owned(),
-        )
-        .into());
-    }
+        // validate expr, ensuring it is SECURE_COMPARE()
+        if expr.as_function_call().is_none()
+            || expr.as_function_call().unwrap().func_type()
+                != crate::optimizer::plan_node::generic::ExprType::SecureCompare
+        {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "The signature verification function must be SECURE_COMPARE()".to_owned(),
+            )
+            .into());
+        }
+
+        Some(expr.to_expr_proto())
+    } else {
+        session.notice_to_user(
+            "VALIDATE clause is strongly recommended for safety or production usages",
+        );
+        None
+    };
 
     let pb_webhook_info = PbWebhookSourceInfo {
         secret_ref: pb_secret_ref,
-        signature_expr: Some(expr.to_expr_proto()),
+        signature_expr,
         wait_for_persistence,
         is_batched,
     };

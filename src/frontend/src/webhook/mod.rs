@@ -89,25 +89,29 @@ pub(super) mod handlers {
             is_batched,
         } = webhook_source_info;
 
-        let secret_string = if let Some(secret_ref) = secret_ref {
-            LocalSecretManager::global()
-                .fill_secret(secret_ref)
-                .map_err(|e| err(e, StatusCode::NOT_FOUND))?
+        let is_valid = if let Some(signature_expr) = signature_expr {
+            let secret_string = if let Some(secret_ref) = secret_ref {
+                LocalSecretManager::global()
+                    .fill_secret(secret_ref)
+                    .map_err(|e| err(e, StatusCode::NOT_FOUND))?
+            } else {
+                String::new()
+            };
+
+            // Once limitation here is that the key is no longer case-insensitive, users must user the lowercase key when defining the webhook source table.
+            let headers_jsonb = header_map_to_json(&headers);
+
+            // verify the signature
+            verify_signature(
+                headers_jsonb,
+                secret_string.as_str(),
+                body.as_ref(),
+                signature_expr,
+            )
+            .await?
         } else {
-            String::new()
+            true
         };
-
-        // Once limitation here is that the key is no longer case-insensitive, users must user the lowercase key when defining the webhook source table.
-        let headers_jsonb = header_map_to_json(&headers);
-
-        // verify the signature
-        let is_valid = verify_signature(
-            headers_jsonb,
-            secret_string.as_str(),
-            body.as_ref(),
-            signature_expr.unwrap(),
-        )
-        .await?;
 
         if !is_valid {
             return Err(err(
