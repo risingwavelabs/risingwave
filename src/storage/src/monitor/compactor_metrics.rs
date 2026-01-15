@@ -51,6 +51,7 @@ pub struct CompactorMetrics {
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
     pub sstable_block_size: Histogram,
+    pub shared_buffer_compact_parallelism: Histogram,
 }
 
 pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
@@ -237,6 +238,15 @@ impl CompactorMetrics {
             register_histogram_with_registry!(opts, registry).unwrap();
 
         let opts = histogram_opts!(
+            "compactor_shared_buffer_compact_parallelism",
+            "The number of splits (parallelism) used when compacting shared buffer",
+            exponential_buckets(1.0, 2.0, 6).unwrap() // 1, 2, 4, 8, 16, 32
+        );
+
+        let shared_buffer_compact_parallelism =
+            register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
             "compactor_compaction_event_consumed_latency",
             "The latency of each event being consumed",
             time_buckets.clone()
@@ -287,6 +297,7 @@ impl CompactorMetrics {
             compaction_event_consumed_latency,
             compaction_event_loop_iteration_latency,
             sstable_block_size,
+            shared_buffer_compact_parallelism,
         }
     }
 
