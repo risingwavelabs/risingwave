@@ -95,3 +95,6 @@ book/
 
 # Build caches
 .m2/
+
+# Agent instructions
+AGENTS.md
