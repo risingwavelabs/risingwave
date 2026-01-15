@@ -130,27 +130,32 @@
     select unnest(Array[1,2,3]) union all (select unnest(Array[1,2,3]));
   expected_outputs:
     - batch_plan
+    - stream_plan
 
 - name: test union all with unnest - both parenthesized
   sql: |
     (select unnest(Array[1,2,3])) union all (select unnest(Array[1,2,3]));
   expected_outputs:
     - batch_plan
+    - stream_plan
 
 - name: test union all with unnest - no parentheses
   sql: |
     select unnest(Array[1,2,3]) union all select unnest(Array[1,2,3]);
   expected_outputs:
     - batch_plan
+    - stream_plan
 
 - name: test intersect with unnest
   sql: |
     select unnest(Array[1,2,3]) intersect (select unnest(Array[2,3,4]));
   expected_outputs:
     - batch_plan
+    - stream_plan
 
 - name: test except with unnest
   sql: |
     select unnest(Array[1,2,3]) except (select unnest(Array[2,3,4]));
   expected_outputs:
     - batch_plan
+    - stream_plan
