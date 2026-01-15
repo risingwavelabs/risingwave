@@ -25,7 +25,7 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
 public class MySqlOffsetContext extends CommonOffsetContext<SourceInfo> {
-    protected final Logger logger = LoggerFactory.getLogger(getClass());
+    protected static final Logger LOGGER = LoggerFactory.getLogger(MySqlOffsetContext.class);
     private static final String SNAPSHOT_COMPLETED_KEY = "snapshot_completed";
     public static final String EVENTS_TO_SKIP_OFFSET_KEY = "event";
     public static final String TIMESTAMP_KEY = "ts_sec";
@@ -94,10 +94,12 @@ public class MySqlOffsetContext extends CommonOffsetContext<SourceInfo> {
     }
 
     private Map<String, Object> offsetUsingPosition(long rowsToSkip) {
-        // logger.info("sourceInfo: " + sourceInfo);
-        // logger.info("transactionContext: " + transactionContext);
         final Map<String, Object> map = new HashMap<>();
-        map.put(SourceInfo.SERVER_ID_KEY, this.serverIdFromOffset);
+        if (sourceInfo.getServerId() != 0) {
+            map.put(SourceInfo.SERVER_ID_KEY, sourceInfo.getServerId());
+        } else {
+            map.put(SourceInfo.SERVER_ID_KEY, this.serverIdFromOffset);
+        }
         if (restartGtidSet != null) {
             // Put the previously-completed GTID set in the offset along with the event number ...
             map.put(GTID_SET_KEY, restartGtidSet);
@@ -110,7 +112,11 @@ public class MySqlOffsetContext extends CommonOffsetContext<SourceInfo> {
         if (rowsToSkip != 0) {
             map.put(SourceInfo.BINLOG_ROW_IN_EVENT_OFFSET_KEY, rowsToSkip);
         }
-        map.put(TIMESTAMP_KEY, this.tsSecFromOffset);
+        if (sourceInfo.timestamp() != null) {
+            map.put(TIMESTAMP_KEY, sourceInfo.timestamp().getEpochSecond());
+        } else {
+            map.put(TIMESTAMP_KEY, this.tsSecFromOffset);
+        }
         return map;
     }
 
@@ -214,8 +220,10 @@ public class MySqlOffsetContext extends CommonOffsetContext<SourceInfo> {
                     longOffsetValue(offset, EVENTS_TO_SKIP_OFFSET_KEY),
                     (int) longOffsetValue(offset, SourceInfo.BINLOG_ROW_IN_EVENT_OFFSET_KEY));
             offsetContext.setCompletedGtidSet((String) offset.get(GTID_SET_KEY)); // may be null
-            offsetContext.setServerIdFromOffset(longOffsetValue(offset, "server_id"));
-            offsetContext.setTsSecFromOffset(longOffsetValue(offset, "ts_sec"));
+            long serverId = longOffsetValue(offset, SourceInfo.SERVER_ID_KEY);
+            offsetContext.setServerIdFromOffset(serverId);
+            long ts = longOffsetValue(offset, TIMESTAMP_KEY);
+            offsetContext.setTsSecFromOffset(ts);
             return offsetContext;
         }
     }
