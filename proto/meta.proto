@@ -681,7 +681,6 @@ enum CacheRefillPolicy {
   BOTH = 3;
 }
 
-
 service NotificationService {
   rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
 }
