@@ -288,14 +288,12 @@ impl RedShiftSinkWriter {
     ) -> Result<Self> {
         let schema = param.schema();
         if config.with_s3 {
-            let executor_id = writer_param.executor_id;
             let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
                 config.s3_inner.ok_or_else(|| {
                     SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
                 })?,
                 schema,
                 is_append_only,
-                executor_id,
                 Some(config.table),
             )?;
             Ok(Self::S3(s3_writer))
@@ -607,7 +605,7 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
             })?;
             let s3_operator = FileSink::<S3Sink>::new_s3_sink(s3_inner)?;
             let (mut writer, path) =
-                build_opendal_writer_path(s3_inner, 0.into(), &s3_operator, &None).await?;
+                build_opendal_writer_path(s3_inner, &s3_operator, &None).await?;
             let manifest_json = json!({
                 "entries": paths
             });
