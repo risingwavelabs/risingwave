@@ -155,7 +155,7 @@ deltalake = { version = "0.29", features = ["s3", "gcs", "datafusion"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
 # TODO(MrCroxx): Switch to a release version.
 foyer = { version = "0.21.0", features = ["serde", "tracing", "nightly"] }
-futures-async-stream = "0.2.9"
+futures-async-stream = "0.2.13"
 governor = { version = "0.10", default-features = false, features = ["std"] }
 hashbrown = { version = "0.16", features = [
     "default-hasher",
@@ -170,14 +170,14 @@ hashbrown0_15 = { package = "hashbrown", version = "0.15", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20251111
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "403e3414c476f644133cfa2f749070145cb8b30c", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d5ad93e26d4e397adbca4cddc4401299f4aba4a1", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "403e3414c476f644133cfa2f749070145cb8b30c" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "403e3414c476f644133cfa2f749070145cb8b30c" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d5ad93e26d4e397adbca4cddc4401299f4aba4a1" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "d5ad93e26d4e397adbca4cddc4401299f4aba4a1" }
 
 adbc_core = { version = "0.21" }
 adbc_snowflake = { version = "0.21", default-features = false }

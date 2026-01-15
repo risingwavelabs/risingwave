@@ -25,7 +25,6 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_meta_model::WorkerId;
-use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
@@ -48,7 +47,7 @@ use crate::barrier::schedule::{NewBarrier, PeriodicBarriers};
 use crate::barrier::utils::{
     NodeToCollect, collect_creating_job_commit_epoch_info, is_valid_after_worker_err,
 };
-use crate::barrier::{Command, CreateStreamingJobType};
+use crate::barrier::{BackfillProgress, Command, CreateStreamingJobType};
 use crate::manager::MetaSrvEnv;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
@@ -289,20 +288,24 @@ impl CheckpointControl {
             .for_each(|database| database.update_barrier_nums_metrics());
     }
 
-    pub(crate) fn gen_ddl_progress(&self) -> HashMap<JobId, DdlProgress> {
+    pub(crate) fn gen_backfill_progress(&self) -> HashMap<JobId, BackfillProgress> {
         let mut progress = HashMap::new();
         for status in self.databases.values() {
             let Some(database_checkpoint_control) = status.running_state() else {
                 continue;
             };
             // Progress of normal backfill
-            progress.extend(database_checkpoint_control.database_info.gen_ddl_progress());
+            progress.extend(
+                database_checkpoint_control
+                    .database_info
+                    .gen_backfill_progress(),
+            );
             // Progress of snapshot backfill
             for creating_job in database_checkpoint_control
                 .creating_streaming_job_controls
                 .values()
             {
-                progress.extend([(creating_job.job_id, creating_job.gen_ddl_progress())]);
+                progress.extend([(creating_job.job_id, creating_job.gen_backfill_progress())]);
             }
         }
         progress
@@ -638,14 +641,14 @@ impl DatabaseCheckpointControl {
         tracing::trace!(
             %worker_id,
             prev_epoch,
-            partial_graph_id = resp.partial_graph_id,
+            partial_graph_id = %resp.partial_graph_id,
             "barrier collected"
         );
         let creating_job_id = from_partial_graph_id(resp.partial_graph_id);
         match creating_job_id {
             None => {
                 if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
-                    assert!(node.state.node_to_collect.remove(&worker_id).is_some());
+                    assert!(node.state.node_to_collect.remove(&worker_id));
                     node.state.resps.push(resp);
                 } else {
                     panic!(
@@ -678,13 +681,12 @@ impl DatabaseCheckpointControl {
     }
 
     /// Return whether the database can still work after worker failure
-    pub(crate) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
-        for epoch_node in self.command_ctx_queue.values_mut() {
-            if !is_valid_after_worker_err(&mut epoch_node.state.node_to_collect, worker_id) {
+    pub(crate) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
+        for epoch_node in self.command_ctx_queue.values() {
+            if !is_valid_after_worker_err(&epoch_node.state.node_to_collect, worker_id) {
                 return false;
             }
         }
-        // TODO: include barrier in creating jobs
         true
     }
 }

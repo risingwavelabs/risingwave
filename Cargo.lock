@@ -5512,9 +5512,9 @@ dependencies = [
 
 [[package]]
 name = "futures-async-stream"
-version = "0.2.11"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "6cce57e88ba9fe4953f476112b2c8e315a2da07725a14dc091ac3e5b6e4cca72"
+checksum = "1890317fad72bd60d4254c0a06140676bcc321889e73b8be23ddf1e7adb2b62d"
 dependencies = [
  "futures-async-stream-macro",
  "futures-core",
@@ -5523,9 +5523,9 @@ dependencies = [
 
 [[package]]
 name = "futures-async-stream-macro"
-version = "0.2.11"
+version = "0.2.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ac45ed0bddbd110eb68862768a194f88700f5b91c39931d2f432fab67a16d08"
+checksum = "8fc954740d4b5ce849e6d8e01b79dbdb0e156b02737f7fb8d17130e25f36ff00"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -6501,7 +6501,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=403e3414c476f644133cfa2f749070145cb8b30c#403e3414c476f644133cfa2f749070145cb8b30c"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=d5ad93e26d4e397adbca4cddc4401299f4aba4a1#d5ad93e26d4e397adbca4cddc4401299f4aba4a1"
 dependencies = [
  "anyhow",
  "apache-avro 0.20.0",
@@ -6560,7 +6560,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=403e3414c476f644133cfa2f749070145cb8b30c#403e3414c476f644133cfa2f749070145cb8b30c"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=d5ad93e26d4e397adbca4cddc4401299f4aba4a1#d5ad93e26d4e397adbca4cddc4401299f4aba4a1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6575,7 +6575,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=403e3414c476f644133cfa2f749070145cb8b30c#403e3414c476f644133cfa2f749070145cb8b30c"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=d5ad93e26d4e397adbca4cddc4401299f4aba4a1#d5ad93e26d4e397adbca4cddc4401299f4aba4a1"
 dependencies = [
  "async-trait",
  "chrono",
@@ -6595,7 +6595,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=20309fe7e9dfe52c19114f2c14b6c423127b3918#20309fe7e9dfe52c19114f2c14b6c423127b3918"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=c6ee79563712c09147d915b42a2fecf39d3fcf30#c6ee79563712c09147d915b42a2fecf39d3fcf30"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6625,7 +6625,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=403e3414c476f644133cfa2f749070145cb8b30c#403e3414c476f644133cfa2f749070145cb8b30c"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=d5ad93e26d4e397adbca4cddc4401299f4aba4a1#d5ad93e26d4e397adbca4cddc4401299f4aba4a1"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -8331,11 +8331,10 @@ dependencies = [
 
 [[package]]
 name = "num-bigint-dig"
-version = "0.8.4"
+version = "0.8.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "dc84195820f291c7697304f3cbdadd1cb7199c0efc917ff5eafd71225c136151"
+checksum = "e661dda6640fad38e827a6d4a310ff4763082116fe217f279885c97f511bb0b7"
 dependencies = [
- "byteorder",
  "lazy_static",
  "libm",
  "num-integer",
@@ -11052,7 +11051,6 @@ dependencies = [
  "risingwave_storage",
  "rw_futures_util",
  "tempfile",
- "thiserror-ext",
  "tikv-jemallocator",
  "tokio-postgres",
  "tokio-stream 0.1.15",

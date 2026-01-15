@@ -237,7 +237,7 @@ pub fn global_streaming_metrics(metric_level: MetricLevel) -> StreamingMetrics {
 }
 
 impl StreamingMetrics {
-    fn new(registry: &Registry, level: MetricLevel) -> Self {
+    pub fn new(registry: &Registry, level: MetricLevel) -> Self {
         let executor_row_count = register_guarded_int_counter_vec_with_registry!(
             "stream_executor_row_count",
             "Total number of rows that have been output from each executor",

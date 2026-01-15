@@ -333,6 +333,13 @@ impl LogicalSource {
             ColIndexMapping::with_remaining_columns(&new_required, pruned_source.schema().len());
         LogicalProject::with_mapping(pruned_source.into(), mapping).into()
     }
+
+    pub fn is_shared_source(&self) -> bool {
+        // Create MV on source.
+        // We only check streaming_use_shared_source is true when `CREATE SOURCE`.
+        // The value does not affect the behavior of `CREATE MATERIALIZED VIEW` here.
+        self.source_catalog().is_some_and(|c| c.info.is_shared())
+    }
 }
 
 impl_plan_tree_node_for_leaf! { Logical, LogicalSource}
@@ -342,6 +349,7 @@ impl Distill for LogicalSource {
             let src = Pretty::from(catalog.name.clone());
             let mut fields = vec![
                 ("source", src),
+                ("is_shared", Pretty::debug(&catalog.info.is_shared())),
                 ("columns", column_names_pretty(self.schema())),
             ];
             if let Some(as_of) = &self.core.as_of {
@@ -448,11 +456,7 @@ impl ToStream for LogicalSource {
                 plan = Self::create_non_shared_source_plan(self.core.clone())?;
             }
             SourceNodeKind::CreateMViewOrBatch => {
-                // Create MV on source.
-                // We only check streaming_use_shared_source is true when `CREATE SOURCE`.
-                // The value does not affect the behavior of `CREATE MATERIALIZED VIEW` here.
-                let use_shared_source = self.source_catalog().is_some_and(|c| c.info.is_shared());
-                if use_shared_source {
+                if self.is_shared_source() {
                     plan = StreamSourceScan::new(self.core.clone()).into();
                 } else {
                     // non-shared source

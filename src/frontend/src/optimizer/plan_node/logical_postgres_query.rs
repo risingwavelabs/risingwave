@@ -48,6 +48,8 @@ impl LogicalPostgresQuery {
         password: String,
         database: String,
         query: String,
+        ssl_mode: Option<String>,
+        ssl_root_cert: Option<String>,
     ) -> Self {
         let core = generic::PostgresQuery {
             schema,
@@ -57,6 +59,8 @@ impl LogicalPostgresQuery {
             password,
             database,
             query,
+            ssl_mode,
+            ssl_root_cert,
             ctx,
         };
 

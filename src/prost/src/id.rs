@@ -312,7 +312,8 @@ declare_id_types!(
     ConnectionId,
     SecretId,
     SubscriberId,
-    LocalOperatorId
+    LocalOperatorId,
+    PartialGraphId
 );
 
 declare_id_type!(ObjectId, u32, 256);

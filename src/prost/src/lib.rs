@@ -36,6 +36,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::ddl_service::streaming_job_resource_type;
 use crate::id::{FragmentId, SourceId, WorkerId};
 use crate::meta::event_log::event_recovery;
 use crate::stream_plan::PbStreamScanType;
@@ -772,6 +773,18 @@ impl expr::UserDefinedFunctionMetadata {
         } else {
             // after `PbUdfExprVersion::NameInRuntime`, `identifier` means `name_in_runtime`
             self.identifier.as_deref()
+        }
+    }
+}
+
+impl streaming_job_resource_type::ResourceType {
+    pub fn resource_group(&self) -> Option<String> {
+        match self {
+            streaming_job_resource_type::ResourceType::Regular(_) => None,
+            streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
+            | streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group) => {
+                Some(group.clone())
+            }
         }
     }
 }

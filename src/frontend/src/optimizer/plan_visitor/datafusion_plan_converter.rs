@@ -37,6 +37,10 @@ use crate::optimizer::plan_node::{PlanTreeNode, PlanTreeNodeBinary, PlanTreeNode
 use crate::optimizer::plan_visitor::{DefaultBehavior, LogicalPlanVisitor};
 use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 
+/// Visitor to convert RisingWave logical plan to DataFusion logical plan.
+///
+/// Returns an error if the plan contains unsupported nodes or expressions.
+// When you add a new plan node here, please also update `DataFusionExecuteChecker`.
 #[derive(Debug, Clone, Copy)]
 pub struct DataFusionPlanConverter;
 
@@ -55,6 +59,12 @@ impl LogicalPlanVisitor for DataFusionPlanConverter {
         // TODO: support grouping sets, rollup, cube
         // Risingwave will convert it to logical expand first, then aggregate
         // But datafusion doesn't have logical expand node, so we need to use other way to implement it
+        if !plan.grouping_sets().is_empty() {
+            bail_not_implemented!(
+                "DataFusionPlanConverter: LogicalAgg with grouping sets is not supported"
+            );
+        }
+
         let rw_input = plan.input();
         let df_input = self.visit(plan.input())?;
         let input_columns = InputColumns::new(df_input.schema().as_ref(), rw_input.schema());

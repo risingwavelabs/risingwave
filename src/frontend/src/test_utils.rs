@@ -48,7 +48,7 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
     DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
-    alter_swap_rename_request, create_connection_request,
+    alter_swap_rename_request, create_connection_request, streaming_job_resource_type,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -103,7 +103,6 @@ impl SessionManager for LocalFrontend {
     fn create_dummy_session(
         &self,
         _database_id: DatabaseId,
-        _user_name: u32,
     ) -> std::result::Result<Arc<Self::Session>, Self::Error> {
         unreachable!()
     }
@@ -301,7 +300,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut table: PbTable,
         _graph: StreamFragmentGraph,
         _dependencies: HashSet<ObjectId>,
-        _specific_resource_group: Option<String>,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         table.id = self.gen_id();
@@ -344,8 +343,14 @@ impl CatalogWriter for MockCatalogWriter {
             let source_id = self.create_source_inner(source)?;
             table.optional_associated_source_id = Some(source_id.into());
         }
-        self.create_materialized_view(table, graph, HashSet::new(), None, if_not_exists)
-            .await?;
+        self.create_materialized_view(
+            table,
+            graph,
+            HashSet::new(),
+            streaming_job_resource_type::ResourceType::Regular(true),
+            if_not_exists,
+        )
+        .await?;
         Ok(())
     }
 
@@ -516,6 +521,10 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
+        Ok(())
+    }
+
+    async fn reset_source(&self, _source_id: SourceId) -> Result<()> {
         Ok(())
     }
 

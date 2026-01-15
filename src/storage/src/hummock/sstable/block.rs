@@ -21,7 +21,7 @@ use std::ops::Range;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::KeyComparator;
-use risingwave_hummock_sdk::key::{FullKey, TABLE_PREFIX_LEN, TableKey};
+use risingwave_hummock_sdk::key::{FullKey, TableKey};
 use serde::{Deserialize, Serialize};
 
 use super::utils::{CompressionAlgorithm, bytes_diff_below_max_key_length, xxhash64_verify};
@@ -533,6 +533,7 @@ impl BlockBuilder {
 
     #[cfg(any(test, feature = "test"))]
     pub fn add_for_test(&mut self, full_key: FullKey<&[u8]>, value: &[u8]) {
+        use risingwave_hummock_sdk::key::TABLE_PREFIX_LEN;
         let input_table_id = full_key.user_key.table_id;
         match self.table_id {
             Some(current_table_id) => assert_eq!(current_table_id, input_table_id),

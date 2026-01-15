@@ -793,6 +793,9 @@ mod tests {
             sequence_number: 0,
             equality_ids: None,
             file_size_in_bytes: 0,
+            partition: None,
+            partition_spec: None,
+            name_mapping: None,
         }
     }
 

@@ -155,6 +155,7 @@ for_all_wrapped_id_fields! (
     common {
         ActorInfo {
             actor_id: ActorId,
+            partial_graph_id: PartialGraphId,
         }
         ActorLocation {
             worker_node_id: WorkerId,
@@ -266,6 +267,9 @@ for_all_wrapped_id_fields! (
         }
         GetTablesResponse {
             tables: TableId,
+        }
+        ResetSourceRequest {
+            source_id: SourceId,
         }
     }
     frontend_service {
@@ -493,6 +497,7 @@ for_all_wrapped_id_fields! (
         }
         ListTableFragmentsResponse.ActorInfo {
             id: ActorId,
+            partial_graph_id: PartialGraphId,
         }
         ListTableFragmentsResponse.FragmentInfo {
             id: FragmentId,
@@ -710,6 +715,7 @@ for_all_wrapped_id_fields! (
             worker_id: WorkerId,
             list_finished_source_ids: SourceId,
             load_finished_source_ids: SourceId,
+            partial_graph_id: PartialGraphId,
         }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
@@ -736,6 +742,7 @@ for_all_wrapped_id_fields! (
             database_id: DatabaseId,
             table_ids_to_sync: TableId,
             actor_ids_to_collect: ActorId,
+            partial_graph_id: PartialGraphId,
         }
         InjectBarrierRequest.BuildActorInfo {
             fragment_upstreams: FragmentId,
@@ -747,9 +754,11 @@ for_all_wrapped_id_fields! (
         }
         StreamingControlStreamRequest.CreatePartialGraphRequest {
             database_id: DatabaseId,
+            partial_graph_id: PartialGraphId,
         }
         StreamingControlStreamRequest.RemovePartialGraphRequest {
             database_id: DatabaseId,
+            partial_graph_ids: PartialGraphId,
         }
         StreamingControlStreamRequest.ResetDatabaseRequest {
             database_id: DatabaseId,
@@ -767,6 +776,7 @@ for_all_wrapped_id_fields! (
         }
         GetStreamRequest.Get {
             database_id: DatabaseId,
+            up_partial_graph_id: PartialGraphId,
             up_fragment_id: FragmentId,
             down_fragment_id: FragmentId,
             up_actor_id: ActorId,

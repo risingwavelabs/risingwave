@@ -118,7 +118,7 @@ pub async fn execute_datafusion_plan(
                 return;
             }
             tracing::error!(
-                "Datafusion query execution timeout after {} seconds",
+                "DataFusion query execution timeout after {} seconds",
                 timeout.as_secs()
             );
             if sender1
