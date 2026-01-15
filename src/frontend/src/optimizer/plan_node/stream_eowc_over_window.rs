@@ -128,8 +128,8 @@ impl StreamEowcOverWindow {
     }
 
     /// Infer the rank state table for persisting rank function snapshots.
-    /// Schema: partition key columns + `call_index` (Int32) + `state` (Bytea).
-    /// PK: partition key columns (ascending) + `call_index` (ascending).
+    /// Schema: partition key columns + `state_0..state_{n-1}` (Bytea, one per window function call).
+    /// PK: partition key columns (ascending) only.
     fn infer_rank_state_table(&self) -> TableCatalog {
         let in_fields = self.core.input.schema().fields();
         let mut tbl_builder = TableCatalogBuilder::default();
@@ -140,19 +140,17 @@ impl StreamEowcOverWindow {
             tbl_builder.add_column(&in_fields[idx]);
         }
 
-        // Add call_index column
-        let call_index_col =
-            tbl_builder.add_column(&Field::with_name(DataType::Int32, "call_index"));
+        // Add state columns: one per window function call (state_0, state_1, ..., state_{n-1})
+        let num_calls = self.window_functions().len();
+        for i in 0..num_calls {
+            tbl_builder.add_column(&Field::with_name(DataType::Bytea, format!("state_{}", i)));
+        }
 
-        // Add state column for serialized snapshot
-        tbl_builder.add_column(&Field::with_name(DataType::Bytea, "state"));
-
-        // Add order columns: partition key columns (ascending) + call_index (ascending)
+        // PK = partition key columns only (ascending)
         for i in 0..partition_key_indices.len() {
             tbl_builder.add_order_column(i, OrderType::ascending());
         }
         let read_prefix_len_hint = tbl_builder.get_current_pk_len();
-        tbl_builder.add_order_column(call_index_col, OrderType::ascending());
 
         // Distribution key: same as partition key distribution
         let in_dist_key = self.core.input.distribution().dist_column_indices();
