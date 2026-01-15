@@ -175,6 +175,7 @@ impl HummockStorage {
         let write_limiter = Arc::new(WriteLimiter::default());
         let (version_update_tx, mut version_update_rx) = unbounded_channel();
         let (cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
+        let (serving_table_vnode_mapping_tx, serving_table_vnode_mapping_rx) = unbounded_channel();
 
         let observer_manager = ObserverManager::new(
             notification_client,
@@ -183,6 +184,7 @@ impl HummockStorage {
                 backup_reader.clone(),
                 version_update_tx.clone(),
                 cache_refill_policy_tx,
+                serving_table_vnode_mapping_tx,
                 write_limiter.clone(),
             ),
         )
@@ -217,6 +219,7 @@ impl HummockStorage {
             role,
             version_update_rx,
             cache_refill_policy_rx,
+            serving_table_vnode_mapping_rx,
             pinned_version,
             compactor_context.clone(),
             compaction_catalog_manager_ref.clone(),

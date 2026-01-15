@@ -66,6 +66,8 @@ pub async fn prepare_first_valid_version(
 ) {
     let (version_update_tx, mut version_update_rx) = unbounded_channel();
     let (cache_refill_policy_tx, _cache_refill_policy_rx) = unbounded_channel();
+    let (serving_table_vnode_mapping_tx, _serving_table_vnode_mapping_rx) = unbounded_channel();
+
     let notification_client = get_notification_client_for_test(
         env,
         hummock_manager_ref.clone(),
@@ -82,6 +84,7 @@ pub async fn prepare_first_valid_version(
             backup_manager,
             version_update_tx.clone(),
             cache_refill_policy_tx,
+            serving_table_vnode_mapping_tx,
             write_limiter,
         ),
     )

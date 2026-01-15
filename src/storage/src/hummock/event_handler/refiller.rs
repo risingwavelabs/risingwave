@@ -356,6 +356,16 @@ impl CacheRefiller {
         }
     }
 
+    pub(crate) fn update_serving_table_vnode_mapping(&mut self, mapping: HashMap<TableId, Bitmap>) {
+        todo!();
+        todo!();
+        todo!();
+        todo!();
+        todo!();
+        todo!();
+        todo!();
+    }
+
     fn update_table_cache_refill_vnodes_for_streaming(&mut self, table_id: TableId) {
         if !self.role.for_streaming() {
             return;

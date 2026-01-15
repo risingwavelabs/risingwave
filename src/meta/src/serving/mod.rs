@@ -371,7 +371,7 @@ async fn notify_hummock_serving_table_vnode_mapping(
     let mut worker_table_vnode_mapping = init_worker_table_vnode_mapping(&active_serving_workers);
     for (fragment_id, mapping) in fragment_worker_slot_mappings {
         let state_table_ids = &streaming_parallelisms
-            .get(&fragment_id)
+            .get(fragment_id)
             .expect("streaming parallelism must exist")
             .state_table_ids;
         append_worker_table_vnode_mapping(
@@ -408,7 +408,7 @@ fn delete_worker_table_vnode_mapping(
     mapping: &mut HashMap<WorkerId, HashMap<TableId, Bitmap>>,
     state_table_ids: &HashSet<TableId>,
 ) {
-    for table_id in state_table_ids.iter() {
+    for table_id in state_table_ids {
         for worker_mapping in mapping.values_mut() {
             worker_mapping.insert(*table_id, Bitmap::zeros(0));
         }
@@ -430,7 +430,7 @@ async fn notify_hummock_delete_serving_table_vnode_mapping(
     let mut worker_table_vnode_mapping = init_worker_table_vnode_mapping(&active_serving_workers);
     for fragment_id in fragment_ids {
         let state_table_ids = &streaming_parallelisms
-            .get(&fragment_id)
+            .get(fragment_id)
             .expect("streaming parallelism must exist")
             .state_table_ids;
         delete_worker_table_vnode_mapping(&mut worker_table_vnode_mapping, state_table_ids);

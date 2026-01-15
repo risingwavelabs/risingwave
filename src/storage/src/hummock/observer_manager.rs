@@ -12,11 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::license::LicenseManager;
 use risingwave_common_service::ObserverState;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
+use risingwave_pb::id::TableId;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{SubscribeResponse, TableCacheRefillPolicies};
@@ -33,6 +37,7 @@ pub struct HummockObserverNode {
     write_limiter: WriteLimiterRef,
     version_update_sender: UnboundedSender<HummockVersionUpdate>,
     cache_refill_policy_sender: UnboundedSender<TableCacheRefillPolicies>,
+    serving_table_vnode_mapping_sender: UnboundedSender<HashMap<TableId, Bitmap>>,
     version: u64,
 }
 
@@ -104,11 +109,29 @@ impl ObserverState for HummockObserverNode {
                     });
             }
             Info::ServingTableVnodeMappings(mappings) => {
-                todo!();
-                todo!();
-                todo!();
-                todo!();
-                todo!();
+                let mappings = mappings
+                    .mappings
+                    .into_iter()
+                    .map(|mapping| {
+                        (
+                            TableId::from(mapping.table_id),
+                            Bitmap::from(
+                                mapping
+                                    .bitmap
+                                    .expect("serving table vnode bitmap cannot inexists"),
+                            ),
+                        )
+                    })
+                    .collect();
+
+                tracing::debug!("receive serving table vnode mappings updates");
+
+                let _ = self
+                    .serving_table_vnode_mapping_sender
+                    .send(mappings)
+                    .inspect_err(|e| {
+                        tracing::error!(?e, "unable to send serving table vnode mappings");
+                    });
             }
             info => {
                 panic!("invalid notification info: {info}");
@@ -161,6 +184,7 @@ impl HummockObserverNode {
         backup_reader: BackupReaderRef,
         version_update_sender: UnboundedSender<HummockVersionUpdate>,
         cache_refill_policy_sender: UnboundedSender<TableCacheRefillPolicies>,
+        serving_table_vnode_mapping_sender: UnboundedSender<HashMap<TableId, Bitmap>>,
         write_limiter: WriteLimiterRef,
     ) -> Self {
         Self {
@@ -168,6 +192,7 @@ impl HummockObserverNode {
             backup_reader,
             version_update_sender,
             cache_refill_policy_sender,
+            serving_table_vnode_mapping_sender,
             version: 0,
             write_limiter,
         }

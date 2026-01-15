@@ -25,6 +25,7 @@ use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
 use prometheus::{Histogram, IntGauge};
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
@@ -200,6 +201,7 @@ pub struct HummockEventHandler {
     hummock_event_rx: HummockEventReceiver,
     version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
     cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
+    serving_table_vnode_mapping_rx: UnboundedReceiver<HashMap<TableId, Bitmap>>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     /// A copy of `read_version_mapping` but owned by event handler
     local_read_version_mapping: HashMap<LocalInstanceId, (TableId, HummockReadVersionRef)>,
@@ -236,6 +238,7 @@ impl HummockEventHandler {
         role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
         cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
+        serving_table_vnode_mapping_rx: UnboundedReceiver<HashMap<TableId, Bitmap>>,
         pinned_version: PinnedVersion,
         compactor_context: CompactorContext,
         compaction_catalog_manager_ref: CompactionCatalogManagerRef,
@@ -260,6 +263,7 @@ impl HummockEventHandler {
             role,
             version_update_rx,
             cache_refill_policy_rx,
+            serving_table_vnode_mapping_rx,
             compactor_context.sstable_store.clone(),
             state_store_metrics,
             CacheRefillConfig::from_storage_opts(&compactor_context.storage_opts),
@@ -317,6 +321,7 @@ impl HummockEventHandler {
         role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
         cache_refill_policy_rx: UnboundedReceiver<TableCacheRefillPolicies>,
+        serving_table_vnode_mapping_rx: UnboundedReceiver<HashMap<TableId, Bitmap>>,
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
         refill_config: CacheRefillConfig,
@@ -363,6 +368,7 @@ impl HummockEventHandler {
             hummock_event_rx,
             version_update_rx,
             cache_refill_policy_rx,
+            serving_table_vnode_mapping_rx,
             version_update_notifier_tx,
             recent_versions: Arc::new(ArcSwap::from_pointee(recent_versions)),
             read_version_mapping,
@@ -667,6 +673,13 @@ impl HummockEventHandler {
                     let policies = policies.policies.into_iter().map(|policy| (TableId::from(policy.table_id), CacheRefillPolicy::from_protobuf(policy.get_policy().unwrap()))).collect::<HashMap<_, _>>();
                     self.refiller.update_table_cache_refill_policies(policies);
                 }
+                serving_table_vnode_mapping = pin!(self.serving_table_vnode_mapping_rx.recv()) => {
+                    let Some(mapping) = serving_table_vnode_mapping else {
+                        warn!("serving table vnode mapping stream ends. event handle shutdown");
+                        return;
+                    };
+                    self.refiller.update_serving_table_vnode_mapping(mapping);
+                }
             }
         }
     }
@@ -969,6 +982,7 @@ mod tests {
 
         let (_version_update_tx, version_update_rx) = unbounded_channel();
         let (_cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
+        let (_serving_table_vnode_mapping_tx, serving_table_vnode_mapping_rx) = unbounded_channel();
 
         let epoch1 = epoch0.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -982,6 +996,7 @@ mod tests {
             Role::None,
             version_update_rx,
             cache_refill_policy_rx,
+            serving_table_vnode_mapping_rx,
             mock_sstable_store().await,
             metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),
@@ -1135,6 +1150,7 @@ mod tests {
 
         let (_version_update_tx, version_update_rx) = unbounded_channel();
         let (_cache_refill_policy_tx, cache_refill_policy_rx) = unbounded_channel();
+        let (_serving_table_vnode_mapping_tx, serving_table_vnode_mapping_rx) = unbounded_channel();
 
         let epoch1 = epoch0.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -1165,6 +1181,7 @@ mod tests {
             Role::None,
             version_update_rx,
             cache_refill_policy_rx,
+            serving_table_vnode_mapping_rx,
             mock_sstable_store().await,
             metrics.clone(),
             CacheRefillConfig::from_storage_opts(&storage_opt),
