@@ -32,13 +32,13 @@ use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{
-    Fragment as FragmentModel, FragmentRelation, FragmentSplits, Sink, StreamingJob,
+    Fragment as FragmentModel, FragmentColumn, FragmentRelation, FragmentSplits, Sink, StreamingJob,
 };
 use risingwave_meta_model::{
     ActorId, ConnectorSplits, DatabaseId, DispatcherType, ExprContext, FragmentId, I32Array,
     JobStatus, ObjectId, SchemaId, SinkId, SourceId, StreamNode, StreamingParallelism, TableId,
-    VnodeBitmap, WorkerId, database, fragment, fragment_relation, fragment_splits, object, sink,
-    source, streaming_job, table,
+    TableIdArray, VnodeBitmap, WorkerId, database, fragment, fragment_relation, fragment_splits,
+    object, sink, source, streaming_job, table,
 };
 use risingwave_meta_model_migration::{ExprTrait, OnConflict, SimpleExpr};
 use risingwave_pb::catalog::PbTable;
@@ -123,6 +123,7 @@ pub struct FragmentParallelismInfo {
     pub distribution_type: FragmentDistributionType,
     pub actor_count: usize,
     pub vnode_count: usize,
+    pub state_table_ids: HashSet<TableId>,
 }
 
 #[easy_ext::ext(FragmentTypeMaskExt)]
@@ -416,6 +417,7 @@ impl CatalogController {
                     distribution_type: fragment.distribution_type.into(),
                     actor_count: fragment.actors.len() as _,
                     vnode_count: fragment.vnode_count,
+                    state_table_ids: fragment.state_table_ids.clone(),
                 },
             );
         }
@@ -1091,6 +1093,20 @@ impl CatalogController {
             .iter_over_fragments()
             .map(|(_, fragment)| rebuild_fragment_mapping(fragment))
             .collect_vec()
+    }
+
+    pub async fn get_fragment_state_table_mapping(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<Option<Vec<TableId>>> {
+        let inner = self.inner.read().await;
+        let state_table_ids: Option<TableIdArray> = FragmentModel::find_by_id(fragment_id)
+            .select_only()
+            .column(FragmentColumn::StateTableIds)
+            .into_tuple()
+            .one(&inner.db)
+            .await?;
+        Ok(state_table_ids.map(|array| array.0))
     }
 
     pub async fn list_fragment_descs(

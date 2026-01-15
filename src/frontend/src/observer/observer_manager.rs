@@ -120,6 +120,9 @@ impl ObserverState for FrontendObserverNode {
             Info::TableCacheRefillPolicies(_) => {
                 panic!("frontend node should not receive TableCacheRefillPolicies");
             }
+            Info::ServingTableVnodeMappings(_) => {
+                panic!("frontend node should not receive ServingTableVnodeMappings");
+            }
         }
     }
 

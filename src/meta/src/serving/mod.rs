@@ -12,22 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use parking_lot::RwLock;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::WorkerSlotMapping;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
-use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_meta_model::{TableId, WorkerId};
+use risingwave_pb::common::{PbHostAddress, PbWorkerNode, WorkerNode, WorkerType};
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType;
-use risingwave_pb::meta::{FragmentWorkerSlotMapping, FragmentWorkerSlotMappings};
+use risingwave_pb::meta::{
+    FragmentWorkerSlotMapping, FragmentWorkerSlotMappings, PbServingTableVnodeMapping,
+    PbServingTableVnodeMappings,
+};
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::controller::fragment::FragmentParallelismInfo;
 use crate::controller::session_params::SessionParamsControllerRef;
-use crate::manager::{LocalNotification, MetadataManager, NotificationManagerRef};
+use crate::manager::{LocalNotification, MetadataManager, NotificationManagerRef, WorkerKey};
 use crate::model::FragmentId;
 
 pub type ServingVnodeMappingRef = Arc<ServingVnodeMapping>;
@@ -46,7 +51,7 @@ impl ServingVnodeMapping {
     /// Returns (successful updates, failed updates).
     pub fn upsert(
         &self,
-        streaming_parallelisms: HashMap<FragmentId, FragmentParallelismInfo>,
+        streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
         workers: &[WorkerNode],
         max_serving_parallelism: Option<u64>,
     ) -> (HashMap<FragmentId, WorkerSlotMapping>, Vec<FragmentId>) {
@@ -55,7 +60,7 @@ impl ServingVnodeMapping {
         let mut failed: Vec<FragmentId> = vec![];
         for (fragment_id, info) in streaming_parallelisms {
             let new_mapping = {
-                let old_mapping = serving_vnode_mappings.get(&fragment_id);
+                let old_mapping = serving_vnode_mappings.get(fragment_id);
                 let max_parallelism = match info.distribution_type {
                     FragmentDistributionType::Unspecified => unreachable!(),
                     FragmentDistributionType::Single => Some(1),
@@ -66,12 +71,12 @@ impl ServingVnodeMapping {
             };
             match new_mapping {
                 None => {
-                    serving_vnode_mappings.remove(&fragment_id as _);
-                    failed.push(fragment_id);
+                    serving_vnode_mappings.remove(fragment_id as _);
+                    failed.push(*fragment_id);
                 }
                 Some(mapping) => {
-                    serving_vnode_mappings.insert(fragment_id, mapping.clone());
-                    upserted.insert(fragment_id, mapping);
+                    serving_vnode_mappings.insert(*fragment_id, mapping.clone());
+                    upserted.insert(*fragment_id, mapping);
                 }
             }
         }
@@ -119,7 +124,7 @@ pub async fn on_meta_start(
     let (serving_compute_nodes, streaming_parallelisms) =
         fetch_serving_infos(metadata_manager).await;
     let (mappings, failed) = serving_vnode_mapping.upsert(
-        streaming_parallelisms,
+        &streaming_parallelisms,
         &serving_compute_nodes,
         max_serving_parallelism,
     );
@@ -139,6 +144,15 @@ pub async fn on_meta_start(
             mappings: to_fragment_worker_slot_mapping(&mappings),
         }),
     );
+
+    notify_hummock_serving_table_vnode_mapping(
+        Operation::Snapshot,
+        metadata_manager,
+        &notification_manager,
+        &mappings,
+        &streaming_parallelisms,
+    )
+    .await;
 }
 
 async fn fetch_serving_infos(
@@ -184,7 +198,7 @@ pub fn start_serving_vnode_mapping_worker(
                 .batch_parallelism()
                 .map(|p| p.get());
             let (mappings, failed) = serving_vnode_mapping.upsert(
-                streaming_parallelisms,
+                &streaming_parallelisms,
                 &workers,
                 max_serving_parallelism,
             );
@@ -204,6 +218,14 @@ pub fn start_serving_vnode_mapping_worker(
                     mappings: to_fragment_worker_slot_mapping(&mappings),
                 }),
             );
+            notify_hummock_serving_table_vnode_mapping(
+                Operation::Snapshot,
+                &metadata_manager,
+                &notification_manager,
+                &mappings,
+                &streaming_parallelisms,
+            )
+            .await;
         };
         loop {
             tokio::select! {
@@ -239,14 +261,28 @@ pub fn start_serving_vnode_mapping_worker(
                                         .await
                                         .batch_parallelism()
                                         .map(|p|p.get());
-                                    let (upserted, failed) = serving_vnode_mapping.upsert(filtered_streaming_parallelisms, &workers, max_serving_parallelism);
+                                    let (upserted, failed) = serving_vnode_mapping.upsert(&filtered_streaming_parallelisms, &workers, max_serving_parallelism);
                                     if !upserted.is_empty() {
                                         tracing::debug!("Update serving vnode mapping for fragments {:?}.", upserted.keys());
                                         notification_manager.notify_frontend_without_version(Operation::Update, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_fragment_worker_slot_mapping(&upserted) }));
+                                        notify_hummock_serving_table_vnode_mapping(
+                                            Operation::Update,
+                                            &metadata_manager,
+                                            &notification_manager,
+                                            &upserted,
+                                            &filtered_streaming_parallelisms,
+                                        ).await;
                                     }
                                     if !failed.is_empty() {
                                         tracing::warn!("Fail to update serving vnode mapping for fragments {:?}.", failed);
                                         notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&failed)}));
+                                        notify_hummock_delete_serving_table_vnode_mapping(
+                                            Operation::Delete,
+                                            &metadata_manager,
+                                            &notification_manager,
+                                            &failed,
+                                            &filtered_streaming_parallelisms,
+                                        ).await;
                                     }
                                 }
                                 LocalNotification::FragmentMappingsDelete(fragment_ids) => {
@@ -256,6 +292,23 @@ pub fn start_serving_vnode_mapping_worker(
                                     tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
                                     serving_vnode_mapping.remove(&fragment_ids);
                                     notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&fragment_ids) }));
+                                    let (_, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
+                                    let filtered_streaming_parallelisms = fragment_ids.iter().filter_map(|frag_id| {
+                                        match streaming_parallelisms.get(frag_id) {
+                                            Some(info) => Some((*frag_id, info.clone())),
+                                            None => {
+                                                tracing::warn!(fragment_id = %frag_id, "streaming parallelism not found");
+                                                None
+                                            }
+                                        }
+                                    }).collect();
+                                    notify_hummock_delete_serving_table_vnode_mapping(
+                                        Operation::Delete,
+                                        &metadata_manager,
+                                        &notification_manager,
+                                        &fragment_ids,
+                                        &filtered_streaming_parallelisms,
+                                    ).await;
                                 }
                                 _ => {}
                             }
@@ -272,4 +325,135 @@ pub fn start_serving_vnode_mapping_worker(
         }
     });
     (join_handle, shutdown_tx)
+}
+
+/// Initialize an empty worker to table id to vnode bitmap mapping.
+fn init_worker_table_vnode_mapping(
+    active_serving_workers: &[PbWorkerNode],
+) -> HashMap<WorkerId, HashMap<TableId, Bitmap>> {
+    active_serving_workers
+        .iter()
+        .map(|worker| (worker.id, HashMap::new()))
+        .collect()
+}
+
+/// Append vnode bitmap mapping to each worker for each state table id.
+fn append_worker_table_vnode_mapping(
+    mapping: &mut HashMap<WorkerId, HashMap<TableId, Bitmap>>,
+    state_table_ids: &HashSet<TableId>,
+    worker_slot_vnode_mapping: &WorkerSlotMapping,
+) {
+    for (worker_slot_id, bitmap) in &worker_slot_vnode_mapping.to_bitmaps() {
+        let worker_id = worker_slot_id.worker_id();
+        if let Some(worker_mapping) = mapping.get_mut(&worker_id) {
+            for table_id in state_table_ids {
+                worker_mapping
+                    .entry(*table_id)
+                    .and_modify(|b| *b |= bitmap.clone())
+                    .or_insert_with(|| bitmap.clone());
+            }
+        }
+    }
+}
+
+async fn notify_hummock_serving_table_vnode_mapping(
+    operation: Operation,
+    metadata_manager: &MetadataManager,
+    notification_manager: &NotificationManagerRef,
+    fragment_worker_slot_mappings: &HashMap<FragmentId, WorkerSlotMapping>,
+    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
+) {
+    let active_serving_workers = metadata_manager
+        .cluster_controller
+        .list_active_serving_workers()
+        .await
+        .expect("fail to list serving compute nodes");
+    let mut worker_table_vnode_mapping = init_worker_table_vnode_mapping(&active_serving_workers);
+    for (fragment_id, mapping) in fragment_worker_slot_mappings {
+        let state_table_ids = &streaming_parallelisms
+            .get(&fragment_id)
+            .expect("streaming parallelism must exist")
+            .state_table_ids;
+        append_worker_table_vnode_mapping(
+            &mut worker_table_vnode_mapping,
+            state_table_ids,
+            mapping,
+        );
+    }
+
+    for worker in active_serving_workers {
+        if let Some(table_vnode_mapping) = worker_table_vnode_mapping.get(&worker.id) {
+            notification_manager.notify_hummock_with_worker_key_without_version(
+                Some(WorkerKey(PbHostAddress {
+                    host: worker.host.as_ref().unwrap().host.clone(),
+                    port: worker.host.as_ref().unwrap().port,
+                })),
+                operation,
+                Info::ServingTableVnodeMappings(PbServingTableVnodeMappings {
+                    mappings: table_vnode_mapping
+                        .iter()
+                        .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
+                            table_id: table_id.as_raw_id(),
+                            bitmap: Some(bitmap.to_protobuf()),
+                        })
+                        .collect(),
+                }),
+            );
+        }
+    }
+}
+
+/// delete vnode bitmap mapping to each worker for each state table id.
+fn delete_worker_table_vnode_mapping(
+    mapping: &mut HashMap<WorkerId, HashMap<TableId, Bitmap>>,
+    state_table_ids: &HashSet<TableId>,
+) {
+    for table_id in state_table_ids.iter() {
+        for worker_mapping in mapping.values_mut() {
+            worker_mapping.insert(*table_id, Bitmap::zeros(0));
+        }
+    }
+}
+
+async fn notify_hummock_delete_serving_table_vnode_mapping(
+    operation: Operation,
+    metadata_manager: &MetadataManager,
+    notification_manager: &NotificationManagerRef,
+    fragment_ids: &Vec<FragmentId>,
+    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
+) {
+    let active_serving_workers = metadata_manager
+        .cluster_controller
+        .list_active_serving_workers()
+        .await
+        .expect("fail to list serving compute nodes");
+    let mut worker_table_vnode_mapping = init_worker_table_vnode_mapping(&active_serving_workers);
+    for fragment_id in fragment_ids {
+        let state_table_ids = &streaming_parallelisms
+            .get(&fragment_id)
+            .expect("streaming parallelism must exist")
+            .state_table_ids;
+        delete_worker_table_vnode_mapping(&mut worker_table_vnode_mapping, state_table_ids);
+    }
+
+    for worker in active_serving_workers {
+        if let Some(table_vnode_mapping) = worker_table_vnode_mapping.get(&worker.id) {
+            notification_manager.notify_hummock_with_worker_key_without_version(
+                Some(WorkerKey(PbHostAddress {
+                    host: worker.host.as_ref().unwrap().host.clone(),
+                    port: worker.host.as_ref().unwrap().port,
+                })),
+                operation,
+                Info::ServingTableVnodeMappings(PbServingTableVnodeMappings {
+                    mappings: table_vnode_mapping
+                        .iter()
+                        .map(|(table_id, bitmap)| PbServingTableVnodeMapping {
+                            table_id: table_id.as_raw_id(),
+                            bitmap: Some(bitmap.to_protobuf()),
+                        })
+                        .collect(),
+                }),
+            );
+        }
+    }
 }

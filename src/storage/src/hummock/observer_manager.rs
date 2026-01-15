@@ -103,6 +103,13 @@ impl ObserverState for HummockObserverNode {
                         tracing::error!(?e, "unable to send table cache refill policies");
                     });
             }
+            Info::ServingTableVnodeMappings(mappings) => {
+                todo!();
+                todo!();
+                todo!();
+                todo!();
+                todo!();
+            }
             info => {
                 panic!("invalid notification info: {info}");
             }

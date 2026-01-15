@@ -74,6 +74,7 @@ pub struct SharedFragmentInfo {
     pub actors: HashMap<ActorId, SharedActorInfo>,
     pub vnode_count: usize,
     pub fragment_type_mask: FragmentTypeMask,
+    pub state_table_ids: HashSet<TableId>,
 }
 
 impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
@@ -86,6 +87,7 @@ impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
             fragment_type_mask,
             actors,
             vnode_count,
+            state_table_ids,
             ..
         } = info;
 
@@ -99,6 +101,7 @@ impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
                 .map(|(actor_id, actor)| (*actor_id, actor.into()))
                 .collect(),
             vnode_count: *vnode_count,
+            state_table_ids: state_table_ids.clone(),
         }
     }
 }

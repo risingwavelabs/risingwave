@@ -646,6 +646,7 @@ message SubscribeResponse {
     catalog.Secret secret = 29;
     common.ClusterResource cluster_resource = 31;
     TableCacheRefillPolicies table_cache_refill_policies = 32;
+    ServingTableVnodeMappings serving_table_vnode_mappings = 33;
   }
   reserved 12;
   reserved "parallel_unit_mapping";
@@ -653,6 +654,15 @@ message SubscribeResponse {
   reserved "serving_parallel_unit_mappings";
   reserved 30;
   reserved "compute_node_total_cpu_count";
+}
+
+message ServingTableVnodeMappings {
+  repeated ServingTableVnodeMapping mappings = 1;
+}
+
+message ServingTableVnodeMapping {
+  uint32 table_id = 1;
+  common.Buffer bitmap = 2;
 }
 
 message TableCacheRefillPolicies {

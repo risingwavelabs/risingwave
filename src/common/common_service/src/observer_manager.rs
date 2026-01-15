@@ -135,6 +135,14 @@ where
             }
             Info::ServingWorkerSlotMappings(_) => true,
             Info::TableCacheRefillPolicies(_) => true,
+            Info::ServingTableVnodeMappings(_) => {
+                notification.version
+                    > info
+                        .version
+                        .as_ref()
+                        .unwrap()
+                        .streaming_worker_slot_mapping_version
+            }
         });
 
         self.observer_states
