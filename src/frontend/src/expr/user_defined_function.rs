@@ -21,7 +21,7 @@ use risingwave_common::types::DataType;
 
 use super::{Expr, ExprDisplay, ExprImpl};
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
-use crate::error::ErrorCode;
+use crate::error::{ErrorCode, RwError};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct UserDefinedFunction {
@@ -50,35 +50,33 @@ impl UserDefinedFunction {
         while let Some(secret) = args.pop_if(|arg| matches!(arg, ExprImpl::SecretRefExpr(_))) {
             let secret_expr = secret.into_secret_ref_expr().unwrap();
             let secret_name = arg_names.pop().ok_or_else(|| {
-                Err(ErrorCode::InternalError(format!(
+                RwError::from(ErrorCode::InternalError(format!(
                     "mismatched secret arg names and args for udf {}",
                     udf.name
-                )).into())
+                )))
             })?;
             let data_type = arg_types.pop().ok_or_else(|| {
-                Err(ErrorCode::InternalError(format!(
+                RwError::from(ErrorCode::InternalError(format!(
                     "mismatched secret arg types and args for udf {}",
                     udf.name
-                )).into())
+                )))
             })?;
             if data_type != secret_expr.return_type() {
-                return Err(ErrorCode::InternalError(format!(
+                return Err(RwError::from(ErrorCode::InternalError(format!(
                     "mismatched secret arg type for udf {}: expected {:?}, got {:?}",
                     udf.name,
                     data_type,
                     secret_expr.return_type()
-                ))
-                .into());
+                ))));
             }
             if secret_refs
-                .insert(secret_name, secret_expr.to_pb_secret_ref())
+                .insert(secret_name.clone(), secret_expr.to_pb_secret_ref())
                 .is_some()
             {
-                return Err(ErrorCode::InternalError(format!(
+                return Err(RwError::from(ErrorCode::InternalError(format!(
                     "duplicate secret arg name '{}' for udf {}",
                     secret_name, udf.name
-                ))
-                .into());
+                ))));
             }
         }
 
