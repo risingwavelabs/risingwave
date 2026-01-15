@@ -43,7 +43,6 @@ struct Partition {
     curr_row_buffer: EstimatedVecDeque<OwnedRow>,
     /// Cached rank state row for this partition, used for upsert operations.
     /// `None` means no prior row exists in the rank state table for this partition.
-    /// Schema: partition key columns + state_0..state_{n-1} (one per window function call).
     rank_state_row: Option<OwnedRow>,
 }
 
@@ -241,10 +240,11 @@ struct ExecutorInner<S: StateStore> {
     state_table_schema_len: usize,
     watermark_sequence: AtomicU64Ref,
     /// Optional state table for persisting rank function snapshots.
-    /// Only present when numbering functions (row_number/rank/dense_rank) are used.
-    /// Schema: partition_key columns + state_0..state_{n-1} (one Bytea column per window function call).
-    /// PK = partition key columns only.
+    /// See `StreamEowcOverWindow::infer_rank_state_table` for schema definition.
     rank_state_table: Option<StateTable<S>>,
+    /// Serde for input stream key (pk), used for encoding/decoding StateKey in rank snapshots.
+    /// Only initialized when `rank_state_table` is present.
+    pk_serde: Option<OrderedRowSerde>,
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -270,14 +270,28 @@ pub struct EowcOverWindowExecutorArgs<S: StateStore> {
     pub state_table: StateTable<S>,
     pub watermark_epoch: AtomicU64Ref,
     /// Optional state table for persisting rank function snapshots.
-    /// Schema: partition_key columns + state_0..state_{n-1} (one Bytea column per window function call).
-    /// PK = partition key columns only.
+    /// See `StreamEowcOverWindow::infer_rank_state_table` for schema definition.
     pub rank_state_table: Option<StateTable<S>>,
 }
 
 impl<S: StateStore> EowcOverWindowExecutor<S> {
     pub fn new(args: EowcOverWindowExecutorArgs<S>) -> Self {
         let input_info = args.input.info().clone();
+
+        // Build pk_serde if rank_state_table is present
+        let pk_serde = args.rank_state_table.as_ref().map(|_| {
+            let pk_data_types: Vec<_> = input_info
+                .stream_key
+                .iter()
+                .map(|&i| args.schema[i].data_type())
+                .collect();
+            let pk_order_types: Vec<_> = input_info
+                .stream_key
+                .iter()
+                .map(|_| OrderType::ascending())
+                .collect();
+            OrderedRowSerde::new(pk_data_types, pk_order_types)
+        });
 
         Self {
             input: args.input,
@@ -292,8 +306,115 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 state_table_schema_len: input_info.schema.len(),
                 watermark_sequence: args.watermark_epoch,
                 rank_state_table: args.rank_state_table,
+                pk_serde,
             },
         }
+    }
+
+    /// Load rank state snapshots from the rank state table and restore into partition states.
+    async fn load_rank_state(
+        this: &ExecutorInner<S>,
+        partition: &mut Partition,
+        partition_key: impl Row,
+        encoded_partition_key: &MemcmpEncoded,
+    ) -> StreamExecutorResult<()> {
+        let Some(rank_state_table) = &this.rank_state_table else {
+            return Ok(());
+        };
+        let pk_serde = this
+            .pk_serde
+            .as_ref()
+            .expect("pk_serde must be set when rank_state_table is present");
+
+        for state in partition.states.iter_mut() {
+            state.enable_persistence();
+        }
+
+        let partition_key_owned = partition_key.to_owned_row();
+        if let Some(row) = rank_state_table.get_row(&partition_key_owned).await? {
+            let num_partition_key_cols = this.partition_key_indices.len();
+            let num_calls = this.calls.len();
+
+            for call_index in 0..num_calls {
+                let state_col = num_partition_key_cols + call_index;
+                if state_col < row.len() {
+                    if let Some(state_bytes) = row.datum_at(state_col) {
+                        let snapshot = decode_snapshot(state_bytes.into_bytea(), pk_serde)?;
+                        debug!(
+                            "Restoring rank state for partition {:?}, call_index {}, has_last_key: {}",
+                            encoded_partition_key,
+                            call_index,
+                            snapshot.last_output_key.is_some()
+                        );
+                        partition
+                            .states
+                            .iter_mut()
+                            .nth(call_index)
+                            .unwrap()
+                            .restore(snapshot)?;
+                    }
+                } else {
+                    tracing::warn!(
+                        "Rank state row has fewer columns ({}) than expected ({}), skipping call_index {}",
+                        row.len(),
+                        num_partition_key_cols + num_calls,
+                        call_index
+                    );
+                }
+            }
+            partition.rank_state_row = Some(row);
+        }
+        Ok(())
+    }
+
+    /// Persist rank state snapshots to the rank state table.
+    fn persist_rank_state(
+        this: &mut ExecutorInner<S>,
+        partition: &mut Partition,
+        partition_key: impl Row,
+    ) {
+        let Some(rank_state_table) = &mut this.rank_state_table else {
+            return;
+        };
+        let pk_serde = this
+            .pk_serde
+            .as_ref()
+            .expect("pk_serde must be set when rank_state_table is present");
+
+        let num_calls = partition.states.len();
+        let num_partition_key_cols = partition_key.len();
+
+        // Build the new row: partition_key columns + state_0..state_{n-1}
+        let mut new_row_values = Vec::with_capacity(num_partition_key_cols + num_calls);
+        for datum in partition_key.iter() {
+            new_row_values.push(datum.to_owned_datum());
+        }
+
+        // For each call, encode snapshot or preserve previous value
+        for (call_index, state) in partition.states.iter().enumerate() {
+            if let Some(snapshot) = state.snapshot() {
+                let snapshot_bytes = encode_snapshot(&snapshot, pk_serde);
+                new_row_values.push(Some(snapshot_bytes.into_boxed_slice().into()));
+            } else if let Some(ref old_row) = partition.rank_state_row {
+                let state_col = num_partition_key_cols + call_index;
+                if state_col < old_row.len() {
+                    new_row_values.push(old_row.datum_at(state_col).to_owned_datum());
+                } else {
+                    new_row_values.push(None);
+                }
+            } else {
+                new_row_values.push(None);
+            }
+        }
+        let new_row = OwnedRow::new(new_row_values);
+
+        // Upsert: update if old row exists, otherwise insert
+        if let Some(old_row) = partition.rank_state_row.take() {
+            rank_state_table.update(old_row, new_row.clone());
+        } else {
+            rank_state_table.insert(new_row.clone());
+        }
+        partition.rank_state_row = Some(new_row);
     }
 
     async fn ensure_key_in_cache(
@@ -306,71 +427,14 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
             return Ok(());
         }
 
-        let num_calls = this.calls.len();
         let mut partition = Partition {
             states: WindowStates::new(this.calls.iter().map(create_window_state).try_collect()?),
             curr_row_buffer: Default::default(),
             rank_state_row: None,
         };
 
-        // If rank state table exists, enable persistence on all states and restore snapshots
-        if let Some(rank_state_table) = &this.rank_state_table {
-            for state in partition.states.iter_mut() {
-                state.enable_persistence();
-            }
-
-            // Build pk serde for deserializing StateKey pk
-            let pk_data_types: Vec<_> = this
-                .input_stream_key
-                .iter()
-                .map(|&i| this.schema[i].data_type())
-                .collect();
-            let pk_order_types: Vec<_> = this
-                .input_stream_key
-                .iter()
-                .map(|_| OrderType::ascending())
-                .collect();
-            let pk_deser = OrderedRowSerde::new(pk_data_types, pk_order_types);
-
-            // Load rank state row for this partition (single row per partition).
-            // New schema: partition_key columns + state_0..state_{n-1} (one per window function call).
-            // PK = partition key columns only.
-            let partition_key_owned = partition_key.to_owned_row();
-            if let Some(row) = rank_state_table.get_row(&partition_key_owned).await? {
-                let num_partition_key_cols = this.partition_key_indices.len();
-
-                // Each state column is at index: num_partition_key_cols + call_index
-                for call_index in 0..num_calls {
-                    let state_col = num_partition_key_cols + call_index;
-                    if state_col < row.len() {
-                        if let Some(state_bytes) = row.datum_at(state_col) {
-                            let snapshot = decode_snapshot(state_bytes.into_bytea(), &pk_deser)?;
-                            debug!(
-                                "Restoring rank state for partition {:?}, call_index {}, has_last_key: {}",
-                                encoded_partition_key,
-                                call_index,
-                                snapshot.last_output_key.is_some()
-                            );
-                            partition
-                                .states
-                                .iter_mut()
-                                .nth(call_index)
-                                .unwrap()
-                                .restore(snapshot)?;
-                        }
-                    } else {
-                        tracing::warn!(
-                            "Rank state row has fewer columns ({}) than expected ({}), skipping call_index {}",
-                            row.len(),
-                            num_partition_key_cols + num_calls,
-                            call_index
-                        );
-                    }
-                }
-                // Cache the row for future upserts
-                partition.rank_state_row = Some(row);
-            }
-        }
+        // If rank state table exists, load and restore rank state snapshots
+        Self::load_rank_state(this, &mut partition, &partition_key, encoded_partition_key).await?;
 
         let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Bound::Unbounded, Bound::Unbounded);
         // Recover states from state table.
@@ -527,58 +591,7 @@ impl<S: StateStore> EowcOverWindowExecutor<S> {
                 }
 
                 // Persist rank state snapshots if rank_state_table exists
-                // New schema: partition_key columns + state_0..state_{n-1} (one per window function call).
-                // Single row per partition.
-                if let Some(rank_state_table) = &mut this.rank_state_table {
-                    // Build pk serde for serializing StateKey pk
-                    let pk_data_types: Vec<_> = this
-                        .input_stream_key
-                        .iter()
-                        .map(|&i| this.schema[i].data_type())
-                        .collect();
-                    let pk_order_types: Vec<_> = this
-                        .input_stream_key
-                        .iter()
-                        .map(|_| OrderType::ascending())
-                        .collect();
-                    let pk_ser = OrderedRowSerde::new(pk_data_types, pk_order_types);
-
-                    let num_calls = partition.states.len();
-                    let num_partition_key_cols = partition_key.len();
-
-                    // Build the new row: partition_key columns + state_0..state_{n-1}
-                    let mut new_row_values = Vec::with_capacity(num_partition_key_cols + num_calls);
-                    for datum in partition_key.iter() {
-                        new_row_values.push(datum.to_owned_datum());
-                    }
-
-                    // For each call, encode snapshot or preserve previous value
-                    for (call_index, state) in partition.states.iter().enumerate() {
-                        if let Some(snapshot) = state.snapshot() {
-                            let snapshot_bytes = encode_snapshot(&snapshot, &pk_ser);
-                            new_row_values.push(Some(snapshot_bytes.into_boxed_slice().into()));
-                        } else if let Some(ref old_row) = partition.rank_state_row {
-                            // Preserve previous value if no new snapshot
-                            let state_col = num_partition_key_cols + call_index;
-                            if state_col < old_row.len() {
-                                new_row_values.push(old_row.datum_at(state_col).to_owned_datum());
-                            } else {
-                                new_row_values.push(None);
-                            }
-                        } else {
-                            new_row_values.push(None);
-                        }
-                    }
-                    let new_row = OwnedRow::new(new_row_values);
-
-                    // Upsert: update if old row exists, otherwise insert
-                    if let Some(old_row) = partition.rank_state_row.take() {
-                        rank_state_table.update(old_row, new_row.clone());
-                    } else {
-                        rank_state_table.insert(new_row.clone());
-                    }
-                    partition.rank_state_row = Some(new_row);
-                }
+                Self::persist_rank_state(this, partition, &partition_key);
             }
         }
 
