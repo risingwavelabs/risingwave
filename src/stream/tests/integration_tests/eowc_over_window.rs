@@ -134,14 +134,21 @@ async fn create_executor_with_rank_table<S: StateStore>(
     )
     .await;
 
-    // Create rank state table: partition_key (Varchar) + call_index (Int32) + state (Bytea)
-    let rank_table_columns = vec![
+    // Create rank state table: partition_key (Varchar) + state_0..state_{n-1} (Bytea)
+    // Schema: partition key columns + one state column per window function call.
+    // PK = partition key columns only.
+    let num_calls = calls.len();
+    let mut rank_table_columns = vec![
         ColumnDesc::unnamed(ColumnId::new(0), DataType::Varchar), // partition key
-        ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),   // call_index
-        ColumnDesc::unnamed(ColumnId::new(2), DataType::Bytea),   // state
     ];
-    let rank_table_pk_indices = vec![0, 1];
-    let rank_table_order_types = vec![OrderType::ascending(), OrderType::ascending()];
+    for i in 0..num_calls {
+        rank_table_columns.push(ColumnDesc::unnamed(
+            ColumnId::new((i + 1) as i32),
+            DataType::Bytea,
+        )); // state_{i}
+    }
+    let rank_table_pk_indices = vec![0]; // PK = partition key only
+    let rank_table_order_types = vec![OrderType::ascending()];
 
     let rank_state_table = StateTable::from_table_catalog_inconsistent_op(
         &gen_pbtable(
