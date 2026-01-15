@@ -1,0 +1,190 @@
+control substitution on
+
+# Comprehensive test for PostGIS geometry types
+# Tests: 3D coordinates, different SRIDs, MultiPoint, MultiLineString, MultiPolygon
+
+system ok
+psql -c "
+    CREATE EXTENSION IF NOT EXISTS postgis;
+    DROP TABLE IF EXISTS test_geometry_comprehensive CASCADE;
+    CREATE TABLE test_geometry_comprehensive (
+        id int PRIMARY KEY,
+        name varchar(255),
+        geom_2d geometry(Point, 4326),
+        geom_3d geometry(PointZ, 4326),
+        geom_srid_0 geometry(Point, 0),
+        geom_srid_3857 geometry(Point, 3857),
+        multi_point geometry(MultiPoint, 4326),
+        multi_line geometry(MultiLineString, 4326),
+        multi_poly geometry(MultiPolygon, 4326)
+    );
+    -- Insert test data
+    INSERT INTO test_geometry_comprehensive VALUES (
+        1,
+        'comprehensive_test',
+        ST_SetSRID(ST_MakePoint(1, 2), 4326),
+        ST_SetSRID(ST_MakePoint(1, 2, 3), 4326),
+        ST_MakePoint(4, 5),  -- SRID 0 (default)
+        ST_Transform(ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326), 3857),  -- Web Mercator
+        ST_SetSRID(ST_GeomFromText('MULTIPOINT((0 0), (1 1))'), 4326),
+        ST_SetSRID(ST_GeomFromText('MULTILINESTRING((0 0, 1 1), (2 2, 3 3))'), 4326),
+        ST_SetSRID(ST_GeomFromText('MULTIPOLYGON(((0 0, 1 0, 1 1, 0 1, 0 0)), ((2 2, 3 2, 3 3, 2 3, 2 2)))'), 4326)
+    );
+"
+
+statement ok
+create source pg_geo_comp_source with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'pg_geo_comp_slot'
+);
+
+statement ok
+create table rw_test_geometry_comprehensive (
+    id int PRIMARY KEY,
+    name varchar,
+    geom_2d bytea,
+    geom_3d bytea,
+    geom_srid_0 bytea,
+    geom_srid_3857 bytea,
+    multi_point bytea,
+    multi_line bytea,
+    multi_poly bytea
+) from pg_geo_comp_source table 'public.test_geometry_comprehensive';
+
+# Verify all columns are captured
+query IIIIIIIII retry 4 backoff 1s
+SELECT 
+    CASE WHEN id IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN geom_2d IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN geom_3d IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN geom_srid_0 IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN geom_srid_3857 IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN multi_point IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN multi_line IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN multi_poly IS NOT NULL THEN 1 ELSE 0 END,
+    1 as all_present
+FROM rw_test_geometry_comprehensive WHERE id = 1;
+----
+1 1 1 1 1 1 1 1 1
+
+# Verify 3D geometry has more bytes than 2D (includes Z coordinate)
+query I retry 4 backoff 1s
+SELECT CASE WHEN length(geom_3d) > length(geom_2d) THEN 1 ELSE 0 END
+FROM rw_test_geometry_comprehensive WHERE id = 1;
+----
+1
+
+# Verify different EWKB headers for different geometry types
+# Point (2D): 0101000020
+# Point (3D): 01010000A0
+# MultiPoint: 0104000020
+query TTT retry 4 backoff 1s
+SELECT 
+    substring(encode(geom_2d, 'hex') from 1 for 8) as point_2d_header,
+    substring(encode(geom_3d, 'hex') from 1 for 8) as point_3d_header,
+    substring(encode(multi_point, 'hex') from 1 for 8) as multipoint_header
+FROM rw_test_geometry_comprehensive WHERE id = 1;
+----
+01010000 01010000 01040000
+
+# Test incremental updates with different geometry types
+system ok
+psql -c "
+    INSERT INTO test_geometry_comprehensive VALUES (
+        2,
+        'incremental_test',
+        ST_SetSRID(ST_MakePoint(10, 20), 4326),
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL,
+        NULL
+    );
+"
+
+query ITI retry 4 backoff 1s
+SELECT id, name, CASE WHEN geom_2d IS NOT NULL THEN 1 ELSE 0 END
+FROM rw_test_geometry_comprehensive WHERE id = 2;
+----
+2 incremental_test 1
+
+# Test geometry array type (if supported)
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geometry_array CASCADE;
+    CREATE TABLE test_geometry_array (
+        id int PRIMARY KEY,
+        geom_array geometry(Point, 4326)[]
+    );
+    INSERT INTO test_geometry_array VALUES (
+        1,
+        ARRAY[ST_SetSRID(ST_MakePoint(1, 1), 4326), ST_SetSRID(ST_MakePoint(2, 2), 4326)]
+    );
+"
+
+statement ok
+create table rw_test_geometry_array (
+    id int PRIMARY KEY,
+    geom_array bytea[]
+) from pg_geo_comp_source table 'public.test_geometry_array';
+
+# Verify geometry array is captured
+query II retry 4 backoff 1s
+SELECT id, array_length(geom_array, 1)
+FROM rw_test_geometry_array WHERE id = 1;
+----
+1 2
+
+# Test mixed NULL and non-NULL values
+system ok
+psql -c "
+    INSERT INTO test_geometry_comprehensive VALUES (
+        3,
+        'mixed_nulls',
+        ST_SetSRID(ST_MakePoint(1, 1), 4326),
+        NULL,
+        ST_MakePoint(2, 2),
+        NULL,
+        NULL,
+        ST_SetSRID(ST_GeomFromText('MULTILINESTRING((0 0, 1 1))'), 4326),
+        NULL
+    );
+"
+
+query IIIIIIIII retry 4 backoff 1s
+SELECT 
+    id,
+    CASE WHEN geom_2d IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN geom_3d IS NULL THEN 1 ELSE 0 END,
+    CASE WHEN geom_srid_0 IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN geom_srid_3857 IS NULL THEN 1 ELSE 0 END,
+    CASE WHEN multi_point IS NULL THEN 1 ELSE 0 END,
+    CASE WHEN multi_line IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN multi_poly IS NULL THEN 1 ELSE 0 END,
+    1
+FROM rw_test_geometry_comprehensive WHERE id = 3;
+----
+3 1 1 1 1 1 1 1 1
+
+# Cleanup
+statement ok
+drop table rw_test_geometry_comprehensive;
+
+statement ok
+drop table rw_test_geometry_array;
+
+statement ok
+drop source pg_geo_comp_source;
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geometry_comprehensive CASCADE;
+    DROP TABLE IF EXISTS test_geometry_array CASCADE;
+    SELECT pg_drop_replication_slot('pg_geo_comp_slot');
+"

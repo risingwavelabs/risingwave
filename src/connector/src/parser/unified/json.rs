@@ -654,6 +654,26 @@ impl JsonParseOptions {
                         .into(),
                 }
             }
+            // Handle Debezium PostGIS geometry type: {"srid": <int>, "wkb": <base64_string>}
+            // We extract the wkb field and decode it as EWKB bytes
+            (DataType::Bytea, ValueType::Object) => {
+                let obj = value.as_object().unwrap();
+                // Check if this is a Debezium geometry object
+                if let (Some(wkb_value), Some(_srid_value)) = (obj.get("wkb"), obj.get("srid")) {
+                    // Extract and decode the wkb field (base64-encoded EWKB)
+                    if let Some(wkb_str) = wkb_value.as_str() {
+                        base64::engine::general_purpose::STANDARD
+                            .decode(wkb_str)
+                            .map_err(|_| create_error())?
+                            .into_boxed_slice()
+                            .into()
+                    } else {
+                        Err(create_error())?
+                    }
+                } else {
+                    Err(create_error())?
+                }
+            }
             // ---- Jsonb -----
             (DataType::Jsonb, ValueType::String)
                 if matches!(self.json_value_handling, JsonValueHandling::AsString) =>

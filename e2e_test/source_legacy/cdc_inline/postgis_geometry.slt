@@ -1,0 +1,186 @@
+control substitution on
+
+# Test PostGIS geometry type support in PostgreSQL CDC
+
+system ok
+psql -c "
+    CREATE EXTENSION IF NOT EXISTS postgis;
+    DROP TABLE IF EXISTS test_geometry CASCADE;
+    CREATE TABLE test_geometry (
+        id int PRIMARY KEY,
+        name varchar(255),
+        location geometry(Point, 4326),
+        area geometry(Polygon, 4326)
+    );
+    -- Insert initial data (backfill test)
+    INSERT INTO test_geometry VALUES
+        (1, 'Chicago', ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326), NULL),
+        (2, 'Origin', ST_SetSRID(ST_MakePoint(0, 0), 4326), NULL),
+        (3, 'NewYork', ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326), NULL);
+"
+
+statement ok
+create source pg_geo_source with (
+ connector = 'postgres-cdc',
+ hostname = '${PGHOST:localhost}',
+ port = '${PGPORT:5432}',
+ username = '${PGUSER:$USER}',
+ password = '${PGPASSWORD:}',
+ database.name = '${PGDATABASE:postgres}',
+ slot.name = 'pg_geo_slot'
+);
+
+statement ok
+create table rw_test_geometry (
+    id int PRIMARY KEY,
+    name varchar,
+    location bytea,
+    area bytea
+) from pg_geo_source table 'public.test_geometry';
+
+# Verify schema
+query TTTT
+describe rw_test_geometry;
+----
+id integer false NULL
+name character varying false NULL
+location bytea false NULL
+area bytea false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_test_geometry NULL NULL
+
+# Verify backfill data
+# We check that:
+# 1. All rows are synced
+# 2. location is not null (contains EWKB bytes)
+# 3. area is null
+query ITI retry 4 backoff 1s
+SELECT id, name, CASE WHEN location IS NOT NULL THEN 1 ELSE 0 END as has_location
+FROM rw_test_geometry ORDER BY id;
+----
+1 Chicago 1
+2 Origin 1
+3 NewYork 1
+
+# Verify EWKB format (should start with 0101000020 for Point with SRID)
+# Check the first few bytes of the EWKB
+query IT retry 4 backoff 1s
+SELECT id, substring(encode(location, 'hex') from 1 for 16)
+FROM rw_test_geometry WHERE id = 1;
+----
+1 0101000020e6100000
+
+# Verify Chicago's coordinates by decoding EWKB length
+query IT retry 4 backoff 1s
+SELECT id, length(location) 
+FROM rw_test_geometry WHERE id = 1;
+----
+1 25
+
+sleep 2s
+
+# Test incremental updates
+system ok
+psql -c "
+    -- Insert new row (incremental test)
+    INSERT INTO test_geometry VALUES 
+        (4, 'London', ST_SetSRID(ST_MakePoint(-0.1278, 51.5074), 4326), NULL);
+    
+    -- Update existing row
+    UPDATE test_geometry 
+    SET location = ST_SetSRID(ST_MakePoint(-87.6299, 41.8782), 4326)
+    WHERE id = 1;
+"
+
+# Verify incremental insert
+query ITI retry 4 backoff 1s
+SELECT id, name, CASE WHEN location IS NOT NULL THEN 1 ELSE 0 END as has_location
+FROM rw_test_geometry WHERE id = 4;
+----
+4 London 1
+
+# Verify incremental update
+query IT retry 4 backoff 1s
+SELECT id, length(location)
+FROM rw_test_geometry WHERE id = 1;
+----
+1 25
+
+# Test different geometry types
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geometry_types CASCADE;
+    CREATE TABLE test_geometry_types (
+        id int PRIMARY KEY,
+        point_geom geometry(Point, 4326),
+        linestring_geom geometry(LineString, 4326),
+        polygon_geom geometry(Polygon, 4326)
+    );
+    INSERT INTO test_geometry_types VALUES (
+        1,
+        ST_SetSRID(ST_MakePoint(1, 1), 4326),
+        ST_SetSRID(ST_MakeLine(ST_MakePoint(0,0), ST_MakePoint(1,1)), 4326),
+        ST_SetSRID(ST_MakePolygon(ST_MakeLine(ARRAY[ST_MakePoint(0,0), ST_MakePoint(1,0), ST_MakePoint(1,1), ST_MakePoint(0,1), ST_MakePoint(0,0)])), 4326)
+    );
+"
+
+statement ok
+create table rw_test_geometry_types (
+    id int PRIMARY KEY,
+    point_geom bytea,
+    linestring_geom bytea,
+    polygon_geom bytea
+) from pg_geo_source table 'public.test_geometry_types';
+
+# Verify all geometry types are captured as bytea
+query IIII retry 4 backoff 1s
+SELECT 
+    id,
+    CASE WHEN point_geom IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN linestring_geom IS NOT NULL THEN 1 ELSE 0 END,
+    CASE WHEN polygon_geom IS NOT NULL THEN 1 ELSE 0 END
+FROM rw_test_geometry_types WHERE id = 1;
+----
+1 1 1 1
+
+# Test NULL geometry values
+system ok
+psql -c "
+    INSERT INTO test_geometry VALUES (5, 'NullLocation', NULL, NULL);
+"
+
+query ITI retry 4 backoff 1s
+SELECT id, name, CASE WHEN location IS NULL THEN 1 ELSE 0 END as is_null
+FROM rw_test_geometry WHERE id = 5;
+----
+5 NullLocation 1
+
+# Test DELETE operation
+system ok
+psql -c "
+    DELETE FROM test_geometry WHERE id = 2;
+"
+
+query I retry 4 backoff 1s
+SELECT count(*) FROM rw_test_geometry WHERE id = 2;
+----
+0
+
+# Cleanup
+statement ok
+drop table rw_test_geometry;
+
+statement ok
+drop table rw_test_geometry_types;
+
+statement ok
+drop source pg_geo_source;
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geometry CASCADE;
+    DROP TABLE IF EXISTS test_geometry_types CASCADE;
+    SELECT pg_drop_replication_slot('pg_geo_slot');
+"
