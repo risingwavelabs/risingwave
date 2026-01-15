@@ -419,6 +419,18 @@ impl EnforceSecret for IcebergConfig {
 }
 
 impl IcebergConfig {
+    /// Validate that append-only sinks use merge-on-read mode
+    /// Copy-on-write is strictly worse than merge-on-read for append-only workloads
+    fn validate_append_only_write_mode(sink_type: &str, write_mode: IcebergWriteMode) -> Result<()> {
+        if sink_type == SINK_TYPE_APPEND_ONLY && write_mode == IcebergWriteMode::CopyOnWrite {
+            return Err(SinkError::Config(anyhow!(
+                "'copy-on-write' mode is not supported for append-only iceberg sink. \
+                 Please use 'merge-on-read' instead, which is strictly better for append-only workloads."
+            )));
+        }
+        Ok(())
+    }
+
     pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let mut config =
             serde_json::from_value::<IcebergConfig>(serde_json::to_value(&values).unwrap())
@@ -450,15 +462,7 @@ impl IcebergConfig {
         }
 
         // Enforce merge-on-read for append-only sinks
-        // Copy-on-write is strictly worse than merge-on-read for append-only workloads
-        if config.r#type == SINK_TYPE_APPEND_ONLY
-            && config.write_mode == IcebergWriteMode::CopyOnWrite
-        {
-            return Err(SinkError::Config(anyhow!(
-                "'copy-on-write' mode is not supported for append-only iceberg sink. \
-                 Please use 'merge-on-read' instead, which is strictly better for append-only workloads."
-            )));
-        }
+        Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = values
@@ -789,6 +793,18 @@ impl Sink for IcebergSink {
         if "snowflake".eq_ignore_ascii_case(self.config.catalog_type()) {
             bail!("Snowflake catalog only supports iceberg sources");
         }
+
+        if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
+            risingwave_common::license::Feature::IcebergSinkWithGlue
+                .check_available()
+                .map_err(|e| anyhow::anyhow!(e))?;
+        }
+
+        // Enforce merge-on-read for append-only tables
+        IcebergConfig::validate_append_only_write_mode(
+            &self.config.r#type,
+            self.config.write_mode,
+        )?;
 
         // Validate compaction type configuration
         let compaction_type = self.config.compaction_type();
