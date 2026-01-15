@@ -179,6 +179,10 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     let (splits, sub_compaction_sstable_size, table_vnode_partition) =
         generate_splits(&payload, &existing_table_ids, context.storage_opts.as_ref());
     let parallelism = splits.len();
+    context
+        .compactor_metrics
+        .shared_buffer_compact_parallelism
+        .observe(parallelism as f64);
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];

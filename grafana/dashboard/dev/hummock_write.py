@@ -204,6 +204,24 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Shared Buffer Compact Parallelism",
+                    "The number of splits (parallelism) used when compacting shared buffer",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('compactor_shared_buffer_compact_parallelism_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
+                                f"p{legend}"
+                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
+                            [50, 90, "max"],
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('compactor_shared_buffer_compact_parallelism_sum')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / sum(rate({metric('compactor_shared_buffer_compact_parallelism_count')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) > 0",
+                            "avg - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                    ],
+                ),
                 panels.timeseries_bytes(
                     "Write Batch Size",
                     "This metric shows the statistics of mem_table size on flush. By default only max (p100) is shown.",
