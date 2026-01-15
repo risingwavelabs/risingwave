@@ -670,7 +670,7 @@ message TableCacheRefillPolicies {
 }
 
 message TableCacheRefillPolicy {
-  uint32 table_id = 1;  
+  uint32 table_id = 1;
   CacheRefillPolicy policy = 2;
 }
 

@@ -38,11 +38,9 @@ pub use storage::{
 };
 pub mod merge;
 pub mod mutate;
+pub mod role;
 pub mod system;
 pub mod utils;
-pub mod role;
-pub use role::*;
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -54,6 +52,7 @@ pub use merge::*;
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
+pub use role::*;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
