@@ -5801,6 +5801,16 @@ impl Parser<'_> {
         Ok(Assignment { id, value })
     }
 
+    fn parse_function_arg_expr(&mut self) -> ModalResult<FunctionArgExpr> {
+        // Check if this is a secret reference
+        if self.parse_keyword(Keyword::SECRET) {
+            let secret_ref = self.parse_secret_ref()?;
+            return Ok(FunctionArgExpr::SecretRef(secret_ref));
+        }
+
+        Ok(self.parse_wildcard_or_expr()?.into())
+    }
+
     /// Parse a `[VARIADIC] name => expr`.
     fn parse_function_args(&mut self) -> ModalResult<(bool, FunctionArg)> {
         let variadic = self.parse_keyword(Keyword::VARIADIC);
@@ -5808,11 +5818,10 @@ impl Parser<'_> {
             let name = self.parse_identifier()?;
 
             self.expect_token(&Token::RArrow)?;
-            let arg = self.parse_wildcard_or_expr()?.into();
-
+            let arg = self.parse_function_arg_expr()?;
             FunctionArg::Named { name, arg }
         } else {
-            FunctionArg::Unnamed(self.parse_wildcard_or_expr()?.into())
+            FunctionArg::Unnamed(self.parse_function_arg_expr()?)
         };
         Ok((variadic, arg))
     }
