@@ -483,7 +483,7 @@ impl IcebergConfig {
             )));
         }
 
-        if !matches!(config.format_version, 1 | 2 | 3) {
+        if !matches!(config.format_version, 1..=3) {
             return Err(SinkError::Config(anyhow!(
                 "`format-version` must be one of 1, 2, or 3"
             )));
@@ -730,7 +730,7 @@ async fn create_table_if_not_exists_impl(config: &IcebergConfig, param: &SinkPar
         };
 
         let properties = HashMap::from([(
-            TableProperties::PROPERTY_FORMAT_VERSION.to_string(),
+            TableProperties::PROPERTY_FORMAT_VERSION.to_owned(),
             config.format_version.to_string(),
         )]);
 
@@ -1360,7 +1360,7 @@ impl IcebergSinkWriterInner {
         };
         let position_delete_builder = if use_deletion_vectors {
             let location_generator = DefaultLocationGenerator::new(table.metadata().clone())
-                .map_err(|err: iceberg::Error| SinkError::Iceberg(anyhow!(err)))?;
+                .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
             PositionDeleteWriterBuilderType::DeletionVector(DeletionVectorWriterBuilder::new(
                 table.file_io().clone(),
                 location_generator,
