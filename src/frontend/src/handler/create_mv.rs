@@ -18,6 +18,7 @@ use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::{FunctionId, ObjectId};
+use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::serverless_backfill_controller::{
     ProvisionRequest, node_group_controller_service_client,
 };
@@ -237,7 +238,7 @@ pub async fn handle_create_mv_bound(
         return Ok(resp);
     }
 
-    let (table, graph, dependencies, resource_group) = {
+    let (table, graph, dependencies, resource_type) = {
         gen_create_mv_graph(
             handler_args,
             name,
@@ -268,7 +269,7 @@ pub async fn handle_create_mv_bound(
             table.to_prost(),
             graph,
             dependencies,
-            resource_group,
+            resource_type,
             if_not_exists,
         ),
         &session,
@@ -294,10 +295,10 @@ pub(crate) async fn gen_create_mv_graph(
     TableCatalog,
     PbStreamFragmentGraph,
     HashSet<ObjectId>,
-    Option<String>,
+    streaming_job_resource_type::ResourceType,
 )> {
     let mut with_options = get_with_options(handler_args.clone());
-    let mut resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+    let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
 
     if resource_group.is_some() {
         risingwave_common::license::Feature::ResourceGroup.check_available()?;
@@ -335,7 +336,8 @@ pub(crate) async fn gen_create_mv_graph(
         )));
     }
 
-    if is_serverless_backfill {
+    let resource_type = if is_serverless_backfill {
+        assert_eq!(resource_group, None);
         match provision_resource_group(sbc_addr).await {
             Err(e) => {
                 return Err(RwError::from(ProtocolError(format!(
@@ -343,14 +345,19 @@ pub(crate) async fn gen_create_mv_graph(
                     e.as_report()
                 ))));
             }
-            Ok(val) => resource_group = Some(val),
+            Ok(group) => {
+                tracing::info!(
+                    resource_group = group,
+                    "provisioning serverless backfill resource group"
+                );
+                streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group)
+            }
         }
-    }
-    tracing::debug!(
-        resource_group = resource_group,
-        "provisioning on resource group"
-    );
-
+    } else if let Some(group) = resource_group {
+        streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
+    } else {
+        streaming_job_resource_type::ResourceType::Regular(true)
+    };
     let context = OptimizerContext::from_handler_args(handler_args);
     let has_order_by = !query.order.is_empty();
     if has_order_by {
@@ -359,7 +366,7 @@ It only indicates the physical clustering of the data, which may improve the per
 "#.to_owned());
     }
 
-    if resource_group.is_some()
+    if resource_type.resource_group().is_some()
         && !context
             .session_ctx()
             .config()
@@ -393,7 +400,7 @@ It only indicates the physical clustering of the data, which may improve the per
         Some(backfill_order),
     )?;
 
-    Ok((table, graph, dependencies, resource_group))
+    Ok((table, graph, dependencies, resource_type))
 }
 
 #[cfg(test)]

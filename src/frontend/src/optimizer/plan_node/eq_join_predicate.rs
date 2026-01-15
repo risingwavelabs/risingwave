@@ -343,6 +343,7 @@ impl EqJoinPredicateDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.eq_join_predicate;
         let mut eq_keys = that.eq_keys().iter();
+        let mut printed_any = false;
         if let Some((k1, k2, null_safe)) = eq_keys.next() {
             write!(
                 f,
@@ -361,6 +362,7 @@ impl EqJoinPredicateDisplay<'_> {
                     input_schema: self.input_schema
                 }
             )?;
+            printed_any = true;
         }
         for (k1, k2, null_safe) in eq_keys {
             write!(
@@ -380,16 +382,22 @@ impl EqJoinPredicateDisplay<'_> {
                     input_schema: self.input_schema
                 }
             )?;
+            printed_any = true;
         }
         if !that.other_cond.always_true() {
             write!(
                 f,
-                " AND {}",
+                "{}{}",
+                if printed_any { " AND " } else { "" },
                 ConditionDisplay {
                     condition: &that.other_cond,
                     input_schema: self.input_schema
                 }
             )?;
+            printed_any = true;
+        }
+        if !printed_any {
+            write!(f, "true")?;
         }
 
         Ok(())

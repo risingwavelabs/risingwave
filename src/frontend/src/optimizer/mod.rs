@@ -32,7 +32,7 @@ mod plan_rewriter;
 mod plan_visitor;
 
 #[cfg(feature = "datafusion")]
-pub use plan_visitor::DatafusionExecuteCheckerExt;
+pub use plan_visitor::DataFusionExecuteCheckerExt;
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
@@ -1121,7 +1121,7 @@ impl LogicalPlanRoot {
     }
 
     /// Optimize and generate a create sink plan.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn gen_sink_plan(
         self,
         sink_name: String,
@@ -1136,10 +1136,25 @@ impl LogicalPlanRoot {
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
+        allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
         let backfill_type = if without_backfill {
             BackfillType::UpstreamOnly
-        } else if target_table.is_none() && self.should_use_snapshot_backfill() {
+        } else if allow_snapshot_backfill
+            && self.should_use_snapshot_backfill()
+            && {
+                if auto_refresh_schema_from_table.is_some() {
+                    self.plan.ctx().session_ctx().notice_to_user("Auto schema change only support for ArrangementBackfill. Switched to use ArrangementBackfill");
+                    false
+                } else {
+                    true
+                }
+            }
+        {
+            assert!(
+                target_table.is_none(),
+                "should not allow snapshot backfill for sink-into-table"
+            );
             // Snapshot backfill on sink-into-table is not allowed
             BackfillType::SnapshotBackfill
         } else if self.should_use_arrangement_backfill() {
@@ -1177,9 +1192,7 @@ impl LogicalPlanRoot {
             auto_refresh_schema_from_table,
         )
     }
-}
 
-impl<P: PlanPhase> PlanRoot<P> {
     pub fn should_use_arrangement_backfill(&self) -> bool {
         let ctx = self.plan.ctx();
         let session_ctx = ctx.session_ctx();
@@ -1192,13 +1205,23 @@ impl<P: PlanPhase> PlanRoot<P> {
     }
 
     pub fn should_use_snapshot_backfill(&self) -> bool {
-        self.plan
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_use_snapshot_backfill()
+        let ctx = self.plan.ctx();
+        let session_ctx = ctx.session_ctx();
+        let use_snapshot_backfill = session_ctx.config().streaming_use_snapshot_backfill();
+        if use_snapshot_backfill {
+            if let Some(warning_msg) = self.plan.forbid_snapshot_backfill() {
+                self.plan.ctx().session_ctx().notice_to_user(warning_msg);
+                false
+            } else {
+                true
+            }
+        } else {
+            false
+        }
     }
+}
 
+impl<P: PlanPhase> PlanRoot<P> {
     /// used when the plan has a target relation such as DML and sink into table, return the mapping from table's columns to the plan's schema
     pub fn target_columns_to_plan_mapping(
         &self,

@@ -66,8 +66,9 @@ fn for_all_metadata_models_v2_should_cover_all_required_meta_model_tables() {
     // When a new metadata table is added to `risingwave_meta_model` (i.e., a new `pub mod xxx;`),
     // we should decide whether it needs to be included in meta snapshot v2.
     //
-    // - If yes: append it to `for_all_metadata_models_v2` in
-    //   `src/storage/backup/src/meta_snapshot_v2.rs`.
+    // - If yes:
+    //   1. append it to `for_all_metadata_models_v2` in `src/storage/backup/src/meta_snapshot_v2.rs`.
+    //   2. add `insert_models` before `update_auto_inc` in `src/meta/src/backup_restore/restore_impl/v2.rs`.
     // - If no (runtime/derived table): add it to the `excluded` set below with a short comment.
 
     let meta_model_lib_rs = include_str!("../../../meta/model/src/lib.rs");

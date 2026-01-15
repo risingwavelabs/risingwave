@@ -97,10 +97,10 @@ impl CreatingStreamingJobBarrierControl {
         self.inflight_barrier_queue.len()
     }
 
-    pub(super) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
+    pub(super) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
         self.inflight_barrier_queue
-            .values_mut()
-            .all(|state| is_valid_after_worker_err(&mut state.node_to_collect, worker_id))
+            .values()
+            .all(|state| is_valid_after_worker_err(&state.node_to_collect, worker_id))
     }
 
     fn latest_epoch(&self) -> Option<u64> {
@@ -187,7 +187,7 @@ impl CreatingStreamingJobBarrierControl {
             .inflight_barrier_queue
             .get_mut(&epoch)
             .expect("should exist");
-        assert!(state.node_to_collect.remove(&worker_id).is_some());
+        assert!(state.node_to_collect.remove(&worker_id));
         state.resps.push(resp);
         while let Some((_, state)) = self.inflight_barrier_queue.first_key_value()
             && state.node_to_collect.is_empty()

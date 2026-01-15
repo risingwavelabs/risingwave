@@ -99,47 +99,57 @@ impl CatalogController {
         include_initial: bool,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<Vec<(JobId, String, DateTime)>> {
+        Ok(self
+            .list_creating_jobs(include_initial, false, database_id)
+            .await?
+            .into_iter()
+            .map(|(job_id, definition, init_at, create_type)| {
+                assert_eq!(create_type, CreateType::Background);
+                (job_id, definition, init_at)
+            })
+            .collect())
+    }
+
+    pub async fn list_creating_jobs(
+        &self,
+        include_initial: bool,
+        include_foreground: bool,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<Vec<(JobId, String, DateTime, CreateType)>> {
         let inner = self.inner.read().await;
+        let create_type_cond = if include_foreground {
+            SimpleExpr::from(true)
+        } else {
+            streaming_job::Column::CreateType.eq(CreateType::Background)
+        };
         let status_cond = if include_initial {
             streaming_job::Column::JobStatus.is_in([JobStatus::Initial, JobStatus::Creating])
         } else {
             streaming_job::Column::JobStatus.eq(JobStatus::Creating)
         };
-        let mut table_info: Vec<(JobId, String, DateTime)> = Table::find()
+        let database_cond = database_id
+            .map(|database_id| object::Column::DatabaseId.eq(database_id))
+            .unwrap_or_else(|| SimpleExpr::from(true));
+        let filter_cond = create_type_cond.and(status_cond).and(database_cond);
+        let mut table_info: Vec<(JobId, String, DateTime, CreateType)> = Table::find()
             .select_only()
             .columns([table::Column::TableId, table::Column::Definition])
             .column(object::Column::InitializedAt)
+            .column(streaming_job::Column::CreateType)
             .join(JoinType::LeftJoin, table::Relation::Object1.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(
-                streaming_job::Column::CreateType
-                    .eq(CreateType::Background)
-                    .and(status_cond.clone())
-                    .and(
-                        database_id
-                            .map(|database_id| object::Column::DatabaseId.eq(database_id))
-                            .unwrap_or_else(|| SimpleExpr::from(true)),
-                    ),
-            )
+            .filter(filter_cond.clone())
             .into_tuple()
             .all(&inner.db)
             .await?;
-        let sink_info: Vec<(JobId, String, DateTime)> = Sink::find()
+        let sink_info: Vec<(JobId, String, DateTime, CreateType)> = Sink::find()
             .select_only()
             .columns([sink::Column::SinkId, sink::Column::Definition])
             .column(object::Column::InitializedAt)
+            .column(streaming_job::Column::CreateType)
             .join(JoinType::LeftJoin, sink::Relation::Object.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(
-                streaming_job::Column::CreateType
-                    .eq(CreateType::Background)
-                    .and(status_cond)
-                    .and(
-                        database_id
-                            .map(|database_id| object::Column::DatabaseId.eq(database_id))
-                            .unwrap_or_else(|| SimpleExpr::from(true)),
-                    ),
-            )
+            .filter(filter_cond)
             .into_tuple()
             .all(&inner.db)
             .await?;

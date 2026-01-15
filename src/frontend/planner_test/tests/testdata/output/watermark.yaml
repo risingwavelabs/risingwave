@@ -5,7 +5,7 @@
     select t.v1 - INTERVAL '2' SECOND as v1 from t;
   logical_plan: |-
     LogicalProject { exprs: [(v1 - '00:00:02':Interval) as $expr1] }
-    └─LogicalSource { source: t, columns: [v1, _row_id] }
+    └─LogicalSource { source: t, is_shared: false, columns: [v1, _row_id] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
     └─StreamProject { exprs: [SubtractWithTimeZone(v1, '00:00:02':Interval, 'UTC':Varchar) as $expr1, _row_id], output_watermarks: [[$expr1]] }

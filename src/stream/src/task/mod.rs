@@ -95,7 +95,7 @@ pub use actor_manager::*;
 pub use barrier_manager::*;
 pub use barrier_worker::*;
 pub use env::*;
-pub use risingwave_common::id::{ActorId, FragmentId};
+pub use risingwave_common::id::{ActorId, FragmentId, PartialGraphId};
 pub use stream_manager::*;
 
 pub type ConsumableChannelPair = (Option<Sender>, Option<Receiver>);
@@ -104,24 +104,9 @@ pub type DispatcherId = FragmentId;
 pub type UpDownActorIds = (ActorId, ActorId);
 pub type UpDownFragmentIds = (FragmentId, FragmentId);
 
-#[derive(Hash, Eq, PartialEq, Copy, Clone, Debug)]
-pub(crate) struct PartialGraphId(u32);
-
 #[cfg(test)]
 pub(crate) const TEST_DATABASE_ID: risingwave_common::catalog::DatabaseId =
     risingwave_common::catalog::DatabaseId::new(u32::MAX);
 
 #[cfg(test)]
-pub(crate) const TEST_PARTIAL_GRAPH_ID: PartialGraphId = PartialGraphId(u32::MAX);
-
-impl PartialGraphId {
-    fn new(id: u32) -> Self {
-        Self(id)
-    }
-}
-
-impl From<PartialGraphId> for u32 {
-    fn from(val: PartialGraphId) -> u32 {
-        val.0
-    }
-}
+pub(crate) const TEST_PARTIAL_GRAPH_ID: PartialGraphId = PartialGraphId::new(u32::MAX);

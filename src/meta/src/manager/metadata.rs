@@ -716,6 +716,28 @@ impl MetadataManager {
             .await?;
         Ok(backfill_types)
     }
+
+    pub async fn collect_unreschedulable_backfill_jobs(
+        &self,
+        job_ids: &[JobId],
+    ) -> MetaResult<HashSet<JobId>> {
+        let mut unreschedulable = HashSet::new();
+
+        for job_id in job_ids {
+            let scan_types = self
+                .catalog_controller
+                .get_job_fragment_backfill_scan_type(*job_id)
+                .await?;
+            if scan_types
+                .values()
+                .any(|scan_type| !scan_type.is_reschedulable())
+            {
+                unreschedulable.insert(*job_id);
+            }
+        }
+
+        Ok(unreschedulable)
+    }
 }
 
 impl MetadataManager {

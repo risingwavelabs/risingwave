@@ -48,9 +48,9 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
-    /// Control the strictness of stream consistency.
-    #[serde(default = "default::streaming::unsafe_enable_strict_consistency")]
-    pub unsafe_enable_strict_consistency: bool,
+    /// Disable strict stream consistency checks.
+    #[serde(default = "default::streaming::unsafe_disable_strict_consistency")]
+    pub unsafe_disable_strict_consistency: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -215,6 +215,11 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::iceberg_sink_write_parquet_max_row_group_rows")]
     pub iceberg_sink_write_parquet_max_row_group_rows: usize,
 
+    /// When enabled, materialized views using default `NoCheck` conflict behavior will be forced
+    /// to use `Overwrite`. Useful to avoid propagating inconsistent changelog downstream.
+    #[serde(default = "default::developer::materialize_force_overwrite_on_no_check")]
+    pub materialize_force_overwrite_on_no_check: bool,
+
     /// Whether by default enable preloading all rows in memory for state table.
     /// If true, all capable state tables will preload its state to memory
     #[serde(default = "default::streaming::default_enable_mem_preload_state_table")]
@@ -304,8 +309,8 @@ pub mod default {
             10
         }
 
-        pub fn unsafe_enable_strict_consistency() -> bool {
-            true
+        pub fn unsafe_disable_strict_consistency() -> bool {
+            false
         }
 
         pub fn default_enable_mem_preload_state_table() -> bool {

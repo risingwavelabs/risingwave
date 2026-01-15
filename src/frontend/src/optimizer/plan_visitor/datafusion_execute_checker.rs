@@ -12,74 +12,147 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::optimizer::plan_node::LogicalIcebergScan;
-use crate::optimizer::plan_visitor::{LogicalPlanVisitor, Merge};
+use crate::optimizer::plan_node::{Logical, PlanTreeNode};
+use crate::optimizer::plan_visitor::{DefaultValue, LogicalPlanVisitor};
 use crate::optimizer::{LogicalPlanRef, PlanVisitor};
 
-/// Visitor to check if this plan can be executed by Datafusion.
+/// Visitor to check if this plan can be executed by DataFusion.
 #[derive(Debug, Clone, Copy)]
-struct DatafusionExecuteChecker;
+struct DataFusionExecuteChecker;
 
 #[derive(Debug, Clone, Copy, Default)]
-struct CheckResult {
-    have_dml: bool,
-    have_iceberg_scan: bool,
+pub struct CheckResult {
+    pub supported: bool,
+    pub have_iceberg_scan: bool,
 }
 
-impl LogicalPlanVisitor for DatafusionExecuteChecker {
-    type DefaultBehavior = Merge<fn(CheckResult, CheckResult) -> CheckResult>;
+impl DataFusionExecuteChecker {
+    /// Recursively checks all input plans and aggregates their [`CheckResult`]s,
+    /// combining `supported` with logical AND and `have_iceberg_scan` with logical OR.
+    fn check_inputs(&mut self, plan: &impl PlanTreeNode<Logical>) -> CheckResult {
+        plan.inputs()
+            .into_iter()
+            .map(|input| self.visit(input))
+            .fold(
+                CheckResult {
+                    supported: true,
+                    have_iceberg_scan: false,
+                },
+                |mut acc, item| {
+                    acc.supported &= item.supported;
+                    acc.have_iceberg_scan |= item.have_iceberg_scan;
+                    acc
+                },
+            )
+    }
+}
+
+impl LogicalPlanVisitor for DataFusionExecuteChecker {
+    type DefaultBehavior = DefaultValue;
     type Result = CheckResult;
 
     fn default_behavior() -> Self::DefaultBehavior {
-        Merge(|left, right| CheckResult {
-            have_dml: left.have_dml || right.have_dml,
-            have_iceberg_scan: left.have_iceberg_scan || right.have_iceberg_scan,
-        })
+        DefaultValue
     }
 
-    fn visit_logical_iceberg_scan(&mut self, _: &LogicalIcebergScan) -> Self::Result {
+    fn visit_logical_agg(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalAgg,
+    ) -> Self::Result {
+        let mut res = self.check_inputs(plan);
+
+        let have_grouping_sets = !plan.grouping_sets().is_empty();
+        if have_grouping_sets {
+            res.supported = false;
+        }
+        res
+    }
+
+    fn visit_logical_filter(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalFilter,
+    ) -> Self::Result {
+        self.check_inputs(plan)
+    }
+
+    fn visit_logical_project(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalProject,
+    ) -> Self::Result {
+        self.check_inputs(plan)
+    }
+
+    fn visit_logical_join(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalJoin,
+    ) -> Self::Result {
+        self.check_inputs(plan)
+    }
+
+    fn visit_logical_values(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalValues,
+    ) -> Self::Result {
+        self.check_inputs(plan)
+    }
+
+    fn visit_logical_limit(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalLimit,
+    ) -> Self::Result {
+        self.check_inputs(plan)
+    }
+
+    fn visit_logical_top_n(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalTopN,
+    ) -> Self::Result {
+        let mut res = self.check_inputs(plan);
+
+        let with_ties = plan.limit_attr().with_ties();
+        let have_group_key = !plan.group_key().is_empty();
+        if with_ties || have_group_key {
+            res.supported = false;
+        }
+        res
+    }
+
+    fn visit_logical_union(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalUnion,
+    ) -> Self::Result {
+        self.check_inputs(plan)
+    }
+
+    fn visit_logical_over_window(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalOverWindow,
+    ) -> Self::Result {
+        self.check_inputs(plan)
+    }
+
+    fn visit_logical_dedup(
+        &mut self,
+        plan: &crate::optimizer::plan_node::LogicalDedup,
+    ) -> Self::Result {
+        self.check_inputs(plan)
+    }
+
+    fn visit_logical_iceberg_scan(
+        &mut self,
+        _: &crate::optimizer::plan_node::LogicalIcebergScan,
+    ) -> Self::Result {
         CheckResult {
+            supported: true,
             have_iceberg_scan: true,
-            ..Default::default()
-        }
-    }
-
-    fn visit_logical_insert(
-        &mut self,
-        _: &crate::optimizer::plan_node::LogicalInsert,
-    ) -> Self::Result {
-        CheckResult {
-            have_dml: true,
-            ..Default::default()
-        }
-    }
-
-    fn visit_logical_update(
-        &mut self,
-        _: &crate::optimizer::plan_node::LogicalUpdate,
-    ) -> Self::Result {
-        CheckResult {
-            have_dml: true,
-            ..Default::default()
-        }
-    }
-
-    fn visit_logical_delete(
-        &mut self,
-        _: &crate::optimizer::plan_node::LogicalDelete,
-    ) -> Self::Result {
-        CheckResult {
-            have_dml: true,
-            ..Default::default()
         }
     }
 }
 
-#[easy_ext::ext(DatafusionExecuteCheckerExt)]
+#[easy_ext::ext(DataFusionExecuteCheckerExt)]
 pub impl LogicalPlanRef {
-    /// Returns `true` if this plan is able to be executed by Datafusion.
-    fn able_to_run_by_datafusion(&self) -> bool {
-        let result = DatafusionExecuteChecker.visit(self.clone());
-        result.have_iceberg_scan && !result.have_dml
+    /// Returns `CheckResult` indicating if this plan can be executed by DataFusion.
+    fn check_for_datafusion(&self) -> CheckResult {
+        DataFusionExecuteChecker.visit(self.clone())
     }
 }
