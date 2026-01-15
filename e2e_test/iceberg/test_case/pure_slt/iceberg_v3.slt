@@ -1,0 +1,89 @@
+control substitution on
+
+statement ok
+create secret hosted_catalog_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+# Test hosted catalog connection using the warehouse created by risedev
+statement ok
+create connection hosted_catalog_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_v3_puffin',
+    s3.access.key = secret hosted_catalog_secret,
+    s3.secret.key = secret hosted_catalog_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.hosted_catalog_conn';
+
+statement ok
+create table t_v3(id int primary key, name varchar, v1 int)
+with(
+    commit_checkpoint_interval = 2,
+    format_version = 3
+) engine = iceberg;
+
+statement ok
+insert into t_v3 values(1, 'alice', 100), (2, 'bob', 200), (3, 'charlie', 300);
+
+statement ok
+flush;
+
+statement ok
+update t_v3 set v1 = 150 where id = 1;
+
+statement ok
+delete from t_v3 where id = 2;
+
+statement ok
+FLUSH;
+
+query ?? retry 3 backoff 1s
+select count(*) > 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3'
+  and file_format = 'puffin';
+----
+t
+
+query ??? rowsort retry 3 backoff 1s
+select * from t_v3;
+----
+1 alice 150
+3 charlie 300
+
+# This compaction won't clean up puffin files, but only generate new data files.
+statement ok
+VACUUM FULL t_v3;
+
+# Run again to clean up the puffin files.
+statement ok
+VACUUM FULL t_v3;
+
+query ? retry 3 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3'
+  and file_format = 'puffin';
+----
+t
+
+query ??? rowsort
+select * from t_v3;
+----
+1 alice 150
+3 charlie 300
+
+statement ok
+DROP TABLE t_v3;
+
+statement ok
+DROP CONNECTION hosted_catalog_conn;
+
+statement ok
+DROP SECRET hosted_catalog_secret;
