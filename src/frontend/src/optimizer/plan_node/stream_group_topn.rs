@@ -46,6 +46,10 @@ impl StreamGroupTopN {
 
         // NOTE: The executor only forwards watermarks on the first group-by column.
         // Keep the optimizer in sync so EOWC won't be enabled on unsupported plans.
+        //
+        // TODO: Actually it's also safe to forward watermarks on
+        // - other group key columns,
+        // - ascending ORDER BY columns on append-only input.
         let watermark_columns = input.watermark_columns().retain_clone(&[core.group_key[0]]);
 
         let mut stream_key = core
