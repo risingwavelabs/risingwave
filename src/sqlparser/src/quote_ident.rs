@@ -67,8 +67,9 @@ fn is_simple_identifier(ident: &str) -> bool {
 
 fn is_keyword(ident: &str) -> bool {
     let ident_upper = ident.to_ascii_uppercase();
-    // NOTE: PostgreSQL only quotes non-UNRESERVED keywords. We stay conservative here
-    // and quote any token that matches our keyword list to avoid ambiguity.
+    // NOTE: PostgreSQL only quotes keywords whose category != UNRESERVED
+    // (e.g. RESERVED / COL_NAME / TYPE_FUNC). We stay conservative and
+    // quote any token in ALL_KEYWORDS to avoid ambiguity.
     keywords::ALL_KEYWORDS
         .binary_search(&ident_upper.as_str())
         .is_ok()
