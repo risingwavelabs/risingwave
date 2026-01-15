@@ -69,6 +69,8 @@ pub struct OptimizerContext {
     /// Last assigned watermark group ID.
     last_watermark_group_id: Cell<u32>,
 
+    timestamp_ms: i64,
+
     _phantom: PhantomUnsend,
 }
 
@@ -112,6 +114,8 @@ impl OptimizerContext {
             last_expr_display_id: Cell::new(RESERVED_ID_NUM.into()),
             last_watermark_group_id: Cell::new(RESERVED_ID_NUM.into()),
 
+            timestamp_ms: chrono::Local::now().timestamp_millis(),
+
             _phantom: Default::default(),
         }
     }
@@ -137,6 +141,8 @@ impl OptimizerContext {
             last_correlated_id: Cell::new(0),
             last_expr_display_id: Cell::new(0),
             last_watermark_group_id: Cell::new(0),
+
+            timestamp_ms: chrono::Local::now().timestamp_millis(),
 
             _phantom: Default::default(),
         }
@@ -285,6 +291,10 @@ impl OptimizerContext {
 
     pub fn insert_rcte_cache_plan(&self, id: ShareId, plan: PlanRef) {
         self.rcte_cache.borrow_mut().insert(id, plan);
+    }
+
+    pub fn timestamp_ms(&self) -> i64 {
+        self.timestamp_ms
     }
 }
 

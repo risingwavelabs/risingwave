@@ -37,8 +37,6 @@ use crate::monitor::BatchMetrics;
 
 pub struct IcebergScanExecutor {
     iceberg_config: IcebergProperties,
-    #[allow(dead_code)]
-    snapshot_id: Option<i64>,
     file_scan_tasks: Option<IcebergFileScanTask>,
     chunk_size: usize,
     schema: Schema,
@@ -65,7 +63,6 @@ impl Executor for IcebergScanExecutor {
 impl IcebergScanExecutor {
     pub fn new(
         iceberg_config: IcebergProperties,
-        snapshot_id: Option<i64>,
         file_scan_tasks: IcebergFileScanTask,
         chunk_size: usize,
         schema: Schema,
@@ -76,7 +73,6 @@ impl IcebergScanExecutor {
     ) -> Self {
         Self {
             iceberg_config,
-            snapshot_id,
             chunk_size,
             schema,
             file_scan_tasks: Some(file_scan_tasks),
@@ -200,7 +196,6 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
 
             Ok(Box::new(IcebergScanExecutor::new(
                 iceberg_properties,
-                Some(split.snapshot_id),
                 split.task,
                 source.context().get_config().developer.chunk_size,
                 schema,

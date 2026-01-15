@@ -31,7 +31,7 @@ impl Rule<Batch> for BatchIcebergCountStar {
                 return None;
             }
             return Some(
-                BatchIcebergScan::new_count_star_with_batch_iceberg_scan(batch_iceberg).into(),
+                BatchIcebergScan::new_count_star_with_batch_iceberg_scan(batch_iceberg)?.into(),
             );
         }
         None
