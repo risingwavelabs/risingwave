@@ -117,8 +117,9 @@ impl StreamEowcOverWindow {
         tbl_builder.build(in_dist_key.to_vec(), read_prefix_len_hint)
     }
 
-    /// Returns true if any window function is a numbering function (`row_number`, `rank`, `dense_rank`).
-    fn has_numbering_functions(&self) -> bool {
+    /// Returns true if any window function requires intermediate state persistence.
+    /// Currently this includes numbering functions (`row_number`, `rank`, `dense_rank`).
+    fn needs_intermediate_state_table(&self) -> bool {
         self.window_functions().iter().any(|f| {
             matches!(
                 f.kind,
@@ -127,10 +128,11 @@ impl StreamEowcOverWindow {
         })
     }
 
-    /// Infer the rank state table for persisting rank function snapshots.
+    /// Infer the intermediate state table for persisting window function states.
+    ///
     /// Schema: partition key columns + `state_0..state_{n-1}` (Bytea, one per window function call).
     /// PK: partition key columns (ascending) only.
-    fn infer_rank_state_table(&self) -> TableCatalog {
+    fn infer_intermediate_state_table(&self) -> TableCatalog {
         let in_fields = self.core.input.schema().fields();
         let mut tbl_builder = TableCatalogBuilder::default();
 
@@ -154,7 +156,7 @@ impl StreamEowcOverWindow {
 
         // Distribution key: same as partition key distribution
         let in_dist_key = self.core.input.distribution().dist_column_indices();
-        // Map input distribution key indices to rank state table column indices.
+        // Map input distribution key indices to intermediate state table column indices.
         // The partition key columns are added first at indices 0..partition_key_indices.len().
         let dist_key: Vec<usize> = in_dist_key
             .iter()
@@ -208,10 +210,10 @@ impl StreamNode for StreamEowcOverWindow {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
-        // Build rank state table if numbering functions are present
-        let rank_state_table = if self.has_numbering_functions() {
+        // Build intermediate state table if needed
+        let intermediate_state_table = if self.needs_intermediate_state_table() {
             Some(
-                self.infer_rank_state_table()
+                self.infer_intermediate_state_table()
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             )
@@ -224,7 +226,7 @@ impl StreamNode for StreamEowcOverWindow {
             partition_by,
             order_by,
             state_table: Some(state_table),
-            rank_state_table,
+            intermediate_state_table,
         }))
     }
 }

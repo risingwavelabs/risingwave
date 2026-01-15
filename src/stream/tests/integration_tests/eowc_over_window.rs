@@ -80,13 +80,13 @@ async fn create_executor<S: StateStore>(
         order_key_index,
         state_table,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
-        rank_state_table: None,
+        intermediate_state_table: None,
     });
     (tx, executor.boxed().execute())
 }
 
-/// Create an executor with rank state table for testing persisted rank functions.
-async fn create_executor_with_rank_table<S: StateStore>(
+/// Create an executor with intermediate state table for testing persisted window functions.
+async fn create_executor_with_intermediate_state_table<S: StateStore>(
     calls: Vec<WindowFuncCall>,
     store: S,
 ) -> (MessageSender, BoxedMessageStream) {
@@ -134,28 +134,28 @@ async fn create_executor_with_rank_table<S: StateStore>(
     )
     .await;
 
-    // Create rank state table: partition_key (Varchar) + state_0..state_{n-1} (Bytea)
+    // Create intermediate state table: partition_key (Varchar) + state_0..state_{n-1} (Bytea)
     // Schema: partition key columns + one state column per window function call.
     // PK = partition key columns only.
     let num_calls = calls.len();
-    let mut rank_table_columns = vec![
+    let mut intermediate_table_columns = vec![
         ColumnDesc::unnamed(ColumnId::new(0), DataType::Varchar), // partition key
     ];
     for i in 0..num_calls {
-        rank_table_columns.push(ColumnDesc::unnamed(
+        intermediate_table_columns.push(ColumnDesc::unnamed(
             ColumnId::new((i + 1) as i32),
             DataType::Bytea,
         )); // state_{i}
     }
-    let rank_table_pk_indices = vec![0]; // PK = partition key only
-    let rank_table_order_types = vec![OrderType::ascending()];
+    let intermediate_table_pk_indices = vec![0]; // PK = partition key only
+    let intermediate_table_order_types = vec![OrderType::ascending()];
 
-    let rank_state_table = StateTable::from_table_catalog_inconsistent_op(
+    let intermediate_state_table = StateTable::from_table_catalog_inconsistent_op(
         &gen_pbtable(
             TableId::new(2),
-            rank_table_columns,
-            rank_table_order_types,
-            rank_table_pk_indices,
+            intermediate_table_columns,
+            intermediate_table_order_types,
+            intermediate_table_pk_indices,
             1, // read_prefix_len_hint = partition key length
         ),
         store,
@@ -176,7 +176,7 @@ async fn create_executor_with_rank_table<S: StateStore>(
         order_key_index,
         state_table,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
-        rank_state_table: Some(rank_state_table),
+        intermediate_state_table: Some(intermediate_state_table),
     });
     (tx, executor.boxed().execute())
 }
@@ -357,7 +357,7 @@ async fn test_over_window_row_number_recovery() {
     }];
 
     check_with_script(
-        || create_executor_with_rank_table(calls.clone(), store.clone()),
+        || create_executor_with_intermediate_state_table(calls.clone(), store.clone()),
         r###"
 - !barrier 1
 - !chunk |2
@@ -444,7 +444,7 @@ async fn test_over_window_multiple_numbering_functions() {
     ];
 
     check_with_script(
-        || create_executor_with_rank_table(calls.clone(), store.clone()),
+        || create_executor_with_intermediate_state_table(calls.clone(), store.clone()),
         r###"
 - !barrier 1
 - !chunk |2
@@ -520,7 +520,7 @@ async fn test_over_window_interleaved_partitions() {
     }];
 
     check_with_script(
-        || create_executor_with_rank_table(calls.clone(), store.clone()),
+        || create_executor_with_intermediate_state_table(calls.clone(), store.clone()),
         r###"
 - !barrier 1
 - !chunk |2
@@ -610,7 +610,7 @@ async fn test_over_window_mixed_numbering_and_aggregate() {
     ];
 
     check_with_script(
-        || create_executor_with_rank_table(calls.clone(), store.clone()),
+        || create_executor_with_intermediate_state_table(calls.clone(), store.clone()),
         r###"
 - !barrier 1
 - !chunk |2
@@ -669,12 +669,12 @@ async fn test_over_window_mixed_numbering_and_aggregate() {
     .await;
 }
 
-/// Test EOWC without rank_state_table behaves exactly as before (legacy compatibility).
-/// Eviction hint should be CannotEvict when rank_state_table is absent.
+/// Test EOWC without intermediate_state_table behaves exactly as before (legacy compatibility).
+/// Eviction hint should be CannotEvict when intermediate_state_table is absent.
 #[tokio::test]
-async fn test_over_window_legacy_without_rank_table() {
+async fn test_over_window_legacy_without_intermediate_state_table() {
     let store = MemoryStateStore::new();
-    // Use row_number without rank state table (legacy mode)
+    // Use row_number without intermediate state table (legacy mode)
     let calls = vec![WindowFuncCall {
         kind: WindowFuncKind::RowNumber,
         return_type: DataType::Int64,
