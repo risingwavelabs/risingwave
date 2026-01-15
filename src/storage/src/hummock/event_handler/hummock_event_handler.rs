@@ -318,6 +318,7 @@ impl HummockEventHandler {
         )
     }
 
+    #[expect(clippy::too_many_arguments)]
     fn new_inner(
         role: Role,
         version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
@@ -806,7 +807,8 @@ impl HummockEventHandler {
                     }
                 }
 
-                self.refiller.update_table_cache_refill_vnodes(table_id);
+                self.refiller
+                    .update_table_cache_refill_vnodes_for_streaming(table_id);
             }
 
             HummockEvent::DestroyReadVersion { instance_id } => {
@@ -815,7 +817,8 @@ impl HummockEventHandler {
                     .get(&instance_id)
                     .unwrap_or_else(|| panic!("query inexist instance instance_id {instance_id}"))
                     .0;
-                self.refiller.update_table_cache_refill_vnodes(table_id);
+                self.refiller
+                    .update_table_cache_refill_vnodes_for_streaming(table_id);
                 self.uploader.may_destroy_instance(instance_id);
                 self.destroy_read_version(instance_id);
             }

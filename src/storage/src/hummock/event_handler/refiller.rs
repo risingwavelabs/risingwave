@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::hash_map::{Entry as HashMapEntry, HashMap};
+use std::collections::{HashSet, VecDeque};
 use std::future::poll_fn;
 use std::ops::Range;
 use std::sync::{Arc, LazyLock};
@@ -305,6 +306,14 @@ impl CacheRefiller {
         pinned_version: PinnedVersion,
         new_pinned_version: PinnedVersion,
     ) {
+        tracing::trace!(
+            role = ?self.role,
+            policies = ?self.table_cache_refill_policies,
+            streaming = ?self.table_cache_refill_vnodes_for_streaming,
+            serving = ?self.table_cache_refill_vnodes_for_serving,
+            "cache refill table vnode mappings"
+        );
+
         let handle = (self.spawn_refill_task)(
             deltas,
             self.context.clone(),
@@ -367,16 +376,35 @@ impl CacheRefiller {
         op: Operation,
         mapping: HashMap<TableId, Bitmap>,
     ) {
-        todo!();
-        todo!();
-        todo!();
-        todo!();
-        todo!();
-        todo!();
-        todo!();
+        match op {
+            Operation::Snapshot => {
+                self.serving_table_vnode_mapping = mapping.clone();
+                for table_id in mapping.keys() {
+                    self.update_table_cache_refill_vnodes_for_serving(*table_id);
+                }
+            }
+            Operation::Update => {
+                for (table_id, bitmap) in mapping {
+                    match self.serving_table_vnode_mapping.entry(table_id) {
+                        HashMapEntry::Occupied(mut o) => *o.get_mut() |= bitmap,
+                        HashMapEntry::Vacant(v) => {
+                            v.insert(bitmap);
+                        }
+                    }
+                    self.update_table_cache_refill_vnodes_for_serving(table_id);
+                }
+            }
+            Operation::Delete => {
+                for table_id in mapping.keys() {
+                    self.serving_table_vnode_mapping.remove(table_id);
+                    self.update_table_cache_refill_vnodes_for_serving(*table_id);
+                }
+            }
+            _ => unreachable!(),
+        }
     }
 
-    fn update_table_cache_refill_vnodes_for_streaming(&mut self, table_id: TableId) {
+    pub(crate) fn update_table_cache_refill_vnodes_for_streaming(&mut self, table_id: TableId) {
         if !self.role.for_streaming() {
             return;
         }
@@ -391,14 +419,15 @@ impl CacheRefiller {
         }
     }
 
-    fn update_table_cache_refill_vnodes_for_serving(&mut self, table_id: TableId) {
+    pub(crate) fn update_table_cache_refill_vnodes_for_serving(&mut self, table_id: TableId) {
         if !self.role.for_serving() {
             return;
         }
-        tracing::warn!(
-            ?table_id,
-            "update_table_cache_refill_vnodes_for_serving is not implemented yet for table_id",
-        );
+        self.table_cache_refill_vnodes_for_serving.remove(&table_id);
+        if let Some(vnodes) = self.serving_table_vnode_mapping.get(&table_id) {
+            self.table_cache_refill_vnodes_for_serving
+                .insert(table_id, vnodes.clone());
+        }
     }
 }
 
