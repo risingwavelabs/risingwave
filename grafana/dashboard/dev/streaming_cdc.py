@@ -9,6 +9,17 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Streaming CDC",
             [
+                panels.timeseries_count(
+                    "CDC Engine Failure Count",
+                    "Total number of failed CDC engine attempts",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('connector_cdc_engine_failure_total')}[$__rate_interval])) by (source_type, source_id, connector_class, error_kind)",
+                            "source_type {{source_type}} source_id {{source_id}} connector_class {{connector_class}} error_kind {{error_kind}}",
+                        )
+                    ],
+                ),
+
                 panels.timeseries_rowsps(
                     "CDC Backfill Snapshot Read Throughput(rows)",
                     "Total number of rows that have been read from the cdc backfill snapshot",
