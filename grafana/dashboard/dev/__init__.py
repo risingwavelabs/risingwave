@@ -5,8 +5,6 @@ from ..common import *
 sections: List[Callable[[Panels], list]] = []
 
 
-SECTION_HEADER_HEIGHT = 1.3
-
 def section(func: Callable[[Panels], list]):
     sections.append(func)
     return func
@@ -14,12 +12,7 @@ def section(func: Callable[[Panels], list]):
 
 def add_section_header(title: str):
     def _header(panels: Panels):
-        return [
-            panels.subheader(
-                content=f"##### **{title}**",
-                height=SECTION_HEADER_HEIGHT,
-            )
-        ]
+        return [panels.row(f"[{title.upper()}]")]
 
     sections.append(_header)
 
