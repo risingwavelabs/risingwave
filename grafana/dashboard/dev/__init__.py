@@ -18,6 +18,7 @@ from . import cluster_errors as _
 from . import cluster_essential as _
 
 # Resource
+from . import cluster_resource as _
 from . import network_connection as _
 from . import memory_manager as _
 
