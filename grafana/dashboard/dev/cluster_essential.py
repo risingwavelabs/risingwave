@@ -19,6 +19,19 @@ def _(outer_panels: Panels):
                 ],
                 ["last"],
             ),
+            panels.timeseries_count(
+                "Meta Cluster",
+                "RW cluster can configure multiple meta nodes to achieve high availability. One is the leader and the "
+                "rest are the followers.",
+                [
+                    panels.target(
+                        f"sum({metric('meta_num')}) by (worker_addr,role)",
+                        f"{{role}} @ {{worker_addr}}",
+                    )
+                ],
+                ["last"],
+            ),
+            panels.subheader("Resource Usage"),
             panels.timeseries_percentage(
                 "Node Memory relative",
                 "Memory usage relative to k8s resource limit of container. Only works in K8s environment",
@@ -40,18 +53,7 @@ def _(outer_panels: Panels):
                     ),
                 ],
             ),
-            panels.timeseries_count(
-                "Meta Cluster",
-                "RW cluster can configure multiple meta nodes to achieve high availability. One is the leader and the "
-                "rest are the followers.",
-                [
-                    panels.target(
-                        f"sum({metric('meta_num')}) by (worker_addr,role)",
-                        f"{{role}} @ {{worker_addr}}",
-                    )
-                ],
-                ["last"],
-            ),
+
             panels.subheader("Recovery"),
             panels.timeseries_ops(
                 "Recovery Successful Rate",
