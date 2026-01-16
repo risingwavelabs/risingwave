@@ -5,7 +5,7 @@ from . import section
 def _(outer_panels: Panels):
     panels = outer_panels
     return [
-        outer_panels.row("[Alerts] Cluster Alerts"),
+        outer_panels.row("[Cluster] Cluster Alerts"),
         *[
             panels.subheader(
                 "Streaming Alerts",
