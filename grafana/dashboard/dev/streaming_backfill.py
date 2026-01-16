@@ -6,7 +6,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Streaming] Streaming Backfill",
+            "Streaming Backfill",
             [
                 # FIXME(kwannoel): We should add the job id as the label, rather than solely the upstream table id.
                 panels.timeseries_rowsps(

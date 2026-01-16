@@ -10,7 +10,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Streaming] Streaming Fragments",
+            "Streaming Fragments",
             [
                 panels.subheader("Busy Rate (IO + CPU Usage) by Fragment"),
                 panels.timeseries_percentage(

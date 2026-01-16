@@ -9,7 +9,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Streaming] Streaming Operator Metrics by Operator Type",
+            "Streaming Operator Metrics by Operator Type",
             [
                 panels.subheader("Exchange"),
                 panels.timeseries_percentage(
