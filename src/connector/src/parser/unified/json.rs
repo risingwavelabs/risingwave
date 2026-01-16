@@ -657,11 +657,17 @@ impl JsonParseOptions {
             // Handle Debezium PostGIS geometry type: {"srid": <int>, "wkb": <base64_string>}
             // We extract the wkb field and decode it as EWKB bytes
             (DataType::Bytea, ValueType::Object) => {
-                let obj = value.as_object().unwrap();
-                // Check if this is a Debezium geometry object
-                if let (Some(wkb_value), Some(_srid_value)) = (obj.get("wkb"), obj.get("srid")) {
-                    // Extract and decode the wkb field (base64-encoded EWKB)
-                    if let Some(wkb_str) = wkb_value.as_str() {
+                let obj = value.as_object().ok_or_else(create_error)?;
+
+                // Check if this is a Debezium geometry object by verifying both fields exist
+                let srid_value = obj.get("srid");
+                let wkb_value = obj.get("wkb");
+
+                if let (Some(srid), Some(wkb)) = (srid_value, wkb_value) {
+                    // Validate srid is numeric and wkb is string
+                    if srid.as_i64().is_some() && wkb.as_str().is_some() {
+                        // Extract and decode the wkb field (base64-encoded EWKB)
+                        let wkb_str = wkb.as_str().unwrap();
                         base64::engine::general_purpose::STANDARD
                             .decode(wkb_str)
                             .map_err(|_| create_error())?
@@ -671,6 +677,7 @@ impl JsonParseOptions {
                         Err(create_error())?
                     }
                 } else {
+                    // Not a geometry object, reject
                     Err(create_error())?
                 }
             }
