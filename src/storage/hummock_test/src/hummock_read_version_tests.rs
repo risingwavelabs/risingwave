@@ -57,6 +57,8 @@ async fn test_read_version_basic() {
         vnodes,
     );
 
+    read_version.init();
+
     {
         // single imm
         let sorted_items = gen_dummy_batch(1);
