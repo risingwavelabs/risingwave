@@ -18,6 +18,7 @@ use std::ops::Range;
 use std::sync::{Arc, LazyLock};
 use std::task::{Poll, ready};
 use std::time::{Duration, Instant};
+use std::usize;
 
 use foyer::{HybridCacheEntry, RangeBoundsExt};
 use futures::future::{join_all, try_join_all};
@@ -353,8 +354,15 @@ impl CacheRefillTask {
                 }
             })
             .collect_vec();
-        let future = join_all(tasks);
-
+        let concurrency = std::env::var("RW_META_REFILL_CONCURRENCY")
+            .map(|s| s.parse::<usize>().ok())
+            .ok()
+            .flatten()
+            .unwrap_or(usize::MAX);
+        use futures::StreamExt;
+        let future = futures::stream::iter(tasks)
+            .buffer_unordered(concurrency)
+            .collect::<Vec<_>>();
         let _ = tokio::time::timeout(self.context.config.timeout, future).await;
     }
 
