@@ -18,7 +18,7 @@ def _(outer_panels: Panels):
     )
     return [
         outer_panels.row_collapsed(
-            "Streaming (Source/Sink/Materialized View/Barrier)",
+            "[Streaming] Streaming (Source/Sink/Materialized View/Barrier)",
             [
                 panels.subheader("General"),
                 panels.timeseries_percentage(
