@@ -59,9 +59,7 @@ mod output_mapping;
 pub use output_mapping::DispatchOutputMapping;
 #[path = "dispatch_sync_log_store.rs"]
 mod dispatch_sync_log_store;
-pub use dispatch_sync_log_store::{
-    SyncLogStoreDispatchConfig, SyncLogStoreDispatchExecutor,
-};
+pub use dispatch_sync_log_store::{SyncLogStoreDispatchConfig, SyncLogStoreDispatchExecutor};
 use risingwave_common::id::FragmentId;
 
 use crate::error::StreamError;

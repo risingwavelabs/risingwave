@@ -46,7 +46,7 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, AnyDispatchExecutor, DispatchExecutor, Execute, Executor,
-    ExecutorInfo, SnapshotBackfillExecutor, StreamExecutorError, SyncLogStoreDispatchConfig,
+    ExecutorInfo, SnapshotBackfillExecutor, SyncLogStoreDispatchConfig,
     SyncLogStoreDispatchExecutor, SyncedKvLogStoreMetrics, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
@@ -642,10 +642,10 @@ impl StreamActorManager {
                 .create_actor(
                     actor.clone(),
                     fragment_id,
-                    node.clone(),
+                    node,
                     barrier_manager.clone(),
                     new_output_request_rx,
-                    actor_config.clone(),
+                    actor_config,
                 )
                 .and_then(|actor| actor.run())
                 .map(move |result| {

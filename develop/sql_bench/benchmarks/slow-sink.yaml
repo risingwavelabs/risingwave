@@ -16,11 +16,11 @@ setup_sql: |
   insert into fact
     select x as v0, 2 as v1, 'abcdefgakjandjkw' as v2, 'jkb1ku1bu' as v3
     from generate_series(2000001, 4000000) t(x);
-  
+
   create sink s_join into t as
     select fact.v0, fact.v1, fact.v2, fact.v3
     from fact join dim on fact.v1 = dim.v1;
-  
+
 
   create materialized view mv_t_agg as
   select v0, count(*) as cnt, sum(v0), string_agg(v2, ',')
