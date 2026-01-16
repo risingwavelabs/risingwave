@@ -250,8 +250,8 @@ pub async fn standalone(
 ) {
     tracing::info!("launching Risingwave in standalone mode");
 
-    // Standalone with local meta backend (sqlite/mem) is a single-host dev mode, so
-    // skip license resource limit checks to avoid false positives.
+    // Skip license resource limit checks for single-node deployments
+    // (standalone with local meta backend (sqlite/mem)).
     if let Some(opts) = meta_opts.as_ref() {
         let config = load_config(&opts.config_path, opts);
         let is_local_meta_backend = matches!(config.meta.backend, MetaBackend::Mem | MetaBackend::Sqlite)
