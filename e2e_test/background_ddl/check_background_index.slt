@@ -2,7 +2,7 @@ statement ok
 create table t(v1 int);
 
 statement ok
-insert into t select * from generate_series(1, 10000);
+insert into t select * from generate_series(1, 500000);
 
 statement ok
 set background_ddl=false;
