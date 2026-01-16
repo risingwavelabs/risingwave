@@ -26,18 +26,21 @@ from . import streaming_metadata as _
 from . import system_params as _
 
 # Streaming
+from . import streaming_barrier as _
 from . import streaming_relations as _
-from . import streaming_actors as _
-from . import streaming_actors_tokio as _
+from . import streaming_fragments as _
+from . import streaming_operators as _
 from . import streaming_exchange as _
 from . import refresh_manager as _
 
 # Source
+from . import source_general as _
 from . import streaming_cdc as _
 from . import kinesis_metrics as _
 from . import kafka_metrics as _
 
 # Sink
+from . import sink_general as _
 from . import sink_metrics as _
 
 # Iceberg
