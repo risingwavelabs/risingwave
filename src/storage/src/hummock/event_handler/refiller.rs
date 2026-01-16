@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::poll_fn;
 use std::ops::Range;
 use std::sync::{Arc, LazyLock};
-use std::task::{Poll, ready};
+use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use foyer::{HybridCacheEntry, RangeBoundsExt};
@@ -329,15 +329,27 @@ impl CacheRefiller {
 }
 
 impl CacheRefiller {
-    pub(crate) fn next_event(&mut self) -> impl Future<Output = CacheRefillerEvent> + '_ {
+    pub(crate) fn next_events(&mut self) -> impl Future<Output = Vec<CacheRefillerEvent>> + '_ {
         poll_fn(|cx| {
-            if let Some(item) = self.queue.front_mut() {
-                ready!(item.handle.poll_unpin(cx)).unwrap();
+            const MAX_BATCH_SIZE: usize = 16;
+            let mut events = None;
+            while let Some(item) = self.queue.front_mut()
+                && let Poll::Ready(result) = item.handle.poll_unpin(cx)
+            {
+                result.unwrap();
                 let item = self.queue.pop_front().unwrap();
                 GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.sub(1);
-                return Poll::Ready(item.event);
+                let events = events.get_or_insert_with(|| Vec::with_capacity(MAX_BATCH_SIZE));
+                events.push(item.event);
+                if events.len() >= MAX_BATCH_SIZE {
+                    break;
+                }
             }
-            Poll::Pending
+            if let Some(events) = events {
+                Poll::Ready(events)
+            } else {
+                Poll::Pending
+            }
         })
     }
 }
