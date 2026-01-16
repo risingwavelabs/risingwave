@@ -308,7 +308,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Executor Barrier Align Per Second",
+                    "Executor Barrier Align Per Second (excludes merge node)",
                     "",
                     [
                         # The metrics might be pre-aggregated locally on each compute node when `actor_id` is masked due to metrics level settings.
@@ -321,21 +321,6 @@ def _(outer_panels: Panels):
                         panels.target_hidden(
                             f"rate({metric('stream_barrier_align_duration_ns', actor_level_filter)}[$__rate_interval]) / 1000000000",
                             "actor {{actor_id}} fragment {{fragment_id}} {{wait_side}} {{executor}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Merger Barrier Align",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('stream_merge_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id) \
-                            / sum({metric('stream_actor_count')}) by (fragment_id)",
-                            "avg - fragment {{fragment_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_merge_barrier_align_duration_ns', actor_level_filter)}[$__rate_interval]) / 1000000000",
-                            "actor {{actor_id}} - fragment {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -362,6 +347,42 @@ def _(outer_panels: Panels):
                             # Here we use `min` but actually no much difference. Any of the sampled epochs makes sense.
                             f"min({metric('stream_actor_current_epoch')} != 0) by (fragment_id)",
                             "fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.subheader("Exchange"),
+                panels.timeseries_percentage(
+                    "Merger Barrier Align",
+                    "",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_merge_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id) \
+                            / sum({metric('stream_actor_count')}) by (fragment_id)",
+                            "avg - fragment {{fragment_id}}",
+                        ),
+                        panels.target_hidden(
+                            f"rate({metric('stream_merge_barrier_align_duration_ns', actor_level_filter)}[$__rate_interval]) / 1000000000",
+                            "actor {{actor_id}} - fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes_per_sec(
+                    "Fragment-level Remote Exchange Send Throughput",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_exchange_frag_send_size')}[$__rate_interval])",
+                            "{{up_fragment_id}}->{{down_fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes_per_sec(
+                    "Fragment-level Remote Exchange Recv Throughput",
+                    "",
+                    [
+                        panels.target(
+                            f"rate({metric('stream_exchange_frag_recv_size')}[$__rate_interval])",
+                            "{{up_fragment_id}}->{{down_fragment_id}}",
                         ),
                     ],
                 ),
