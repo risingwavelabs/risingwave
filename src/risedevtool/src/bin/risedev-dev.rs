@@ -31,7 +31,7 @@ use risedev::{
     CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask, DummyService,
     EnsureStopService, ExecuteContext, FrontendService, GrafanaService, KafkaService,
     LakekeeperService, MetaNodeService, MinioService, MoatService, MySqlService, PostgresService,
-    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
+    PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService, RustfsService,
     SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
     TempoService, generate_risedev_env, preflight_check,
 };
@@ -144,6 +144,12 @@ fn task_main(
 
                     let mut task = risedev::ConfigureMinioTask::new(c)?;
                     task.execute(&mut ctx)?;
+                }
+                ServiceConfig::Rustfs(c) => {
+                    let mut service = RustfsService::new(c.clone())?;
+                    service.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("api http://{}:{}/", c.address, c.port));
                 }
                 ServiceConfig::Sqlite(c) => {
                     struct SqliteService(SqliteConfig);
