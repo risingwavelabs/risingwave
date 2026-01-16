@@ -6,7 +6,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Source] Refresh Manager",
+            "Refresh Manager",
             [
                 panels.timeseries_latency(
                     "Refresh Job Duration",

@@ -9,7 +9,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Streaming] Streaming Operator Overview",
+            "Streaming Operator Overview",
             [
                 panels.subheader("Executor Cache Metrics"),
                 panels.timeseries_bytes(

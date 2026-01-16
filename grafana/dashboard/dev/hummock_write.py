@@ -7,7 +7,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Storage] Hummock (Write)",
+            "Hummock (Write)",
             [
                 panels.timeseries_bytes(
                     "Uploader Memory Size",
