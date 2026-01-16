@@ -380,6 +380,7 @@ impl CacheRefillTask {
             .map(|info| async {
                 let mut stats = StoreLocalStatistic::default();
                 GLOBAL_CACHE_REFILL_METRICS.meta_refill_attempts_total.inc();
+                let _permit = context.concurrency.acquire().await.unwrap();
 
                 let now = Instant::now();
                 let res = context.sstable_store.sstable(info, &mut stats).await;
