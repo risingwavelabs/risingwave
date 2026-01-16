@@ -7,7 +7,6 @@ setup_sql: |
   create table fact(v0 int primary key, v1 int, v2 varchar, v3 varchar);
 
   create table t(v0 int primary key, v1 int, v2 varchar, v3 varchar);
-  set sink_decouple=false;
 
   insert into dim values (1), (2);
 
@@ -25,7 +24,7 @@ setup_sql: |
 
   create materialized view mv_t_agg as
   select v0, count(*) as cnt, sum(v0), string_agg(v2, ',')
-  from t
+  from t join dim on t.v1 = dim.v1
   group by v0;
   flush;
 prepare_sql: |
