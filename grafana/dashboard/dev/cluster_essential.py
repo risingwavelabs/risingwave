@@ -19,6 +19,18 @@ def _(outer_panels: Panels):
                 ],
                 ["last"],
             ),
+            panels.timeseries_count(
+                "Meta Cluster",
+                "RW cluster can configure multiple meta nodes to achieve high availability. One is the leader and the "
+                "rest are the followers.",
+                [
+                    panels.target(
+                        f"sum({metric('meta_num')}) by (worker_addr,role)",
+                        f"{{role}} @ {{worker_addr}}",
+                    )
+                ],
+                ["last"],
+            ),
             panels.subheader("Resource Usage (relative)"),
             panels.timeseries_percentage(
                 "Node Memory relative",
@@ -67,18 +79,6 @@ def _(outer_panels: Panels):
                         % (COMPONENT_LABEL, NODE_LABEL),
                     ),
                 ],
-            ),
-            panels.timeseries_count(
-                "Meta Cluster",
-                "RW cluster can configure multiple meta nodes to achieve high availability. One is the leader and the "
-                "rest are the followers.",
-                [
-                    panels.target(
-                        f"sum({metric('meta_num')}) by (worker_addr,role)",
-                        f"{{role}} @ {{worker_addr}}",
-                    )
-                ],
-                ["last"],
             ),
             panels.subheader("Recovery"),
             panels.timeseries_ops(
