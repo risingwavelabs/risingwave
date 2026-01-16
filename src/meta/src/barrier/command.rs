@@ -1501,18 +1501,6 @@ impl Command {
             ..Default::default()
         }))
     }
-
-    /// For `CancelStreamingJob`, returns the table id of the target table.
-    pub fn jobs_to_drop(&self) -> impl Iterator<Item = JobId> + '_ {
-        match self {
-            Command::DropStreamingJobs {
-                streaming_job_ids, ..
-            } => Some(streaming_job_ids.iter().cloned()),
-            _ => None,
-        }
-        .into_iter()
-        .flatten()
-    }
 }
 
 impl Command {
