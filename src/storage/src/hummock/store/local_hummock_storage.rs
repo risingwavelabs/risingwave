@@ -522,6 +522,7 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
             "local state store of table id {:?} is init for more than once",
             self.table_id
         );
+        self.read_version.write().init();
         if !self.is_replicated {
             self.event_sender
                 .send(HummockEvent::InitEpoch {
