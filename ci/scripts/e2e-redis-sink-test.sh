@@ -63,9 +63,11 @@ else
 fi
 
 echo "--- testing cluster sinks"
-redis-server ./ci/redis-conf/redis-7000.conf --daemonize yes
-redis-server ./ci/redis-conf/redis-7001.conf --daemonize yes
-redis-server ./ci/redis-conf/redis-7002.conf --daemonize yes
+REDIS_CLUSTER_LOG_DIR=".risingwave/log"
+mkdir -p "$REDIS_CLUSTER_LOG_DIR"
+redis-server ./ci/redis-conf/redis-7000.conf --daemonize yes --logfile "$REDIS_CLUSTER_LOG_DIR/redis-7000.log"
+redis-server ./ci/redis-conf/redis-7001.conf --daemonize yes --logfile "$REDIS_CLUSTER_LOG_DIR/redis-7001.log"
+redis-server ./ci/redis-conf/redis-7002.conf --daemonize yes --logfile "$REDIS_CLUSTER_LOG_DIR/redis-7002.log"
 
 echo "yes" | redis-cli --cluster create 127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002
 
