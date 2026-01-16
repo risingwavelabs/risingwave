@@ -368,14 +368,11 @@ impl IcebergSplitEnumerator {
         let mut equality_delete_files = vec![];
         let mut equality_delete_files_set = HashSet::new();
         let mut equality_delete_ids = None;
-        let scan = table
-            .scan()
-            .with_filter(predicate)
-            .snapshot_id(snapshot_id)
-            .select_all()
-            .with_row_group_filtering_enabled(true)
-            .build()?;
-
+        let mut scan_builder = table.scan().snapshot_id(snapshot_id).select_all();
+        if predicate != IcebergPredicate::AlwaysTrue {
+            scan_builder = scan_builder.with_filter(predicate.clone());
+        }
+        let scan = scan_builder.build()?;
         let file_scan_stream = scan.plan_files().await?;
 
         #[for_await]
@@ -564,7 +561,12 @@ pub async fn scan_task_to_chunk_with_deletes(
     }
 
     // Read the data file; delete application is delegated to the reader.
-    let reader = table.reader_builder().with_batch_size(chunk_size).build();
+    let reader = table
+        .reader_builder()
+        .with_batch_size(chunk_size)
+        .with_row_group_filtering_enabled(true)
+        .with_row_selection_enabled(true)
+        .build();
     let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
 
     let record_batch_stream: iceberg::scan::ArrowRecordBatchStream =

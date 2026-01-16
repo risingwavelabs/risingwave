@@ -78,7 +78,7 @@ impl DisplayAs for IcebergScan {
         }
 
         write!(f, "IcebergScan: ")?;
-        write!(f, ", table={}", self.inner.table.identifier())?;
+        write!(f, "table={}", self.inner.table.identifier())?;
         if format_type == DisplayFormatType::Verbose {
             write!(f, ", scan_column_names={:?}", self.inner.scan_column_names)?;
             write!(f, ", need_seq_num={}", self.inner.need_seq_num)?;
@@ -245,6 +245,8 @@ impl IcebergScanInner {
             .table
             .reader_builder()
             .with_batch_size(chunk_size)
+            .with_row_group_filtering_enabled(true)
+            .with_row_selection_enabled(true)
             .build();
 
         for task in &self.tasks[partition] {
