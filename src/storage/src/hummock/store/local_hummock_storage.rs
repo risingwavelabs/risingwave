@@ -22,7 +22,7 @@ use bytes::Bytes;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{EpochPair, MAX_SPILL_TIMES};
+use risingwave_common::util::epoch::{EpochPair, MAX_EPOCH, MAX_SPILL_TIMES};
 use risingwave_hummock_sdk::key::{
     FullKey, TableKey, TableKeyRange, UserKey, is_empty_key_range, vnode_range,
 };
@@ -258,7 +258,6 @@ pub struct LocalHummockFlushedSnapshotReader {
     table_id: TableId,
     read_version: HummockReadVersionRef,
     hummock_version_reader: HummockVersionReader,
-    epoch: HummockEpoch,
 }
 
 impl StateStoreGet for LocalHummockFlushedSnapshotReader {
@@ -275,7 +274,7 @@ impl StateStoreGet for LocalHummockFlushedSnapshotReader {
             key,
             read_options,
             on_key_value_fn,
-            self.epoch,
+            MAX_EPOCH,
         )
         .await
     }
@@ -290,7 +289,7 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
-        self.iter_flushed(key_range, read_options, self.epoch)
+        self.iter_flushed(key_range, read_options, MAX_EPOCH)
             .instrument(tracing::trace_span!("hummock_iter"))
     }
 
@@ -299,7 +298,7 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
-        self.rev_iter_flushed(key_range, read_options, self.epoch)
+        self.rev_iter_flushed(key_range, read_options, MAX_EPOCH)
             .instrument(tracing::trace_span!("hummock_rev_iter"))
     }
 }
@@ -628,7 +627,6 @@ impl LocalHummockStorage {
             table_id: self.table_id,
             read_version: self.read_version.clone(),
             hummock_version_reader: self.hummock_version_reader.clone(),
-            epoch: self.epoch(),
         }
     }
 
