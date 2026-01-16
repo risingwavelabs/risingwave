@@ -32,10 +32,6 @@ from . import streaming_actors_tokio as _
 from . import streaming_exchange as _
 from . import refresh_manager as _
 
-# Iceberg
-from . import iceberg_metrics as _
-from . import iceberg_compaction_metrics as _
-
 # Source
 from . import streaming_cdc as _
 from . import kinesis_metrics as _
@@ -43,6 +39,10 @@ from . import kafka_metrics as _
 
 # Sink
 from . import sink_metrics as _
+
+# Iceberg
+from . import iceberg_metrics as _
+from . import iceberg_compaction_metrics as _
 
 # Batch
 from . import batch as _
