@@ -13,7 +13,7 @@ def _(outer_panels: Panels):
 
     return [
         outer_panels.row_collapsed(
-            "[Storage] Hummock (Read)",
+            "Hummock (Read)",
             [
                 panels.timeseries_ops(
                     "Cache Ops",

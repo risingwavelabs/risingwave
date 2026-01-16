@@ -39,7 +39,7 @@ def _(outer_panels: Panels):
     )
     return [
         outer_panels.row_collapsed(
-            "[Streaming] Streaming Relation Metrics",
+            "Streaming Relation Metrics",
             [
                 panels.subheader("Relation Level Metrics"),
                 panels.timeseries_percentage(
