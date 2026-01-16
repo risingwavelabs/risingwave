@@ -11,9 +11,9 @@ def section(func: Callable[[Panels], list]):
 
 
 # The import order determines the order of the sections in the dashboard.
-from . import actor_info as _
 from . import cluster_essential as _
-from . import streaming as _
+from . import streaming_metadata as _
+from . import streaming_relations as _
 from . import streaming_cdc as _
 from . import streaming_actors as _
 from . import streaming_actors_tokio as _
