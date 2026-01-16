@@ -13,6 +13,7 @@ def _(outer_panels: Panels):
 - Too Many Barriers: there are too many uncommitted barriers generated. This means the streaming graph is stuck or under heavy load. Check 'Barrier Latency' panel.
 - Recovery Triggered: cluster recovery is triggered. Check 'Errors by Type' / 'Node Count' panels.
 """,
+                height=10,
             ),
             panels.timeseries_count(
                 "Streaming Alerts",

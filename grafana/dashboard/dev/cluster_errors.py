@@ -7,6 +7,19 @@ def _(outer_panels: Panels):
     return [
         outer_panels.row("[Cluster] Cluster Errors"),
         *[
+            panels.subheader("Container Termination Reasons"),
+            panels.timeseries_count(
+                "Termination reasons (OOMKilled, etc...)",
+                "The reasons for the termination of the containers.",
+                [
+                    panels.target(
+                        'kube_pod_container_status_last_terminated_timestamp{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"}'
+                        '* on (namespace,pod,container) group_left (reason) kube_pod_container_status_last_terminated_reason{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"}',
+                        "[{{reason}}] {{container}} {{pod}}",
+                    )
+                ],
+            ),
+
             panels.subheader("User Streaming Errors"),
             panels.timeseries_count(
                 "Errors",
@@ -56,18 +69,6 @@ def _(outer_panels: Panels):
                     ),
                 ],
             ),
-            panels.timeseries_count(
-                "Termination reasons (OOMKilled, etc...)",
-                "The reasons for the termination of the containers.",
-                [
-                    panels.target(
-                        'kube_pod_container_status_last_terminated_timestamp{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"}'
-                        '* on (namespace,pod,container) group_left (reason) kube_pod_container_status_last_terminated_reason{cluster=~"$cluster",namespace=~"$namespace",pod=~"$pod"}',
-                        "[{{reason}}] {{container}} {{pod}}",
-                    )
-                ],
-            ),
-            panels.subheader("User Streaming Errors"),
             panels.timeseries_count(
                 "Compute Errors by Type",
                 "Errors that happened during computation. Check the logs for detailed error message.",
