@@ -40,7 +40,6 @@ from . import kinesis_metrics as _
 from . import kafka_metrics as _
 
 # Sink
-from . import sink_general as _
 from . import sink_metrics as _
 
 # Iceberg
