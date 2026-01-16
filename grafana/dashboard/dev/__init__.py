@@ -12,7 +12,9 @@ def section(func: Callable[[Panels], list]):
 
 # NOTE: The import order determines the order of the sections in the dashboard.
 
-# Essential Metrics
+# Cluster
+from . import cluster_alerts as _
+from . import cluster_errors as _
 from . import cluster_essential as _
 
 # Resource
