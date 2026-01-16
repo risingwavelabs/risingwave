@@ -306,6 +306,7 @@ async fn test_read_filter_basic() {
         pinned_version,
         vnodes.clone(),
     )));
+    read_version.write().init();
     read_version.write().update_vnode_bitmap(vnodes);
 
     {

@@ -854,7 +854,10 @@ async fn test_snapshot_read_ignores_uninitialized_local() {
     assert_eq!(value, Bytes::from("value2"));
 
     // Local reads should also observe its own write.
-    let value = second_local.get(epoch2_key, Default::default()).await.unwrap();
+    let value = second_local
+        .get(epoch2_key, Default::default())
+        .await
+        .unwrap();
     assert_eq!(value.unwrap(), Bytes::from("value2"));
 }
 
