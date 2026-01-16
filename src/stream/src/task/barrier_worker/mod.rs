@@ -176,7 +176,6 @@ impl ControlStreamHandle {
         &mut self,
         partial_graph_id: PartialGraphId,
         root_err: Option<ScoredStreamError>,
-        reset_request_id: u32,
     ) {
         self.send_response(Response::ResetPartialGraph(ResetPartialGraphResponse {
             partial_graph_id,
@@ -184,7 +183,6 @@ impl ControlStreamHandle {
                 err_msg: err.error.to_report_string(),
                 score: err.score.0,
             }),
-            reset_request_id,
         }));
     }
 
@@ -384,9 +382,9 @@ impl LocalBarrierWorker {
                         } => {
                             self.on_partial_graph_failure(partial_graph_id, Some(actor_id), err, "recv actor failure");
                         }
-                        ManagedBarrierStateEvent::PartialGraphsReset(output, reset_request_id) => {
+                        ManagedBarrierStateEvent::PartialGraphsReset(output) => {
                             for (partial_graph_id, output) in output {
-                                self.ack_partial_graph_reset(partial_graph_id, Some(output), reset_request_id);
+                                self.ack_partial_graph_reset(partial_graph_id, Some(output));
                             }
                         }
                         ManagedBarrierStateEvent::RegisterLocalUpstreamOutput{
@@ -962,12 +960,11 @@ impl LocalBarrierWorker {
                 let reset_future = status.start_reset(
                     partial_graph_id,
                     self.await_epoch_completed_futures.remove(&partial_graph_id),
-                    req.reset_request_id,
                     &mut table_ids_to_clear,
                 );
                 reset_futures.insert(partial_graph_id, reset_future);
             } else {
-                self.ack_partial_graph_reset(partial_graph_id, None, req.reset_request_id);
+                self.ack_partial_graph_reset(partial_graph_id, None);
             }
         }
         if reset_futures.is_empty() {
@@ -990,7 +987,7 @@ impl LocalBarrierWorker {
             {
                 hummock.clear_tables(table_ids_to_clear).await;
             }
-            (outputs, req.reset_request_id)
+            outputs
         }));
     }
 
@@ -998,7 +995,6 @@ impl LocalBarrierWorker {
         &mut self,
         partial_graph_id: PartialGraphId,
         reset_output: Option<ResetPartialGraphOutput>,
-        reset_request_id: u32,
     ) {
         info!(
             %partial_graph_id,
@@ -1009,7 +1005,6 @@ impl LocalBarrierWorker {
         self.control_stream_handle.ack_reset_partial_graph(
             partial_graph_id,
             reset_output.and_then(|output| output.root_err),
-            reset_request_id,
         );
     }
 

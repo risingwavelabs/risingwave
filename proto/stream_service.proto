@@ -137,9 +137,8 @@ message StreamingControlStreamRequest {
 
   message ResetPartialGraphsRequest {
     repeated uint64 partial_graph_ids = 1;
-    uint32 reset_request_id = 2;
-    reserved 3;
-    reserved "database_id";
+    reserved 2, 3;
+    reserved "reset_request_id", "database_id";
   }
 
   oneof request {
@@ -166,7 +165,8 @@ message StreamingControlStreamResponse {
   message ResetPartialGraphResponse {
     uint64 partial_graph_id = 1;
     optional ScoredError root_err = 2;
-    uint32 reset_request_id = 3;
+    reserved 3;
+    reserved "reset_request_id";
   }
 
   oneof response {

@@ -472,7 +472,6 @@ impl PartialGraphStatus {
         &mut self,
         partial_graph_id: PartialGraphId,
         completing_futures: Option<FuturesOrdered<AwaitEpochCompletedFuture>>,
-        reset_request_id: u32,
         table_ids_to_clear: &mut HashSet<TableId>,
     ) -> BoxFuture<'static, ResetPartialGraphOutput> {
         match replace(self, PartialGraphStatus::Resetting) {
@@ -488,7 +487,7 @@ impl PartialGraphStatus {
                 assert_eq!(partial_graph_id, state.partial_graph_id);
                 info!(
                     %partial_graph_id,
-                    reset_request_id, "start partial graph reset from Running"
+                    "start partial graph reset from Running"
                 );
                 table_ids_to_clear.extend(state.table_ids.iter().copied());
                 SuspendedPartialGraphState::new(state, None, completing_futures)
@@ -503,7 +502,6 @@ impl PartialGraphStatus {
                 assert_eq!(partial_graph_id, state.inner.partial_graph_id);
                 info!(
                     %partial_graph_id,
-                    reset_request_id,
                     suspend_elapsed = ?state.suspend_time.elapsed(),
                     "start partial graph reset after suspended"
                 );
@@ -523,9 +521,8 @@ impl PartialGraphStatus {
 #[derive(Default)]
 pub(in crate::task) struct ManagedBarrierState {
     pub(super) partial_graphs: HashMap<PartialGraphId, PartialGraphStatus>,
-    #[expect(clippy::type_complexity)]
     pub(super) resetting_graphs:
-        FuturesUnordered<JoinHandle<(Vec<(PartialGraphId, ResetPartialGraphOutput)>, u32)>>,
+        FuturesUnordered<JoinHandle<Vec<(PartialGraphId, ResetPartialGraphOutput)>>>,
 }
 
 pub(super) enum ManagedBarrierStateEvent {
@@ -538,7 +535,7 @@ pub(super) enum ManagedBarrierStateEvent {
         actor_id: ActorId,
         err: StreamError,
     },
-    PartialGraphsReset(Vec<(PartialGraphId, ResetPartialGraphOutput)>, u32),
+    PartialGraphsReset(Vec<(PartialGraphId, ResetPartialGraphOutput)>),
     RegisterLocalUpstreamOutput {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
@@ -556,7 +553,7 @@ impl ManagedBarrierState {
                 }
             }
             if let Poll::Ready(Some(result)) = self.resetting_graphs.poll_next_unpin(cx) {
-                let (outputs, reset_request_id) = result.expect("failed to join resetting future");
+                let outputs = result.expect("failed to join resetting future");
                 for (partial_graph_id, _) in &outputs {
                     let PartialGraphStatus::Resetting = self
                         .partial_graphs
@@ -566,10 +563,7 @@ impl ManagedBarrierState {
                         panic!("should be resetting")
                     };
                 }
-                return Poll::Ready(ManagedBarrierStateEvent::PartialGraphsReset(
-                    outputs,
-                    reset_request_id,
-                ));
+                return Poll::Ready(ManagedBarrierStateEvent::PartialGraphsReset(outputs));
             }
             Poll::Pending
         })
