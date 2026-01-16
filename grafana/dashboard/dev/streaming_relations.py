@@ -1,6 +1,6 @@
 from ..common import *
 from . import section
-from streaming_actors import _actor_busy_rate_expr
+from .streaming_common import _actor_busy_rate_expr
 
 def _relation_busy_rate_expr(rate_interval: str):
     actor_busy_rate_expr = _actor_busy_rate_expr(rate_interval)
@@ -128,6 +128,16 @@ def _(outer_panels: Panels):
                         panels.target_hidden(
                             f"rate({table_metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
                             "mview {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "Executor Cache Memory Usage of Materialized Views",
+                    "Memory usage aggregated by materialized views",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
+                            "materialized view {{materialized_view_id}}",
                         ),
                     ],
                 ),
