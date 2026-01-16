@@ -39,7 +39,7 @@ def _(outer_panels: Panels):
     )
     return [
         outer_panels.row_collapsed(
-            "[Streaming] Streaming Relations",
+            "[Streaming] Streaming Relation Metrics",
             [
                 panels.subheader("Relation Level Metrics"),
                 panels.timeseries_percentage(
@@ -105,70 +105,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Materialized View"),
-                panels.timeseries_rowsps(
-                    "Materialized View Throughput (rows/s)",
-                    "The figure shows the number of rows written into each materialized view per second.",
-                    [
-                        panels.target(
-                            f"sum(rate({table_metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
-                            "mview {{table_id}} {{table_name}}",
-                        ),
-                        panels.target_hidden(
-                            f"rate({table_metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
-                            "mview {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Backfill Snapshot-Read Throughput (rows/s)",
-                    "Rows/sec that we read from the backfill snapshot by materialized view",
-                    [
-                        panels.target(
-                            f"""
-                                sum by (table_id) (
-                                  rate({metric('stream_backfill_snapshot_read_row_count', node_filter_enabled=False, table_id_filter_enabled=True)}[$__rate_interval])
-                                )
-                                * on(table_id) group_left(table_name) (
-                                  group({metric('table_info', node_filter_enabled=False)}) by (table_name, table_id)
-                                )
-                            """,
-                            "table_name={{table_name}} table_id={{table_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"rate({table_metric('stream_backfill_snapshot_read_row_count')}[$__rate_interval])",
-                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
-                        ),
-                        panels.target_hidden(
-                            f"rate({table_metric('stream_snapshot_backfill_consume_snapshot_row_count')}[$__rate_interval])",
-                            "table_id={{table_id}} actor={{actor_id}} {{stage}} @ {{%s}}"
-                            % NODE_LABEL,
-                        ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Backfill Upstream Throughput (rows/s)",
-                    "Total number of rows that have been output from the backfill upstream",
-                    [
-                        panels.target(
-                            f"""
-                                sum by (table_id) (
-                                  rate({metric('stream_backfill_upstream_output_row_count', node_filter_enabled=False, table_id_filter_enabled=True)}[$__rate_interval])
-                                )
-                                * on(table_id) group_left(table_name) (
-                                  group({metric('table_info', node_filter_enabled=False)}) by (table_name, table_id)
-                                )
-                            """,
-                            "table_name={{table_name}} table_id={{table_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"rate({table_metric('stream_backfill_upstream_output_row_count')}[$__rate_interval])",
-                            "table_id={{table_id}} actor={{actor_id}} @ {{%s}}"
-                            % NODE_LABEL,
-                        ),
-                    ],
-                ),
                 panels.timeseries_epoch(
                     "Current Epoch of Materialize Views",
                     "The current epoch that the Materialize Executors are processing. If an MV's epoch is far behind the others, "
@@ -181,14 +117,17 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-
-                panels.timeseries_latency(
-                    "Snapshot Backfill Lag",
-                    "",
+                panels.timeseries_rowsps(
+                    "Materialized View Throughput (rows/s)",
+                    "The figure shows the number of rows written into each materialized view per second.",
                     [
                         panels.target(
-                            f"{metric('meta_snapshot_backfill_upstream_lag')} / (2^16) / 1000",
-                            "lag @ {{table_id}}",
+                            f"sum(rate({table_metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
+                            "mview {{table_id}} {{table_name}}",
+                        ),
+                        panels.target_hidden(
+                            f"rate({table_metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
+                            "mview {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
                         ),
                     ],
                 ),

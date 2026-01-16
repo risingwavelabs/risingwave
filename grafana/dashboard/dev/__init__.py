@@ -27,6 +27,7 @@ from . import system_params as _
 
 # Streaming
 from . import streaming_barrier as _
+from . import streaming_backfill as _
 from . import streaming_relations as _
 from . import streaming_fragments as _
 from . import streaming_operators as _
