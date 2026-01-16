@@ -5,7 +5,7 @@ from . import section
 def _(outer_panels: Panels):
     panels = outer_panels
     return [
-        outer_panels.row("[Essential] Cluster Essential Information"),
+        outer_panels.row("[Cluster] Cluster Essential Information"),
         *[
             panels.subheader("Node Status"),
             panels.timeseries_count(
@@ -19,16 +19,6 @@ def _(outer_panels: Panels):
                 ],
                 ["last"],
             ),
-            panels.timeseries_memory(
-                "Node Memory",
-                "The memory usage of each RisingWave component.",
-                [
-                    panels.target(
-                        f"avg({metric('process_resident_memory_bytes')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                        "{{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                    )
-                ],
-            ),
             panels.timeseries_percentage(
                 "Node Memory relative",
                 "Memory usage relative to k8s resource limit of container. Only works in K8s environment",
@@ -38,22 +28,6 @@ def _(outer_panels: Panels):
                         "avg memory usage @ {{%s}} @ {{%s}}"
                         % (COMPONENT_LABEL, NODE_LABEL),
                     )
-                ],
-            ),
-            panels.timeseries_cpu(
-                "Node CPU",
-                "The CPU usage of each RisingWave component.",
-                [
-                    panels.target(
-                        f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                        "cpu usage (total) - {{%s}} @ {{%s}}"
-                        % (COMPONENT_LABEL, NODE_LABEL),
-                    ),
-                    panels.target(
-                        f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / avg({metric('process_cpu_core_num')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) > 0",
-                        "cpu usage (avg per core) - {{%s}} @ {{%s}}"
-                        % (COMPONENT_LABEL, NODE_LABEL),
-                    ),
                 ],
             ),
             panels.timeseries_cpu(
@@ -73,7 +47,7 @@ def _(outer_panels: Panels):
                 [
                     panels.target(
                         f"sum({metric('meta_num')}) by (worker_addr,role)",
-                        "{{worker_addr}} @ {{role}}",
+                        f"{{role}} @ {{worker_addr}}",
                     )
                 ],
                 ["last"],
@@ -138,32 +112,6 @@ def _(outer_panels: Panels):
                         "snapshot_backfill_in_flight_barrier {{table_id}}",
                     ),
                 ],
-            ),
-            panels.timeseries_latency(
-                "Barrier Latency",
-                "The time that the data between two consecutive barriers gets fully processed, i.e. the computation "
-                "results are made durable into materialized views or sink to external systems. This metric shows to users "
-                "the freshness of materialized views.",
-                quantile(
-                    lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('meta_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le, database_id))",
-                        f"barrier_latency_p{legend} " + " (database {{database_id}})",
-                    ),
-                    [50, 90, 99, 999, "max"],
-                )
-                + [
-                    panels.target(
-                        f"rate({metric('meta_barrier_duration_seconds_sum')}[$__rate_interval]) / rate({metric('meta_barrier_duration_seconds_count')}[$__rate_interval]) > 0",
-                        "barrier_latency_avg (database {{database_id}})",
-                    ),
-                ]
-                + quantile(
-                    lambda quantile, legend: panels.target(
-                        f"histogram_quantile({quantile}, sum(rate({metric('meta_snapshot_backfill_barrier_duration_seconds_bucket')}[$__rate_interval])) by (le, table_id, barrier_type))",
-                        f"snapshot_backfill_barrier_latency_p{legend} table_id[{{{{table_id}}}}] {{{{barrier_type}}}}",
-                    ),
-                    [50, 90, 99, 999, "max"],
-                ),
             ),
             panels.timeseries(
                 "Barrier pending time (secs)",
