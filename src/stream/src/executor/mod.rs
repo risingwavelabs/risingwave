@@ -124,7 +124,6 @@ mod row_merge;
 #[cfg(test)]
 mod integration_tests;
 mod sync_kv_log_store;
-mod synced_log_store_shared;
 #[cfg(any(test, feature = "test"))]
 pub mod test_utils;
 mod utils;

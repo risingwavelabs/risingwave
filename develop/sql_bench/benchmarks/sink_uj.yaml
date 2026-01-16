@@ -7,7 +7,7 @@ setup_sql: |
 
   create table dim(v1 int);
   insert into dim values (1), (2);
-  
+
   create table fact(v0 int primary key, v1 int, v2 varchar, v3 varchar);
 
   create materialized view t as
