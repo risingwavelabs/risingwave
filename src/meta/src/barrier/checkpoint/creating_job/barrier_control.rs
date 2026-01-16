@@ -26,6 +26,7 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
 
 use crate::barrier::BarrierKind;
+use crate::barrier::notifier::Notifier;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 
@@ -34,6 +35,7 @@ struct CreatingStreamingJobEpochState {
     epoch: u64,
     node_to_collect: NodeToCollect,
     resps: Vec<BarrierCompleteResponse>,
+    notifiers: Vec<Notifier>,
     kind: BarrierKind,
     is_first_commit: bool,
     enqueue_time: Instant,
@@ -125,6 +127,7 @@ impl CreatingStreamingJobBarrierControl {
         epoch: u64,
         node_to_collect: NodeToCollect,
         kind: BarrierKind,
+        notifiers: Vec<Notifier>,
     ) {
         debug!(
             epoch,
@@ -160,6 +163,7 @@ impl CreatingStreamingJobBarrierControl {
             epoch,
             node_to_collect,
             resps: vec![],
+            notifiers,
             kind,
             is_first_commit,
             enqueue_time: Instant::now(),
@@ -241,6 +245,9 @@ impl CreatingStreamingJobBarrierControl {
             self.completing_barrier.take().expect("should exist");
         wait_commit_timer.observe_duration();
         assert_eq!(epoch_state.epoch, completed_epoch);
+        for notifier in epoch_state.notifiers {
+            notifier.notify_collected();
+        }
         if let Some(prev_max_committed_epoch) = self.max_committed_epoch.replace(completed_epoch) {
             assert!(completed_epoch > prev_max_committed_epoch);
         }
