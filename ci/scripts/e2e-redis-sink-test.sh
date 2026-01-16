@@ -70,6 +70,7 @@ redis-server ./ci/redis-conf/redis-7001.conf --daemonize yes --logfile "$REDIS_C
 redis-server ./ci/redis-conf/redis-7002.conf --daemonize yes --logfile "$REDIS_CLUSTER_LOG_DIR/redis-7002.log"
 
 echo "yes" | redis-cli --cluster create 127.0.0.1:7000 127.0.0.1:7001 127.0.0.1:7002
+# Wait a bit for cluster_state to become ok before running SLT.
 sleep 2
 
 sqllogictest -p 4566 -d dev './e2e_test/sink/redis_cluster_sink.slt'
