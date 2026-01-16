@@ -146,7 +146,7 @@ def _relation_busy_rate_target(panels: Panels, rate_interval: str):
 def _(outer_panels: Panels):
     panels = outer_panels
     return [
-        outer_panels.row("Cluster Essential Information"),
+        outer_panels.row("[Essential] Cluster Essential Information"),
         *[
             panels.subheader("Node Status"),
             panels.timeseries_count(

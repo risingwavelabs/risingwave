@@ -10,7 +10,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Streaming Actors",
+            "[Streaming] Streaming Actors",
             [
                 panels.subheader("General"),
                 panels.timeseries_rowsps(
