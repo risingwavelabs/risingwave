@@ -254,13 +254,14 @@ pub async fn standalone(
     // (standalone with local meta backend (sqlite/mem)).
     if let Some(opts) = meta_opts.as_ref() {
         let config = load_config(&opts.config_path, opts);
-        let is_local_meta_backend = matches!(config.meta.backend, MetaBackend::Mem | MetaBackend::Sqlite)
-            || (config.meta.backend == MetaBackend::Sql
-                && opts
-                    .sql_endpoint
-                    .as_ref()
-                    .map(|endpoint| endpoint.expose_secret().starts_with("sqlite:"))
-                    .unwrap_or(false));
+        let is_local_meta_backend =
+            matches!(config.meta.backend, MetaBackend::Mem | MetaBackend::Sqlite)
+                || (matches!(config.meta.backend, MetaBackend::Sql)
+                    && opts
+                        .sql_endpoint
+                        .as_ref()
+                        .map(|endpoint| endpoint.expose_secret().starts_with("sqlite:"))
+                        .unwrap_or(false));
         if is_local_meta_backend {
             LicenseManager::get().set_ignore_resource_limit(true);
             tracing::info!(

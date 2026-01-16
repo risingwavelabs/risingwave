@@ -7,6 +7,9 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["enum-as-inner", "pbjson", "prost-helpers", "strum"]
+
 [dependencies]
 enum-as-inner = "0.6"
 paste = "1"
