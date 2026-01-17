@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::hash_map::{Entry as HashMapEntry, HashMap};
+use std::collections::{HashSet, VecDeque};
 use std::future::poll_fn;
 use std::ops::Range;
 use std::sync::{Arc, LazyLock};
@@ -23,19 +24,26 @@ use foyer::{HybridCacheEntry, RangeBoundsExt};
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
+use parking_lot::RwLock;
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
     register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
+use risingwave_common::bitmap::Bitmap;
+use risingwave_common::config::Role;
+use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
+use risingwave_pb::id::TableId;
+use risingwave_pb::meta::subscribe_response::Operation;
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
+use crate::hummock::event_handler::ReadVersionMappingType;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{
     Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
@@ -249,13 +257,22 @@ pub(crate) struct CacheRefiller {
     context: CacheRefillContext,
 
     spawn_refill_task: SpawnRefillTask,
+
+    role: Role,
+    table_cache_refill_policies: HashMap<TableId, CacheRefillPolicy>,
+    table_cache_refill_vnodes_for_streaming: HashMap<TableId, Arc<Bitmap>>,
+    table_cache_refill_vnodes_for_serving: HashMap<TableId, Bitmap>,
+    read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
+    serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
 }
 
 impl CacheRefiller {
     pub(crate) fn new(
+        role: Role,
         config: CacheRefillConfig,
         sstable_store: SstableStoreRef,
         spawn_refill_task: SpawnRefillTask,
+        read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
@@ -267,6 +284,12 @@ impl CacheRefiller {
                 sstable_store,
             },
             spawn_refill_task,
+            role,
+            table_cache_refill_policies: HashMap::new(),
+            table_cache_refill_vnodes_for_streaming: HashMap::new(),
+            table_cache_refill_vnodes_for_serving: HashMap::new(),
+            read_version_mapping,
+            serving_table_vnode_mapping: HashMap::new(),
         }
     }
 
@@ -283,6 +306,14 @@ impl CacheRefiller {
         pinned_version: PinnedVersion,
         new_pinned_version: PinnedVersion,
     ) {
+        tracing::trace!(
+            role = ?self.role,
+            policies = ?self.table_cache_refill_policies,
+            streaming = ?self.table_cache_refill_vnodes_for_streaming,
+            serving = ?self.table_cache_refill_vnodes_for_serving,
+            "cache refill table vnode mappings"
+        );
+
         let handle = (self.spawn_refill_task)(
             deltas,
             self.context.clone(),
@@ -300,6 +331,103 @@ impl CacheRefiller {
 
     pub(crate) fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
         self.queue.back().map(|item| &item.event.new_pinned_version)
+    }
+
+    pub(crate) fn update_table_cache_refill_policies(
+        &mut self,
+        policies: HashMap<TableId, CacheRefillPolicy>,
+    ) {
+        for (table_id, policy) in policies {
+            if policy == CacheRefillPolicy::Default {
+                self.table_cache_refill_policies.remove(&table_id);
+            } else {
+                self.table_cache_refill_policies.insert(table_id, policy);
+            }
+            self.update_table_cache_refill_vnodes(table_id);
+        }
+    }
+
+    pub(crate) fn update_table_cache_refill_vnodes(&mut self, table_id: TableId) {
+        let policy = self
+            .table_cache_refill_policies
+            .get(&table_id)
+            .copied()
+            .unwrap_or_default();
+        match policy {
+            CacheRefillPolicy::Default => {
+                self.table_cache_refill_vnodes_for_streaming
+                    .remove(&table_id);
+            }
+            CacheRefillPolicy::Streaming => {
+                self.update_table_cache_refill_vnodes_for_streaming(table_id);
+            }
+            CacheRefillPolicy::Serving => {
+                self.update_table_cache_refill_vnodes_for_serving(table_id);
+            }
+            CacheRefillPolicy::Both => {
+                self.update_table_cache_refill_vnodes_for_streaming(table_id);
+                self.update_table_cache_refill_vnodes_for_serving(table_id);
+            }
+        }
+    }
+
+    pub(crate) fn update_serving_table_vnode_mapping(
+        &mut self,
+        op: Operation,
+        mapping: HashMap<TableId, Bitmap>,
+    ) {
+        match op {
+            Operation::Snapshot => {
+                self.serving_table_vnode_mapping = mapping.clone();
+                for table_id in mapping.keys() {
+                    self.update_table_cache_refill_vnodes_for_serving(*table_id);
+                }
+            }
+            Operation::Update => {
+                for (table_id, bitmap) in mapping {
+                    match self.serving_table_vnode_mapping.entry(table_id) {
+                        HashMapEntry::Occupied(mut o) => *o.get_mut() |= bitmap,
+                        HashMapEntry::Vacant(v) => {
+                            v.insert(bitmap);
+                        }
+                    }
+                    self.update_table_cache_refill_vnodes_for_serving(table_id);
+                }
+            }
+            Operation::Delete => {
+                for table_id in mapping.keys() {
+                    self.serving_table_vnode_mapping.remove(table_id);
+                    self.update_table_cache_refill_vnodes_for_serving(*table_id);
+                }
+            }
+            _ => unreachable!(),
+        }
+    }
+
+    pub(crate) fn update_table_cache_refill_vnodes_for_streaming(&mut self, table_id: TableId) {
+        if !self.role.for_streaming() {
+            return;
+        }
+        self.table_cache_refill_vnodes_for_streaming
+            .remove(&table_id);
+        if let Some(mapping) = self.read_version_mapping.read().get(&table_id) {
+            for read_version in mapping.values() {
+                let vnodes = read_version.read().vnodes();
+                self.table_cache_refill_vnodes_for_streaming
+                    .insert(table_id, vnodes);
+            }
+        }
+    }
+
+    pub(crate) fn update_table_cache_refill_vnodes_for_serving(&mut self, table_id: TableId) {
+        if !self.role.for_serving() {
+            return;
+        }
+        self.table_cache_refill_vnodes_for_serving.remove(&table_id);
+        if let Some(vnodes) = self.serving_table_vnode_mapping.get(&table_id) {
+            self.table_cache_refill_vnodes_for_serving
+                .insert(table_id, vnodes.clone());
+        }
     }
 }
 

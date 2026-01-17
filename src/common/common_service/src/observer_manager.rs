@@ -81,6 +81,8 @@ where
         }
     }
 
+    /// `wait_init_notification` is used to wait for the initial notification from meta
+    /// and process the buffered notifications before the initial notification if needed.
     async fn wait_init_notification(&mut self) -> Result<(), ObserverError> {
         let mut notification_vec = Vec::new();
         let init_notification = loop {
@@ -132,6 +134,15 @@ where
                         .streaming_worker_slot_mapping_version
             }
             Info::ServingWorkerSlotMappings(_) => true,
+            Info::TableCacheRefillPolicies(_) => true,
+            Info::ServingTableVnodeMappings(_) => {
+                notification.version
+                    > info
+                        .version
+                        .as_ref()
+                        .unwrap()
+                        .streaming_worker_slot_mapping_version
+            }
         });
 
         self.observer_states
