@@ -180,7 +180,7 @@ pub use upstream_sink_union::{UpstreamFragmentInfo, UpstreamSinkUnionExecutor};
 pub use utils::DummyExecutor;
 pub use values::ValuesExecutor;
 pub use vector::*;
-pub use watermark_filter::WatermarkFilterExecutor;
+pub use watermark_filter::{UpsertWatermarkFilterExecutor, WatermarkFilterExecutor};
 pub use wrapper::WrapperExecutor;
 
 use self::barrier_align::AlignedMessageStream;

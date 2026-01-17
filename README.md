@@ -9,7 +9,7 @@
 
 <div align="center">
 
-### 🌊 Ride the wave of streaming data
+### 🌊 Ride the wave of event streaming
 
 </div>
 <p align="center">
@@ -45,7 +45,7 @@
   </a>
 </div>
 
-RisingWave is a real-time event streaming platform designed to offer the <i><b>simplest</b></i> and <i><b>most cost-effective</b></i> way to <b>process</b>, <b>analyze</b>, and <b>manage</b> real-time event data — with built-in support for the [Apache Iceberg™](https://iceberg.apache.org/) open table format. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
+RisingWave is an enterprise-grade event streaming platform designed to offer the <i><b>simplest</b></i> and <i><b>most cost-effective</b></i> way to <b>ingest</b>, <b>process</b>, and <b>manage</b> real-time event data — with built-in support for the [Apache Iceberg™](https://iceberg.apache.org/) open table format. It provides both a Postgres-compatible [SQL interface](https://docs.risingwave.com/sql/overview) and a DataFrame-style [Python interface](https://docs.risingwave.com/python-sdk/intro).
 
 RisingWave can <b>ingest</b> millions of events per second, continuously <b>join and analyze</b> live streams with historical data, <b>serve</b> ad-hoc queries at low latency, and <b>manage</b> data reliably in Apache Iceberg™ tables.
 
@@ -64,8 +64,8 @@ To learn about other installation options, such as using a Docker image, see the
 
 RisingWave delivers a unified streaming data platform that combines **ultra-low-latency stream processing** and **Iceberg-native data management**.
 
-### Low-latency streaming processing and analytics
-RisingWave integrates real-time stream processing and low-latency serving in a single system. It continuously ingests data from streaming and batch sources, performs incremental computations across streams and tables with end-to-end freshness under 100 ms. Materialized views can be served directly within RisingWave with 10–20 ms p99 query latency, or delivered to downstream systems.
+### Low-latency streaming ingestion and processing
+RisingWave integrates real-time streaming ingestion, stream processing and low-latency serving in a single system. It continuously ingests data from streaming and batch sources, performs incremental computations across streams and tables with end-to-end freshness under 100 ms. Materialized views can be served directly within RisingWave with 10–20 ms p99 query latency, or delivered to downstream systems.
 
 ### Iceberg lakehouse ingestion, transformation, and management
 RisingWave treats Apache Iceberg™ as a first-class citizen. It directly hosts and manages the Iceberg REST catalog, allowing users to create and operate Iceberg tables through a PostgreSQL-compatible interface. RisingWave supports two write modes: Merge-on-Read (MoR) and Copy-on-Write (CoW), to suit different ingestion and query patterns. It also provides built-in table maintenance capabilities, including compaction, small-file optimization, vacuum, and snapshot cleanup, ensuring efficient and consistent data management without external tools or pipelines.

@@ -34,6 +34,7 @@ struct RwMaterializedView {
     initialized_at_cluster_version: Option<String>,
     created_at_cluster_version: Option<String>,
     background_ddl: bool,
+    status: String,
 }
 
 #[system_catalog(table, "rw_catalog.rw_materialized_views")]
@@ -64,6 +65,7 @@ fn read_rw_materialized_views(reader: &SysCatalogReaderImpl) -> Result<Vec<RwMat
                     initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
                     created_at_cluster_version: table.created_at_cluster_version.clone(),
                     background_ddl: table.create_type == CreateType::Background,
+                    status: table.stream_job_status.to_string(),
                 })
         })
         .collect())

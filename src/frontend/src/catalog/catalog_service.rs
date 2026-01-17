@@ -34,6 +34,7 @@ use risingwave_pb::ddl_service::replace_job_plan::{
 use risingwave_pb::ddl_service::{
     PbTableJobType, TableJobType, WaitVersion, alter_name_request, alter_owner_request,
     alter_set_schema_request, alter_swap_rename_request, create_connection_request,
+    streaming_job_resource_type,
 };
 use risingwave_pb::meta::PbTableParallelism;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -93,7 +94,7 @@ pub trait CatalogWriter: Send + Sync {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()>;
 
@@ -322,19 +323,13 @@ impl CatalogWriter for CatalogWriterImpl {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<()> {
         let create_type = table.get_create_type().unwrap_or(PbCreateType::Foreground);
         let version = self
             .meta_client
-            .create_materialized_view(
-                table,
-                graph,
-                dependencies,
-                specific_resource_group,
-                if_not_exists,
-            )
+            .create_materialized_view(table, graph, dependencies, resource_type, if_not_exists)
             .await?;
         if matches!(create_type, PbCreateType::Foreground) {
             self.wait_version(version).await?

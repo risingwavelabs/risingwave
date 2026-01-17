@@ -385,7 +385,7 @@ fn fallback_rw_expr_builder(
 #[derive(Debug, educe::Educe)]
 #[educe(PartialEq, Eq, Hash)]
 struct RwScalarFunction {
-    // Datafusion uses function name as column identifier, so we need to keep unique names for different functions to avoid conflicts
+    // DataFusion uses function name as column identifier, so we need to keep unique names for different functions to avoid conflicts
     name: String,
     column_name: Vec<String>,
     #[educe(PartialEq(ignore), Hash(ignore))]

@@ -1658,15 +1658,19 @@ impl UploaderData {
 }
 
 impl HummockUploader {
-    pub(super) fn next_uploaded_sst(
+    pub(super) fn next_uploaded_ssts(
         &mut self,
-    ) -> impl Future<Output = Arc<StagingSstableInfo>> + '_ {
+    ) -> impl Future<Output = Vec<Arc<StagingSstableInfo>>> + '_ {
         poll_fn(|cx| {
             let UploaderState::Working(data) = &mut self.state else {
                 return Poll::Pending;
             };
 
-            if let Some((task_id, status, result)) = ready!(data.task_manager.poll_task_result(cx))
+            const MAX_BATCH_SIZE: usize = 16;
+
+            let mut ssts = None;
+            while let Poll::Ready(Some((task_id, status, result))) =
+                data.task_manager.poll_task_result(cx)
             {
                 match result {
                     Ok(sst) => {
@@ -1686,7 +1690,11 @@ impl HummockUploader {
                             }
                         }
                         data.check_upload_task_consistency();
-                        Poll::Ready(sst)
+                        let ssts = ssts.get_or_insert_with(|| Vec::with_capacity(MAX_BATCH_SIZE));
+                        ssts.push(sst);
+                        if ssts.len() >= MAX_BATCH_SIZE {
+                            break;
+                        }
                     }
                     Err((sync_id, e)) => {
                         let syncing_data =
@@ -1713,9 +1721,12 @@ impl HummockUploader {
                                 failed_epochs
                             ))
                         });
-                        Poll::Pending
+                        return Poll::Pending;
                     }
                 }
+            }
+            if let Some(ssts) = ssts {
+                Poll::Ready(ssts)
             } else {
                 Poll::Pending
             }
@@ -1841,6 +1852,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_uploader_basic() {
         let mut uploader = test_uploader(dummy_success_upload_future);
+        let mut sst_collector = UploadedSstCollector::default();
         let epoch1 = INITIAL_EPOCH.next_epoch();
         const VECTOR_INDEX_TABLE_ID: TableId = TableId::new(234);
         uploader.start_epoch(
@@ -1885,7 +1897,7 @@ pub(crate) mod tests {
         assert!(syncing_data.uploaded.is_empty());
         assert!(!syncing_data.remaining_uploading_tasks.is_empty());
 
-        let staging_sst = uploader.next_uploaded_sst().await;
+        let staging_sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&vec![epoch1], staging_sst.epochs());
         assert_eq!(
             &HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, vec![imm.batch_id()])]),
@@ -1945,6 +1957,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_uploader_destroy_instance_before_sync() {
         let mut uploader = test_uploader(dummy_success_upload_future);
+        let mut sst_collector = UploadedSstCollector::default();
         let epoch1 = INITIAL_EPOCH.next_epoch();
         uploader.start_epochs_for_test([epoch1]);
         let imm = gen_imm(epoch1).await;
@@ -1962,7 +1975,7 @@ pub(crate) mod tests {
         assert!(syncing_data.uploaded.is_empty());
         assert!(!syncing_data.remaining_uploading_tasks.is_empty());
 
-        let staging_sst = uploader.next_uploaded_sst().await;
+        let staging_sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&vec![epoch1], staging_sst.epochs());
         assert_eq!(
             &HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, vec![imm.batch_id()])]),
@@ -2087,7 +2100,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_uploader_poll_empty() {
         let mut uploader = test_uploader(dummy_success_upload_future);
-        let fut = uploader.next_uploaded_sst();
+        let fut = uploader.next_uploaded_ssts();
         let mut fut = pin!(fut);
         assert!(poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending())).await);
     }
@@ -2095,6 +2108,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_uploader_empty_advance_mce() {
         let mut uploader = test_uploader(dummy_success_upload_future);
+        let mut sst_collector = UploadedSstCollector::default();
         let initial_pinned_version = uploader.context.pinned_version.clone();
         let epoch1 = INITIAL_EPOCH.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -2143,7 +2157,7 @@ pub(crate) mod tests {
         assert_eq!(epoch4, uploader.test_max_synced_epoch());
         assert_eq!(epoch6, uploader.test_max_syncing_epoch());
 
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_imm_ids([&imm]), sst.imm_ids());
 
         match sync_rx.await {
@@ -2169,6 +2183,7 @@ pub(crate) mod tests {
         };
         let (buffer_tracker, mut uploader, new_task_notifier) =
             prepare_uploader_order_test(&config, false);
+        let mut sst_collector = UploadedSstCollector::default();
 
         let epoch1 = INITIAL_EPOCH.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -2210,11 +2225,11 @@ pub(crate) mod tests {
         assert_uploader_pending(&mut uploader).await;
 
         finish_tx1.send(()).unwrap();
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch1_spill_payload12), sst.imm_ids());
         assert_eq!(&vec![epoch1], sst.epochs());
 
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch2_spill_payload), sst.imm_ids());
         assert_eq!(&vec![epoch2], sst.epochs());
 
@@ -2231,7 +2246,7 @@ pub(crate) mod tests {
         let (await_start1_4, finish_tx1_4) =
             new_task_notifier(get_payload_imm_ids(&epoch1_sync_payload));
         uploader.local_seal_epoch_for_test(instance_id1, epoch1);
-        let (sync_tx1, mut sync_rx1) = oneshot::channel();
+        let (sync_tx1, sync_rx1) = oneshot::channel();
         uploader.start_single_epoch_sync(epoch1, sync_tx1, HashSet::from_iter([TEST_TABLE_ID]));
         await_start1_4.await;
 
@@ -2282,12 +2297,10 @@ pub(crate) mod tests {
         assert_uploader_pending(&mut uploader).await;
         finish_tx1_3.send(()).unwrap();
 
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch1_spill_payload3), sst.imm_ids());
 
-        assert!(poll_fn(|cx| Poll::Ready(sync_rx1.poll_unpin(cx).is_pending())).await);
-
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch1_sync_payload), sst.imm_ids());
 
         match sync_rx1.await {
@@ -2321,7 +2334,7 @@ pub(crate) mod tests {
         let (sync_tx2, sync_rx2) = oneshot::channel();
         uploader.start_single_epoch_sync(epoch2, sync_tx2, HashSet::from_iter([TEST_TABLE_ID]));
         uploader.local_seal_epoch_for_test(instance_id2, epoch3);
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload1), sst.imm_ids());
 
         match sync_rx2.await {
@@ -2364,13 +2377,13 @@ pub(crate) mod tests {
         assert_uploader_pending(&mut uploader).await;
 
         finish_tx3_2.send(()).unwrap();
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload2), sst.imm_ids());
 
         finish_tx4_with_3_3.send(()).unwrap();
         assert!(poll_fn(|cx| Poll::Ready(sync_rx4.poll_unpin(cx).is_pending())).await);
 
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch4_sync_payload), sst.imm_ids());
 
         match sync_rx4.await {

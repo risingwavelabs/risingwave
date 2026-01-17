@@ -559,19 +559,28 @@ impl HummockManager {
 
                     let table_ids_to_be_compacted = compact_task.build_compact_table_ids();
 
-                    let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks) = version
+                    let mut pk_prefix_table_watermarks = BTreeMap::default();
+                    let mut non_pk_prefix_table_watermarks = BTreeMap::default();
+                    let mut value_table_watermarks = BTreeMap::default();
+                    for (table_id, watermark) in version
                         .latest_version()
                         .safe_epoch_table_watermarks(&table_ids_to_be_compacted)
-                        .into_iter()
-                        .partition(|(_table_id, table_watermarke)| {
-                            matches!(
-                                table_watermarke.watermark_type,
-                                WatermarkSerdeType::PkPrefix
-                            )
-                        });
-
+                    {
+                        match watermark.watermark_type {
+                            WatermarkSerdeType::PkPrefix => {
+                                pk_prefix_table_watermarks.insert(table_id, watermark);
+                            }
+                            WatermarkSerdeType::NonPkPrefix => {
+                                non_pk_prefix_table_watermarks.insert(table_id, watermark);
+                            }
+                            WatermarkSerdeType::Value => {
+                                value_table_watermarks.insert(table_id, watermark);
+                            }
+                        }
+                    }
                     compact_task.pk_prefix_table_watermarks = pk_prefix_table_watermarks;
                     compact_task.non_pk_prefix_table_watermarks = non_pk_prefix_table_watermarks;
+                    compact_task.value_table_watermarks = value_table_watermarks;
 
                     compact_task.table_schemas = compact_task
                         .existing_table_ids

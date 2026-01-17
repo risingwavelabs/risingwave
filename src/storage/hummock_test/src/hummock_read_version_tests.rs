@@ -57,6 +57,8 @@ async fn test_read_version_basic() {
         vnodes,
     );
 
+    read_version.init();
+
     {
         // single imm
         let sorted_items = gen_dummy_batch(1);
@@ -304,6 +306,7 @@ async fn test_read_filter_basic() {
         pinned_version,
         vnodes.clone(),
     )));
+    read_version.write().init();
     read_version.write().update_vnode_bitmap(vnodes);
 
     {

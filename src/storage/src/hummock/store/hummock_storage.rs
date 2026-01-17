@@ -456,7 +456,7 @@ impl HummockStorageReadSnapshot {
                         v.values()
                             .filter(|v| {
                                 let read_version = v.read();
-                                if read_version.contains(vnode) {
+                                if read_version.is_initialized() && read_version.contains(vnode) {
                                     if read_version.is_replicated() {
                                         matched_replicated_read_version_cnt += 1;
                                         false
@@ -992,5 +992,14 @@ impl HummockStorage {
             }
             yield_now().await;
         }
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub async fn flush_events_for_test(&self) {
+        let (tx, rx) = oneshot::channel();
+        self.hummock_event_sender
+            .send(HummockEvent::FlushEvent(tx))
+            .expect("flush event should succeed");
+        rx.await.expect("flush event receiver dropped");
     }
 }

@@ -7,7 +7,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Streaming Exchange",
+            "[Streaming] Streaming Exchange",
             [
                 panels.timeseries_bytes_per_sec(
                     "Fragment-level Remote Exchange Send Throughput",

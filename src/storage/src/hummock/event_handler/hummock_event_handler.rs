@@ -452,12 +452,44 @@ impl HummockEventHandler {
         }
     }
 
-    fn handle_uploaded_sst_inner(&mut self, staging_sstable_info: Arc<StagingSstableInfo>) {
-        trace!("data_flushed. SST size {}", staging_sstable_info.imm_size());
-        self.for_each_read_version(
-            staging_sstable_info.imm_ids().keys().cloned(),
-            |_, read_version| read_version.update(VersionUpdate::Sst(staging_sstable_info.clone())),
-        )
+    fn handle_uploaded_ssts_inner(&mut self, ssts: Vec<Arc<StagingSstableInfo>>) {
+        match ssts.as_slice() {
+            [] => {
+                if cfg!(debug_assertions) {
+                    panic!("empty ssts")
+                }
+            }
+            [staging_sstable_info] => {
+                trace!("data_flushed. SST size {}", staging_sstable_info.imm_size());
+                self.for_each_read_version(
+                    staging_sstable_info.imm_ids().keys().cloned(),
+                    |_, read_version| {
+                        read_version.update(VersionUpdate::Sst(staging_sstable_info.clone()))
+                    },
+                )
+            }
+            ssts => {
+                warn!(
+                    batch_size = ssts.len(),
+                    "handle multiple uploaded ssts in batch"
+                );
+                let affected_instances: HashSet<_> = ssts
+                    .iter()
+                    .flat_map(|sst| {
+                        trace!("data_flushed. SST size {}", sst.imm_size());
+                        sst.imm_ids().keys()
+                    })
+                    .copied()
+                    .collect();
+                self.for_each_read_version(affected_instances, |instance_id, read_version| {
+                    for sst in ssts {
+                        if sst.imm_ids().contains_key(&instance_id) {
+                            read_version.update(VersionUpdate::Sst(sst.clone()));
+                        }
+                    }
+                })
+            }
+        }
     }
 
     fn handle_sync_epoch(
@@ -573,42 +605,80 @@ impl HummockEventHandler {
         }
     }
 
-    fn apply_version_update(
-        &mut self,
-        pinned_version: PinnedVersion,
-        new_pinned_version: PinnedVersion,
-    ) {
+    fn apply_version_updates(&mut self, events: Vec<CacheRefillerEvent>) {
+        let Some(CacheRefillerEvent {
+            new_pinned_version: latest_pinned_version,
+            ..
+        }) = events.last()
+        else {
+            if cfg!(debug_assertions) {
+                panic!("empty events")
+            }
+            return;
+        };
+        if events.len() > 1 {
+            warn!(
+                count = events.len(),
+                "handle multiple version updates in batch"
+            );
+        }
         let _timer = self
             .metrics
             .event_handler_on_apply_version_update
             .start_timer();
         self.recent_versions.rcu(|prev_recent_versions| {
-            prev_recent_versions.with_new_version(new_pinned_version.clone())
+            let mut recent_versions = None;
+            for event in &events {
+                let CacheRefillerEvent {
+                    new_pinned_version, ..
+                } = event;
+                recent_versions = Some(
+                    recent_versions
+                        .as_ref()
+                        .unwrap_or(prev_recent_versions.as_ref())
+                        .with_new_version(new_pinned_version.clone()),
+                );
+            }
+            recent_versions.expect("non-empty events")
         });
 
         {
             self.for_each_read_version(
                 self.local_read_version_mapping.keys().cloned(),
                 |_, read_version| {
-                    read_version
-                        .update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()))
+                    for CacheRefillerEvent {
+                        new_pinned_version, ..
+                    } in &events
+                    {
+                        read_version
+                            .update(VersionUpdate::CommittedSnapshot(new_pinned_version.clone()))
+                    }
                 },
             );
         }
 
         self.version_update_notifier_tx.send_if_modified(|state| {
-            assert_eq!(pinned_version.id(), state.id());
-            if state.id() == new_pinned_version.id() {
-                return false;
+            let mut modified = false;
+            for CacheRefillerEvent {
+                pinned_version,
+                new_pinned_version,
+            } in &events
+            {
+                assert_eq!(pinned_version.id(), state.id());
+                if state.id() == new_pinned_version.id() {
+                    continue;
+                }
+                assert!(new_pinned_version.id() > state.id());
+                *state = new_pinned_version.clone();
+                modified = true;
             }
-            assert!(new_pinned_version.id() > state.id());
-            *state = new_pinned_version.clone();
-            true
+            modified
         });
 
-        debug!("update to hummock version: {}", new_pinned_version.id(),);
+        debug!("update to hummock version: {}", latest_pinned_version.id(),);
 
-        self.uploader.update_pinned_version(new_pinned_version);
+        self.uploader
+            .update_pinned_version(latest_pinned_version.clone());
     }
 }
 
@@ -616,12 +686,11 @@ impl HummockEventHandler {
     pub async fn start_hummock_event_handler_worker(mut self) {
         loop {
             tokio::select! {
-                sst = self.uploader.next_uploaded_sst() => {
-                    self.handle_uploaded_sst(sst);
+                ssts = self.uploader.next_uploaded_ssts() => {
+                    self.handle_uploaded_ssts(ssts);
                 }
-                event = self.refiller.next_event() => {
-                    let CacheRefillerEvent {pinned_version, new_pinned_version } = event;
-                    self.apply_version_update(pinned_version, new_pinned_version);
+                events = self.refiller.next_events() => {
+                    self.apply_version_updates(events);
                 }
                 event = pin!(self.hummock_event_rx.recv()) => {
                     let Some(event) = event else { break };
@@ -646,12 +715,12 @@ impl HummockEventHandler {
         }
     }
 
-    fn handle_uploaded_sst(&mut self, sst: Arc<StagingSstableInfo>) {
+    fn handle_uploaded_ssts(&mut self, ssts: Vec<Arc<StagingSstableInfo>>) {
         let _timer = self
             .metrics
             .event_handler_on_upload_finish_latency
             .start_timer();
-        self.handle_uploaded_sst_inner(sst);
+        self.handle_uploaded_ssts_inner(ssts);
     }
 
     /// Gracefully shutdown if returns `true`.
@@ -999,6 +1068,8 @@ mod tests {
             table_ids: HashSet::from_iter([TEST_TABLE_ID]),
         });
 
+        read_version.write().init();
+
         send_event(HummockEvent::InitEpoch {
             instance_id: guard.instance_id,
             init_epoch: epoch1,
@@ -1209,6 +1280,7 @@ mod tests {
         let (task1_1_finish_tx, task1_1_rx) = {
             start_epoch(table_id1, epoch1);
 
+            read_version1.write().init();
             init_epoch(&guard1, epoch1);
 
             write_imm(&read_version1, &guard1, &imm1_1);
@@ -1239,6 +1311,7 @@ mod tests {
             let mut finish_txs = vec![];
             let imm2_1_1 = gen_imm(table_id2, epoch1, 0);
             start_epoch(table_id2, epoch1);
+            read_version2.write().init();
             init_epoch(&guard2, epoch1);
             let (wait_task_start, task1_2_finish_tx) = new_task_notifier(HashMap::from_iter([(
                 guard1.instance_id,

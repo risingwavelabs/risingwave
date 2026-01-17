@@ -184,6 +184,7 @@ mod tests {
         };
         let (buffer_tracker, mut uploader, new_task_notifier) =
             prepare_uploader_order_test(&config, false);
+        let mut sst_collector = UploadedSstCollector::default();
 
         let table_id1 = TableId::new(1);
         let table_id2 = TableId::new(2);
@@ -365,7 +366,7 @@ mod tests {
                 (instance_id1_1, vec![imm1_1_1.batch_id()]),
                 (instance_id1_2, vec![imm1_2_1.batch_id()]),
             ]);
-            let sst = uploader.next_uploaded_sst().await;
+            let sst = sst_collector.next(&mut uploader).await;
             assert_eq!(&imm_ids, sst.imm_ids());
             let synced_data = sync_rx1_1.await.unwrap().unwrap();
             assert_eq!(synced_data.uploaded_ssts.len(), 1);
@@ -388,9 +389,9 @@ mod tests {
                     .map(|imm| imm.batch_id())
                     .collect_vec(),
             )]);
-            let sst = uploader.next_uploaded_sst().await;
+            let sst = sst_collector.next(&mut uploader).await;
             assert_eq!(&imm_ids3, sst.imm_ids());
-            let sst = uploader.next_uploaded_sst().await;
+            let sst = sst_collector.next(&mut uploader).await;
             assert_eq!(&imm_ids2, sst.imm_ids());
             let synced_data = sync_rx2_1.await.unwrap().unwrap();
             assert_eq!(synced_data.uploaded_ssts.len(), 1);
@@ -407,7 +408,7 @@ mod tests {
             let imm_ids2_1 = HashMap::from_iter([(instance_id2, vec![imm2_1.batch_id()])]);
             let imm_ids2_4_1 = HashMap::from_iter([(instance_id2, vec![imm2_4_1.batch_id()])]);
             finish_tx2_1.send(()).unwrap();
-            let sst = uploader.next_uploaded_sst().await;
+            let sst = sst_collector.next(&mut uploader).await;
             assert_eq!(&imm_ids1_4, sst.imm_ids());
 
             // trigger the sync after the spill task is finished and acked to cover the case
@@ -419,9 +420,9 @@ mod tests {
             );
             await_start2_4_2.await;
 
-            let sst = uploader.next_uploaded_sst().await;
+            let sst = sst_collector.next(&mut uploader).await;
             assert_eq!(&imm_ids2_1, sst.imm_ids());
-            let sst = uploader.next_uploaded_sst().await;
+            let sst = sst_collector.next(&mut uploader).await;
             assert_eq!(&imm_ids2_4_1, sst.imm_ids());
             let synced_data = sync_rx1_2.await.unwrap().unwrap();
             assert_eq!(synced_data.uploaded_ssts.len(), 1);
@@ -435,7 +436,7 @@ mod tests {
 
             assert!((&mut sync_rx4).now_or_never().is_none());
             finish_tx2_4_2.send(()).unwrap();
-            let sst = uploader.next_uploaded_sst().await;
+            let sst = sst_collector.next(&mut uploader).await;
             assert_eq!(&imm_ids2_4_2, sst.imm_ids());
             let synced_data = sync_rx4.await.unwrap().unwrap();
             assert_eq!(synced_data.uploaded_ssts.len(), 3);

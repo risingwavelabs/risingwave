@@ -1,4 +1,36 @@
 # Single phase approx percentile
+
+onlyif can-use-recover
+statement ok
+create table t(p_col double, grp_col int);
+
+onlyif can-use-recover
+statement ok
+create materialized view m1 as
+ select
+     approx_percentile(0.01, 0.01) within group (order by p_col) as p01,
+     approx_percentile(0.1, 0.01) within group (order by p_col) as p10,
+     approx_percentile(0.5, 0.01) within group (order by p_col) as p50,
+     approx_percentile(0.9, 0.01) within group (order by p_col) as p90,
+     approx_percentile(0.99, 0.01) within group (order by p_col) as p99
+ from t;
+
+onlyif can-use-recover
+statement ok
+recover;
+
+onlyif can-use-recover
+statement ok
+insert into t values (1.0, 1);
+
+onlyif can-use-recover
+statement ok
+flush;
+
+onlyif can-use-recover
+statement ok
+drop table t cascade;
+
 statement ok
 create table t(p_col double, grp_col int);
 

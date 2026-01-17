@@ -21,7 +21,7 @@ def _(outer_panels: Panels):
     cache_miss_filter = 'op="miss"'
     return [
         outer_panels.row_collapsed(
-            "Hummock Tiered Cache",
+            "[Storage] Hummock Tiered Cache",
             [
                 # hybrid
                 panels.timeseries_ops(

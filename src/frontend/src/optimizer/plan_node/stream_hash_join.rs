@@ -45,10 +45,6 @@ pub struct StreamHashJoin {
     pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
 
-    /// The join condition must be equivalent to `logical.on`, but separated into equal and
-    /// non-equal parts to facilitate execution later
-    eq_join_predicate: EqJoinPredicate,
-
     /// `(do_state_cleaning, InequalityInputPair {key_required_larger, key_required_smaller,
     /// delta_expression})`. View struct `InequalityInputPair` for details.
     inequality_pairs: Vec<(bool, InequalityInputPair)>,
@@ -68,10 +64,29 @@ pub struct StreamHashJoin {
 }
 
 impl StreamHashJoin {
-    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Result<Self> {
+    pub fn new(mut core: generic::Join<PlanRef>) -> Result<Self> {
         let ctx = core.ctx();
 
         let stream_kind = core.stream_kind()?;
+
+        // Reorder `eq_join_predicate` by placing the watermark column at the beginning.
+        let eq_join_predicate = {
+            let eq_join_predicate = core
+                .on
+                .as_eq_predicate_ref()
+                .expect("StreamHashJoin requires JoinOn::EqPredicate in core")
+                .clone();
+            let mut reorder_idx = vec![];
+            for (i, (left_key, right_key)) in eq_join_predicate.eq_indexes().iter().enumerate() {
+                if core.left.watermark_columns().contains(*left_key)
+                    && core.right.watermark_columns().contains(*right_key)
+                {
+                    reorder_idx.push(i);
+                }
+            }
+            eq_join_predicate.reorder(&reorder_idx)
+        };
+        core.on = generic::JoinOn::EqPredicate(eq_join_predicate.clone());
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),
@@ -82,17 +97,6 @@ impl StreamHashJoin {
         let mut inequality_pairs = vec![];
         let mut clean_left_state_conjunction_idx = None;
         let mut clean_right_state_conjunction_idx = None;
-
-        // Reorder `eq_join_predicate` by placing the watermark column at the beginning.
-        let mut reorder_idx = vec![];
-        for (i, (left_key, right_key)) in eq_join_predicate.eq_indexes().iter().enumerate() {
-            if core.left.watermark_columns().contains(*left_key)
-                && core.right.watermark_columns().contains(*right_key)
-            {
-                reorder_idx.push(i);
-            }
-        }
-        let eq_join_predicate = eq_join_predicate.reorder(&reorder_idx);
 
         let watermark_columns = {
             let l2i = core.l2i_col_mapping();
@@ -215,7 +219,6 @@ impl StreamHashJoin {
         Ok(Self {
             base,
             core,
-            eq_join_predicate,
             inequality_pairs,
             is_append_only: stream_kind.is_append_only(),
             clean_left_state_conjunction_idx,
@@ -230,12 +233,15 @@ impl StreamHashJoin {
 
     /// Get a reference to the hash join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
-        &self.eq_join_predicate
+        self.core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamHashJoin should store predicate as EqJoinPredicate")
     }
 
     /// Convert this hash join to a delta join plan
     pub fn into_delta_join(self) -> StreamDeltaJoin {
-        StreamDeltaJoin::new(self.core, self.eq_join_predicate).unwrap()
+        StreamDeltaJoin::new(self.core).unwrap()
     }
 
     pub fn derive_dist_key_in_join_key(&self) -> Vec<usize> {
@@ -257,7 +263,7 @@ impl StreamHashJoin {
 impl Distill for StreamHashJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let (ljk, rjk) = self
-            .eq_join_predicate
+            .eq_join_predicate()
             .eq_indexes()
             .first()
             .cloned()
@@ -319,7 +325,7 @@ impl PlanTreeNodeBinary<Stream> for StreamHashJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone()).unwrap()
+        Self::new(core).unwrap()
     }
 }
 
@@ -330,8 +336,8 @@ impl TryToStreamPb for StreamHashJoin {
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<NodeBody> {
-        let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
-        let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
+        let left_jk_indices = self.eq_join_predicate().left_eq_indexes();
+        let right_jk_indices = self.eq_join_predicate().right_eq_indexes();
         let left_jk_indices_prost = left_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
         let right_jk_indices_prost = right_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
 
@@ -372,10 +378,10 @@ impl TryToStreamPb for StreamHashJoin {
             right_degree_table.with_id(state.gen_table_id_wrapped()),
         );
 
-        let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
+        let null_safe_prost = self.eq_join_predicate().null_safes().into_iter().collect();
 
         let condition = self
-            .eq_join_predicate
+            .eq_join_predicate()
             .other_cond()
             .as_expr_unless_true()
             .map(|expr| expr.to_expr_proto_checked_pure(retract, "JOIN condition"))
@@ -445,9 +451,7 @@ impl ExprRewritable<Stream> for StreamHashJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.eq_join_predicate.rewrite_exprs(r))
-            .unwrap()
-            .into()
+        Self::new(core).unwrap().into()
     }
 }
 

@@ -55,7 +55,7 @@ use risingwave_storage::hummock::CachePolicy;
 use risingwave_storage::mem_table::MemTableError;
 use risingwave_storage::row_serde::find_columns_by_ids;
 use risingwave_storage::row_serde::row_serde_util::{
-    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode,
+    deserialize_pk_with_vnode, serialize_pk, serialize_pk_with_vnode, serialize_row,
 };
 use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::*;
@@ -63,7 +63,7 @@ use risingwave_storage::table::{KeyedRow, TableDistribution};
 use thiserror_ext::AsReport;
 use tracing::{Instrument, trace};
 
-use crate::cache::cache_may_stale;
+use crate::cache::keyed_cache_may_stale;
 use crate::executor::StreamExecutorResult;
 use crate::executor::monitor::streaming_stats::StateTableMetrics;
 
@@ -523,6 +523,10 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                     warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written non pk prefix watermark");
                     self.all_rows = None;
                 }
+                WatermarkSerdeType::Value => {
+                    warn!(table_id = %self.table_id, "table enabled preloading rows got disabled by written value watermark");
+                    self.all_rows = None;
+                }
             }
         }
         self.state_store
@@ -900,13 +904,11 @@ where
 
         // Compute output indices
         let (_, output_indices) = find_columns_by_ids(&columns[..], &output_column_ids);
-
         let clean_watermark_indices = table_catalog.get_clean_watermark_column_indices();
         if clean_watermark_indices.len() > 1 {
             unimplemented!("multiple clean watermark columns are not supported yet")
         }
         let clean_watermark_index = clean_watermark_indices.first().map(|&i| i as usize);
-
         let watermark_serde = clean_watermark_index.map(|idx| {
             let pk_idx = pk_indices.iter().position(|&i| i == idx);
             let (watermark_serde, watermark_serde_type) = match pk_idx {
@@ -920,8 +922,7 @@ where
                         vec![data_types[idx].clone()],
                         vec![OrderType::ascending()],
                     ),
-                    // TODO(ttl): may introduce a new type for watermark not in pk.
-                    WatermarkSerdeType::NonPkPrefix,
+                    WatermarkSerdeType::Value,
                 ),
             };
             (watermark_serde, watermark_serde_type)
@@ -1235,6 +1236,10 @@ where
     S: StateStore,
     SD: ValueRowSerde,
 {
+    /// Returns `Some((new_vnodes, old_vnodes, state_table), keyed_cache_may_stale)` if the vnode bitmap is updated.
+    ///
+    /// Note the `keyed_cache_may_stale` only applies to keyed cache. If the executor's cache is not keyed, but will
+    /// be consumed with all vnodes it owns, the executor may need to ALWAYS clear the cache regardless of this flag.
     pub async fn post_yield_barrier(
         mut self,
         new_vnodes: Option<Arc<Bitmap>>,
@@ -1250,9 +1255,9 @@ where
     > {
         self.inner.on_post_commit = false;
         Ok(if let Some(new_vnodes) = new_vnodes {
-            let (old_vnodes, cache_may_stale) =
+            let (old_vnodes, keyed_cache_may_stale) =
                 self.update_vnode_bitmap(new_vnodes.clone()).await?;
-            Some(((new_vnodes, old_vnodes, self.inner), cache_may_stale))
+            Some(((new_vnodes, old_vnodes, self.inner), keyed_cache_may_stale))
         } else {
             None
         })
@@ -1287,15 +1292,15 @@ where
         }
         assert_eq!(self.inner.vnodes().len(), new_vnodes.len());
 
-        let cache_may_stale = cache_may_stale(self.inner.vnodes(), &new_vnodes);
+        let keyed_cache_may_stale = keyed_cache_may_stale(self.inner.vnodes(), &new_vnodes);
 
-        if cache_may_stale {
+        if keyed_cache_may_stale {
             self.inner.pending_watermark = None;
         }
 
         Ok((
             self.inner.distribution.update_vnode_bitmap(new_vnodes),
-            cache_may_stale,
+            keyed_cache_may_stale,
         ))
     }
 }
@@ -1597,14 +1602,12 @@ where
             .watermark_serde
             .as_ref()
             .expect("watermark serde should be initialized to commit watermark");
-
         let watermark_suffix =
-            serialize_pk(row::once(Some(watermark.clone())), watermark_serializer);
+            serialize_row(row::once(Some(watermark.clone())), watermark_serializer);
         let vnode_watermark = VnodeWatermark::new(
             self.vnodes().clone(),
             Bytes::copy_from_slice(watermark_suffix.as_ref()),
         );
-
         trace!(table_id = %self.table_id, ?vnode_watermark, "table watermark");
 
         let order_type = watermark_serializer.get_order_types().get(0).unwrap();

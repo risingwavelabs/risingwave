@@ -28,7 +28,9 @@ use risingwave_common::types::ToDatumRef;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_pb::hummock::table_watermarks::PbEpochNewWatermarks;
-use risingwave_pb::hummock::{PbVnodeWatermark, TableWatermarks as PbTableWatermarks};
+use risingwave_pb::hummock::{
+    PbVnodeWatermark, PbWatermarkSerdeType, TableWatermarks as PbTableWatermarks,
+};
 use tracing::{debug, warn};
 
 use crate::HummockEpoch;
@@ -468,34 +470,6 @@ impl TableWatermarks {
             .next()
             .map(|w| w.vnode_count())
     }
-
-    pub fn from_protobuf(pb: &PbTableWatermarks) -> Self {
-        Self {
-            watermarks: pb
-                .epoch_watermarks
-                .iter()
-                .map(|epoch_watermark| {
-                    let epoch = epoch_watermark.epoch;
-                    let watermarks = epoch_watermark
-                        .watermarks
-                        .iter()
-                        .map(VnodeWatermark::from)
-                        .collect_vec();
-                    (epoch, Arc::from(watermarks))
-                })
-                .collect(),
-            direction: if pb.is_ascending {
-                WatermarkDirection::Ascending
-            } else {
-                WatermarkDirection::Descending
-            },
-            watermark_type: if pb.is_non_pk_prefix {
-                WatermarkSerdeType::NonPkPrefix
-            } else {
-                WatermarkSerdeType::PkPrefix
-            },
-        }
-    }
 }
 
 pub fn merge_multiple_new_table_watermarks(
@@ -688,8 +662,27 @@ impl TableWatermarks {
     }
 }
 
+impl From<&PbTableWatermarks> for WatermarkSerdeType {
+    fn from(pb: &PbTableWatermarks) -> Self {
+        match pb.raw_watermark_serde_type() {
+            PbWatermarkSerdeType::TypeUnspecified => {
+                // For backward compatibility.
+                #[expect(deprecated)]
+                if pb.is_non_pk_prefix {
+                    WatermarkSerdeType::NonPkPrefix
+                } else {
+                    WatermarkSerdeType::PkPrefix
+                }
+            }
+            PbWatermarkSerdeType::PkPrefix => WatermarkSerdeType::PkPrefix,
+            PbWatermarkSerdeType::NonPkPrefix => WatermarkSerdeType::NonPkPrefix,
+            PbWatermarkSerdeType::Value => WatermarkSerdeType::Value,
+        }
+    }
+}
 impl From<&PbTableWatermarks> for TableWatermarks {
     fn from(pb: &PbTableWatermarks) -> Self {
+        let watermark_type = WatermarkSerdeType::from(pb);
         Self {
             watermarks: pb
                 .epoch_watermarks
@@ -709,17 +702,28 @@ impl From<&PbTableWatermarks> for TableWatermarks {
             } else {
                 WatermarkDirection::Descending
             },
-            watermark_type: if pb.is_non_pk_prefix {
-                WatermarkSerdeType::NonPkPrefix
-            } else {
-                WatermarkSerdeType::PkPrefix
-            },
+            watermark_type,
+        }
+    }
+}
+
+impl From<WatermarkSerdeType> for PbWatermarkSerdeType {
+    fn from(s: WatermarkSerdeType) -> Self {
+        match s {
+            WatermarkSerdeType::PkPrefix => PbWatermarkSerdeType::PkPrefix,
+            WatermarkSerdeType::NonPkPrefix => PbWatermarkSerdeType::NonPkPrefix,
+            WatermarkSerdeType::Value => PbWatermarkSerdeType::Value,
         }
     }
 }
 
 impl From<&TableWatermarks> for PbTableWatermarks {
     fn from(table_watermarks: &TableWatermarks) -> Self {
+        let is_non_pk_prefix = match table_watermarks.watermark_type {
+            WatermarkSerdeType::PkPrefix => false,
+            WatermarkSerdeType::NonPkPrefix => true,
+            WatermarkSerdeType::Value => false,
+        };
         Self {
             epoch_watermarks: table_watermarks
                 .watermarks
@@ -733,16 +737,17 @@ impl From<&TableWatermarks> for PbTableWatermarks {
                 WatermarkDirection::Ascending => true,
                 WatermarkDirection::Descending => false,
             },
-            is_non_pk_prefix: match table_watermarks.watermark_type {
-                WatermarkSerdeType::NonPkPrefix => true,
-                WatermarkSerdeType::PkPrefix => false,
-            },
+            #[expect(deprecated)]
+            is_non_pk_prefix,
+            raw_watermark_serde_type: PbWatermarkSerdeType::from(table_watermarks.watermark_type)
+                as i32,
         }
     }
 }
 
 impl From<PbTableWatermarks> for TableWatermarks {
     fn from(pb: PbTableWatermarks) -> Self {
+        let watermark_type = WatermarkSerdeType::from(&pb);
         Self {
             watermarks: pb
                 .epoch_watermarks
@@ -762,11 +767,7 @@ impl From<PbTableWatermarks> for TableWatermarks {
             } else {
                 WatermarkDirection::Descending
             },
-            watermark_type: if pb.is_non_pk_prefix {
-                WatermarkSerdeType::NonPkPrefix
-            } else {
-                WatermarkSerdeType::PkPrefix
-            },
+            watermark_type,
         }
     }
 }
@@ -786,10 +787,14 @@ impl From<TableWatermarks> for PbTableWatermarks {
                 WatermarkDirection::Ascending => true,
                 WatermarkDirection::Descending => false,
             },
+            #[expect(deprecated)]
             is_non_pk_prefix: match table_watermarks.watermark_type {
                 WatermarkSerdeType::NonPkPrefix => true,
                 WatermarkSerdeType::PkPrefix => false,
+                WatermarkSerdeType::Value => false,
             },
+            raw_watermark_serde_type: PbWatermarkSerdeType::from(table_watermarks.watermark_type)
+                as i32,
         }
     }
 }
@@ -798,6 +803,7 @@ impl From<TableWatermarks> for PbTableWatermarks {
 pub enum WatermarkSerdeType {
     PkPrefix,
     NonPkPrefix,
+    Value,
 }
 
 #[cfg(test)]

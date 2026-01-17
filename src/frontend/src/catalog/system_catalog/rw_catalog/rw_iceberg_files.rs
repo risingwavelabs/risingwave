@@ -16,7 +16,6 @@ use std::ops::Deref;
 
 use anyhow::anyhow;
 use futures::StreamExt;
-use iceberg::spec::ManifestList;
 use iceberg::table::Table;
 use risingwave_common::types::Fields;
 use risingwave_connector::WithPropertiesExt;
@@ -81,9 +80,11 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergFiles>> {
         let config = ConnectorProperties::extract(source.with_properties.clone(), false)?;
         if let ConnectorProperties::Iceberg(iceberg_properties) = config {
             let table: Table = iceberg_properties.load_table().await?;
+            let metadata = table.metadata_ref();
             if let Some(snapshot) = table.metadata().current_snapshot() {
-                let manifest_list: ManifestList = snapshot
-                    .load_manifest_list(table.file_io(), table.metadata())
+                let manifest_list = table
+                    .object_cache()
+                    .get_manifest_list(snapshot, &metadata)
                     .await
                     .map_err(|e| anyhow!(e))?;
                 for entry in manifest_list.entries() {

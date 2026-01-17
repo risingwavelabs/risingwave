@@ -780,6 +780,88 @@ async fn test_state_store_sync() {
 }
 
 #[tokio::test]
+async fn test_snapshot_read_ignores_uninitialized_local() {
+    const TEST_TABLE_ID: TableId = TableId::new(233);
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table_id(TEST_TABLE_ID).await;
+    let mut local = test_env
+        .storage
+        .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
+        .await;
+
+    let epoch1 = test_epoch(1);
+    test_env
+        .storage
+        .start_epoch(epoch1, HashSet::from_iter([TEST_TABLE_ID]));
+    local.init_for_test(epoch1).await.unwrap();
+
+    let user_key = gen_key_from_str(VirtualNode::ZERO, "dup-vnode");
+    let batch = vec![(user_key.clone(), StorageValue::new_put("value"))];
+    let read_options = ReadOptions {
+        table_id: TEST_TABLE_ID,
+        cache_policy: CachePolicy::Fill(Hint::Normal),
+        ..Default::default()
+    };
+
+    local.ingest_batch(batch).await.unwrap();
+
+    // The first snapshot read should pick up the uncommitted data.
+    let value = test_env
+        .storage
+        .get(user_key.clone(), epoch1, read_options.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, Bytes::from("value"));
+
+    // Create another local store with the same vnode bitmap but leave it uninitialized.
+    let mut second_local = test_env
+        .storage
+        .new_local(NewLocalOptions::for_test(TEST_TABLE_ID))
+        .await;
+
+    // We should still be able to read the uncommitted data without hitting duplicated vnode errors.
+    let value = test_env
+        .storage
+        .get(user_key, epoch1, read_options.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, Bytes::from("value"));
+
+    let epoch2 = epoch1.next_epoch();
+    test_env
+        .storage
+        .start_epoch(epoch2, HashSet::from_iter([TEST_TABLE_ID]));
+    local.seal_current_epoch(epoch2, SealCurrentEpochOptions::for_test());
+    test_env.commit_epoch(epoch1).await;
+    drop(local);
+    test_env.storage.flush_events_for_test().await;
+    second_local.init_for_test(epoch2).await.unwrap();
+
+    let epoch2_key = gen_key_from_str(VirtualNode::ZERO, "epoch2-key");
+    second_local
+        .ingest_batch(vec![(epoch2_key.clone(), StorageValue::new_put("value2"))])
+        .await
+        .unwrap();
+
+    let value = test_env
+        .storage
+        .get(epoch2_key.clone(), epoch2, read_options.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(value, Bytes::from("value2"));
+
+    // Local reads should also observe its own write.
+    let value = second_local
+        .get(epoch2_key, Default::default())
+        .await
+        .unwrap();
+    assert_eq!(value.unwrap(), Bytes::from("value2"));
+}
+
+#[tokio::test]
 async fn test_state_store_multiple_flush_no_upload() {
     const TEST_TABLE_ID: TableId = TableId::new(233);
     let table_id_set = HashSet::from_iter([TEST_TABLE_ID]);

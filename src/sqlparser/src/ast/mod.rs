@@ -54,6 +54,7 @@ pub use crate::ast::ddl::{
 };
 use crate::keywords::Keyword;
 use crate::parser::{IncludeOption, IncludeOptionItem, Parser, ParserError, StrError};
+pub use crate::quote_ident::QuoteIdent;
 use crate::tokenizer::Tokenizer;
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
@@ -172,14 +173,9 @@ impl Ident {
     }
 
     /// Convert a real value back to Ident. Behaves the same as SQL function `quote_ident` or
-    /// `QuoteIdent` wrapper in `common` crate.
+    /// [`QuoteIdent`] wrapper.
     pub fn from_real_value(value: &str) -> Self {
-        let needs_quotes = value
-            .chars()
-            .any(|c| !matches!(c, 'a'..='z' | '0'..='9' | '_'))
-            // Also need quotes if the identifier starts with a digit, as it would be
-            // tokenized as a number instead of an identifier (e.g., "2000000")
-            || value.chars().next().is_some_and(|c| c.is_ascii_digit());
+        let needs_quotes = QuoteIdent::needs_quotes(value);
 
         if needs_quotes {
             Self::with_quote_unchecked('"', value.replace('"', "\"\""))

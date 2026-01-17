@@ -7,7 +7,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Streaming Actors (Tokio)",
+            "[Streaming] Streaming Actors (Tokio)",
             [
                 panels.timeseries_percentage(
                     "Tokio: Actor Poll Rate Per Actor",

@@ -1,3 +1,5 @@
+SET NOCOUNT ON;
+
 EXEC sys.sp_cdc_enable_db;
 
 CREATE TABLE orders (

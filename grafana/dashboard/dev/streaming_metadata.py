@@ -7,7 +7,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Actor/Table Id Info",
+            "[Metadata] Streaming Metadata (Actor Info, State Table Info, Relation Info)",
             [
                 panels.table_info(
                     "Actor Info",

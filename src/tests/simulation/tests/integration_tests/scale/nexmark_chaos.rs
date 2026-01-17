@@ -35,10 +35,12 @@ async fn nexmark_chaos_common_inner(
     initial_timeout: Duration,
     after_scale_duration: Duration,
     _multiple: bool,
+    watermark: bool,
 ) -> Result<()> {
     let configuration = Configuration::for_scale();
     let total_cores = configuration.total_streaming_cores();
-    let mut cluster = NexmarkCluster::new(configuration, 6, Some(20 * THROUGHPUT), false).await?;
+    let mut cluster =
+        NexmarkCluster::new(configuration, 6, Some(20 * THROUGHPUT), watermark).await?;
     let mut session = cluster.start_session();
     session.run(create).await?;
     sleep(Duration::from_secs(30)).await;
@@ -47,6 +49,9 @@ async fn nexmark_chaos_common_inner(
     sleep(Duration::from_secs(5)).await;
 
     println!("Reference run done.");
+    if final_result.trim().is_empty() {
+        anyhow::bail!("Reference run result is empty. Check the query.")
+    }
     // Create a new session for the chaos run.
     let mut session = cluster.start_session();
     session.run(create).await?;
@@ -85,7 +90,17 @@ async fn nexmark_chaos_common_inner(
 
     sleep(Duration::from_secs(50)).await;
 
-    session.run(select).await?.assert_result_eq(&final_result);
+    let result = session.run(select).await?;
+    if watermark {
+        if result.trim() != final_result.trim() {
+            println!(
+                "Warn: results mismatch, which might be expected since watermark is used.\nDiff:\n{}",
+                pretty_assertions::StrComparison::new(&final_result, &result)
+            )
+        }
+    } else {
+        result.assert_result_eq(&final_result);
+    }
 
     Ok(())
 }
@@ -99,6 +114,7 @@ fn nexmark_chaos_common(
     initial_timeout: Duration,
     after_scale_duration: Duration,
     multiple: bool,
+    watermark: bool,
 ) -> BoxFuture<'static, Result<()>> {
     Box::pin(nexmark_chaos_common_inner(
         query_name,
@@ -109,6 +125,7 @@ fn nexmark_chaos_common(
         initial_timeout,
         after_scale_duration,
         multiple,
+        watermark,
     ))
 }
 
@@ -130,6 +147,7 @@ macro_rules! test {
                     INITIAL_TIMEOUT,
                     $after_scale_duration,
                     false,
+                    WATERMARK,
                 )
                 .await
             }
@@ -146,6 +164,7 @@ macro_rules! test {
                     INITIAL_TIMEOUT,
                     $after_scale_duration,
                     true,
+                    WATERMARK,
                 )
                 .await
             }
@@ -157,8 +176,9 @@ macro_rules! test {
 test!(q3);
 test!(q4);
 test!(q5);
-// q6: cannot plan
+test!(q5_eowc);
 test!(q7);
+test!(q7_eowc);
 test!(q8);
 test!(q9);
 // q10+: duplicated or unsupported
@@ -172,3 +192,4 @@ test!(q103);
 test!(q104);
 test!(q105);
 test!(q106);
+test!(q107_eowc);

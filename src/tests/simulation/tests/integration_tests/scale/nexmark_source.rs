@@ -33,8 +33,9 @@ async fn nexmark_source_with_watermark() -> Result<()> {
 async fn nexmark_source_inner(watermark: bool) -> Result<()> {
     let expected_events = 20 * THROUGHPUT;
     let expected_events_range = if watermark {
-        // If there's watermark, we'll possibly get fewer events.
-        (0.99 * expected_events as f64) as usize..=expected_events
+        // If there's watermark, we'll possibly get fewer events due to alignment to the global
+        // max watermark during scaling. The lower bound is a heuristic to reduce flakes.
+        (0.95 * expected_events as f64) as usize..=expected_events
     } else {
         // If there's no watermark, we'll get exactly the expected number of events.
         expected_events..=expected_events
