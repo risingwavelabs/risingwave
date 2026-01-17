@@ -87,6 +87,9 @@ pub struct RedShiftConfig {
     #[serde(rename = "schema")]
     pub schema: Option<String>,
 
+    #[serde(rename = "intermediate.schema.name")]
+    pub intermediate_schema: Option<String>,
+
     #[serde(rename = "table.name")]
     pub table: String,
 
@@ -201,12 +204,13 @@ impl Sink for RedshiftSink {
                         "intermediate.table.name is required for append-only sink"
                     ))
                 })?;
-                let build_cdc_table_sql = build_create_table_sql(
-                    self.config.schema.as_deref(),
-                    cdc_table,
-                    &schema,
-                    true,
-                )?;
+                let cdc_schema_for_create = self
+                    .config
+                    .intermediate_schema
+                    .as_deref()
+                    .or(self.config.schema.as_deref());
+                let build_cdc_table_sql =
+                    build_create_table_sql(cdc_schema_for_create, cdc_table, &schema, true)?;
                 client.execute_sql_sync(vec![build_cdc_table_sql]).await?;
             }
         }
@@ -463,7 +467,8 @@ impl RedshiftSinkCommitter {
         let client = config.build_client()?;
         let schedule_seconds = config.schedule_seconds;
         let (periodic_task_handle, shutdown_sender) = if !is_append_only {
-            let schema_name = config.schema.clone();
+            let target_schema_name = config.schema.clone();
+            let cdc_schema_name = config.intermediate_schema.clone();
             let target_table_name = config.table.clone();
             let cdc_table_name = config.cdc_table.clone().ok_or_else(|| {
                 SinkError::Config(anyhow!(
@@ -482,7 +487,8 @@ impl RedshiftSinkCommitter {
             let periodic_task_handle = tokio::spawn(async move {
                 Self::run_periodic_query_task(
                     task_client,
-                    schema_name.as_deref(),
+                    cdc_schema_name.as_deref(),
+                    target_schema_name.as_deref(),
                     &cdc_table_name,
                     &target_table_name,
                     pk_column_names,
@@ -512,7 +518,8 @@ impl RedshiftSinkCommitter {
     /// Runs a periodic query task every hour
     async fn run_periodic_query_task(
         client: JdbcJniClient,
-        schema_name: Option<&str>,
+        cdc_schema_name: Option<&str>,
+        target_schema_name: Option<&str>,
         cdc_table_name: &str,
         target_table_name: &str,
         pk_column_names: Vec<String>,
@@ -522,8 +529,11 @@ impl RedshiftSinkCommitter {
     ) {
         let mut interval_timer = interval(Duration::from_secs(schedule_seconds)); // 1 hour = 3600 seconds
         interval_timer.set_missed_tick_behavior(MissedTickBehavior::Skip);
+        // If intermediate (cdc) schema is not set, fall back to target schema.
+        let effective_cdc_schema = cdc_schema_name.or(target_schema_name);
         let sql = build_create_merge_into_task_sql(
-            schema_name,
+            effective_cdc_schema,
+            target_schema_name,
             cdc_table_name,
             target_table_name,
             &pk_column_names,
@@ -627,11 +637,21 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                     ))
                 })?
             };
+            // Choose schema for COPY: use intermediate_schema for cdc (staging) tables if provided,
+            // otherwise fall back to configured target schema.
+            let table_schema = if self.is_append_only {
+                self.config.schema.as_deref()
+            } else {
+                self.config
+                    .intermediate_schema
+                    .as_deref()
+                    .or(self.config.schema.as_deref())
+            };
             let s3_inner = self.config.s3_inner.as_ref().ok_or_else(|| {
                 SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
             })?;
             let copy_into_sql = build_copy_into_sql(
-                self.config.schema.as_deref(),
+                table_schema,
                 table,
                 &path,
                 &s3_inner.access,
@@ -735,10 +755,12 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
             let target_table_name = self.config.table.clone();
             let pk_column_names = self.pk_column_names.clone();
             let all_column_names = self.all_column_names.clone();
+            let cdc_schema_name = self.config.intermediate_schema.clone();
             let schedule_seconds = self.schedule_seconds;
             let periodic_task_handle = tokio::spawn(async move {
                 Self::run_periodic_query_task(
                     client,
+                    cdc_schema_name.as_deref(),
                     schema_name.as_deref(),
                     &cdc_table_name,
                     &target_table_name,
@@ -809,14 +831,15 @@ fn convert_redshift_data_type(data_type: &DataType) -> Result<String> {
 }
 
 fn build_create_merge_into_task_sql(
-    schema_name: Option<&str>,
+    cdc_schema_name: Option<&str>,
+    target_schema_name: Option<&str>,
     cdc_table_name: &str,
     target_table_name: &str,
     pk_column_names: &Vec<String>,
     all_column_names: &Vec<String>,
 ) -> Vec<String> {
-    let cdc_table_name = build_full_table_name(schema_name, cdc_table_name);
-    let target_table_name = build_full_table_name(schema_name, target_table_name);
+    let cdc_table_name = build_full_table_name(cdc_schema_name, cdc_table_name);
+    let target_table_name = build_full_table_name(target_schema_name, target_table_name);
     let pk_names_str = pk_column_names.join(", ");
     let pk_names_eq_str = pk_column_names
         .iter()
