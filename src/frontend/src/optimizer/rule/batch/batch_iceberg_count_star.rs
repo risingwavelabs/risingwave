@@ -30,8 +30,11 @@ impl Rule<Batch> for BatchIcebergCountStar {
             if batch_iceberg.iceberg_scan_type() != IcebergScanType::DataScan {
                 return None;
             }
+            if batch_iceberg.predicate().is_some() {
+                return None;
+            }
             return Some(
-                BatchIcebergScan::new_count_star_with_batch_iceberg_scan(batch_iceberg).into(),
+                BatchIcebergScan::new_count_star_with_batch_iceberg_scan(batch_iceberg)?.into(),
             );
         }
         None
