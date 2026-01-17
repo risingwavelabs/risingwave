@@ -293,13 +293,12 @@ pub fn start_serving_vnode_mapping_worker(
 
                                     tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
 
+                                    // TODO(MrCroxx): Are streaming parallelisms already needed here?
                                     let (_, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
                                     let mut deleted : HashMap<FragmentId, FragmentParallelismInfo> = HashMap::new();
                                     for fragment_id in &fragment_ids {
                                         if let Some(info) = streaming_parallelisms.get(fragment_id) {
                                             deleted.insert(*fragment_id, info.clone());
-                                        }else {
-                                            tracing::warn!(fragment_id = %fragment_id, "streaming parallelism not found");
                                         }
                                     }
 
