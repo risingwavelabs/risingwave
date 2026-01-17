@@ -395,7 +395,7 @@ impl DatabaseCheckpointControl {
                                 }),
                         );
                         // new actors belong to the database partial graph
-                        let partial_graph_id = to_partial_graph_id(None);
+                        let partial_graph_id = to_partial_graph_id(self.database_id, None);
                         let mut edge_builder = FragmentEdgeBuilder::new(
                             info.upstream_fragment_downstreams
                                 .keys()

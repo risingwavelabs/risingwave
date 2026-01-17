@@ -27,7 +27,7 @@ use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use risingwave_pb::stream_service::streaming_control_stream_response::ResetDatabaseResponse;
+use risingwave_pb::stream_service::streaming_control_stream_response::ResetPartialGraphResponse;
 use tracing::{debug, warn};
 
 use crate::barrier::cdc_progress::CdcProgress;
@@ -72,13 +72,13 @@ impl CheckpointControl {
 
     pub(crate) fn recover(
         databases: HashMap<DatabaseId, DatabaseCheckpointControl>,
-        failed_databases: HashSet<DatabaseId>,
+        failed_databases: HashMap<DatabaseId, HashSet<JobId>>, /* `database_id` -> set of `creating_job_id` */
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: HummockVersionStats,
         env: MetaSrvEnv,
     ) -> Self {
         env.shared_actor_infos()
-            .retain_databases(databases.keys().chain(&failed_databases).cloned());
+            .retain_databases(databases.keys().chain(failed_databases.keys()).cloned());
         Self {
             in_flight_barrier_nums: env.opts.in_flight_barrier_nums,
             env,
@@ -90,14 +90,22 @@ impl CheckpointControl {
                         DatabaseCheckpointControlStatus::Running(control),
                     )
                 })
-                .chain(failed_databases.into_iter().map(|database_id| {
-                    (
-                        database_id,
-                        DatabaseCheckpointControlStatus::Recovering(
-                            DatabaseRecoveringState::resetting(database_id, control_stream_manager),
-                        ),
-                    )
-                }))
+                .chain(
+                    failed_databases
+                        .into_iter()
+                        .map(|(database_id, creating_jobs)| {
+                            (
+                                database_id,
+                                DatabaseCheckpointControlStatus::Recovering(
+                                    DatabaseRecoveringState::new_resetting(
+                                        database_id,
+                                        creating_jobs.into_iter(),
+                                        control_stream_manager,
+                                    ),
+                                ),
+                            )
+                        }),
+                )
                 .collect(),
             hummock_version_stats,
         }
@@ -134,7 +142,7 @@ impl CheckpointControl {
         resp: BarrierCompleteResponse,
         periodic_barriers: &mut PeriodicBarriers,
     ) -> MetaResult<()> {
-        let database_id = resp.database_id;
+        let (database_id, _) = from_partial_graph_id(resp.partial_graph_id);
         let database_status = self.databases.get_mut(&database_id).expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(database) => {
@@ -391,18 +399,18 @@ pub(crate) enum CheckpointControlEvent<'a> {
 }
 
 impl CheckpointControl {
-    pub(crate) fn on_reset_database_resp(
+    pub(crate) fn on_reset_partial_graph_resp(
         &mut self,
         worker_id: WorkerId,
-        resp: ResetDatabaseResponse,
+        resp: ResetPartialGraphResponse,
     ) {
-        let database_id = resp.database_id;
+        let (database_id, _) = from_partial_graph_id(resp.partial_graph_id);
         match self.databases.get_mut(&database_id).expect("should exist") {
             DatabaseCheckpointControlStatus::Running(_) => {
                 unreachable!("should not receive reset database resp when running")
             }
             DatabaseCheckpointControlStatus::Recovering(state) => {
-                state.on_reset_database_resp(worker_id, resp)
+                state.on_reset_partial_graph_resp(worker_id, resp)
             }
         }
     }
@@ -517,7 +525,7 @@ impl DatabaseCheckpointControlMetrics {
 }
 
 /// Controls the concurrent execution of commands.
-pub(crate) struct DatabaseCheckpointControl {
+pub(in crate::barrier) struct DatabaseCheckpointControl {
     pub(super) database_id: DatabaseId,
     pub(super) state: BarrierWorkerState,
 
@@ -531,7 +539,7 @@ pub(crate) struct DatabaseCheckpointControl {
     committed_epoch: Option<u64>,
 
     pub(super) database_info: InflightDatabaseInfo,
-    pub(super) creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl>,
+    pub creating_streaming_job_controls: HashMap<JobId, CreatingStreamingJobControl>,
 
     metrics: DatabaseCheckpointControlMetrics,
 }
@@ -644,7 +652,8 @@ impl DatabaseCheckpointControl {
             partial_graph_id = %resp.partial_graph_id,
             "barrier collected"
         );
-        let creating_job_id = from_partial_graph_id(resp.partial_graph_id);
+        let (database_id, creating_job_id) = from_partial_graph_id(resp.partial_graph_id);
+        assert_eq!(self.database_id, database_id);
         match creating_job_id {
             None => {
                 if let Some(node) = self.command_ctx_queue.get_mut(&prev_epoch) {
