@@ -304,17 +304,20 @@ pub struct CacheConfig {
 
 /// the section `[storage.cache.eviction]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "algorithm")]
+#[serde(tag = "algorithm", rename_all = "snake_case")]
 pub enum CacheEvictionConfig {
+    #[serde(alias = "Lru")]
     Lru {
         high_priority_ratio_in_percent: Option<usize>,
     },
+    #[serde(alias = "Lfu")]
     Lfu {
         window_capacity_ratio_in_percent: Option<usize>,
         protected_capacity_ratio_in_percent: Option<usize>,
         cmsketch_eps: Option<f64>,
         cmsketch_confidence: Option<f64>,
     },
+    #[serde(alias = "S3Fifo", alias = "s3fifo")]
     S3Fifo {
         small_queue_capacity_ratio_in_percent: Option<usize>,
         ghost_queue_capacity_ratio_in_percent: Option<usize>,

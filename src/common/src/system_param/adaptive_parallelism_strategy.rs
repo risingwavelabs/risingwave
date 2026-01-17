@@ -19,13 +19,10 @@ use std::str::FromStr;
 
 use regex::Regex;
 use risingwave_common::system_param::ParamValue;
-use serde::{Deserialize, Serialize};
+use serde_with::{DeserializeFromStr, SerializeDisplay};
 use thiserror::Error;
 
-/// Use `#[serde(try_from, into)]` to serialize/deserialize as string format (e.g., "Bounded(64)"),
-/// which is consistent with `ALTER SYSTEM SET` command.
-#[derive(PartialEq, Copy, Clone, Debug, Default, Serialize, Deserialize)]
-#[serde(try_from = "String", into = "String")]
+#[derive(PartialEq, Copy, Clone, Debug, SerializeDisplay, DeserializeFromStr, Default)]
 pub enum AdaptiveParallelismStrategy {
     #[default]
     Auto,
@@ -34,21 +31,13 @@ pub enum AdaptiveParallelismStrategy {
     Ratio(f32),
 }
 
-impl TryFrom<String> for AdaptiveParallelismStrategy {
-    type Error = ParallelismStrategyParseError;
-
-    fn try_from(s: String) -> Result<Self, Self::Error> {
-        s.parse()
-    }
-}
-
 impl Display for AdaptiveParallelismStrategy {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            AdaptiveParallelismStrategy::Auto => write!(f, "AUTO"),
-            AdaptiveParallelismStrategy::Full => write!(f, "FULL"),
-            AdaptiveParallelismStrategy::Bounded(n) => write!(f, "BOUNDED({})", n),
-            AdaptiveParallelismStrategy::Ratio(r) => write!(f, "RATIO({})", r),
+            AdaptiveParallelismStrategy::Auto => write!(f, "auto"),
+            AdaptiveParallelismStrategy::Full => write!(f, "full"),
+            AdaptiveParallelismStrategy::Bounded(n) => write!(f, "bounded({})", n),
+            AdaptiveParallelismStrategy::Ratio(r) => write!(f, "ratio({})", r),
         }
     }
 }
@@ -297,11 +286,11 @@ mod tests {
         let auto: AdaptiveParallelismStrategy = serde_json::from_str(r#""Auto""#).unwrap();
         assert_eq!(auto, AdaptiveParallelismStrategy::Auto);
 
-        let full: AdaptiveParallelismStrategy = serde_json::from_str(r#""Full""#).unwrap();
+        let full: AdaptiveParallelismStrategy = serde_json::from_str(r#""FULL""#).unwrap();
         assert_eq!(full, AdaptiveParallelismStrategy::Full);
 
         let bounded: AdaptiveParallelismStrategy =
-            serde_json::from_str(r#""Bounded(64)""#).unwrap();
+            serde_json::from_str(r#""bounded(64)""#).unwrap();
         assert!(matches!(bounded, AdaptiveParallelismStrategy::Bounded(n) if n.get() == 64));
 
         let ratio: AdaptiveParallelismStrategy = serde_json::from_str(r#""Ratio(0.5)""#).unwrap();
@@ -311,10 +300,10 @@ mod tests {
 
         // Test serialization to string
         let auto = AdaptiveParallelismStrategy::Auto;
-        assert_eq!(serde_json::to_string(&auto).unwrap(), r#""AUTO""#);
+        assert_eq!(serde_json::to_string(&auto).unwrap(), r#""auto""#);
 
         let bounded = AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(64).unwrap());
-        assert_eq!(serde_json::to_string(&bounded).unwrap(), r#""BOUNDED(64)""#);
+        assert_eq!(serde_json::to_string(&bounded).unwrap(), r#""bounded(64)""#);
 
         // Test roundtrip
         let original = AdaptiveParallelismStrategy::Bounded(NonZeroUsize::new(128).unwrap());
