@@ -290,9 +290,9 @@ pub fn start_serving_vnode_mapping_worker(
                                     if fragment_ids.is_empty() {
                                         continue;
                                     }
+
                                     tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
-                                    serving_vnode_mapping.remove(&fragment_ids);
-                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(fragment_ids.iter().cloned()) }));
+
                                     let (_, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
                                     let mut deleted : HashMap<FragmentId, FragmentParallelismInfo> = HashMap::new();
                                     for fragment_id in &fragment_ids {
@@ -302,6 +302,9 @@ pub fn start_serving_vnode_mapping_worker(
                                             tracing::warn!(fragment_id = %fragment_id, "streaming parallelism not found");
                                         }
                                     }
+
+                                    serving_vnode_mapping.remove(&fragment_ids);
+                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(fragment_ids.iter().cloned()) }));
                                     notify_hummock_delete_serving_table_vnode_mapping(
                                         Operation::Delete,
                                         &metadata_manager,
