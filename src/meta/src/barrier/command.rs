@@ -402,6 +402,15 @@ pub enum Command {
     ResetSource {
         source_id: SourceId,
     },
+
+    /// `InjectSourceOffsets` command generates a barrier to inject specific offsets
+    /// into source splits (UNSAFE - admin only).
+    /// This can cause data duplication or loss depending on the correctness of the provided offsets.
+    InjectSourceOffsets {
+        source_id: SourceId,
+        /// Split ID -> offset (JSON-encoded based on connector type)
+        split_offsets: HashMap<String, String>,
+    },
 }
 
 // For debugging and observability purposes. Can add more details later if needed.
@@ -461,6 +470,15 @@ impl std::fmt::Display for Command {
                 table_id, associated_source_id
             ),
             Command::ResetSource { source_id } => write!(f, "ResetSource: {source_id}"),
+            Command::InjectSourceOffsets {
+                source_id,
+                split_offsets,
+            } => write!(
+                f,
+                "InjectSourceOffsets: {} ({} splits)",
+                source_id,
+                split_offsets.len()
+            ),
         }
     }
 }
@@ -626,6 +644,7 @@ impl Command {
             Command::ListFinish { .. } => None, // ListFinish doesn't change fragment structure
             Command::LoadFinish { .. } => None, // LoadFinish doesn't change fragment structure
             Command::ResetSource { .. } => None, // ResetSource doesn't change fragment structure
+            Command::InjectSourceOffsets { .. } => None, /* InjectSourceOffsets doesn't change fragment structure */
         }
     }
 
@@ -1312,6 +1331,15 @@ impl Command {
             Command::ResetSource { source_id } => Some(Mutation::ResetSource(
                 risingwave_pb::stream_plan::ResetSourceMutation {
                     source_id: source_id.as_raw_id(),
+                },
+            )),
+            Command::InjectSourceOffsets {
+                source_id,
+                split_offsets,
+            } => Some(Mutation::InjectSourceOffsets(
+                risingwave_pb::stream_plan::InjectSourceOffsetsMutation {
+                    source_id: source_id.as_raw_id(),
+                    split_offsets: split_offsets.clone(),
                 },
             )),
         };
