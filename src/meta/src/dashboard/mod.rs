@@ -23,7 +23,7 @@ use axum::extract::{Extension, Path};
 use axum::http::{Method, StatusCode};
 use axum::response::{IntoResponse, Response};
 use axum::routing::get;
-use risingwave_rpc_client::ComputeClientPool;
+use risingwave_rpc_client::MonitorClientPool;
 use tokio::net::TcpListener;
 use tower::ServiceBuilder;
 use tower_http::add_extension::AddExtensionLayer;
@@ -42,7 +42,7 @@ pub struct DashboardService {
     pub prometheus_selector: String,
     pub metadata_manager: MetadataManager,
     pub hummock_manager: HummockManagerRef,
-    pub compute_clients: ComputeClientPool,
+    pub monitor_clients: MonitorClientPool,
     pub diagnose_command: DiagnoseCommandRef,
     pub trace_state: otlp_embedded::StateRef,
 }
@@ -517,7 +517,7 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+        let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
 
         let result = client.heap_profile("".to_owned()).await.map_err(err)?;
 
@@ -536,7 +536,7 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+        let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
 
         let result = client.list_heap_profile().await.map_err(err)?;
         Ok(result.into())
@@ -557,7 +557,7 @@ pub(super) mod handlers {
             .context("worker node not found")
             .map_err(err)?;
 
-        let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+        let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
 
         let collapsed_bin = client
             .analyze_heap(file_path.clone())
@@ -613,7 +613,7 @@ pub(super) mod handlers {
         let mut futures = Vec::new();
 
         for worker_node in worker_nodes {
-            let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
             let client = Arc::new(client);
             let fut = async move {
                 let result = client.get_streaming_stats().await.map_err(err)?;
@@ -696,7 +696,7 @@ pub(super) mod handlers {
         let mut futures = Vec::new();
 
         for worker_node in worker_nodes {
-            let client = srv.compute_clients.get(&worker_node).await.map_err(err)?;
+            let client = srv.monitor_clients.get(&worker_node).await.map_err(err)?;
             let client = Arc::new(client);
             let fut = async move {
                 let result = client.get_streaming_stats().await.map_err(err)?;
