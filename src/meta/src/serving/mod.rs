@@ -54,10 +54,13 @@ impl ServingVnodeMapping {
         streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
         workers: &[WorkerNode],
         max_serving_parallelism: Option<u64>,
-    ) -> (HashMap<FragmentId, WorkerSlotMapping>, Vec<FragmentId>) {
+    ) -> (
+        HashMap<FragmentId, WorkerSlotMapping>,
+        HashMap<FragmentId, FragmentParallelismInfo>,
+    ) {
         let mut serving_vnode_mappings = self.serving_vnode_mappings.write();
         let mut upserted: HashMap<FragmentId, WorkerSlotMapping> = HashMap::default();
-        let mut failed: Vec<FragmentId> = vec![];
+        let mut failed: HashMap<FragmentId, FragmentParallelismInfo> = HashMap::default();
         for (fragment_id, info) in streaming_parallelisms {
             let new_mapping = {
                 let old_mapping = serving_vnode_mappings.get(fragment_id);
@@ -72,7 +75,7 @@ impl ServingVnodeMapping {
             match new_mapping {
                 None => {
                     serving_vnode_mappings.remove(fragment_id as _);
-                    failed.push(*fragment_id);
+                    failed.insert(*fragment_id, info.clone());
                 }
                 Some(mapping) => {
                     serving_vnode_mappings.insert(*fragment_id, mapping.clone());
@@ -104,11 +107,10 @@ pub(crate) fn to_fragment_worker_slot_mapping(
 }
 
 pub(crate) fn to_deleted_fragment_worker_slot_mapping(
-    fragment_ids: &[FragmentId],
+    fragment_ids: impl Iterator<Item = FragmentId>,
 ) -> Vec<FragmentWorkerSlotMapping> {
     fragment_ids
-        .iter()
-        .map(|&fragment_id| FragmentWorkerSlotMapping {
+        .map(|fragment_id| FragmentWorkerSlotMapping {
             fragment_id,
             mapping: None,
         })
@@ -275,13 +277,12 @@ pub fn start_serving_vnode_mapping_worker(
                                     }
                                     if !failed.is_empty() {
                                         tracing::warn!("Fail to update serving vnode mapping for fragments {:?}.", failed);
-                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&failed)}));
+                                        notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(failed.keys().cloned())}));
                                         notify_hummock_delete_serving_table_vnode_mapping(
                                             Operation::Delete,
                                             &metadata_manager,
                                             &notification_manager,
                                             &failed,
-                                            &filtered_streaming_parallelisms,
                                         ).await;
                                     }
                                 }
@@ -291,23 +292,21 @@ pub fn start_serving_vnode_mapping_worker(
                                     }
                                     tracing::debug!("Delete serving vnode mapping for fragments {:?}.", fragment_ids);
                                     serving_vnode_mapping.remove(&fragment_ids);
-                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(&fragment_ids) }));
+                                    notification_manager.notify_frontend_without_version(Operation::Delete, Info::ServingWorkerSlotMappings(FragmentWorkerSlotMappings{ mappings: to_deleted_fragment_worker_slot_mapping(fragment_ids.iter().cloned()) }));
                                     let (_, streaming_parallelisms) = fetch_serving_infos(&metadata_manager).await;
-                                    let filtered_streaming_parallelisms = fragment_ids.iter().filter_map(|frag_id| {
-                                        match streaming_parallelisms.get(frag_id) {
-                                            Some(info) => Some((*frag_id, info.clone())),
-                                            None => {
-                                                tracing::warn!(fragment_id = %frag_id, "streaming parallelism not found");
-                                                None
-                                            }
+                                    let mut deleted : HashMap<FragmentId, FragmentParallelismInfo> = HashMap::new();
+                                    for fragment_id in &fragment_ids {
+                                        if let Some(info) = streaming_parallelisms.get(fragment_id) {
+                                            deleted.insert(*fragment_id, info.clone());
+                                        }else {
+                                            tracing::warn!(fragment_id = %fragment_id, "streaming parallelism not found");
                                         }
-                                    }).collect();
+                                    }
                                     notify_hummock_delete_serving_table_vnode_mapping(
                                         Operation::Delete,
                                         &metadata_manager,
                                         &notification_manager,
-                                        &fragment_ids,
-                                        &filtered_streaming_parallelisms,
+                                        &deleted,
                                     ).await;
                                 }
                                 _ => {}
@@ -419,8 +418,7 @@ async fn notify_hummock_delete_serving_table_vnode_mapping(
     operation: Operation,
     metadata_manager: &MetadataManager,
     notification_manager: &NotificationManagerRef,
-    fragment_ids: &Vec<FragmentId>,
-    streaming_parallelisms: &HashMap<FragmentId, FragmentParallelismInfo>,
+    fragment_infos: &HashMap<FragmentId, FragmentParallelismInfo>,
 ) {
     let active_serving_workers = metadata_manager
         .cluster_controller
@@ -428,12 +426,8 @@ async fn notify_hummock_delete_serving_table_vnode_mapping(
         .await
         .expect("fail to list serving compute nodes");
     let mut worker_table_vnode_mapping = init_worker_table_vnode_mapping(&active_serving_workers);
-    for fragment_id in fragment_ids {
-        let state_table_ids = &streaming_parallelisms
-            .get(fragment_id)
-            .expect("streaming parallelism must exist")
-            .state_table_ids;
-        delete_worker_table_vnode_mapping(&mut worker_table_vnode_mapping, state_table_ids);
+    for info in fragment_infos.values() {
+        delete_worker_table_vnode_mapping(&mut worker_table_vnode_mapping, &info.state_table_ids);
     }
 
     for worker in active_serving_workers {
