@@ -146,7 +146,7 @@ def _relation_busy_rate_target(panels: Panels, rate_interval: str):
 def _(outer_panels: Panels):
     panels = outer_panels
     return [
-        outer_panels.row("Cluster Essential Information"),
+        outer_panels.row("[Essential] Cluster Essential Information"),
         *[
             panels.subheader("Node Status"),
             panels.timeseries_count(
@@ -175,7 +175,7 @@ def _(outer_panels: Panels):
                 "Memory usage relative to k8s resource limit of container. Only works in K8s environment",
                 [
                     panels.target(
-                        '(avg by(namespace, pod) (container_memory_working_set_bytes{namespace=~"$namespace",pod=~"$pod",container=~"$component"})) / (  sum by(namespace, pod) (kube_pod_container_resource_limits{namespace=~"$namespace", pod=~"$pod", container="$component", resource="memory", unit="byte"}))',
+                        '(avg by(namespace, pod) (container_memory_working_set_bytes{namespace=~"$namespace",pod=~"$pod",container=~"$component"})) / (  sum by(namespace, pod) (kube_pod_container_resource_limits{namespace=~"$namespace", pod=~"$pod", container=~"$component", resource="memory", unit="byte"}))',
                         "avg memory usage @ {{%s}} @ {{%s}}"
                         % (COMPONENT_LABEL, NODE_LABEL),
                     )

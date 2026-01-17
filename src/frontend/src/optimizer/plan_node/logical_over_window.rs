@@ -678,9 +678,11 @@ impl ToStream for LogicalOverWindow {
                 .watermark_columns()
                 .contains(order_by[0].column_index)
             {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "The column ordered by must be a watermark column".to_owned(),
-                )
+                let order_by_col = &input.schema().fields()[order_by[0].column_index].name;
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "The ORDER BY column `{}` must be a watermark column",
+                    order_by_col
+                ))
                 .into());
             }
             let order_key_index = order_by[0].column_index;

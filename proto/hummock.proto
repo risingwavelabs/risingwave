@@ -135,6 +135,13 @@ message VnodeWatermark {
   common.Buffer vnode_bitmap = 2;
 }
 
+enum WatermarkSerdeType {
+  TYPE_UNSPECIFIED = 0;
+  PK_PREFIX = 1;
+  NON_PK_PREFIX = 2;
+  VALUE = 3;
+}
+
 // Table watermark is a lighter weight range delete introduced in
 // https://github.com/risingwavelabs/risingwave/issues/13148
 // It means the lowest (or highest when `is_ascending` is false) visible
@@ -154,7 +161,10 @@ message TableWatermarks {
   bool is_ascending = 2;
 
   // The table watermark is non-pk prefix table watermark.
-  bool is_non_pk_prefix = 3;
+  // Deprecated. use WatermarkSerdeType instead;
+  bool is_non_pk_prefix = 3 [deprecated = true];
+
+  WatermarkSerdeType raw_watermark_serde_type = 4;
 }
 
 message EpochNewChangeLog {

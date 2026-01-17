@@ -54,6 +54,7 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchId, SharedBufferValue,
 };
+use crate::hummock::store::version::StagingSstableInfo;
 use crate::hummock::{HummockError, HummockResult, MemoryLimiter};
 use crate::mem_table::{ImmId, ImmutableMemtable};
 use crate::monitor::HummockStateStoreMetrics;
@@ -353,8 +354,26 @@ pub(crate) async fn assert_uploader_pending(uploader: &mut HummockUploader) {
         yield_now().await;
     }
     assert!(
-        poll_fn(|cx| Poll::Ready(uploader.next_uploaded_sst().poll_unpin(cx)))
+        poll_fn(|cx| Poll::Ready(uploader.next_uploaded_ssts().poll_unpin(cx)))
             .await
             .is_pending()
     )
+}
+
+#[derive(Default)]
+pub(crate) struct UploadedSstCollector {
+    buffered: VecDeque<Arc<StagingSstableInfo>>,
+}
+
+impl UploadedSstCollector {
+    pub(crate) async fn next(&mut self, uploader: &mut HummockUploader) -> Arc<StagingSstableInfo> {
+        if let Some(sst) = self.buffered.pop_front() {
+            return sst;
+        }
+        let mut batch = uploader.next_uploaded_ssts().await;
+        assert!(!batch.is_empty());
+        let first = batch.remove(0);
+        self.buffered.extend(batch);
+        first
+    }
 }
