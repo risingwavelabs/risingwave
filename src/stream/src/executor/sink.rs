@@ -333,7 +333,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         let processed_input = Self::process_msg(
             input,
             self.sink_param.sink_type,
-            self.sink_param.ignore_delete,
             stream_key,
             self.chunk_size,
             self.input_data_types,
@@ -343,6 +342,18 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             metrics.sink_chunk_buffer_size,
             self.sink.is_blackhole(), // skip compact for blackhole for better benchmark results
         );
+
+        let processed_input = if self.sink_param.ignore_delete {
+            // Drop UPDATE/DELETE messages if specified `ignore_delete` (formerly `force_append_only`).
+            processed_input
+                .map_ok(|msg| match msg {
+                    Message::Chunk(chunk) => Message::Chunk(force_append_only(chunk)),
+                    other => other,
+                })
+                .left_stream()
+        } else {
+            processed_input.right_stream()
+        };
 
         if self.sink.is_sink_into_table() {
             // TODO(hzxa21): support rate limit?
@@ -531,7 +542,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
     async fn process_msg(
         input: impl MessageStream,
         sink_type: SinkType,
-        ignore_delete: bool,
         stream_key: StreamKey,
         chunk_size: usize,
         input_data_types: Vec<DataType>,
@@ -654,12 +664,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                     )
                                 });
                             }
-                        }
-                        if ignore_delete {
-                            // Force append-only by dropping UPDATE/DELETE messages. We do this when the
-                            // user forces the sink to be append-only while it is actually not based on
-                            // the frontend derivation result.
-                            chunk = force_append_only(chunk);
                         }
                         yield Message::Chunk(chunk);
                     }
