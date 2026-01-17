@@ -23,6 +23,7 @@ use risingwave_common::config::DefaultParallelism;
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
 use risingwave_common::secret::LocalSecretManager;
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::stream_graph_visitor::{
     visit_stream_node_body, visit_stream_node_mut,
@@ -124,6 +125,10 @@ impl CatalogController {
             create_type: Set(create_type.into()),
             timezone: Set(ctx.timezone),
             config_override: Set(Some(ctx.config_override.to_string())),
+            adaptive_parallelism_strategy: Set(ctx
+                .adaptive_parallelism_strategy
+                .as_ref()
+                .map(ToString::to_string)),
             parallelism: Set(streaming_parallelism),
             backfill_parallelism: Set(backfill_parallelism),
             max_parallelism: Set(max_parallelism as _),
@@ -941,19 +946,22 @@ impl CatalogController {
         }
 
         // 3. check parallelism.
-        let (original_max_parallelism, original_timezone, original_config_override): (
-            i32,
-            Option<String>,
-            Option<String>,
-        ) = StreamingJobModel::find_by_id(id)
-            .select_only()
-            .column(streaming_job::Column::MaxParallelism)
-            .column(streaming_job::Column::Timezone)
-            .column(streaming_job::Column::ConfigOverride)
-            .into_tuple()
-            .one(&txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
+        let (
+            original_max_parallelism,
+            original_timezone,
+            original_config_override,
+            original_adaptive_strategy,
+        ): (i32, Option<String>, Option<String>, Option<String>) =
+            StreamingJobModel::find_by_id(id)
+                .select_only()
+                .column(streaming_job::Column::MaxParallelism)
+                .column(streaming_job::Column::Timezone)
+                .column(streaming_job::Column::ConfigOverride)
+                .column(streaming_job::Column::AdaptiveParallelismStrategy)
+                .into_tuple()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
 
         if let Some(max_parallelism) = expected_original_max_parallelism
             && original_max_parallelism != max_parallelism as i32
@@ -981,6 +989,9 @@ impl CatalogController {
             // We don't expect replacing a job with a different config override.
             // Thus always use the original config override.
             config_override: original_config_override.unwrap_or_default().into(),
+            adaptive_parallelism_strategy: original_adaptive_strategy.as_deref().map(|s| {
+                parse_strategy(s).expect("strategy should be validated before persisting")
+            }),
         };
 
         // 4. create streaming object for new replace table.
