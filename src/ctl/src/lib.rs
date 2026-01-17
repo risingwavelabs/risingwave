@@ -508,12 +508,28 @@ enum TestCommands {
 enum ThrottleCommands {
     Source(ThrottleCommandArgs),
     Mv(ThrottleCommandArgs),
+    Sink(ThrottleCommandArgs),
+}
+
+#[derive(Clone, Debug, clap::ValueEnum)]
+pub enum ThrottleTypeArg {
+    Dml,
+    Backfill,
+    Source,
+    Sink,
 }
 
 #[derive(Clone, Debug, Args)]
 pub struct ThrottleCommandArgs {
+    /// The ID of the object to throttle
+    #[clap(long, required = true)]
     id: u32,
+    /// The rate limit to apply
+    #[clap(long)]
     rate: Option<u32>,
+    /// The type of throttle to apply
+    #[clap(long, value_enum, required = true)]
+    throttle_type: ThrottleTypeArg,
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -931,6 +947,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Throttle(ThrottleCommands::Mv(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
+        }
+        Commands::Throttle(ThrottleCommands::Sink(args)) => {
+            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Sink, args).await?;
         }
         Commands::Meta(MetaCommands::SetCdcTableBackfillParallelism {
             table_id,
