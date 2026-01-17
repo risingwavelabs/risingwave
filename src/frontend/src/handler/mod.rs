@@ -278,7 +278,7 @@ pub async fn handle(
     check_ban_ddl_for_iceberg_engine_table(handler_args.session.clone(), &stmt)?;
 
     let session = handler_args.session.clone();
-    audit_log::with_audit_context(&session, async move {
+    let fut = async move {
         match stmt {
         Statement::Explain {
             statement,
@@ -1440,8 +1440,9 @@ pub async fn handle(
         }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
         }
-    })
-    .await
+    };
+    let fut = Box::pin(fut);
+    audit_log::with_audit_context(&session, fut).await
 }
 
 fn check_ban_ddl_for_iceberg_engine_table(
