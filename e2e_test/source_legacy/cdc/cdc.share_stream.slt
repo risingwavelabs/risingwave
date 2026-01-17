@@ -515,7 +515,8 @@ CREATE TABLE partitioned_timestamp_table_shared(
     PRIMARY KEY (c_int, c_timestamp)
 ) from pg_source table 'public.partitioned_timestamp_table';
 
-statement error The ancestor or descendant partition 'partitioned_timestamp_table' of the table partition 'partitioned_timestamp_table_2023' is already covered in the publication 'rw_publication'.
+# Test partition table conflict. Note: publication name is not fixed after per-source publication naming.
+statement error The ancestor or descendant partition 'partitioned_timestamp_table' of the table partition 'partitioned_timestamp_table_2023' is already covered in the publication
 CREATE TABLE partitioned_timestamp_table_2023_shared(
     c_int int,
     c_boolean boolean,
