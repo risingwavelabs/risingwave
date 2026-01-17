@@ -15,9 +15,7 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::error::tonic::TonicStatusWrapper;
 use risingwave_pb::frontend_service::CancelRunningSqlRequest;
-use serde_json::json;
 
-use super::audit_log::record_audit_log;
 use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, RwPgResponse};
 use crate::session::{
@@ -35,18 +33,6 @@ pub(super) async fn handle_kill(handler_args: HandlerArgs, s: String) -> Result<
             worker_process_id.process_id,
         )
         .await?;
-        record_audit_log(
-            &handler_args.session,
-            "KILL",
-            Some("PROCESS"),
-            None,
-            None,
-            json!({
-                "worker_id": worker_process_id.worker_id,
-                "process_id": worker_process_id.process_id,
-            }),
-        )
-        .await;
         return Ok(resp);
     }
     let Some(worker) = handler_args
@@ -68,18 +54,6 @@ pub(super) async fn handle_kill(handler_args: HandlerArgs, s: String) -> Result<
         })
         .await
         .map_err(TonicStatusWrapper::from)?;
-    record_audit_log(
-        &handler_args.session,
-        "KILL",
-        Some("PROCESS"),
-        None,
-        None,
-        json!({
-            "worker_id": worker_process_id.worker_id,
-            "process_id": worker_process_id.process_id,
-        }),
-    )
-    .await;
     Ok(PgResponse::empty_result(StatementType::KILL))
 }
 

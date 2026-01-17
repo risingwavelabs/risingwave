@@ -17,13 +17,11 @@ use std::collections::HashMap;
 use anyhow::Context;
 use pgwire::pg_response::StatementType;
 use risingwave_sqlparser::ast::{ObjectName, SqlOption, SqlOptionValue, Value as AstValue};
-use serde_json::json;
 use toml::Value as TomlValue;
 use toml::map::Map as TomlMap;
 
 use crate::error::{Result, bail_invalid_input_syntax};
 use crate::handler::alter_utils::resolve_streaming_job_id_for_alter;
-use crate::handler::audit_log::record_audit_log;
 use crate::handler::{HandlerArgs, RwPgResponse};
 
 /// A diff of a TOML map. `None` means the key should be removed.
@@ -73,7 +71,7 @@ pub async fn handle_alter_streaming_set_config(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
 
-    let obj_name_string = obj_name.to_string();
+    let _obj_name_string = obj_name.to_string();
     let job_id = resolve_streaming_job_id_for_alter(&session, obj_name, stmt_type, "config")?;
     let map_diff = collect_options(entries)?;
 
@@ -88,25 +86,10 @@ pub async fn handle_alter_streaming_set_config(
         }
     }
 
-    let audit_set_keys = entries_to_add.keys().cloned().collect::<Vec<_>>();
-    let audit_reset_keys = keys_to_remove.clone();
     let catalog_writer = session.catalog_writer()?;
     catalog_writer
         .alter_config(job_id, entries_to_add, keys_to_remove)
         .await?;
-
-    record_audit_log(
-        &session,
-        "ALTER CONFIG",
-        Some("STREAMING_JOB"),
-        Some(job_id as u32),
-        Some(obj_name_string),
-        json!({
-            "set_keys": audit_set_keys,
-            "reset_keys": audit_reset_keys,
-        }),
-    )
-    .await;
 
     Ok(RwPgResponse::builder(stmt_type)
         .notice("ALTER CONFIG requires a RECOVER on the specified streaming job to take effect.")

@@ -12,10 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use serde_json::json;
-
 use super::RwPgResponse;
-use super::audit_log::record_audit_log;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, ObjectName, SqlOption, StatementType};
@@ -52,10 +49,6 @@ pub async fn handle_alter_connection_connector_props(
     };
 
     let meta_client = session.env().meta_client();
-    let audit_keys = alter_props
-        .iter()
-        .map(|opt| opt.name.real_value())
-        .collect::<Vec<_>>();
     let (resolved_with_options, _, connector_conn_ref) = resolve_connection_ref_and_secret_ref(
         WithOptions::try_from(alter_props.as_ref() as &[SqlOption])?,
         &session,
@@ -77,16 +70,6 @@ pub async fn handle_alter_connection_connector_props(
             changed_secret_refs,
         )
         .await?;
-
-    record_audit_log(
-        &session,
-        "ALTER CONNECTION CONNECTOR",
-        Some("CONNECTION"),
-        Some(connection_id.as_raw_id()),
-        Some(real_connection_name.to_string()),
-        json!({ "keys": audit_keys }),
-    )
-    .await;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_CONNECTION))
 }

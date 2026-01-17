@@ -41,7 +41,12 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwAuditLog>> {
         .map(|log| {
             let details = match log.details_json {
                 Some(payload) if !payload.trim().is_empty() => {
-                    let value: Value = serde_json::from_str(&payload)?;
+                    let value: Value = serde_json::from_str(&payload).map_err(|err| {
+                        crate::error::ErrorCode::InternalError(format!(
+                            "invalid audit log details json: {}",
+                            err
+                        ))
+                    })?;
                     Some(JsonbVal::from(value))
                 }
                 _ => None,

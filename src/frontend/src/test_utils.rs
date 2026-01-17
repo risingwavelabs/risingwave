@@ -66,8 +66,8 @@ use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    RefreshRequest, RefreshResponse, SystemParams,
+    AddAuditLogRequest, AuditLog, EventLog, FragmentDistribution, PbTableParallelism,
+    PbThrottleTarget, RecoveryStatus, RefreshRequest, RefreshResponse, SystemParams,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
@@ -1179,6 +1179,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
+    async fn list_audit_log(&self) -> RpcResult<Vec<AuditLog>> {
+        Ok(vec![])
+    }
+
     async fn list_compact_task_assignment(&self) -> RpcResult<Vec<CompactTaskAssignment>> {
         unimplemented!()
     }
@@ -1202,6 +1206,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _rate_limit: Option<u32>,
     ) -> RpcResult<()> {
         unimplemented!()
+    }
+
+    async fn add_audit_log(&self, _req: AddAuditLogRequest) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn alter_fragment_parallelism(

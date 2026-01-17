@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod audit_log;
 pub mod await_tree;
 pub mod ddl_controller;
 pub mod election;

@@ -19,11 +19,9 @@ use risingwave_pb::meta::table_parallelism::{
 use risingwave_pb::meta::{PbTableParallelism, TableParallelism};
 use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSingle, Value};
 use risingwave_sqlparser::keywords::Keyword;
-use serde_json::json;
 use thiserror_ext::AsReport;
 
 use super::alter_utils::resolve_streaming_job_id_for_alter_parallelism;
-use super::audit_log::record_audit_log;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::FragmentId;
 use crate::error::{ErrorCode, Result};
@@ -38,7 +36,6 @@ pub async fn handle_alter_parallelism(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
 
-    let obj_name_string = obj_name.to_string();
     let job_id = resolve_streaming_job_id_for_alter_parallelism(
         &session,
         obj_name,
@@ -47,7 +44,6 @@ pub async fn handle_alter_parallelism(
     )?;
 
     let target_parallelism = extract_table_parallelism(parallelism)?;
-    let parallelism_summary = format!("{:?}", target_parallelism);
 
     let mut builder = RwPgResponse::builder(stmt_type);
 
@@ -64,19 +60,6 @@ pub async fn handle_alter_parallelism(
         builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());
     }
 
-    record_audit_log(
-        &session,
-        "ALTER PARALLELISM",
-        Some("STREAMING_JOB"),
-        Some(job_id as u32),
-        Some(obj_name_string),
-        json!({
-            "parallelism": parallelism_summary,
-            "deferred": deferred,
-        }),
-    )
-    .await;
-
     Ok(builder.into())
 }
 
@@ -87,27 +70,11 @@ pub async fn handle_alter_fragment_parallelism(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let target_parallelism = extract_fragment_parallelism(parallelism)?;
-    let parallelism_summary = format!("{:?}", target_parallelism);
-
-    let fragment_ids_for_audit = fragment_ids.clone();
     session
         .env()
         .meta_client()
         .alter_fragment_parallelism(fragment_ids, target_parallelism)
         .await?;
-
-    record_audit_log(
-        &session,
-        "ALTER FRAGMENT PARALLELISM",
-        Some("FRAGMENT"),
-        None,
-        None,
-        json!({
-            "fragment_ids": fragment_ids_for_audit,
-            "parallelism": parallelism_summary,
-        }),
-    )
-    .await;
 
     Ok(RwPgResponse::builder(StatementType::ALTER_FRAGMENT).into())
 }

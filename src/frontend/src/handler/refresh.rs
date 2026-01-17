@@ -16,12 +16,10 @@ use anyhow::Context;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_pb::meta::RefreshRequest;
 use risingwave_sqlparser::ast::ObjectName;
-use serde_json::json;
 use thiserror_ext::AsReport;
 
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
-use crate::handler::audit_log::record_audit_log;
 use crate::handler::util::get_table_catalog_by_table_name;
 use crate::handler::{HandlerArgs, RwPgResponse};
 
@@ -86,16 +84,6 @@ pub async fn handle_refresh(
                 table_name = %table_name,
                 "Manual refresh initiated"
             );
-
-            record_audit_log(
-                &session,
-                "REFRESH",
-                Some("TABLE"),
-                Some(table_id.as_raw_id()),
-                Some(table_name.to_string()),
-                json!({}),
-            )
-            .await;
 
             // Return success response
             Ok(PgResponse::builder(StatementType::REFRESH_TABLE)

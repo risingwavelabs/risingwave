@@ -33,8 +33,9 @@ use risingwave_meta::hummock::IcebergCompactorManager;
 use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManager;
 use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
 use risingwave_meta::rpc::ElectionClientRef;
+use risingwave_meta::rpc::audit_log::start_audit_log_cleanup;
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
-use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
+use risingwave_meta::rpc::intercept::{AuditLogLayer, MetricsMiddlewareLayer};
 use risingwave_meta::stream::{GlobalRefreshManager, ScaleController};
 use risingwave_meta_service::AddressInfo;
 use risingwave_meta_service::audit_log_service::AuditLogServiceImpl;
@@ -721,6 +722,7 @@ pub async fn start_service_as_election_leader(
     if let Some(pair) = env.event_log_manager_ref().take_join_handle() {
         sub_tasks.push(pair);
     }
+    sub_tasks.push(start_audit_log_cleanup(env.clone()));
 
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
@@ -736,6 +738,7 @@ pub async fn start_service_as_election_leader(
 
     let server_builder = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
+        .layer(AuditLogLayer::new(env.clone()))
         .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))

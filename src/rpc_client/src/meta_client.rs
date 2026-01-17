@@ -75,8 +75,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::*;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::Register as IcebergRegister;
 use risingwave_pb::iceberg_compaction::{
-    SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
-    subscribe_iceberg_compaction_event_request,
+    SubscribeIcebergCompactionEventRequest, subscribe_iceberg_compaction_event_request,
 };
 use risingwave_pb::id::{ActorId, FragmentId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
@@ -132,7 +131,7 @@ use crate::hummock_meta_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
     IcebergCompactionEventItem,
 };
-use crate::meta_rpc_client_method_impl;
+use crate::{audit, meta_rpc_client_method_impl};
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone, Debug)]
@@ -2025,12 +2024,14 @@ impl HummockMetaClient for MetaClient {
             })
             .context("Failed to subscribe compaction event")?;
 
-        let stream = self
-            .inner
-            .subscribe_compaction_event(Request::new(UnboundedReceiverStream::new(
-                request_receiver,
-            )))
-            .await?;
+        let mut request = Request::new(UnboundedReceiverStream::new(request_receiver));
+        audit::inject_audit_metadata(request.metadata_mut());
+        let mut client = self.inner.core.read().await.hummock_client.clone();
+        let stream = client
+            .subscribe_compaction_event(request)
+            .await
+            .map_err(RpcError::from_meta_status)?
+            .into_inner();
 
         Ok((request_sender, Box::pin(stream)))
     }
@@ -2065,12 +2066,14 @@ impl HummockMetaClient for MetaClient {
             })
             .context("Failed to subscribe compaction event")?;
 
-        let stream = self
-            .inner
-            .subscribe_iceberg_compaction_event(Request::new(UnboundedReceiverStream::new(
-                request_receiver,
-            )))
-            .await?;
+        let mut request = Request::new(UnboundedReceiverStream::new(request_receiver));
+        audit::inject_audit_metadata(request.metadata_mut());
+        let mut client = self.inner.core.read().await.hummock_client.clone();
+        let stream = client
+            .subscribe_iceberg_compaction_event(request)
+            .await
+            .map_err(RpcError::from_meta_status)?
+            .into_inner();
 
         Ok((request_sender, Box::pin(stream)))
     }
@@ -2090,7 +2093,7 @@ impl TelemetryInfoFetcher for MetaClient {
 
 pub type SinkCoordinationRpcClient = SinkCoordinationServiceClient<Channel>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct GrpcMetaClientCore {
     cluster_client: ClusterServiceClient<Channel>,
     meta_member_client: MetaMemberServiceClient<Channel>,
@@ -2599,8 +2602,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
             ,{ hummock_client, get_compaction_score, GetCompactionScoreRequest, GetCompactionScoreResponse }
             ,{ hummock_client, rise_ctl_rebuild_table_stats, RiseCtlRebuildTableStatsRequest, RiseCtlRebuildTableStatsResponse }
-            ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
-            ,{ hummock_client, subscribe_iceberg_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeIcebergCompactionEventRequest>, Streaming<SubscribeIcebergCompactionEventResponse> }
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }

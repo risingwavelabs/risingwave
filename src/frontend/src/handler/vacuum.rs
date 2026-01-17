@@ -17,11 +17,9 @@ use risingwave_common::bail;
 use risingwave_common::catalog::Engine;
 use risingwave_connector::sink::CONNECTOR_TYPE_KEY;
 use risingwave_sqlparser::ast::ObjectName;
-use serde_json::json;
 
 use crate::binder::Binder;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::audit_log::record_audit_log;
 use crate::handler::{HandlerArgs, RwPgResponse};
 
 pub async fn handle_vacuum(
@@ -32,7 +30,7 @@ pub async fn handle_vacuum(
     let session = &handler_args.session;
     let db_name = &session.database();
 
-    let (sink_id, target_kind, target_name) = {
+    let (sink_id, _target_kind, _target_name) = {
         let (schema_name, real_object_name) =
             Binder::resolve_schema_qualified_name(db_name, &object_name)?;
         let catalog_reader = session.env().catalog_reader().read_guard();
@@ -123,14 +121,5 @@ pub async fn handle_vacuum(
             .await?;
     }
 
-    record_audit_log(
-        session,
-        "VACUUM",
-        Some(target_kind),
-        Some(sink_id.as_raw_id()),
-        Some(target_name),
-        json!({ "full": full }),
-    )
-    .await;
     Ok(PgResponse::builder(StatementType::VACUUM).into())
 }

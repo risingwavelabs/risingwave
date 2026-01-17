@@ -18,10 +18,8 @@ use risingwave_common::types::Fields;
 use risingwave_pb::id::JobId;
 use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::JobIdents;
-use serde_json::json;
 
 use super::RwPgResponseBuilderExt;
-use super::audit_log::record_audit_log;
 use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::error::Result;
 use crate::handler::{HandlerArgs, RwPgResponse};
@@ -33,7 +31,6 @@ pub(super) async fn handle_cancel(
     let session = handler_args.session;
     let job_ids = jobs.0.into_iter().map(JobId::from).collect_vec();
 
-    let audit_job_ids = job_ids.iter().map(|id| id.as_raw_id()).collect::<Vec<_>>();
     let canceled_jobs = if !job_ids.is_empty() {
         // Wrap in async block to convert RpcError to RwError
         execute_with_long_running_notification(
@@ -57,15 +54,6 @@ pub(super) async fn handle_cancel(
         .into_iter()
         .map(|id| CancelRow { id: id.to_string() });
 
-    record_audit_log(
-        &session,
-        "CANCEL JOBS",
-        Some("JOB"),
-        None,
-        None,
-        json!({ "job_ids": audit_job_ids }),
-    )
-    .await;
     Ok(PgResponse::builder(StatementType::CANCEL_COMMAND)
         .rows(rows)
         .into())

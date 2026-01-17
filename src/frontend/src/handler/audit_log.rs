@@ -12,49 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_pb::meta::AddAuditLogRequest;
-use serde_json::Value;
+use std::future::Future;
+
+use risingwave_rpc_client::audit::{self, AuditContext};
 
 use crate::session::SessionImpl;
 
-pub async fn record_audit_log(
-    session: &SessionImpl,
-    action: &str,
-    object_type: Option<&str>,
-    object_id: Option<u32>,
-    object_name: Option<String>,
-    details: Value,
-) {
+pub async fn with_audit_context<T>(session: &SessionImpl, fut: impl Future<Output = T>) -> T {
     let database_id = session
         .env()
         .catalog_reader()
         .read_guard()
         .get_database_by_name(&session.database())
-        .map(|db| db.id() as u32)
+        .map(|db| db.id().as_raw_id())
         .ok();
-
-    let details_json = match details {
-        Value::Null => None,
-        other => match serde_json::to_string(&other) {
-            Ok(payload) => Some(payload),
-            Err(err) => {
-                tracing::warn!(error = %err, "failed to serialize audit log details");
-                None
-            }
-        },
-    };
-
-    let req = AddAuditLogRequest {
-        user_name: session.user_name().to_owned(),
-        action: action.to_owned(),
-        object_type: object_type.map(|value| value.to_owned()),
-        object_id,
-        object_name,
-        database_id,
-        details_json,
-    };
-
-    if let Err(err) = session.env().meta_client().add_audit_log(req).await {
-        tracing::warn!(error = %err, "failed to write audit log");
-    }
+    let ctx = AuditContext::new(session.user_name(), database_id);
+    audit::with_audit_context(ctx, fut).await
 }

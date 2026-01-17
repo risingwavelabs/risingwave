@@ -19,6 +19,8 @@ use futures::Future;
 use tonic::body::BoxBody;
 use tower::{Layer, Service};
 
+use crate::manager::MetaSrvEnv;
+use crate::rpc::audit_log::{extract_audit_context, should_audit_path, write_audit_log};
 use crate::rpc::metrics::MetaMetrics;
 
 #[derive(Clone)]
@@ -29,6 +31,69 @@ pub struct MetricsMiddlewareLayer {
 impl MetricsMiddlewareLayer {
     pub fn new(metrics: Arc<MetaMetrics>) -> Self {
         Self { metrics }
+    }
+}
+
+#[derive(Clone)]
+pub struct AuditLogLayer {
+    env: MetaSrvEnv,
+}
+
+impl AuditLogLayer {
+    pub fn new(env: MetaSrvEnv) -> Self {
+        Self { env }
+    }
+}
+
+impl<S> Layer<S> for AuditLogLayer {
+    type Service = AuditLogMiddleware<S>;
+
+    fn layer(&self, service: S) -> Self::Service {
+        AuditLogMiddleware {
+            inner: service,
+            env: self.env.clone(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct AuditLogMiddleware<S> {
+    inner: S,
+    env: MetaSrvEnv,
+}
+
+impl<S> Service<http::Request<BoxBody>> for AuditLogMiddleware<S>
+where
+    S: Service<http::Request<BoxBody>> + Clone + Send + 'static,
+    S::Future: Send + 'static,
+{
+    type Error = S::Error;
+    type Response = S::Response;
+
+    type Future = impl Future<Output = Result<Self::Response, Self::Error>>;
+
+    fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
+        self.inner.poll_ready(cx)
+    }
+
+    fn call(&mut self, req: http::Request<BoxBody>) -> Self::Future {
+        let clone = self.inner.clone();
+        let mut inner = std::mem::replace(&mut self.inner, clone);
+        let env = self.env.clone();
+
+        async move {
+            let path = req.uri().path().to_owned();
+            let audit_context = if should_audit_path(&path) {
+                extract_audit_context(req.headers())
+            } else {
+                None
+            };
+            let response = inner.call(req).await?;
+            if let Some(ctx) = audit_context {
+                write_audit_log(&env, ctx, &path).await;
+            }
+            Ok(response)
+        }
     }
 }
 
