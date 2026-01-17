@@ -238,6 +238,7 @@ pub fn init_risingwave_logger(settings: LoggerSettings) {
             .with_target("cranelift", Level::INFO)
             .with_target("wasmtime", Level::INFO)
             .with_target("sqlx", Level::WARN)
+            .with_target("sqlx::query", Level::WARN)
             .with_target("opendal", Level::INFO)
             .with_target("reqsign", Level::INFO)
             .with_target("jni", Level::INFO)
