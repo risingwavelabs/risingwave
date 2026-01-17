@@ -638,6 +638,11 @@ IcebergConfig:
     comments: The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     required: false
     default: 'IcebergWriteMode :: MergeOnRead'
+  - name: format_version
+    field_type: u8
+    comments: Iceberg format version for table creation.
+    required: false
+    default: '2'
   - name: snapshot_expiration_max_age_millis
     field_type: i64
     comments: |-

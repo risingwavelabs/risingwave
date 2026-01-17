@@ -74,6 +74,9 @@ impl FallibleRule<Logical> for SourceToIcebergScanRule {
                     delete_parameters.snapshot_id,
                 )
                 .into();
+                if delete_parameters.format_version >= 3 {
+                    return ApplyResult::Ok(data_iceberg_scan);
+                }
                 if !delete_parameters.equality_delete_columns.is_empty() {
                     data_iceberg_scan = build_equality_delete_hashjoin_scan(
                         source,
