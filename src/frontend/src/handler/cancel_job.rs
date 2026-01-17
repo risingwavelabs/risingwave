@@ -53,6 +53,7 @@ pub(super) async fn handle_cancel(
     let rows = canceled_jobs
         .into_iter()
         .map(|id| CancelRow { id: id.to_string() });
+
     Ok(PgResponse::builder(StatementType::CANCEL_COMMAND)
         .rows(rows)
         .into())

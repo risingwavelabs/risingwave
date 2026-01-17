@@ -66,6 +66,7 @@ pub mod alter_table_props;
 mod alter_table_with_sr;
 pub mod alter_user;
 mod alter_utils;
+mod audit_log;
 pub mod cancel_job;
 pub mod close_cursor;
 mod comment;
@@ -276,7 +277,9 @@ pub async fn handle(
 
     check_ban_ddl_for_iceberg_engine_table(handler_args.session.clone(), &stmt)?;
 
-    match stmt {
+    let session = handler_args.session.clone();
+    let fut = async move {
+        match stmt {
         Statement::Explain {
             statement,
             analyze,
@@ -1436,7 +1439,10 @@ pub async fn handle(
             refresh::handle_refresh(handler_args, table_name).await
         }
         _ => bail_not_implemented!("Unhandled statement: {}", stmt),
-    }
+        }
+    };
+    let fut = Box::pin(fut);
+    audit_log::with_audit_context(&session, fut).await
 }
 
 fn check_ban_ddl_for_iceberg_engine_table(

@@ -37,7 +37,7 @@ pub async fn handle_alter_table_connector_props(
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let source_id = {
+    let (source_id, _table_id) = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
@@ -66,7 +66,7 @@ pub async fn handle_alter_table_connector_props(
             associate_source_id
         );
 
-        associate_source_id
+        (associate_source_id, table.id)
     };
 
     handle_alter_source_props_inner(&session, alter_props, source_id).await?;

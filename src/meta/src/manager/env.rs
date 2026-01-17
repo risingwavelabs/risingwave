@@ -220,6 +220,10 @@ pub struct MetaOpts {
 
     pub event_log_enabled: bool,
     pub event_log_channel_max_size: u32,
+    /// Retention of audit log rows in days. Set 0 to disable cleanup.
+    pub audit_log_retention_days: u32,
+    /// Interval of running audit log cleanup task.
+    pub audit_log_cleanup_interval_sec: u64,
     pub advertise_addr: String,
     /// The number of traces to be cached in-memory by the tracing collector
     /// embedded in the meta node.
@@ -353,6 +357,8 @@ impl MetaOpts {
             hybrid_partition_node_count: 4,
             event_log_enabled: false,
             event_log_channel_max_size: 1,
+            audit_log_retention_days: 30,
+            audit_log_cleanup_interval_sec: 3600,
             advertise_addr: "".to_owned(),
             cached_traces_num: 1,
             cached_traces_memory_limit_bytes: usize::MAX,

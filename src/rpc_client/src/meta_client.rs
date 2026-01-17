@@ -75,13 +75,13 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::*;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::Register as IcebergRegister;
 use risingwave_pb::iceberg_compaction::{
-    SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
-    subscribe_iceberg_compaction_event_request,
+    SubscribeIcebergCompactionEventRequest, subscribe_iceberg_compaction_event_request,
 };
 use risingwave_pb::id::{ActorId, FragmentId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
+use risingwave_pb::meta::audit_log_service_client::AuditLogServiceClient;
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::cluster_service_client::ClusterServiceClient;
 use risingwave_pb::meta::event_log_service_client::EventLogServiceClient;
@@ -131,7 +131,7 @@ use crate::hummock_meta_client::{
     CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
     IcebergCompactionEventItem,
 };
-use crate::meta_rpc_client_method_impl;
+use crate::{audit, meta_rpc_client_method_impl};
 
 /// Client to meta server. Cloning the instance is lightweight.
 #[derive(Clone, Debug)]
@@ -1708,6 +1708,17 @@ impl MetaClient {
         Ok(resp.event_logs)
     }
 
+    pub async fn list_audit_log(&self) -> Result<Vec<AuditLog>> {
+        let req = ListAuditLogRequest::default();
+        let resp = self.inner.list_audit_log(req).await?;
+        Ok(resp.audit_logs)
+    }
+
+    pub async fn add_audit_log(&self, req: AddAuditLogRequest) -> Result<()> {
+        self.inner.add_audit_log(req).await?;
+        Ok(())
+    }
+
     pub async fn list_compact_task_progress(&self) -> Result<Vec<CompactTaskProgress>> {
         let req = ListCompactTaskProgressRequest {};
         let resp = self.inner.list_compact_task_progress(req).await?;
@@ -2013,12 +2024,14 @@ impl HummockMetaClient for MetaClient {
             })
             .context("Failed to subscribe compaction event")?;
 
-        let stream = self
-            .inner
-            .subscribe_compaction_event(Request::new(UnboundedReceiverStream::new(
-                request_receiver,
-            )))
-            .await?;
+        let mut request = Request::new(UnboundedReceiverStream::new(request_receiver));
+        audit::inject_audit_metadata(request.metadata_mut());
+        let mut client = self.inner.core.read().await.hummock_client.clone();
+        let stream = client
+            .subscribe_compaction_event(request)
+            .await
+            .map_err(RpcError::from_meta_status)?
+            .into_inner();
 
         Ok((request_sender, Box::pin(stream)))
     }
@@ -2053,12 +2066,14 @@ impl HummockMetaClient for MetaClient {
             })
             .context("Failed to subscribe compaction event")?;
 
-        let stream = self
-            .inner
-            .subscribe_iceberg_compaction_event(Request::new(UnboundedReceiverStream::new(
-                request_receiver,
-            )))
-            .await?;
+        let mut request = Request::new(UnboundedReceiverStream::new(request_receiver));
+        audit::inject_audit_metadata(request.metadata_mut());
+        let mut client = self.inner.core.read().await.hummock_client.clone();
+        let stream = client
+            .subscribe_iceberg_compaction_event(request)
+            .await
+            .map_err(RpcError::from_meta_status)?
+            .into_inner();
 
         Ok((request_sender, Box::pin(stream)))
     }
@@ -2078,7 +2093,7 @@ impl TelemetryInfoFetcher for MetaClient {
 
 pub type SinkCoordinationRpcClient = SinkCoordinationServiceClient<Channel>;
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct GrpcMetaClientCore {
     cluster_client: ClusterServiceClient<Channel>,
     meta_member_client: MetaMemberServiceClient<Channel>,
@@ -2097,6 +2112,7 @@ struct GrpcMetaClientCore {
     cloud_client: CloudServiceClient<Channel>,
     sink_coordinate_client: SinkCoordinationRpcClient,
     event_log_client: EventLogServiceClient<Channel>,
+    audit_log_client: AuditLogServiceClient<Channel>,
     cluster_limit_client: ClusterLimitServiceClient<Channel>,
     hosted_iceberg_catalog_service_client: HostedIcebergCatalogServiceClient<Channel>,
     monitor_client: MonitorServiceClient<Channel>,
@@ -2128,6 +2144,7 @@ impl GrpcMetaClientCore {
         let sink_coordinate_client = SinkCoordinationServiceClient::new(channel.clone())
             .max_decoding_message_size(usize::MAX);
         let event_log_client = EventLogServiceClient::new(channel.clone());
+        let audit_log_client = AuditLogServiceClient::new(channel.clone());
         let cluster_limit_client = ClusterLimitServiceClient::new(channel.clone());
         let hosted_iceberg_catalog_service_client =
             HostedIcebergCatalogServiceClient::new(channel.clone());
@@ -2151,6 +2168,7 @@ impl GrpcMetaClientCore {
             cloud_client,
             sink_coordinate_client,
             event_log_client,
+            audit_log_client,
             cluster_limit_client,
             hosted_iceberg_catalog_service_client,
             monitor_client,
@@ -2584,8 +2602,6 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, rise_ctl_list_compaction_status, RiseCtlListCompactionStatusRequest, RiseCtlListCompactionStatusResponse }
             ,{ hummock_client, get_compaction_score, GetCompactionScoreRequest, GetCompactionScoreResponse }
             ,{ hummock_client, rise_ctl_rebuild_table_stats, RiseCtlRebuildTableStatsRequest, RiseCtlRebuildTableStatsResponse }
-            ,{ hummock_client, subscribe_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeCompactionEventRequest>, Streaming<SubscribeCompactionEventResponse> }
-            ,{ hummock_client, subscribe_iceberg_compaction_event, impl tonic::IntoStreamingRequest<Message = SubscribeIcebergCompactionEventRequest>, Streaming<SubscribeIcebergCompactionEventResponse> }
             ,{ hummock_client, list_branched_object, ListBranchedObjectRequest, ListBranchedObjectResponse }
             ,{ hummock_client, list_active_write_limit, ListActiveWriteLimitRequest, ListActiveWriteLimitResponse }
             ,{ hummock_client, list_hummock_meta_config, ListHummockMetaConfigRequest, ListHummockMetaConfigResponse }
@@ -2616,6 +2632,8 @@ macro_rules! for_all_meta_rpc {
             ,{ cloud_client, rw_cloud_validate_source, RwCloudValidateSourceRequest, RwCloudValidateSourceResponse }
             ,{ event_log_client, list_event_log, ListEventLogRequest, ListEventLogResponse }
             ,{ event_log_client, add_event_log, AddEventLogRequest, AddEventLogResponse }
+            ,{ audit_log_client, list_audit_log, ListAuditLogRequest, ListAuditLogResponse }
+            ,{ audit_log_client, add_audit_log, AddAuditLogRequest, AddAuditLogResponse }
             ,{ cluster_limit_client, get_cluster_limits, GetClusterLimitsRequest, GetClusterLimitsResponse }
             ,{ hosted_iceberg_catalog_service_client, list_iceberg_tables, ListIcebergTablesRequest, ListIcebergTablesResponse }
             ,{ monitor_client, stack_trace, StackTraceRequest, StackTraceResponse }

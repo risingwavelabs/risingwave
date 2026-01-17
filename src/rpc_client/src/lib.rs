@@ -15,6 +15,7 @@
 //! Wrapper gRPC clients, which help constructing the request and destructing the
 //! response gRPC message structs.
 
+#![recursion_limit = "256"]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
@@ -61,6 +62,7 @@ use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
 };
 
+pub mod audit;
 pub mod error;
 
 mod channel;
@@ -192,20 +194,40 @@ macro_rules! stream_rpc_client_method_impl {
 
 #[macro_export]
 macro_rules! meta_rpc_client_method_impl {
-    ($( { $client:tt, $fn_name:ident, $req:ty, $resp:ty }),*) => {
-        $(
-            pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
-                let mut client = self.core.read().await.$client.to_owned();
-                match client.$fn_name(request).await {
-                    Ok(resp) => Ok(resp.into_inner()),
-                    Err(e) => {
-                        self.refresh_client_if_needed(e.code()).await;
-                        Err($crate::error::RpcError::from_meta_status(e))
-                    }
+    () => {};
+    ({ $client:tt, $fn_name:ident, impl $($req:tt)+, $resp:ty } $(, $rest:tt)*) => {
+        pub async fn $fn_name(
+            &self,
+            request: impl $($req)+,
+        ) -> $crate::Result<$resp> {
+            let mut client = self.core.read().await.$client.to_owned();
+            let mut request = tonic::IntoStreamingRequest::into_streaming_request(request);
+            $crate::audit::inject_audit_metadata(request.metadata_mut());
+            match client.$fn_name(request).await {
+                Ok(resp) => Ok(resp.into_inner()),
+                Err(e) => {
+                    self.refresh_client_if_needed(e.code()).await;
+                    Err($crate::error::RpcError::from_meta_status(e))
                 }
             }
-        )*
-    }
+        }
+        $crate::meta_rpc_client_method_impl! { $($rest),* }
+    };
+    ({ $client:tt, $fn_name:ident, $req:ty, $resp:ty } $(, $rest:tt)*) => {
+        pub async fn $fn_name(&self, request: $req) -> $crate::Result<$resp> {
+            let mut client = self.core.read().await.$client.to_owned();
+            let mut request = tonic::Request::new(request);
+            $crate::audit::inject_audit_metadata(request.metadata_mut());
+            match client.$fn_name(request).await {
+                Ok(resp) => Ok(resp.into_inner()),
+                Err(e) => {
+                    self.refresh_client_if_needed(e.code()).await;
+                    Err($crate::error::RpcError::from_meta_status(e))
+                }
+            }
+        }
+        $crate::meta_rpc_client_method_impl! { $($rest),* }
+    };
 }
 
 pub const DEFAULT_BUFFER_SIZE: usize = 16;

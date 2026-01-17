@@ -28,11 +28,12 @@ pub(super) async fn handle_kill(handler_args: HandlerArgs, s: String) -> Result<
     let env = handler_args.session.env();
     let this_worker_id = env.meta_client_ref().worker_id();
     if this_worker_id == worker_process_id.worker_id {
-        return handle_kill_local(
+        let resp = handle_kill_local(
             handler_args.session.env().sessions_map().clone(),
             worker_process_id.process_id,
         )
-        .await;
+        .await?;
+        return Ok(resp);
     }
     let Some(worker) = handler_args
         .session

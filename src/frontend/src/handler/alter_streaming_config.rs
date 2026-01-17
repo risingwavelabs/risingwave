@@ -71,6 +71,7 @@ pub async fn handle_alter_streaming_set_config(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
 
+    let _obj_name_string = obj_name.to_string();
     let job_id = resolve_streaming_job_id_for_alter(&session, obj_name, stmt_type, "config")?;
     let map_diff = collect_options(entries)?;
 

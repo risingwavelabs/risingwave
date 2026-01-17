@@ -30,7 +30,7 @@ pub async fn handle_vacuum(
     let session = &handler_args.session;
     let db_name = &session.database();
 
-    let sink_id = {
+    let (sink_id, _target_kind, _target_name) = {
         let (schema_name, real_object_name) =
             Binder::resolve_schema_qualified_name(db_name, &object_name)?;
         let catalog_reader = session.env().catalog_reader().read_guard();
@@ -66,7 +66,7 @@ pub async fn handle_vacuum(
                         ))
                     })?;
 
-                sink.id
+                (sink.id, "TABLE", real_object_name.clone())
             } else {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "VACUUM can only be used on Iceberg engine tables or Iceberg sinks, but table '{}' uses {:?} engine",
@@ -80,7 +80,7 @@ pub async fn handle_vacuum(
         {
             if let Some(connector_type) = sink.properties.get(CONNECTOR_TYPE_KEY) {
                 if connector_type == "iceberg" {
-                    sink.id
+                    (sink.id, "SINK", real_object_name.clone())
                 } else {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "VACUUM can only be used on Iceberg sinks, but sink '{}' is of type '{}'",
@@ -120,5 +120,6 @@ pub async fn handle_vacuum(
             .expire_iceberg_table_snapshots(sink_id)
             .await?;
     }
+
     Ok(PgResponse::builder(StatementType::VACUUM).into())
 }

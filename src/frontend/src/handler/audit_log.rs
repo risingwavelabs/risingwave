@@ -1,4 +1,4 @@
-// Copyright 2022 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod audit_log;
-pub mod await_tree;
-pub mod ddl_controller;
-pub mod election;
-pub mod intercept;
-pub mod metrics;
+use std::future::Future;
 
-pub type ElectionClientRef = std::sync::Arc<dyn ElectionClient>;
+use risingwave_rpc_client::audit::{self, AuditContext};
 
-pub use election::{ElectionClient, ElectionMember};
+use crate::session::SessionImpl;
+
+pub async fn with_audit_context<T>(session: &SessionImpl, fut: impl Future<Output = T>) -> T {
+    let database_id = session
+        .env()
+        .catalog_reader()
+        .read_guard()
+        .get_database_by_name(&session.database())
+        .map(|db| db.id().as_raw_id())
+        .ok();
+    let ctx = AuditContext::new(session.user_name(), database_id);
+    audit::with_audit_context(ctx, fut).await
+}
