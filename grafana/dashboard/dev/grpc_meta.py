@@ -32,7 +32,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "gRPC Meta",
+            "[Meta] gRPC Meta",
             [
                 panels.subheader("Catalog Service"),
                 grpc_metrics_target(
