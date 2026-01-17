@@ -17,6 +17,7 @@ use risingwave_common_proc_macro::serde_prefix_all;
 use super::*;
 
 /// The section `[batch]` in `risingwave.toml`.
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct BatchConfig {
     /// The thread number of the batch task runtime in the compute node. The default value is
@@ -25,7 +26,7 @@ pub struct BatchConfig {
     pub worker_threads_num: Option<usize>,
 
     #[serde(default)]
-    #[config_doc(omitted)]
+    #[config_doc(nested)]
     pub developer: BatchDeveloperConfig,
 
     /// This is the max number of queries per sql session.
@@ -69,6 +70,7 @@ pub struct BatchConfig {
 ///
 /// It is put at [`BatchConfig::developer`].
 #[serde_prefix_all("batch_", mode = "alias")]
+#[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct BatchDeveloperConfig {
     /// The capacity of the chunks in the channel that connects between `ConnectorSource` and
