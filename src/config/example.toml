@@ -179,7 +179,7 @@ auth_method = "password"
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
-unsafe_enable_strict_consistency = true
+unsafe_disable_strict_consistency = false
 
 [streaming.developer]
 enable_executor_row_count = false
@@ -216,6 +216,7 @@ iceberg_list_interval_sec = 10
 iceberg_fetch_batch_size = 1024
 iceberg_sink_positional_delete_cache_size = 1024
 iceberg_sink_write_parquet_max_row_group_rows = 100000
+materialize_force_overwrite_on_no_check = false
 default_enable_mem_preload_state_table = false
 mem_preload_state_table_ids_whitelist = []
 mem_preload_state_table_ids_blacklist = []

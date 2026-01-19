@@ -16,8 +16,8 @@
 //!
 //! <https://www.postgresql.org/docs/current/functions-string.html>
 
-use risingwave_common::util::quote_ident::QuoteIdent;
 use risingwave_expr::function;
+use risingwave_sqlparser::ast::QuoteIdent;
 
 /// Returns the character with the specified Unicode code point.
 ///
@@ -329,8 +329,8 @@ pub fn to_hex_i64(n: i64, writer: &mut impl std::fmt::Write) {
 }
 
 /// Returns the given string suitably quoted to be used as an identifier in an SQL statement string.
-/// Quotes are added only if necessary (i.e., if the string contains non-identifier characters or
-/// would be case-folded). Embedded quotes are properly doubled.
+/// Quotes are added only if necessary (i.e., if the string contains non-identifier characters,
+/// would be case-folded, or is a SQL keyword). Embedded quotes are properly doubled.
 ///
 /// Refer to <https://github.com/postgres/postgres/blob/90189eefc1e11822794e3386d9bafafd3ba3a6e8/src/backend/utils/adt/ruleutils.c#L11506>
 ///
@@ -357,11 +357,10 @@ pub fn to_hex_i64(n: i64, writer: &mut impl std::fmt::Write) {
 /// ----
 /// "foo""bar"
 ///
-/// # FIXME: quote SQL keywords is not supported yet
 /// query T
 /// select quote_ident('select')
 /// ----
-/// select
+/// "select"
 /// ```
 #[function("quote_ident(varchar) -> varchar")]
 pub fn quote_ident(s: &str, writer: &mut impl std::fmt::Write) {

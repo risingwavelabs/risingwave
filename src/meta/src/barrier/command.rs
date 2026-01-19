@@ -60,7 +60,7 @@ use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::rpc::ControlStreamManager;
+use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::utils::collect_resp_info;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
@@ -220,6 +220,7 @@ pub struct CreateStreamingJobCommandInfo {
     pub fragment_backfill_ordering: FragmentBackfillOrder,
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
+    pub is_serverless: bool,
 }
 
 impl StreamJobFragments {
@@ -861,6 +862,7 @@ impl Command {
         control_stream_manager: &ControlStreamManager,
         database_info: &mut InflightDatabaseInfo,
     ) -> MetaResult<Option<Mutation>> {
+        let database_id = database_info.database_id;
         let mutation = match self {
             Command::Flush => None,
 
@@ -978,6 +980,7 @@ impl Command {
                                 actors.into_iter().map(|(actor, worker_id)| PbActorInfo {
                                     actor_id: actor.actor_id,
                                     host: Some(control_stream_manager.host_addr(worker_id)),
+                                    partial_graph_id: to_partial_graph_id(database_id, None),
                                 })
                             })
                             .unwrap_or_else(|_| panic!("should have exactly one sink actor"));
@@ -1174,6 +1177,11 @@ impl Command {
                                                 actors.iter().map(move |&actor_id| PbActorInfo {
                                                     actor_id,
                                                     host: Some(host.clone()),
+                                                    // we assume that we only scale the partial graph of database
+                                                    partial_graph_id: to_partial_graph_id(
+                                                        database_id,
+                                                        None,
+                                                    ),
                                                 })
                                             })
                                             .collect(),
@@ -1344,7 +1352,8 @@ impl Command {
                 fragment_actors,
                 ..
             } => {
-                let mut actor_upstreams = Self::collect_actor_upstreams(
+                // we assume that we only scale the actors in database partial graph
+                let mut actor_upstreams = Self::collect_database_partial_graph_actor_upstreams(
                     reschedules.iter().map(|(fragment_id, reschedule)| {
                         (
                             *fragment_id,
@@ -1508,7 +1517,7 @@ impl Command {
 
 impl Command {
     #[expect(clippy::type_complexity)]
-    pub(super) fn collect_actor_upstreams(
+    pub(super) fn collect_database_partial_graph_actor_upstreams(
         actor_dispatchers: impl Iterator<
             Item = (FragmentId, impl Iterator<Item = (ActorId, &[Dispatcher])>),
         >,
@@ -1540,6 +1549,10 @@ impl Command {
                             PbActorInfo {
                                 actor_id: upstream_actor_id,
                                 host: Some(upstream_actor_host.clone()),
+                                partial_graph_id: to_partial_graph_id(
+                                    database_info.database_id,
+                                    None,
+                                ),
                             },
                         );
                 }
@@ -1583,6 +1596,10 @@ impl Command {
                                     PbActorInfo {
                                         actor_id: *upstream_actor_id,
                                         host: Some(upstream_actor_host.clone()),
+                                        partial_graph_id: to_partial_graph_id(
+                                            database_info.database_id,
+                                            None,
+                                        ),
                                     },
                                 );
                         }

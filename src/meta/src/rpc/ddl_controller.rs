@@ -54,7 +54,7 @@ use risingwave_pb::common::PbActorLocation;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::{
     DdlProgress, TableJobType, WaitVersion, alter_name_request, alter_set_schema_request,
-    alter_swap_rename_request,
+    alter_swap_rename_request, streaming_job_resource_type,
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -164,7 +164,7 @@ pub enum DdlCommand {
         stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>, // specific resource group
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     },
     DropStreamingJob {
@@ -412,14 +412,14 @@ impl DdlController {
                     stream_job,
                     fragment_graph,
                     dependencies,
-                    specific_resource_group,
+                    resource_type,
                     if_not_exists,
                 } => {
                     ctrl.create_streaming_job(
                         stream_job,
                         fragment_graph,
                         dependencies,
-                        specific_resource_group,
+                        resource_type,
                         if_not_exists,
                     )
                     .await
@@ -939,7 +939,7 @@ impl DdlController {
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
         dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> MetaResult<NotificationVersion> {
         if let StreamingJob::Sink(sink) = &streaming_job
@@ -948,6 +948,7 @@ impl DdlController {
             self.validate_table_for_sink(target_table).await?;
         }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
+        let specific_resource_group = resource_type.resource_group();
         let check_ret = self
             .metadata_manager
             .catalog_controller
@@ -957,7 +958,7 @@ impl DdlController {
                 &fragment_graph.parallelism,
                 fragment_graph.max_parallelism as _,
                 dependencies,
-                specific_resource_group.clone(),
+                specific_resource_group,
                 &fragment_graph.backfill_parallelism,
             )
             .await;
@@ -1006,13 +1007,7 @@ impl DdlController {
 
         // create streaming job.
         match self
-            .create_streaming_job_inner(
-                ctx,
-                streaming_job,
-                fragment_graph,
-                specific_resource_group,
-                permit,
-            )
+            .create_streaming_job_inner(ctx, streaming_job, fragment_graph, resource_type, permit)
             .await
         {
             Ok(version) => Ok(version),
@@ -1054,7 +1049,7 @@ impl DdlController {
         ctx: StreamContext,
         mut streaming_job: StreamingJob,
         fragment_graph: StreamFragmentGraphProto,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         permit: OwnedSemaphorePermit,
     ) -> MetaResult<NotificationVersion> {
         let mut fragment_graph =
@@ -1076,7 +1071,7 @@ impl DdlController {
         // create fragment and actor catalogs.
         tracing::debug!(id = %streaming_job.id(), "building streaming job");
         let (ctx, stream_job_fragments) = self
-            .build_stream_job(ctx, streaming_job, fragment_graph, specific_resource_group)
+            .build_stream_job(ctx, streaming_job, fragment_graph, resource_type)
             .await?;
 
         let streaming_job = &ctx.streaming_job;
@@ -1695,7 +1690,7 @@ impl DdlController {
         stream_ctx: StreamContext,
         mut stream_job: StreamingJob,
         fragment_graph: StreamFragmentGraph,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
     ) -> MetaResult<(CreateStreamingJobContext, StreamJobFragmentsToCreate)> {
         let id = stream_job.id();
         let specified_parallelism = fragment_graph.specified_parallelism();
@@ -1777,14 +1772,17 @@ impl DdlController {
             },
             (&stream_job).into(),
         )?;
-        let resource_group = match specific_resource_group {
-            None => {
-                self.metadata_manager
-                    .get_database_resource_group(stream_job.database_id())
-                    .await?
-            }
-            Some(resource_group) => resource_group,
+        let resource_group = if let Some(group) = resource_type.resource_group() {
+            group
+        } else {
+            self.metadata_manager
+                .get_database_resource_group(stream_job.database_id())
+                .await?
         };
+        let is_serverless_backfill = matches!(
+            &resource_type,
+            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
+        );
 
         // 3. Build the actor graph.
         let cluster_info = self.metadata_manager.get_streaming_cluster_info().await?;
@@ -1914,6 +1912,7 @@ impl DdlController {
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
+            is_serverless_backfill,
         };
 
         Ok((

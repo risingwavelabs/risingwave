@@ -105,6 +105,8 @@ pub struct CreateStreamingJobContext {
     pub fragment_backfill_ordering: FragmentBackfillOrder,
 
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
+
+    pub is_serverless_backfill: bool,
 }
 
 struct StreamingJobExecution {
@@ -409,6 +411,7 @@ impl GlobalStreamManager {
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
             cdc_table_snapshot_splits,
+            is_serverless_backfill,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -447,6 +450,7 @@ impl GlobalStreamManager {
             fragment_backfill_ordering,
             cdc_table_snapshot_splits,
             locality_fragment_state_table_mapping,
+            is_serverless: is_serverless_backfill,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
@@ -665,16 +669,15 @@ impl GlobalStreamManager {
             .await?;
 
         if !background_jobs.is_empty() {
-            let related_jobs = self
-                .scale_controller
-                .resolve_related_no_shuffle_jobs(&background_jobs)
+            let unreschedulable = self
+                .metadata_manager
+                .collect_unreschedulable_backfill_jobs(&background_jobs)
                 .await?;
 
-            if related_jobs.contains(&job_id) {
+            if unreschedulable.contains(&job_id) {
                 bail!(
-                    "Cannot alter the job {} because the related job {:?} is currently being created",
+                    "Cannot alter the job {} because it is a non-reschedulable background backfill job",
                     job_id,
-                    background_jobs,
                 );
             }
         }

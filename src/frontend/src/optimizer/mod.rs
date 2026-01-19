@@ -32,7 +32,7 @@ mod plan_rewriter;
 mod plan_visitor;
 
 #[cfg(feature = "datafusion")]
-pub use plan_visitor::DatafusionExecuteCheckerExt;
+pub use plan_visitor::DataFusionExecuteCheckerExt;
 pub use plan_visitor::{
     ExecutionModeDecider, PlanVisitor, RelationCollectorVisitor, SysTableVisitor,
 };
