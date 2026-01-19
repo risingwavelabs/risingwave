@@ -453,7 +453,9 @@ impl CacheRefiller {
                 let vnodes = read_version.read().vnodes();
                 table_cache_refill_vnodes
                     .streaming
-                    .insert(table_id, vnodes.as_ref().clone());
+                    .entry(table_id)
+                    .and_modify(|bitmap| *bitmap |= vnodes.as_ref())
+                    .or_insert_with(|| vnodes.as_ref().clone());
             }
         }
 
