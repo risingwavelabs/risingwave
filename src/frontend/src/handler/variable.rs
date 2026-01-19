@@ -49,17 +49,14 @@ pub fn handle_set(
 
     // Check connection existence for iceberg_engine_connection
     let param_name = name.real_value().to_lowercase();
-    if param_name.eq_ignore_ascii_case("iceberg_engine_connection") {
-        if let Some(val) = string_val.as_deref() {
-            if !val.is_empty() {
-                if let Some((schema_name, connection_name)) = val.split_once('.') {
+    if param_name.eq_ignore_ascii_case("iceberg_engine_connection")
+        && let Some(val) = string_val.as_deref()
+            && !val.is_empty()
+                && let Some((schema_name, connection_name)) = val.split_once('.') {
                     handler_args
                         .session
                         .get_connection_by_name(Some(schema_name.to_owned()), connection_name)?;
                 }
-            }
-        }
-    }
 
     let mut status = ParameterStatus::default();
 
