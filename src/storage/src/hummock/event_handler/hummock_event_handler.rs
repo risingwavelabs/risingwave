@@ -999,6 +999,8 @@ mod tests {
             table_ids: HashSet::from_iter([TEST_TABLE_ID]),
         });
 
+        read_version.write().init();
+
         send_event(HummockEvent::InitEpoch {
             instance_id: guard.instance_id,
             init_epoch: epoch1,
@@ -1209,6 +1211,7 @@ mod tests {
         let (task1_1_finish_tx, task1_1_rx) = {
             start_epoch(table_id1, epoch1);
 
+            read_version1.write().init();
             init_epoch(&guard1, epoch1);
 
             write_imm(&read_version1, &guard1, &imm1_1);
@@ -1239,6 +1242,7 @@ mod tests {
             let mut finish_txs = vec![];
             let imm2_1_1 = gen_imm(table_id2, epoch1, 0);
             start_epoch(table_id2, epoch1);
+            read_version2.write().init();
             init_epoch(&guard2, epoch1);
             let (wait_task_start, task1_2_finish_tx) = new_task_notifier(HashMap::from_iter([(
                 guard1.instance_id,

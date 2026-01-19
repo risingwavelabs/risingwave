@@ -378,10 +378,15 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
                     yield Message::Barrier(barrier);
 
-                    if let Some((_, cache_may_stale)) =
-                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
-                        && cache_may_stale
+                    if post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?
+                        .is_some()
                     {
+                        // `SortBuffer` may output data directly from its in-memory cache without
+                        // checking current vnode ownership. Therefore, we must rebuild the cache
+                        // whenever the vnode bitmap is updated to avoid emitting rows that no
+                        // longer belong to this actor.
                         vars.buffer.refill_cache(None, &this.buffer_table).await?;
                     }
                 }
