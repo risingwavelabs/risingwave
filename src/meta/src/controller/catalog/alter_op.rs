@@ -12,13 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::str::FromStr;
-
 use anyhow::Context;
 use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_common::catalog::{AlterDatabaseParam, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX};
 use risingwave_common::config::mutate::TomlTableMutateExt as _;
-use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::config::{StreamingConfig, merge_streaming_config_section};
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::{OverrideValidate, Validate};
@@ -1034,7 +1031,8 @@ impl CatalogController {
         let updated_config_override = table.to_string();
 
         // Validate the config override by trying to merge it to the default config.
-        {
+        // And extract fields for other use.
+        let cache_refill_policy = {
             let merged = merge_streaming_config_section(
                 &StreamingConfig::default(),
                 &updated_config_override,
@@ -1044,13 +1042,17 @@ impl CatalogController {
             // Reject unrecognized entries.
             // Note: If these unrecognized entries are pre-existing, we also reject them here.
             // Users are able to fix them by issuing a `RESET` first.
-            if let Some(merged) = merged {
+            if let Some(merged) = &merged {
                 let unrecognized_keys = merged.unrecognized_keys().collect_vec();
                 if !unrecognized_keys.is_empty() {
                     bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
                 }
             }
-        }
+
+            merged
+                .map(|config| config.developer.cache_refill_policy)
+                .unwrap_or_default()
+        };
 
         streaming_job::ActiveModel {
             job_id: Set(job_id),
@@ -1070,13 +1072,6 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        // Notify compute nodes cache refill policy at once.
-        let cache_refill_policy = table
-            .get("cache_refill_policy")
-            .map(|v| {
-                CacheRefillPolicy::from_str(v.as_str().unwrap_or_default()).unwrap_or_default()
-            })
-            .unwrap_or_default();
         let table_refill_policies = PbTableCacheRefillPolicies {
             policies: internal_tables
                 .into_iter()
