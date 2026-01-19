@@ -485,6 +485,8 @@ pub fn start(
                 hybrid_partition_node_count: config.meta.hybrid_partition_vnode_count,
                 event_log_enabled: config.meta.event_log_enabled,
                 event_log_channel_max_size: config.meta.event_log_channel_max_size,
+                audit_log_retention_days: config.meta.audit_log_retention_days,
+                audit_log_cleanup_interval_sec: config.meta.audit_log_cleanup_interval_sec,
                 advertise_addr: opts.advertise_addr,
                 cached_traces_num: config.meta.developer.cached_traces_num,
                 cached_traces_memory_limit_bytes: config

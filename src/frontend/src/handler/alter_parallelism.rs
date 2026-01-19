@@ -70,7 +70,6 @@ pub async fn handle_alter_fragment_parallelism(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let target_parallelism = extract_fragment_parallelism(parallelism)?;
-
     session
         .env()
         .meta_client()

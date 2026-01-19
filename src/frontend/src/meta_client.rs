@@ -41,8 +41,8 @@ use risingwave_pb::meta::list_refresh_table_states_response::RefreshTableState;
 use risingwave_pb::meta::list_streaming_job_states_response::StreamingJobState;
 use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
 use risingwave_pb::meta::{
-    EventLog, FragmentDistribution, PbTableParallelism, PbThrottleTarget, RecoveryStatus,
-    RefreshRequest, RefreshResponse,
+    AddAuditLogRequest, AuditLog, EventLog, FragmentDistribution, PbTableParallelism,
+    PbThrottleTarget, RecoveryStatus, RefreshRequest, RefreshResponse,
 };
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_rpc_client::error::Result;
@@ -122,6 +122,7 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn list_hummock_meta_configs(&self) -> Result<HashMap<String, String>>;
 
     async fn list_event_log(&self) -> Result<Vec<EventLog>>;
+    async fn list_audit_log(&self) -> Result<Vec<AuditLog>>;
     async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>>;
 
     async fn list_all_nodes(&self) -> Result<Vec<WorkerNode>>;
@@ -146,6 +147,8 @@ pub trait FrontendMetaClient: Send + Sync {
     async fn get_cluster_limits(&self) -> Result<Vec<ClusterLimit>>;
 
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>>;
+
+    async fn add_audit_log(&self, req: AddAuditLogRequest) -> Result<()>;
 
     async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>>;
 
@@ -361,6 +364,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.list_event_log().await
     }
 
+    async fn list_audit_log(&self) -> Result<Vec<AuditLog>> {
+        self.0.list_audit_log().await
+    }
+
     async fn list_compact_task_assignment(&self) -> Result<Vec<CompactTaskAssignment>> {
         self.0.list_compact_task_assignment().await
     }
@@ -405,6 +412,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_rate_limits(&self) -> Result<Vec<RateLimitInfo>> {
         self.0.list_rate_limits().await
+    }
+
+    async fn add_audit_log(&self, req: AddAuditLogRequest) -> Result<()> {
+        self.0.add_audit_log(req).await
     }
 
     async fn list_cdc_progress(&self) -> Result<HashMap<JobId, PbCdcProgress>> {

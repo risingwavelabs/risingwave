@@ -75,7 +75,6 @@ pub async fn handle_alter_resource_group(
         .map(resolve_resource_group)
         .transpose()?
         .flatten();
-
     let mut builder = RwPgResponse::builder(stmt_type);
 
     let catalog_writer = session.catalog_writer()?;

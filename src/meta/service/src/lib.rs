@@ -17,6 +17,7 @@
 
 use risingwave_meta::*;
 
+pub mod audit_log_service;
 pub mod backup_service;
 pub mod cloud_service;
 pub mod cluster_limit_service;

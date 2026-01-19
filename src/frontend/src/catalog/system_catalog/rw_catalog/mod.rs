@@ -14,6 +14,7 @@
 
 mod rw_actor_infos;
 mod rw_actors;
+mod rw_audit_logs;
 mod rw_columns;
 mod rw_connections;
 mod rw_databases;

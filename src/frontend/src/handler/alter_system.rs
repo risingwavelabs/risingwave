@@ -34,6 +34,7 @@ pub async fn handle_alter_system(
 
     // Currently session params are separated from system params. If the param exist in session params, we set it. Otherwise
     // we try to set it as a system param.
+    let _value_summary = value.as_ref().map(|_| "SET").unwrap_or("DEFAULT");
     if SessionConfig::contains_param(&param_name) {
         if SessionConfig::check_no_alter_sys(&param_name)? {
             return Err(ErrorCode::InternalError(format!(

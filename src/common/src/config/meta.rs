@@ -296,6 +296,12 @@ pub struct MetaConfig {
     /// Keeps the latest N events per channel.
     #[serde(default = "default::meta::event_log_channel_max_size")]
     pub event_log_channel_max_size: u32,
+    /// Retention of audit log rows in days. Set 0 to disable cleanup.
+    #[serde(default = "default::meta::audit_log_retention_days")]
+    pub audit_log_retention_days: u32,
+    /// Interval of running audit log cleanup task.
+    #[serde(default = "default::meta::audit_log_cleanup_interval_sec")]
+    pub audit_log_cleanup_interval_sec: u64,
 
     #[serde(default)]
     #[config_doc(omitted)]
@@ -693,6 +699,14 @@ pub mod default {
 
         pub fn event_log_channel_max_size() -> u32 {
             10
+        }
+
+        pub fn audit_log_retention_days() -> u32 {
+            30
+        }
+
+        pub fn audit_log_cleanup_interval_sec() -> u64 {
+            3600
         }
 
         pub fn parallelism_control_batch_size() -> usize {

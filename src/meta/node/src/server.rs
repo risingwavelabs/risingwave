@@ -33,10 +33,12 @@ use risingwave_meta::hummock::IcebergCompactorManager;
 use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManager;
 use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
 use risingwave_meta::rpc::ElectionClientRef;
+use risingwave_meta::rpc::audit_log::start_audit_log_cleanup;
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
-use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
+use risingwave_meta::rpc::intercept::{AuditLogLayer, MetricsMiddlewareLayer};
 use risingwave_meta::stream::{GlobalRefreshManager, ScaleController};
 use risingwave_meta_service::AddressInfo;
+use risingwave_meta_service::audit_log_service::AuditLogServiceImpl;
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
 use risingwave_meta_service::cluster_limit_service::ClusterLimitServiceImpl;
@@ -65,6 +67,7 @@ use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
 use risingwave_pb::meta::SystemParams;
+use risingwave_pb::meta::audit_log_service_server::AuditLogServiceServer;
 use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
@@ -616,6 +619,7 @@ pub async fn start_service_as_election_leader(
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
     let cloud_srv = CloudServiceImpl::new();
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
+    let audit_log_srv = AuditLogServiceImpl::new(env.clone());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
     let hosted_iceberg_catalog_srv = HostedIcebergCatalogServiceImpl::new(env.clone());
     let monitor_srv = MonitorServiceImpl {
@@ -718,6 +722,7 @@ pub async fn start_service_as_election_leader(
     if let Some(pair) = env.event_log_manager_ref().take_join_handle() {
         sub_tasks.push(pair);
     }
+    sub_tasks.push(start_audit_log_cleanup(env.clone()));
 
     tracing::info!("Assigned cluster id {:?}", *env.cluster_id());
     tracing::info!("Starting meta services");
@@ -733,6 +738,7 @@ pub async fn start_service_as_election_leader(
 
     let server_builder = tonic::transport::Server::builder()
         .layer(MetricsMiddlewareLayer::new(meta_metrics))
+        .layer(AuditLogLayer::new(env.clone()))
         .layer(TracingExtractLayer::new())
         .add_service(HeartbeatServiceServer::new(heartbeat_srv))
         .add_service(ClusterServiceServer::new(cluster_srv))
@@ -758,6 +764,9 @@ pub async fn start_service_as_election_leader(
         )
         .add_service(
             EventLogServiceServer::new(event_log_srv).max_decoding_message_size(usize::MAX),
+        )
+        .add_service(
+            AuditLogServiceServer::new(audit_log_srv).max_decoding_message_size(usize::MAX),
         )
         .add_service(ClusterLimitServiceServer::new(cluster_limit_srv))
         .add_service(HostedIcebergCatalogServiceServer::new(

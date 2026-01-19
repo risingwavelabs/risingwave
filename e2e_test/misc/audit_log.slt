@@ -1,0 +1,19 @@
+statement ok
+ALTER SYSTEM SET application_name = 'audit_slt';
+
+query T retry 10 backoff 1s
+select exists(
+    select 1
+    from rw_catalog.rw_audit_logs
+    where action = 'ALTER SYSTEM'
+      and object_type = 'SESSION_PARAM'
+      and object_name = 'application_name'
+      and details->>'value' = 'SET'
+    order by event_time desc
+    limit 1
+);
+----
+t
+
+statement ok
+ALTER SYSTEM RESET application_name;
