@@ -37,13 +37,13 @@ use super::{Access, AccessError, AccessResult};
 use crate::parser::DatumCow;
 use crate::schema::{InvalidOptionError, bail_invalid_option_error};
 
-/// Try to parse Debezium PostGIS geometry object.
+/// Try to parse Debezium `PostGIS` `geometry` object.
 ///
-/// Debezium represents PostGIS `geometry` as an object: `{"srid": <int>, "wkb": <base64_string>}`.
+/// Debezium represents `PostGIS` `geometry` as an object: `{"srid": <int>, "wkb": <base64_string>}`.
 /// For our current Postgres CDC ingestion, the `wkb` field is expected to be EWKB bytes (base64-encoded),
 /// and `srid` is redundant. We decode `wkb` into raw bytes and store it as `bytea`.
 ///
-/// Note: Debezium provides an SMT to convert between WKB and EWKB, which may be useful for future
+/// Note: Debezium provides an SMT to convert between `WKB` and `EWKB`, which may be useful for future
 /// unification across connectors (e.g., MySQL): see `GeometryFormatTransformer`.
 fn try_parse_debezium_geometry_as_bytea(
     value: &BorrowedValue<'_>,

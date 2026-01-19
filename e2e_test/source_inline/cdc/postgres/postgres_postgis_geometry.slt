@@ -42,16 +42,24 @@ select id, name, length(location) from test_geo order by id;
 1 Chicago 25
 2 NewYork 25
 
-# Display and assert the full EWKB hex from upstream and RisingWave are identical.
-system ok
-psql -t -A -c "select encode(location, 'hex') from test_geo where id = 1;"
-----
-0101000020e610000055c1a8a44ee855c00e4faf9465f04440
-
+# Compare the full EWKB hex from upstream and RisingWave are identical.
+# Note: `system ok` can't assert stdout, so we use `postgres_query` to query upstream from RisingWave.
 query T retry 3 backoff 1s
-select encode(location, 'hex') from test_geo where id = 1;
+select
+  encode(location, 'hex')
+  =
+  (select * from postgres_query(
+      '${PGHOST:localhost}',
+      '${PGPORT:5432}',
+      '${PGUSER:$USER}',
+      '${PGPASSWORD:}',
+      '${PGDATABASE:postgres}',
+      'select encode(location, ''hex'') from test_geo where id = 1;'
+   ))
+from test_geo
+where id = 1;
 ----
-0101000020e610000055c1a8a44ee855c00e4faf9465f04440
+t
 
 # Test incremental INSERT
 system ok
