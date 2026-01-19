@@ -14,7 +14,6 @@
 
 use core::fmt::Formatter;
 use std::cell::{Cell, RefCell, RefMut};
-use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -23,11 +22,10 @@ use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use super::property::WatermarkGroupId;
 use crate::Explain;
-use crate::binder::ShareId;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::LogicalPlanRef;
-use crate::optimizer::plan_node::{LogicalPlanRef as PlanRef, PlanNodeId};
+use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
 
@@ -56,10 +54,6 @@ pub struct OptimizerContext {
     /// Store the configs can be overwritten in with clause
     /// if not specified, use the value from session variable.
     overwrite_options: OverwriteOptions,
-    /// Store the mapping between `share_id` and the corresponding
-    /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
-    rcte_cache: RefCell<HashMap<ShareId, PlanRef>>,
-
     /// Last assigned plan node ID.
     last_plan_node_id: Cell<i32>,
     /// Last assigned correlated ID.
@@ -105,8 +99,6 @@ impl OptimizerContext {
             session_timezone,
             total_rule_applied: RefCell::new(0),
             overwrite_options,
-            rcte_cache: RefCell::new(HashMap::new()),
-
             last_plan_node_id: Cell::new(RESERVED_ID_NUM.into()),
             last_correlated_id: Cell::new(0),
             last_expr_display_id: Cell::new(RESERVED_ID_NUM.into()),
@@ -131,8 +123,6 @@ impl OptimizerContext {
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
-            rcte_cache: RefCell::new(HashMap::new()),
-
             last_plan_node_id: Cell::new(0),
             last_correlated_id: Cell::new(0),
             last_expr_display_id: Cell::new(0),
@@ -277,14 +267,6 @@ impl OptimizerContext {
 
     pub fn get_session_timezone(&self) -> String {
         self.session_timezone.borrow().timezone()
-    }
-
-    pub fn get_rcte_cache_plan(&self, id: &ShareId) -> Option<PlanRef> {
-        self.rcte_cache.borrow().get(id).cloned()
-    }
-
-    pub fn insert_rcte_cache_plan(&self, id: ShareId, plan: PlanRef) {
-        self.rcte_cache.borrow_mut().insert(id, plan);
     }
 }
 
