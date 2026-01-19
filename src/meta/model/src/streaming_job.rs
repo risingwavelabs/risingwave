@@ -35,6 +35,7 @@ pub struct Model {
     pub backfill_parallelism: Option<StreamingParallelism>,
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,
+    pub is_serverless_backfill: bool,
 }
 
 /// This data structure contains an adjacency list of

@@ -254,15 +254,9 @@ impl GlobalBarrierWorkerContextImpl {
         database_id: Option<DatabaseId>,
     ) -> MetaResult<HashSet<JobId>> {
         let mgr = &self.metadata_manager;
-        let job_info = mgr
-            .catalog_controller
+        mgr.catalog_controller
             .list_background_creating_jobs(false, database_id)
-            .await?;
-
-        Ok(job_info
-            .into_iter()
-            .map(|(job_id, _definition, _init_at)| job_id)
-            .collect())
+            .await
     }
 
     /// Sync render stage: uses loaded context and current workers to produce actor assignments.
