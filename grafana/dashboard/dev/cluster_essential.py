@@ -19,6 +19,7 @@ def _(outer_panels: Panels):
                 ],
                 ["last"],
             ),
+            panels.subheader("Resource Usage (relative)"),
             panels.timeseries_percentage(
                 "Node Memory relative",
                 "Memory usage relative to k8s resource limit of container. Only works in K8s environment",
@@ -37,6 +38,33 @@ def _(outer_panels: Panels):
                     panels.target(
                         '(sum(rate(container_cpu_usage_seconds_total{namespace=~"$namespace",container=~"$component",pod=~"$pod"}[$__rate_interval])) by (namespace, pod)) / (sum(kube_pod_container_resource_limits{namespace=~"$namespace",pod=~"$pod",container=~"$component", resource="cpu"}) by (namespace, pod))',
                         "cpu usage @ {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                    ),
+                ],
+            ),
+            panels.subheader("Resource Usage (absolute)"),
+            panels.timeseries_memory(
+                "Node Memory",
+                "The memory usage of each RisingWave component.",
+                [
+                    panels.target(
+                        f"avg({metric('process_resident_memory_bytes')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                        "{{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                    )
+                ],
+            ),
+            panels.timeseries_cpu(
+                "Node CPU",
+                "The CPU usage of each RisingWave component.",
+                [
+                    panels.target(
+                        f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                        "cpu usage (total) - {{%s}} @ {{%s}}"
+                        % (COMPONENT_LABEL, NODE_LABEL),
+                    ),
+                    panels.target(
+                        f"sum(rate({metric('process_cpu_seconds_total')}[$__rate_interval])) by ({COMPONENT_LABEL}, {NODE_LABEL}) / avg({metric('process_cpu_core_num')}) by ({COMPONENT_LABEL}, {NODE_LABEL}) > 0",
+                        "cpu usage (avg per core) - {{%s}} @ {{%s}}"
+                        % (COMPONENT_LABEL, NODE_LABEL),
                     ),
                 ],
             ),
