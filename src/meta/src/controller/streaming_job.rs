@@ -42,6 +42,7 @@ use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
+use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -113,11 +114,16 @@ impl CatalogController {
         ctx: StreamContext,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
-        specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
+        resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: Option<StreamingParallelism>,
     ) -> MetaResult<JobId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
+        let specific_resource_group = resource_type.resource_group();
+        let is_serverless_backfill = matches!(
+            &resource_type,
+            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
+        );
         let job = streaming_job::ActiveModel {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Initial),
@@ -128,6 +134,7 @@ impl CatalogController {
             backfill_parallelism: Set(backfill_parallelism),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
+            is_serverless_backfill: Set(is_serverless_backfill),
         };
         job.insert(txn).await?;
 
@@ -147,7 +154,7 @@ impl CatalogController {
         parallelism: &Option<Parallelism>,
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: &Option<Parallelism>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
@@ -218,7 +225,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -248,7 +255,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -267,7 +274,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -327,7 +334,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -360,7 +367,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -998,7 +1005,7 @@ impl CatalogController {
             ctx,
             parallelism,
             original_max_parallelism as _,
-            None,
+            streaming_job_resource_type::ResourceType::Regular(true),
             None,
         )
         .await?;

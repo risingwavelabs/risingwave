@@ -106,7 +106,6 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
 
 pub(crate) struct BackfillProgress {
     pub(crate) progress: String,
-    pub(crate) is_serverless: bool,
     pub(crate) backfill_type: PbBackfillType,
 }
 
