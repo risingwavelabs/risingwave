@@ -19,6 +19,7 @@ use sea_orm::prelude::DateTime;
 
 use super::*;
 use crate::controller::fragment::FragmentTypeMaskExt;
+use crate::controller::utils::load_streaming_jobs_by_ids;
 
 impl CatalogController {
     pub async fn list_time_travel_table_ids(&self) -> MetaResult<Vec<TableId>> {
@@ -238,9 +239,18 @@ impl CatalogController {
             .filter(table::Column::TableType.eq(table_type))
             .all(&inner.db)
             .await?;
+        let streaming_jobs = load_streaming_jobs_by_ids(
+            &inner.db,
+            table_objs.iter().map(|(table, _)| table.job_id()),
+        )
+        .await?;
         Ok(table_objs
             .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .map(|(table, obj)| {
+                let job_id = table.job_id();
+                let streaming_job = streaming_jobs.get(&job_id).cloned();
+                ObjectModel(table, obj.unwrap(), streaming_job).into()
+            })
             .collect())
     }
 
@@ -279,7 +289,7 @@ impl CatalogController {
             .await?;
         Ok(conn_objs
             .into_iter()
-            .map(|(conn, obj)| ObjectModel(conn, obj.unwrap()).into())
+            .map(|(conn, obj)| ObjectModel(conn, obj.unwrap(), None).into())
             .collect())
     }
 
@@ -340,10 +350,19 @@ impl CatalogController {
             ))
             .all(&inner.db)
             .await?;
+        let streaming_jobs = load_streaming_jobs_by_ids(
+            &inner.db,
+            table_objs.iter().map(|(table, _)| table.job_id()),
+        )
+        .await?;
 
         Ok(table_objs
             .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .map(|(table, obj)| {
+                let job_id = table.job_id();
+                let streaming_job = streaming_jobs.get(&job_id).cloned();
+                ObjectModel(table, obj.unwrap(), streaming_job).into()
+            })
             .collect())
     }
 
