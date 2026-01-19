@@ -11,7 +11,7 @@ psql -c "
         name varchar,
         location geometry(Point, 4326)
     );
-    INSERT INTO test_geo VALUES 
+    INSERT INTO test_geo VALUES
         (1, 'Chicago', ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326)),
         (2, 'NewYork', ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326));
 "
@@ -45,8 +45,9 @@ select id, name, length(location) from test_geo order by id;
 2 NewYork 25
 
 # Verify EWKB header contains SRID flag (0x20000000 -> 0x20 at byte offset 4)
+# Use 12 hex chars to include the start of SRID
 query IT
-select id, substring(encode(location, 'hex') from 1 for 10) from test_geo where id = 1;
+select id, substring(encode(location, 'hex') from 1 for 12) from test_geo where id = 1;
 ----
 1 0101000020e6
 
@@ -54,7 +55,7 @@ select id, substring(encode(location, 'hex') from 1 for 10) from test_geo where 
 query IT
 select id, substring(encode(location, 'hex') from 11 for 8) from test_geo where id = 1;
 ----
-1 10000000
+1 e6100000
 
 # Test incremental INSERT
 system ok
@@ -119,7 +120,7 @@ psql -c "
         name varchar,
         path geometry(LineString, 4326)
     );
-    INSERT INTO test_geo_line VALUES 
+    INSERT INTO test_geo_line VALUES
         (1, 'Route1', ST_SetSRID(ST_MakeLine(ST_MakePoint(-87.6298, 41.8781), ST_MakePoint(-74.0060, 40.7128)), 4326));
 "
 
@@ -133,14 +134,16 @@ create table test_geo_line (
 sleep 3s
 
 # LineString should have different length (more coordinates)
+# EWKB length = 9 (header) + 4 (num points) + 16 * 2 (coords) = 45
 query ITI
 select id, name, length(path) from test_geo_line;
 ----
-1 Route1 41
+1 Route1 45
 
 # Verify LineString EWKB header (0x02 for LineString type)
+# Use 12 hex chars to include the start of SRID
 query IT
-select id, substring(encode(path, 'hex') from 1 for 10) from test_geo_line where id = 1;
+select id, substring(encode(path, 'hex') from 1 for 12) from test_geo_line where id = 1;
 ----
 1 0102000020e6
 
