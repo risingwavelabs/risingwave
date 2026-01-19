@@ -115,15 +115,15 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             }
 
             // Build the data file scan with pre-computed splits
+            let schema = data_files[0].schema.clone();
             let mut projection_columns: Vec<&str> = scan
                 .output_columns
                 .iter()
                 .chain(&equality_delete_columns)
                 .map(|col| col.as_str())
                 .collect();
-            projection_columns.sort_unstable();
+            projection_columns.sort_unstable_by_key(|&s| schema.field_id_by_name(s));
             projection_columns.dedup();
-            let schema = data_files[0].schema.clone();
             set_project_field_ids(&mut data_files, &schema, projection_columns.iter())?;
 
             let column_catalog_map: HashMap<&str, &ColumnCatalog> = catalog
