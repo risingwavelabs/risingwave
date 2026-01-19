@@ -51,14 +51,6 @@ def _(outer_panels: Panels):
                 "",
                 [
                     panels.target(
-                        f"{metric('all_barrier_nums')} >= bool 200",
-                        "Too Many Barriers {{database_id}}",
-                    ),
-                    panels.target(
-                        f"sum(rate({metric('recovery_latency_count')}[$__rate_interval])) > bool 0 + sum({metric('recovery_failure_cnt')}) > bool 0",
-                        "Recovery Triggered {{recovery_type}}",
-                    ),
-                    panels.target(
                         f"(({metric('storage_current_version_id')} - {metric('storage_checkpoint_version_id')}) >= bool 100) + "
                         + f"(({metric('storage_current_version_id')} - {metric('storage_min_pinned_version_id')}) >= bool 100)",
                         "Lagging Version",
