@@ -43,23 +43,29 @@ select id, name, length(location) from test_geo order by id;
 2 NewYork 25
 
 # Compare the full EWKB hex from upstream and RisingWave are identical.
-# Note: `system ok` can't assert stdout, so we use `postgres_query` to query upstream from RisingWave.
-query T retry 3 backoff 1s
+# This prints both sides for easier debugging when it fails.
+query ITTT retry 3 backoff 1s
 select
-  encode(location, 'hex')
-  =
-  (select * from postgres_query(
-      '${PGHOST:localhost}',
-      '${PGPORT:5432}',
-      '${PGUSER:$USER}',
-      '${PGPASSWORD:}',
-      '${PGDATABASE:postgres}',
-      'select encode(location, ''hex'') from test_geo where id = 1;'
-   ))
-from test_geo
-where id = 1;
+  ours.id,
+  encode(ours.location, 'hex') as ours_hex,
+  upstream.upstream_hex,
+  encode(ours.location, 'hex') = upstream.upstream_hex as same
+from test_geo as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, encode(location, ''hex'') as upstream_hex from test_geo where id in (1,2) order by id'
+  )
+) as upstream(id, upstream_hex)
+on ours.id = upstream.id
+order by ours.id;
 ----
-t
+1 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 t
+2 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440 t
 
 # Test incremental INSERT
 system ok
@@ -69,6 +75,28 @@ query ITI retry 3 backoff 1s
 select id, name, length(location) from test_geo where id = 3;
 ----
 3 London 25
+
+# Compare upstream vs RisingWave EWKB for the inserted row.
+query ITTT retry 3 backoff 1s
+select
+  ours.id,
+  encode(ours.location, 'hex') as ours_hex,
+  upstream.upstream_hex,
+  encode(ours.location, 'hex') = upstream.upstream_hex as same
+from test_geo as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, encode(location, ''hex'') as upstream_hex from test_geo where id = 3'
+  )
+) as upstream(id, upstream_hex)
+on ours.id = upstream.id;
+----
+3 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940 t
 
 # Test incremental UPDATE
 system ok
@@ -85,6 +113,28 @@ query IT retry 3 backoff 1s
 select id, substring(encode(location, 'hex') from 1 for 50) from test_geo where id = 1;
 ----
 1 0101000020e610000000000000000000000000000000000000
+
+# Compare upstream vs RisingWave EWKB for the updated row.
+query ITTT retry 3 backoff 1s
+select
+  ours.id,
+  encode(ours.location, 'hex') as ours_hex,
+  upstream.upstream_hex,
+  encode(ours.location, 'hex') = upstream.upstream_hex as same
+from test_geo as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, encode(location, ''hex'') as upstream_hex from test_geo where id = 1'
+  )
+) as upstream(id, upstream_hex)
+on ours.id = upstream.id;
+----
+1 0101000020e61000000000000000000000000000000000000000000000000000 0101000020e61000000000000000000000000000000000000000000000000000 t
 
 # Test incremental DELETE
 system ok

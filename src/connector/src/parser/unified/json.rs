@@ -45,6 +45,15 @@ use crate::schema::{InvalidOptionError, bail_invalid_option_error};
 ///
 /// Note: Debezium provides an SMT to convert between `WKB` and `EWKB`, which may be useful for future
 /// unification across connectors (e.g., MySQL): see `GeometryFormatTransformer`.
+///
+/// Return semantics:
+/// - `Ok(Some(bytes))`: The input matches the Debezium geometry shape (`srid` is numeric AND `wkb` is string),
+///   and we successfully decoded `wkb` into bytes.
+/// - `Ok(None)`: The input does NOT look like a Debezium geometry object. This allows the caller to keep the
+///   match arm focused on dispatching, and avoids misclassifying other JSON objects that might map to `bytea`
+///   in the future.
+/// - `Err(...)`: The input looks like a Debezium geometry object, but decoding/parsing failed (e.g. invalid
+///   base64). This indicates a real data/format error and should not be silently ignored.
 fn try_parse_debezium_geometry_as_bytea(
     value: &BorrowedValue<'_>,
     create_error: impl Fn() -> AccessError,
