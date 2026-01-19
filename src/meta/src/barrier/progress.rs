@@ -940,11 +940,13 @@ mod tests {
     // CDC sources should be initialized as CdcSourceInit
     #[test]
     fn test_cdc_source_initialized_as_cdc_source_init() {
+        use std::collections::BTreeMap;
+
+        use risingwave_pb::catalog::{CreateType, PbSource, StreamSourceInfo};
+
         use crate::barrier::command::CreateStreamingJobCommandInfo;
         use crate::manager::{StreamingJob, StreamingJobType};
         use crate::model::StreamJobFragmentsToCreate;
-        use risingwave_pb::catalog::{CreateType, PbSource, StreamSourceInfo};
-        use std::collections::BTreeMap;
 
         // Create a CDC source with cdc_source_job = true
         let mut source_info = StreamSourceInfo::default();
@@ -1002,10 +1004,7 @@ mod tests {
         tracker.mark_cdc_source_finished();
 
         // Should now be in Finished state
-        assert!(matches!(
-            tracker.status,
-            CreateMviewStatus::Finished { .. }
-        ));
+        assert!(matches!(tracker.status, CreateMviewStatus::Finished { .. }));
         assert!(tracker.is_finished());
     }
 }
