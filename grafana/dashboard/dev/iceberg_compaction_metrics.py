@@ -7,7 +7,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Iceberg Compaction Metrics",
+            "[Iceberg] Iceberg Compaction Metrics",
             [
                 panels.timeseries_count(
                     "Iceberg Compaction Commit Count",

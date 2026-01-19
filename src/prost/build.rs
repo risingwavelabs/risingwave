@@ -707,7 +707,6 @@ for_all_wrapped_id_fields! (
     }
     stream_service {
         BarrierCompleteResponse {
-            database_id: DatabaseId,
             truncate_tables: TableId,
             refresh_finished_tables: TableId,
             table_watermarks: TableId,
@@ -739,7 +738,6 @@ for_all_wrapped_id_fields! (
             table_stats_map: TableId,
         }
         InjectBarrierRequest {
-            database_id: DatabaseId,
             table_ids_to_sync: TableId,
             actor_ids_to_collect: ActorId,
             partial_graph_id: PartialGraphId,
@@ -753,21 +751,19 @@ for_all_wrapped_id_fields! (
             fragment_id: FragmentId,
         }
         StreamingControlStreamRequest.CreatePartialGraphRequest {
-            database_id: DatabaseId,
             partial_graph_id: PartialGraphId,
         }
         StreamingControlStreamRequest.RemovePartialGraphRequest {
-            database_id: DatabaseId,
             partial_graph_ids: PartialGraphId,
         }
-        StreamingControlStreamRequest.ResetDatabaseRequest {
-            database_id: DatabaseId,
+        StreamingControlStreamRequest.ResetPartialGraphsRequest {
+            partial_graph_ids: PartialGraphId,
         }
-        StreamingControlStreamResponse.ReportDatabaseFailureResponse {
-            database_id: DatabaseId,
+        StreamingControlStreamResponse.ReportPartialGraphFailureResponse {
+            partial_graph_id: PartialGraphId,
         }
-        StreamingControlStreamResponse.ResetDatabaseResponse {
-            database_id: DatabaseId,
+        StreamingControlStreamResponse.ResetPartialGraphResponse {
+            partial_graph_id: PartialGraphId,
         }
     }
     task_service {
@@ -775,7 +771,6 @@ for_all_wrapped_id_fields! (
             table_id: TableId,
         }
         GetStreamRequest.Get {
-            database_id: DatabaseId,
             up_partial_graph_id: PartialGraphId,
             up_fragment_id: FragmentId,
             down_fragment_id: FragmentId,
