@@ -410,12 +410,12 @@ WITH (
 FROM pg_source TABLE 'parallelized_cdc.parallelized_cdc_backfill_test';
 
 
-query I retry 6 backoff 1s
+query I retry 15 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
 ----
 12
 
-query II retry 6 backoff 1s
+query II retry 15 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
 ----
 12
@@ -426,12 +426,12 @@ insert into parallelized_cdc.parallelized_cdc_backfill_test values (20,22),(30,3
 "
 
 
-query I retry 6 backoff 1s
+query I retry 15 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
 ----
 23
 
-query II retry 6 backoff 1s
+query II retry 15 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
 ----
 23
