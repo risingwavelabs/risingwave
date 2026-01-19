@@ -478,37 +478,10 @@ macro_rules! impl_has_variant {
 
 impl_has_variant! {InputRef, Literal, FunctionCall, FunctionCallWithLambda, AggCall, Subquery, TableFunction, WindowFunction, UserDefinedFunction, Now}
 
-/// Deprecated: Use `InequalityInputPairV2` instead.
-#[allow(dead_code)]
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct InequalityInputPair {
-    /// Input index of greater side of inequality.
-    pub(crate) key_required_larger: usize,
-    /// Input index of less side of inequality.
-    pub(crate) key_required_smaller: usize,
-    /// greater >= less + `delta_expression`
-    pub(crate) delta_expression: Option<(ExprType, ExprImpl)>,
-}
-
-#[allow(dead_code)]
-impl InequalityInputPair {
-    fn new(
-        key_required_larger: usize,
-        key_required_smaller: usize,
-        delta_expression: Option<(ExprType, ExprImpl)>,
-    ) -> Self {
-        Self {
-            key_required_larger,
-            key_required_smaller,
-            delta_expression,
-        }
-    }
-}
-
 /// Inequality condition between two input columns with clearer semantics.
 /// Represents: `left_col <op> right_col` where op is one of `<`, `<=`, `>`, `>=`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct InequalityInputPairV2 {
+pub struct InequalityInputPair {
     /// Index of the left side column (from left input).
     pub left_idx: usize,
     /// Index of the right side column (from right input, NOT offset by `left_cols_num`).
@@ -517,7 +490,7 @@ pub struct InequalityInputPairV2 {
     pub op: ExprType,
 }
 
-impl InequalityInputPairV2 {
+impl InequalityInputPair {
     pub fn new(left_idx: usize, right_idx: usize, op: ExprType) -> Self {
         debug_assert!(matches!(
             op,
@@ -820,57 +793,6 @@ impl ExprImpl {
                         && op2.has_input_ref()
                     {
                         Some((op2, Self::reverse_comparison(ty), op1))
-                    } else {
-                        None
-                    }
-                }
-                _ => None,
-            }
-        } else {
-            None
-        }
-    }
-
-    /// Accepts expressions of the form `InputRef cmp InputRef [+- const_expr]` or
-    /// `InputRef [+- const_expr] cmp InputRef`.
-    ///
-    /// Deprecated: Use `as_comparison_cond` instead, which only matches pure `InputRef <op> InputRef`.
-    #[allow(dead_code)]
-    pub(crate) fn as_input_comparison_cond(&self) -> Option<InequalityInputPair> {
-        if let ExprImpl::FunctionCall(function_call) = self {
-            match function_call.func_type() {
-                ty @ (ExprType::LessThan
-                | ExprType::LessThanOrEqual
-                | ExprType::GreaterThan
-                | ExprType::GreaterThanOrEqual) => {
-                    let (_, mut op1, mut op2) = function_call.clone().decompose_as_binary();
-                    if matches!(ty, ExprType::LessThan | ExprType::LessThanOrEqual) {
-                        std::mem::swap(&mut op1, &mut op2);
-                    }
-                    if let (Some((lft_input, lft_offset)), Some((rht_input, rht_offset))) =
-                        (op1.as_input_offset(), op2.as_input_offset())
-                    {
-                        match (lft_offset, rht_offset) {
-                            (Some(_), Some(_)) => None,
-                            (None, rht_offset @ Some(_)) => {
-                                Some(InequalityInputPair::new(lft_input, rht_input, rht_offset))
-                            }
-                            (Some((operator, operand)), None) => Some(InequalityInputPair::new(
-                                lft_input,
-                                rht_input,
-                                Some((
-                                    if operator == ExprType::Add {
-                                        ExprType::Subtract
-                                    } else {
-                                        ExprType::Add
-                                    },
-                                    operand,
-                                )),
-                            )),
-                            (None, None) => {
-                                Some(InequalityInputPair::new(lft_input, rht_input, None))
-                            }
-                        }
                     } else {
                         None
                     }

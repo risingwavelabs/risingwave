@@ -18,8 +18,8 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 
 use crate::expr::{
-    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InequalityInputPairV2,
-    InputRef, InputRefDisplay,
+    ExprRewriter, ExprType, ExprVisitor, FunctionCall, InequalityInputPair, InputRef,
+    InputRefDisplay,
 };
 use crate::utils::{ColIndexMapping, Condition, ConditionDisplay};
 
@@ -189,25 +189,13 @@ impl EqJoinPredicate {
             .collect()
     }
 
-    /// Deprecated: Use `inequality_pairs_v2` instead.
-    #[allow(dead_code)]
-    pub(crate) fn inequality_pairs(&self) -> (usize, Vec<(usize, InequalityInputPair)>) {
-        (
-            self.left_cols_num,
-            self.other_cond()
-                .extract_inequality_keys(self.left_cols_num, self.right_cols_num),
-        )
-    }
-
-    /// Extract inequality pairs with the new V2 format.
-    ///
-    /// Returns a list of `(conjunction_index, InequalityInputPairV2)` where:
+    /// Returns a list of `(conjunction_index, InequalityInputPair)` where:
     /// - `left_idx` is the column index from the left input
     /// - `right_idx` is the column index from the right input (NOT offset by `left_cols_num`)
     /// - `op` is the comparison operator
-    pub(crate) fn inequality_pairs_v2(&self) -> Vec<(usize, InequalityInputPairV2)> {
+    pub(crate) fn inequality_pairs_v2(&self) -> Vec<(usize, InequalityInputPair)> {
         self.other_cond()
-            .extract_inequality_keys_v2(self.left_cols_num, self.right_cols_num)
+            .extract_inequality_keys(self.left_cols_num, self.right_cols_num)
     }
 
     /// Note: `right_col_index` starts from `0`

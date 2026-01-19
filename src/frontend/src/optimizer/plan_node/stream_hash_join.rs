@@ -30,7 +30,7 @@ use super::{
     ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamDeltaJoin, StreamPlanRef as PlanRef,
     TryToStreamPb, generic,
 };
-use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprType, ExprVisitor, InequalityInputPairV2};
+use crate::expr::{Expr, ExprDisplay, ExprRewriter, ExprType, ExprVisitor, InequalityInputPair};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
@@ -46,9 +46,9 @@ pub struct StreamHashJoin {
     pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
 
-    /// `(clean_left_state, clean_right_state, InequalityInputPairV2)`.
+    /// `(clean_left_state, clean_right_state, InequalityInputPair)`.
     /// Each entry represents an inequality condition like `left_col <op> right_col`.
-    inequality_pairs: Vec<(bool, bool, InequalityInputPairV2)>,
+    inequality_pairs: Vec<(bool, bool, InequalityInputPair)>,
 
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
@@ -130,7 +130,7 @@ impl StreamHashJoin {
             // Process inequality pairs using the new V2 format
             let original_inequality_pairs = eq_join_predicate.inequality_pairs_v2();
             for (conjunction_idx, pair) in original_inequality_pairs {
-                let InequalityInputPairV2 {
+                let InequalityInputPair {
                     left_idx,
                     right_idx,
                     op,
@@ -192,7 +192,7 @@ impl StreamHashJoin {
                     inequality_pairs.push((
                         clean_left,
                         clean_right,
-                        InequalityInputPairV2::new(left_idx, right_idx, op),
+                        InequalityInputPair::new(left_idx, right_idx, op),
                     ));
                 }
             }
@@ -248,7 +248,7 @@ impl StreamHashJoin {
         )
     }
 
-    pub fn inequality_pairs(&self) -> &Vec<(bool, bool, InequalityInputPairV2)> {
+    pub fn inequality_pairs(&self) -> &Vec<(bool, bool, InequalityInputPair)> {
         &self.inequality_pairs
     }
 }
