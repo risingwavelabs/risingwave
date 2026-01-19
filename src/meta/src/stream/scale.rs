@@ -986,15 +986,15 @@ impl GlobalStreamManager {
         );
         ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
 
-        // waiting for the first tick
-        ticker.tick().await;
-
         let (local_notification_tx, mut local_notification_rx) =
             tokio::sync::mpsc::unbounded_channel();
 
         self.env
             .notification_manager()
             .insert_local_sender(local_notification_tx);
+
+        // waiting for the first tick
+        ticker.tick().await;
 
         let worker_nodes = self
             .metadata_manager
