@@ -762,6 +762,7 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool> HummockIterator
                     DirectionEnum::Forward => {
                         // seek key table id < batch table id, so seek to beginning
                         self.rewind().await?;
+                        return Ok(());
                     }
                     DirectionEnum::Backward => {
                         self.invalidate();
@@ -778,6 +779,7 @@ impl<D: HummockIteratorDirection, const IS_NEW_VALUE: bool> HummockIterator
                     DirectionEnum::Backward => {
                         // seek key table id > batch table id, so seek to end
                         self.rewind().await?;
+                        return Ok(());
                     }
                 };
             }
@@ -1719,5 +1721,60 @@ mod tests {
             }
             assert_eq!(expected, output);
         }
+    }
+    #[tokio::test]
+    async fn test_shared_buffer_batch_seek_bug() {
+        // Reproduce the bug where seek falls through to binary_search when table_id mismatch
+        let epoch = test_epoch(1);
+        let table_id = TableId::new(100);
+        let shared_buffer_items: Vec<(Vec<u8>, SharedBufferValue<Bytes>)> = vec![(
+            iterator_test_table_key_of(1), // "key_test_000...001"
+            SharedBufferValue::Insert(Bytes::from("value1")),
+        )];
+        let shared_buffer_batch = SharedBufferBatch::for_test(
+            transform_shared_buffer(shared_buffer_items.clone()),
+            epoch,
+            table_id,
+        );
+
+        // Case 1: Seek with smaller TableId (99), but larger TableKey ("key_test_000...002").
+        // "key_test...002" > "key_test...001".
+        // Forward Iterator.
+        // Expected: Should land on the first item (TableId 100 > TableId 99).
+        // Bug description: rewinds (index 0), then binary_search("key_2") in batch (only "key_1").
+        // "key_2" > "key_1", so index becomes 1 (end). Iterator invalid.
+        let mut iter = shared_buffer_batch.clone().into_forward_iter();
+        let seek_key = FullKey::for_test(
+            TableId::new(99),
+            iterator_test_table_key_of(2), // larger key
+            epoch,
+        );
+        iter.seek(seek_key.to_ref()).await.unwrap();
+
+        assert!(
+            iter.is_valid(),
+            "Iterator should be valid when seeking with smaller table_id, even if the key part is larger"
+        );
+        assert_eq!(iter.key().user_key.table_id, table_id);
+
+        // Case 2: Seek with larger TableId (101), but smaller TableKey ("key_test_000...000").
+        // "key_test...000" < "key_test...001".
+        // Backward Iterator.
+        // Expected: Should land on the last item (TableId 100 < TableId 101).
+        // Bug description: rewinds (index valid), then binary_search("key_0") which returns Err(0) (insertion point at start).
+        // Backward generic logic for Err(0) is `invalidate()`.
+        let mut iter = shared_buffer_batch.clone().into_backward_iter();
+        let seek_key = FullKey::for_test(
+            TableId::new(101),
+            iterator_test_table_key_of(0), // smaller key
+            epoch,
+        );
+        iter.seek(seek_key.to_ref()).await.unwrap();
+
+        assert!(
+            iter.is_valid(),
+            "Iterator should be valid when seeking with larger table_id, even if the key part is smaller"
+        );
+        assert_eq!(iter.key().user_key.table_id, table_id);
     }
 }
