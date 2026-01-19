@@ -523,7 +523,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
     type BarrierStream = impl Stream<Item = StreamResult<Barrier>> + Send;
 
     fn execute(mut self: Box<Self>) -> Self::BarrierStream {
-        tracing::debug!("Starting SyncLogStoreDispatchExecutor::execute");
         let _max_barrier_count_per_batch = self.inner.actor_config.developer.max_barrier_batch_size;
 
         #[try_stream]
@@ -546,8 +545,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 .await?;
             self.inner.metrics.metrics.barrier_batch_size.observe(1.0);
 
-            tracing::debug!("Get the first barrier: {:?}", first_barrier.epoch);
-
             let local_state_store = log_store_config
                 .state_store
                 .new_local(NewLocalOptions {
@@ -562,7 +559,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 })
                 .await;
 
-            tracing::debug!("Create local state store for log store dispatch executor.");
             let (read_state, mut initial_write_state) = new_log_store_state(
                 log_store_config.table_id,
                 local_state_store,
@@ -570,26 +566,20 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 log_store_config.chunk_size,
             );
             initial_write_state.init(first_write_epoch).await?;
-            tracing::debug!(
-                "Initialized log store write state at epoch {:?}",
-                first_write_epoch
-            );
 
             let initial_write_epoch = first_write_epoch;
             let mut pause_stream = first_barrier.is_pause_on_startup();
-
-            tracing::debug!("collect the first barrier");
 
             if log_store_config.aligned {
                 tracing::info!("aligned mode");
                 let log_store_stream = read_state
                     .read_persisted_log_store(
-                        log_store_config.metrics.persistent_log_read_metrics.clone(), 
-                        initial_write_epoch.curr, 
+                        log_store_config.metrics.persistent_log_read_metrics.clone(),
+                        initial_write_epoch.curr,
                         LogStoreReadStateStreamRangeStart::Unbounded,
                     )
                     .await?;
-                
+
                 #[for_await]
                 for message in log_store_stream {
                     let (_epoch, message) = message?;
@@ -602,7 +592,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                 .dispatch(MessageBatch::Chunk(chunk))
                                 .instrument(tracing::info_span!("dispatch_chunk"))
                                 .instrument_await("dispatch_chunk")
-                                .await;
+                                .await?;
                         }
                     }
                 }
@@ -617,15 +607,17 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                             let mut progress = LogStoreVnodeProgress::None;
                             progress.apply_aligned(
                                 read_state.vnodes().clone(),
-                                barrier.epoch.prev, 
+                                barrier.epoch.prev,
                                 None,
                             );
                             let post_seal = initial_write_state
                                 .seal_current_epoch(barrier.epoch.curr, progress.take());
-                            let update_vnode_bitmap =
-                                barrier.as_update_vnode_bitmap(actor_id);
+                            let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
                             if update_vnode_bitmap.is_some() {
-                                return Err(anyhow!("updating vnode bitmap in place is not supported any more!"));
+                                return Err(anyhow!(
+                                    "updating vnode bitmap in place is not supported any more!"
+                                )
+                                .into());
                             }
 
                             self.inner
@@ -633,11 +625,11 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                 .instrument(tracing::info_span!("dispatch_barrier_batch"))
                                 .instrument_await("dispatch_barrier_batch")
                                 .await?;
-                             post_seal.post_yield_barrier(None).await?;
-                             if !realigned_logstore && is_checkpoint {
+                            post_seal.post_yield_barrier(None).await?;
+                            if !realigned_logstore && is_checkpoint {
                                 realigned_logstore = true;
                                 tracing::info!("realigned logstore");
-                             }
+                            }
                         }
                         Message::Chunk(chunk) => {
                             self.inner
@@ -657,7 +649,6 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 }
                 return Ok(());
             }
-
 
             let mut seq_id = FIRST_SEQ_ID;
             let mut buffer = SyncedLogStoreBuffer {
@@ -697,23 +688,23 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                 // Avoid a busy-loop when there's no buffered data to dispatch. In that case we
                 // should wait for upstream, but still exit promptly once upstream is done.
                 let consumer_idle = matches!(
-                    consumer_future_state,
+                    &consumer_future_state,
                     ConsumerFuture::ReadingChunk {
                         read_future: ReadFuture::Idle,
                         ..
                     }
                 );
-                if write_done && barriers.is_empty() && buffer.buffer.is_empty() && consumer_idle {
+                if write_done && barriers.is_empty() && buffer.is_empty() && consumer_idle {
                     break;
                 }
 
                 let select_result = {
                     let should_wait_for_upstream =
-                        barriers.is_empty() && buffer.buffer.is_empty() && consumer_idle;
+                        barriers.is_empty() && buffer.is_empty() && consumer_idle;
                     let consumer_future = async {
                         if pause_stream
                             && barriers.is_empty()
-                            && matches!(consumer_future_state, ConsumerFuture::ReadingChunk { .. })
+                            && matches!(&consumer_future_state, ConsumerFuture::ReadingChunk { .. })
                         {
                             pending().await
                         } else if should_wait_for_upstream {
@@ -867,6 +858,20 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                     Either::Right(consumer_result) => {
                         drop(consumer_future_state);
                         let (inner, event, read_future) = consumer_result?;
+                        if !clean_state
+                            && matches!(&read_future, ReadFuture::Idle)
+                            && buffer.is_empty()
+                        {
+                            clean_state = true;
+                            log_store_config.metrics.clean_state.inc();
+
+                            if let WriteFuture::Paused { sleep_future, .. } =
+                                &mut write_future_state
+                            {
+                                assert!(buffer.current_size < log_store_config.max_buffer_size);
+                                *sleep_future = None;
+                            }
+                        }
                         match event {
                             ConsumerFutureEvent::ReadOutChunk(chunk) => {
                                 log_store_config

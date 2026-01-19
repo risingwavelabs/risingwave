@@ -45,8 +45,8 @@ use crate::error::StreamResult;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
-    Actor, ActorContext, ActorContextRef, AnyDispatchExecutor, DispatchExecutor, Execute, Executor,
-    ExecutorInfo, SnapshotBackfillExecutor, SyncLogStoreDispatchConfig,
+    Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
+    GenericDispatchExecutor, SnapshotBackfillExecutor, SyncLogStoreDispatchConfig,
     SyncLogStoreDispatchExecutor, SyncedKvLogStoreMetrics, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
@@ -430,7 +430,7 @@ impl StreamActorManager {
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         actor_config: Arc<StreamingConfig>,
-    ) -> StreamResult<Actor<AnyDispatchExecutor>> {
+    ) -> StreamResult<Actor<GenericDispatchExecutor>> {
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
@@ -533,7 +533,7 @@ impl StreamActorManager {
                             log_store_config,
                         )
                         .await?;
-                        AnyDispatchExecutor::SyncLogStoreHummock(inner)
+                        GenericDispatchExecutor::SyncLogStoreHummock(inner)
                     }
                     StateStoreImpl::MemoryStateStore(store) => {
                         #[cfg(debug_assertions)]
@@ -556,11 +556,7 @@ impl StreamActorManager {
                                 log_store_config,
                             )
                             .await?;
-                            AnyDispatchExecutor::SyncLogStoreMemory(inner)
-                        }
-                        #[cfg(not(debug_assertions))]
-                        {
-                            unreachable!("memory state store should only be used in debug builds");
+                            GenericDispatchExecutor::SyncLogStoreMemory(inner)
                         }
                     }
                     StateStoreImpl::SledStateStore(store) => {
@@ -584,11 +580,7 @@ impl StreamActorManager {
                                 log_store_config,
                             )
                             .await?;
-                            AnyDispatchExecutor::SyncLogStoreSled(inner)
-                        }
-                        #[cfg(not(debug_assertions))]
-                        {
-                            unreachable!("sled state store should only be used in debug builds");
+                            GenericDispatchExecutor::SyncLogStoreSled(inner)
                         }
                     }
                 }
@@ -601,7 +593,7 @@ impl StreamActorManager {
                     &actor_context,
                 )
                 .await?;
-                AnyDispatchExecutor::Direct(inner)
+                GenericDispatchExecutor::Direct(inner)
             }
         };
 

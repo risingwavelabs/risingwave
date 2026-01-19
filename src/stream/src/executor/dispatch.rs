@@ -72,7 +72,7 @@ pub struct DispatchExecutor {
     inner: DispatchExecutorInner,
 }
 
-pub enum AnyDispatchExecutor {
+pub enum GenericDispatchExecutor {
     Direct(DispatchExecutor),
     SyncLogStoreHummock(SyncLogStoreDispatchExecutor<MonitoredStateStore<HummockStorageType>>),
     #[cfg(debug_assertions)]
@@ -587,23 +587,23 @@ impl StreamConsumer for DispatchExecutor {
     }
 }
 
-impl StreamConsumer for AnyDispatchExecutor {
+impl StreamConsumer for GenericDispatchExecutor {
     type BarrierStream = BoxStream<'static, StreamResult<Barrier>>;
 
     fn execute(self: Box<Self>) -> Self::BarrierStream {
         match *self {
-            AnyDispatchExecutor::Direct(exec) => {
+            GenericDispatchExecutor::Direct(exec) => {
                 futures::StreamExt::boxed(Box::new(exec).execute())
             }
-            AnyDispatchExecutor::SyncLogStoreHummock(exec) => {
-                futures::StreamExt::boxed(Box::new(exec).execute())
-            }
-            #[cfg(debug_assertions)]
-            AnyDispatchExecutor::SyncLogStoreMemory(exec) => {
+            GenericDispatchExecutor::SyncLogStoreHummock(exec) => {
                 futures::StreamExt::boxed(Box::new(exec).execute())
             }
             #[cfg(debug_assertions)]
-            AnyDispatchExecutor::SyncLogStoreSled(exec) => {
+            GenericDispatchExecutor::SyncLogStoreMemory(exec) => {
+                futures::StreamExt::boxed(Box::new(exec).execute())
+            }
+            #[cfg(debug_assertions)]
+            GenericDispatchExecutor::SyncLogStoreSled(exec) => {
                 futures::StreamExt::boxed(Box::new(exec).execute())
             }
         }

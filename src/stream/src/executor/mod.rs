@@ -147,7 +147,7 @@ pub use changelog::ChangeLogExecutor;
 pub use dedup::AppendOnlyDedupExecutor;
 pub(crate) use dispatch::SyncLogStoreDispatchConfig;
 pub use dispatch::{
-    AnyDispatchExecutor, DispatchExecutor, DispatcherImpl, SyncLogStoreDispatchExecutor,
+    DispatchExecutor, DispatcherImpl, GenericDispatchExecutor, SyncLogStoreDispatchExecutor,
 };
 pub use dynamic_filter::DynamicFilterExecutor;
 pub use error::{StreamExecutorError, StreamExecutorResult};
