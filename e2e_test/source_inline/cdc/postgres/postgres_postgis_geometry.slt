@@ -35,35 +35,29 @@ create table test_geo (
     location bytea
 ) from geo_source table 'public.test_geo';
 
-sleep 3s
-
 # Test backfill: verify EWKB length (25 bytes: 9-byte header + 16-byte coordinates)
-query ITI
+query ITI retry 3 backoff 1s
 select id, name, length(location) from test_geo order by id;
 ----
 1 Chicago 25
 2 NewYork 25
 
-# Verify EWKB header contains SRID flag (0x20000000 -> 0x20 at byte offset 4)
-# Use 12 hex chars to include the start of SRID
-query IT
-select id, substring(encode(location, 'hex') from 1 for 12) from test_geo where id = 1;
+# Display and assert the full EWKB hex from upstream and RisingWave are identical.
+system ok
+psql -t -A -c "select encode(location, 'hex') from test_geo where id = 1;"
 ----
-1 0101000020e6
+0101000020e610000055c1a8a44ee855c00e4faf9465f04440
 
-# Verify SRID value is 4326 (0xe6100000 in little-endian = 4326)
-query IT
-select id, substring(encode(location, 'hex') from 11 for 8) from test_geo where id = 1;
+query T retry 3 backoff 1s
+select encode(location, 'hex') from test_geo where id = 1;
 ----
-1 e6100000
+0101000020e610000055c1a8a44ee855c00e4faf9465f04440
 
 # Test incremental INSERT
 system ok
 psql -c "INSERT INTO test_geo VALUES (3, 'London', ST_SetSRID(ST_MakePoint(-0.1278, 51.5074), 4326));"
 
-sleep 2s
-
-query ITI
+query ITI retry 3 backoff 1s
 select id, name, length(location) from test_geo where id = 3;
 ----
 3 London 25
@@ -72,16 +66,14 @@ select id, name, length(location) from test_geo where id = 3;
 system ok
 psql -c "UPDATE test_geo SET location = ST_SetSRID(ST_MakePoint(0, 0), 4326) WHERE id = 1;"
 
-sleep 2s
-
 # Verify UPDATE: length should still be 25, but data changed
-query ITI
+query ITI retry 3 backoff 1s
 select id, name, length(location) from test_geo where id = 1;
 ----
 1 Chicago 25
 
 # Verify the coordinates actually changed (different hex than before)
-query IT
+query IT retry 3 backoff 1s
 select id, substring(encode(location, 'hex') from 1 for 50) from test_geo where id = 1;
 ----
 1 0101000020e610000000000000000000000000000000000000
@@ -90,9 +82,7 @@ select id, substring(encode(location, 'hex') from 1 for 50) from test_geo where 
 system ok
 psql -c "DELETE FROM test_geo WHERE id = 2;"
 
-sleep 2s
-
-query II
+query II retry 3 backoff 1s
 select count(*) as total, count(*) filter (where id = 2) as id_2_count from test_geo;
 ----
 2 0
@@ -100,13 +90,10 @@ select count(*) as total, count(*) filter (where id = 2) as id_2_count from test
 # Test with NULL geometry
 system ok
 psql -c "
-    ALTER TABLE test_geo ALTER COLUMN location DROP NOT NULL;
     INSERT INTO test_geo VALUES (4, 'NullLocation', NULL);
 "
 
-sleep 2s
-
-query ITI
+query ITI retry 3 backoff 1s
 select id, name, location from test_geo where id = 4;
 ----
 4 NullLocation NULL
@@ -131,18 +118,16 @@ create table test_geo_line (
     path bytea
 ) from geo_source table 'public.test_geo_line';
 
-sleep 3s
-
 # LineString should have different length (more coordinates)
 # EWKB length = 9 (header) + 4 (num points) + 16 * 2 (coords) = 45
-query ITI
+query ITI retry 3 backoff 1s
 select id, name, length(path) from test_geo_line;
 ----
 1 Route1 45
 
 # Verify LineString EWKB header (0x02 for LineString type)
 # Use 12 hex chars to include the start of SRID
-query IT
+query IT retry 3 backoff 1s
 select id, substring(encode(path, 'hex') from 1 for 12) from test_geo_line where id = 1;
 ----
 1 0102000020e6
