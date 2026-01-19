@@ -74,7 +74,6 @@ impl LogicalIcebergScan {
             IcebergFileScanTask::Data(_) => IcebergScanType::DataScan,
             IcebergFileScanTask::EqualityDelete(_) => IcebergScanType::EqualityDeleteScan,
             IcebergFileScanTask::PositionDelete(_) => IcebergScanType::PositionDeleteScan,
-            IcebergFileScanTask::CountStar(_) => IcebergScanType::CountStar,
         }
     }
 }

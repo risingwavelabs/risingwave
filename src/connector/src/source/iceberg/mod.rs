@@ -23,7 +23,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures_async_stream::{for_await, try_stream};
 use iceberg::Catalog;
-use iceberg::expr::Predicate as IcebergPredicate;
+use iceberg::expr::{BoundPredicate, Predicate as IcebergPredicate};
 use iceberg::scan::FileScanTask;
 use iceberg::table::Table;
 pub use parquet_file_handler::*;
@@ -144,57 +144,31 @@ pub enum IcebergFileScanTask {
     Data(Vec<FileScanTask>),
     EqualityDelete(Vec<FileScanTask>),
     PositionDelete(Vec<FileScanTask>),
-    CountStar(u64),
 }
 
 impl IcebergFileScanTask {
-    pub fn new_count_star(count_sum: u64) -> Self {
-        IcebergFileScanTask::CountStar(count_sum)
-    }
-
-    pub fn new_scan_with_scan_type(
-        iceberg_scan_type: IcebergScanType,
-        data_files: Vec<FileScanTask>,
-        equality_delete_files: Vec<FileScanTask>,
-        position_delete_files: Vec<FileScanTask>,
-    ) -> Self {
-        match iceberg_scan_type {
-            IcebergScanType::EqualityDeleteScan => {
-                IcebergFileScanTask::EqualityDelete(equality_delete_files)
-            }
-            IcebergScanType::DataScan => IcebergFileScanTask::Data(data_files),
-            IcebergScanType::PositionDeleteScan => {
-                IcebergFileScanTask::PositionDelete(position_delete_files)
-            }
-            IcebergScanType::Unspecified | IcebergScanType::CountStar => {
-                unreachable!("Unspecified iceberg scan type")
-            }
+    pub fn tasks(&self) -> &[FileScanTask] {
+        match self {
+            IcebergFileScanTask::Data(file_scan_tasks)
+            | IcebergFileScanTask::EqualityDelete(file_scan_tasks)
+            | IcebergFileScanTask::PositionDelete(file_scan_tasks) => file_scan_tasks,
         }
     }
 
     pub fn is_empty(&self) -> bool {
-        match self {
-            IcebergFileScanTask::Data(data_files) => data_files.is_empty(),
-            IcebergFileScanTask::EqualityDelete(equality_delete_files) => {
-                equality_delete_files.is_empty()
-            }
-            IcebergFileScanTask::PositionDelete(position_delete_files) => {
-                position_delete_files.is_empty()
-            }
-            IcebergFileScanTask::CountStar(_) => false,
-        }
+        self.tasks().is_empty()
     }
 
     pub fn files(&self) -> Vec<String> {
-        match self {
-            IcebergFileScanTask::Data(file_scan_tasks)
-            | IcebergFileScanTask::EqualityDelete(file_scan_tasks)
-            | IcebergFileScanTask::PositionDelete(file_scan_tasks) => file_scan_tasks
-                .iter()
-                .map(|task| task.data_file_path.clone())
-                .collect(),
-            IcebergFileScanTask::CountStar(_) => vec![],
-        }
+        self.tasks()
+            .iter()
+            .map(|task| task.data_file_path.clone())
+            .collect()
+    }
+
+    pub fn predicate(&self) -> Option<&BoundPredicate> {
+        let first_task = self.tasks().first()?;
+        first_task.predicate.as_ref()
     }
 }
 
@@ -206,22 +180,13 @@ pub struct IcebergSplit {
 
 impl IcebergSplit {
     pub fn empty(iceberg_scan_type: IcebergScanType) -> Self {
-        if let IcebergScanType::CountStar = iceberg_scan_type {
-            Self {
-                split_id: 0,
-                task: IcebergFileScanTask::new_count_star(0),
-            }
-        } else {
-            Self {
-                split_id: 0,
-                task: IcebergFileScanTask::new_scan_with_scan_type(
-                    iceberg_scan_type,
-                    vec![],
-                    vec![],
-                    vec![],
-                ),
-            }
-        }
+        let task = match iceberg_scan_type {
+            IcebergScanType::DataScan => IcebergFileScanTask::Data(vec![]),
+            IcebergScanType::EqualityDeleteScan => IcebergFileScanTask::EqualityDelete(vec![]),
+            IcebergScanType::PositionDeleteScan => IcebergFileScanTask::PositionDelete(vec![]),
+            _ => unimplemented!(),
+        };
+        Self { split_id: 0, task }
     }
 }
 

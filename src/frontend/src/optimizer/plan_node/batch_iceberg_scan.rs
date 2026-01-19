@@ -16,8 +16,6 @@ use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
-use risingwave_common::types::DataType;
 use risingwave_connector::source::iceberg::IcebergFileScanTask;
 use risingwave_pb::batch_plan::IcebergScanNode;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
@@ -64,47 +62,16 @@ impl BatchIcebergScan {
         Self { base, core, task }
     }
 
-    pub fn new_count_star_with_batch_iceberg_scan(
-        batch_iceberg_scan: &BatchIcebergScan,
-    ) -> Option<Self> {
-        let mut core = batch_iceberg_scan.core.clone();
-        core.column_catalog = vec![ColumnCatalog::visible(ColumnDesc::named(
-            "count",
-            ColumnId::first_user_column(),
-            DataType::Int64,
-        ))];
-        let base = PlanBase::new_batch_with_core(
-            &core,
-            batch_iceberg_scan.base.distribution().clone(),
-            batch_iceberg_scan.base.order().clone(),
-        );
-
-        let IcebergFileScanTask::Data(tasks) = &batch_iceberg_scan.task else {
-            return None;
-        };
-        let count_sum = tasks.iter().map(|t| t.record_count).sum::<Option<u64>>()?;
-        Some(Self {
-            base,
-            core,
-            task: IcebergFileScanTask::CountStar(count_sum),
-        })
-    }
-
     pub fn iceberg_scan_type(&self) -> IcebergScanType {
         match &self.task {
             IcebergFileScanTask::Data(_) => IcebergScanType::DataScan,
             IcebergFileScanTask::EqualityDelete(_) => IcebergScanType::EqualityDeleteScan,
             IcebergFileScanTask::PositionDelete(_) => IcebergScanType::PositionDeleteScan,
-            IcebergFileScanTask::CountStar(_) => IcebergScanType::CountStar,
         }
     }
 
     pub fn predicate(&self) -> Option<String> {
-        let IcebergFileScanTask::Data(tasks) = &self.task else {
-            return None;
-        };
-        let task = tasks.first()?;
-        let predicate = task.predicate.as_ref()?;
+        let predicate = self.task.predicate()?;
         Some(predicate.to_string())
     }
 

@@ -28,7 +28,7 @@ use datafusion::physical_plan::{
 };
 use datafusion::prelude::Expr;
 use datafusion_common::stats::Precision;
-use datafusion_common::{DataFusionError, Statistics, exec_err, internal_err};
+use datafusion_common::{DataFusionError, Statistics, exec_err};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use iceberg::scan::FileScanTask;
@@ -196,18 +196,11 @@ impl IcebergScan {
             .contains(&name.as_str())
         });
 
-        let scan_tasks = match &provider.task {
-            IcebergFileScanTask::Data(tasks)
-            | IcebergFileScanTask::EqualityDelete(tasks)
-            | IcebergFileScanTask::PositionDelete(tasks) => tasks,
-            IcebergFileScanTask::CountStar(_) => {
-                return internal_err!("CountStar task should not reach IcebergScan execution plan");
-            }
-        };
+        let scan_tasks = provider.task.tasks();
         let tasks = if scan_tasks.len() <= batch_parallelism {
             scan_tasks.iter().map(|task| vec![task.clone()]).collect()
         } else {
-            IcebergSplitEnumerator::split_n_vecs(scan_tasks.clone(), batch_parallelism)
+            IcebergSplitEnumerator::split_n_vecs(scan_tasks.to_vec(), batch_parallelism)
         };
         let statistics = tasks
             .iter()

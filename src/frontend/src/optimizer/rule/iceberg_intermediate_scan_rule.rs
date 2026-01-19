@@ -125,6 +125,9 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
             projection_columns.sort_unstable_by_key(|&s| schema.field_id_by_name(s));
             projection_columns.dedup();
             set_project_field_ids(&mut data_files, &schema, projection_columns.iter())?;
+            for file in &mut data_files {
+                file.deletes.clear();
+            }
 
             let column_catalog_map: HashMap<&str, &ColumnCatalog> = catalog
                 .columns

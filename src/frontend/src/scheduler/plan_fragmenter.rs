@@ -401,12 +401,6 @@ impl UnpartitionedData {
                 IcebergFileScanTask::PositionDelete(tasks) => {
                     split_iceberg_tasks!(tasks, PositionDelete)
                 }
-                IcebergFileScanTask::CountStar(n) => {
-                    vec![SplitImpl::Iceberg(IcebergSplit {
-                        split_id: 0,
-                        task: IcebergFileScanTask::CountStar(n),
-                    })]
-                }
             },
         };
         Ok(SourceScanInfo::Complete(splits))

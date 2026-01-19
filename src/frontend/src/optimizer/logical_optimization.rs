@@ -555,6 +555,14 @@ static MATERIALIZE_ICEBERG_SCAN: LazyLock<OptimizationStage> = LazyLock::new(|| 
     )
 });
 
+static ICEBERG_COUNT_STAR: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Iceberg Count Star Optimization",
+        vec![IcebergCountStarRule::create()],
+        ApplyOrder::BottomUp,
+    )
+});
+
 static TOP_N_TO_VECTOR_SEARCH: LazyLock<OptimizationStage> = LazyLock::new(|| {
     OptimizationStage::new(
         "TopN to Vector Search",
@@ -912,6 +920,9 @@ impl LogicalOptimizer {
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
+
+        // This need to be apply after PROJECT_REMOVE to ensure there is no projection between agg and iceberg scan.
+        plan = plan.optimize_by_rules(&ICEBERG_COUNT_STAR)?;
 
         plan = plan.optimize_by_rules(&PULL_UP_HOP)?;
 
