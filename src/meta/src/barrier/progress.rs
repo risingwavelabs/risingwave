@@ -936,4 +936,76 @@ mod tests {
         assert_eq!(progress.mv_backfill_consumed_rows, 0);
         assert_eq!(progress.source_backfill_consumed_rows, 0);
     }
+
+    // CDC sources should be initialized as CdcSourceInit
+    #[test]
+    fn test_cdc_source_initialized_as_cdc_source_init() {
+        use crate::barrier::command::CreateStreamingJobCommandInfo;
+        use crate::manager::{StreamingJob, StreamingJobType};
+        use crate::model::StreamJobFragmentsToCreate;
+        use risingwave_pb::catalog::{CreateType, PbSource, StreamSourceInfo};
+        use std::collections::BTreeMap;
+
+        // Create a CDC source with cdc_source_job = true
+        let mut source_info = StreamSourceInfo::default();
+        source_info.cdc_source_job = true;
+
+        let mut source = PbSource::default();
+        source.id = risingwave_common::id::SourceId::new(100).into();
+        source.info = Some(source_info);
+
+        // Create empty fragments (no actors to track)
+        let fragments = StreamJobFragments::for_test(JobId::new(100), BTreeMap::new());
+        let stream_job_fragments = StreamJobFragmentsToCreate {
+            inner: fragments,
+            downstreams: Default::default(),
+        };
+
+        let info = CreateStreamingJobCommandInfo {
+            stream_job_fragments,
+            upstream_fragment_downstreams: Default::default(),
+            init_split_assignment: Default::default(),
+            definition: "CREATE SOURCE ...".to_string(),
+            job_type: StreamingJobType::Source,
+            create_type: CreateType::Foreground,
+            streaming_job: StreamingJob::Source(source),
+            fragment_backfill_ordering: Default::default(),
+            cdc_table_snapshot_splits: None,
+            locality_fragment_state_table_mapping: Default::default(),
+            is_serverless: false,
+        };
+
+        let tracker = CreateMviewProgressTracker::new(&info, &HummockVersionStats::default());
+
+        // CDC source should be in CdcSourceInit state
+        assert!(matches!(tracker.status, CreateMviewStatus::CdcSourceInit));
+        assert!(!tracker.is_finished());
+    }
+
+    // CDC source should transition from CdcSourceInit to Finished when offset is updated
+    #[test]
+    fn test_cdc_source_transitions_to_finished_on_offset_update() {
+        let mut tracker = CreateMviewProgressTracker {
+            tracking_job: TrackingJob {
+                job_id: JobId::new(300),
+                is_recovered: false,
+                source_change: None,
+            },
+            status: CreateMviewStatus::CdcSourceInit,
+        };
+
+        // Initially in CdcSourceInit state
+        assert!(matches!(tracker.status, CreateMviewStatus::CdcSourceInit));
+        assert!(!tracker.is_finished());
+
+        // Mark as finished when offset is updated
+        tracker.mark_cdc_source_finished();
+
+        // Should now be in Finished state
+        assert!(matches!(
+            tracker.status,
+            CreateMviewStatus::Finished { .. }
+        ));
+        assert!(tracker.is_finished());
+    }
 }
