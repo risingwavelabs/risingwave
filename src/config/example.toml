@@ -361,6 +361,7 @@ recent_filter_shards = 16
 recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 skip_recent_filter = false
+skip_inheritance_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false
