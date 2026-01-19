@@ -35,6 +35,23 @@ pub struct ValuesExecutor {
     chunk_size: usize,
 }
 
+impl ValuesExecutor {
+    #[cfg(test)]
+    pub(crate) fn new(
+        rows: Vec<Vec<BoxedExpression>>,
+        schema: Schema,
+        identity: String,
+        chunk_size: usize,
+    ) -> Self {
+        Self {
+            rows: rows.into_iter(),
+            schema,
+            identity,
+            chunk_size,
+        }
+    }
+}
+
 impl Executor for ValuesExecutor {
     fn schema(&self) -> &Schema {
         &self.schema
