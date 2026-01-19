@@ -53,10 +53,9 @@ pub fn handle_set(
         if let Some(val) = string_val.as_deref() {
             if !val.is_empty() {
                 if let Some((schema_name, connection_name)) = val.split_once('.') {
-                    handler_args.session.get_connection_by_name(
-                        Some(schema_name.to_owned()),
-                        connection_name,
-                    )?;
+                    handler_args
+                        .session
+                        .get_connection_by_name(Some(schema_name.to_owned()), connection_name)?;
                 }
             }
         }
