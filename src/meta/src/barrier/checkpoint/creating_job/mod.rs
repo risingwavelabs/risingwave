@@ -41,7 +41,7 @@ use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::creating_job::status::CreateMviewLogStoreProgressTracker;
 use crate::barrier::checkpoint::recovery::ResetPartialGraphCollector;
-use crate::barrier::context::CreateSnapshotBackfillJobInfo;
+use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::Notifier;
@@ -80,7 +80,7 @@ pub(crate) struct CreatingStreamingJobControl {
 
 impl CreatingStreamingJobControl {
     pub(super) fn new(
-        create_info: CreateSnapshotBackfillJobInfo,
+        create_info: CreateSnapshotBackfillJobCommandInfo,
         notifiers: Vec<Notifier>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
@@ -562,7 +562,7 @@ impl CreatingStreamingJobControl {
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
         mut notifiers: Vec<Notifier>,
-        first_create_info: Option<CreateSnapshotBackfillJobInfo>,
+        first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
     ) -> MetaResult<()> {
         let (state_table_ids, nodes_to_sync_table) = if let Some(state_table_ids) = state_table_ids
         {
@@ -698,7 +698,7 @@ impl CreatingStreamingJobControl {
 
 pub(super) enum CompleteJobType {
     /// The first barrier
-    First(CreateSnapshotBackfillJobInfo),
+    First(CreateSnapshotBackfillJobCommandInfo),
     Normal,
     /// The last barrier to complete
     Finished,

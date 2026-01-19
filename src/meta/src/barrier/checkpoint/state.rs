@@ -30,7 +30,8 @@ use tracing::warn;
 
 use crate::MetaResult;
 use crate::barrier::checkpoint::{CreatingStreamingJobControl, DatabaseCheckpointControl};
-use crate::barrier::context::CreateSnapshotBackfillJobInfo;
+use crate::barrier::command::PostCollectCommand;
+use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
@@ -128,7 +129,7 @@ pub(super) struct ApplyCommandInfo {
     pub table_ids_to_commit: HashSet<TableId>,
     pub jobs_to_wait: HashSet<JobId>,
     pub node_to_collect: NodeToCollect,
-    pub command: Option<Command>,
+    pub command: PostCollectCommand,
 }
 
 impl DatabaseCheckpointControl {
@@ -192,7 +193,7 @@ impl DatabaseCheckpointControl {
                         .collect();
 
                     let job = CreatingStreamingJobControl::new(
-                        CreateSnapshotBackfillJobInfo {
+                        CreateSnapshotBackfillJobCommandInfo {
                             info: info.clone(),
                             snapshot_backfill_info: snapshot_backfill_info.clone(),
                             cross_db_snapshot_backfill_info: cross_db_snapshot_backfill_info
@@ -578,7 +579,9 @@ impl DatabaseCheckpointControl {
             table_ids_to_commit,
             jobs_to_wait: finished_snapshot_backfill_jobs,
             node_to_collect,
-            command,
+            command: command
+                .map(Command::into_post_collect)
+                .unwrap_or(PostCollectCommand::barrier()),
         })
     }
 }

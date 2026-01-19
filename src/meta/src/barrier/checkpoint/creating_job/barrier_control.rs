@@ -26,7 +26,7 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
 
 use crate::barrier::BarrierKind;
-use crate::barrier::context::CreateSnapshotBackfillJobInfo;
+use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -38,7 +38,7 @@ struct CreatingStreamingJobEpochState {
     resps: Vec<BarrierCompleteResponse>,
     notifiers: Vec<Notifier>,
     kind: BarrierKind,
-    first_create_info: Option<CreateSnapshotBackfillJobInfo>,
+    first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
     enqueue_time: Instant,
 }
 
@@ -122,7 +122,7 @@ impl CreatingStreamingJobBarrierControl {
         node_to_collect: NodeToCollect,
         kind: BarrierKind,
         notifiers: Vec<Notifier>,
-        first_create_info: Option<CreateSnapshotBackfillJobInfo>,
+        first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
     ) {
         debug!(
             epoch,
@@ -208,7 +208,7 @@ impl CreatingStreamingJobBarrierControl {
     ) -> Option<(
         u64,
         Vec<BarrierCompleteResponse>,
-        Option<CreateSnapshotBackfillJobInfo>,
+        Option<CreateSnapshotBackfillJobCommandInfo>,
     )> {
         assert!(self.completing_barrier.is_none());
         let epoch_range: (Bound<u64>, Bound<u64>) = (Unbounded, epoch_end_bound);

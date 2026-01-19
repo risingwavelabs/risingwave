@@ -848,7 +848,7 @@ impl DatabaseCheckpointControl {
                 self.handle_refresh_table_info(task, &node);
 
                 self.database_info.apply_collected_command(
-                    node.command_ctx.command.as_ref(),
+                    &node.command_ctx.command,
                     &node.state.resps,
                     hummock_version_stats,
                 );
@@ -909,7 +909,7 @@ impl DatabaseCheckpointControl {
                         .state_table_ids()
                         .iter()
                         .copied(),
-                    create_info.is_some(),
+                    create_info.as_ref(),
                 );
                 let (_, creating_job_epochs) =
                     task.epoch_infos.entry(self.database_id).or_default();

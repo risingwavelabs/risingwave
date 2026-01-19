@@ -32,7 +32,8 @@ use tokio::task::JoinHandle;
 
 use crate::barrier::checkpoint::CheckpointControl;
 use crate::barrier::command::CommandContext;
-use crate::barrier::context::{CreateSnapshotBackfillJobInfo, GlobalBarrierWorkerContext};
+use crate::barrier::context::{CreateSnapshotBackfillJobCommandInfo, GlobalBarrierWorkerContext};
+use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::ControlStreamManager;
@@ -71,7 +72,7 @@ pub(super) struct CompleteBarrierTask {
         DatabaseId,
         (
             Option<(CommandContext, HistogramTimer)>,
-            Vec<(JobId, u64, Option<CreateSnapshotBackfillJobInfo>)>,
+            Vec<(JobId, u64, Option<CreateSnapshotBackfillJobCommandInfo>)>,
         ),
     >,
     /// Source listing completion events that need `ListFinish` commands
@@ -144,14 +145,26 @@ impl CompleteBarrierTask {
                     .await?;
             }
 
-            for (command_ctx, creating_jobs) in self.epoch_infos.values() {
-                if let Some((command_ctx, _)) = command_ctx {
-                    context.post_collect_command(command_ctx).await?;
+            for (database_id, (command_ctx, creating_jobs)) in self.epoch_infos {
+                if let Some((command_ctx, enqueue_time)) = command_ctx {
+                    let command_name = command_ctx.command.command_name().to_owned();
+                    context.post_collect_command(command_ctx.command).await?;
+                    let duration_sec = enqueue_time.stop_and_record();
+                    Self::report_complete_event(
+                        &env,
+                        duration_sec,
+                        &command_ctx.barrier_info,
+                        command_name,
+                    );
+                    GLOBAL_META_METRICS
+                        .last_committed_barrier_time
+                        .with_label_values(&[database_id.to_string().as_str()])
+                        .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
                 }
                 for (_, _, create_info) in creating_jobs {
                     if let Some(create_info) = create_info {
                         context
-                            .post_collect_create_snapshot_backfill(create_info)
+                            .post_collect_command(create_info.into_post_collect())
                             .await?;
                     }
                 }
@@ -186,16 +199,6 @@ impl CompleteBarrierTask {
                     .map(|job_id| context.finish_cdc_table_backfill(job_id)),
             )
             .await?;
-            for (database_id, (command, _)) in self.epoch_infos {
-                if let Some((command_ctx, enqueue_time)) = command {
-                    let duration_sec = enqueue_time.stop_and_record();
-                    Self::report_complete_event(&env, duration_sec, &command_ctx);
-                    GLOBAL_META_METRICS
-                        .last_committed_barrier_time
-                        .with_label_values(&[database_id.to_string().as_str()])
-                        .set(command_ctx.barrier_info.curr_epoch.value().as_unix_secs() as i64);
-                }
-            }
             version_stats
         };
 
@@ -204,19 +207,20 @@ impl CompleteBarrierTask {
 }
 
 impl CompleteBarrierTask {
-    fn report_complete_event(env: &MetaSrvEnv, duration_sec: f64, command_ctx: &CommandContext) {
+    fn report_complete_event(
+        env: &MetaSrvEnv,
+        duration_sec: f64,
+        barrier_info: &BarrierInfo,
+        command: String,
+    ) {
         // Record barrier latency in event log.
         use risingwave_pb::meta::event_log;
         let event = event_log::EventBarrierComplete {
-            prev_epoch: command_ctx.barrier_info.prev_epoch(),
-            cur_epoch: command_ctx.barrier_info.curr_epoch(),
+            prev_epoch: barrier_info.prev_epoch(),
+            cur_epoch: barrier_info.curr_epoch(),
             duration_sec,
-            command: command_ctx
-                .command
-                .as_ref()
-                .map(|command| command.to_string())
-                .unwrap_or_else(|| "barrier".to_owned()),
-            barrier_kind: command_ctx.barrier_info.kind.as_str_name().to_owned(),
+            command,
+            barrier_kind: barrier_info.kind.as_str_name().to_owned(),
         };
         if cfg!(debug_assertions) || Deployment::current().is_ci() {
             // Add a warning log so that debug mode / CI can observe it

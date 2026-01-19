@@ -30,13 +30,13 @@ use risingwave_pb::stream_service::streaming_control_stream_request::PbInitReque
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::MetaResult;
-use crate::barrier::command::CommandContext;
+use crate::barrier::command::PostCollectCommand;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
     BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot,
-    CreateStreamingJobCommandInfo, DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
-    SnapshotBackfillInfo,
+    CreateStreamingJobCommandInfo, CreateStreamingJobType, DatabaseRuntimeInfoSnapshot,
+    RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
@@ -44,10 +44,20 @@ use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 #[derive(Debug)]
-pub(super) struct CreateSnapshotBackfillJobInfo {
+pub(super) struct CreateSnapshotBackfillJobCommandInfo {
     pub info: CreateStreamingJobCommandInfo,
     pub snapshot_backfill_info: SnapshotBackfillInfo,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
+}
+
+impl CreateSnapshotBackfillJobCommandInfo {
+    pub(super) fn into_post_collect(self) -> PostCollectCommand {
+        PostCollectCommand::CreateStreamingJob {
+            info: self.info,
+            job_type: CreateStreamingJobType::SnapshotBackfill(self.snapshot_backfill_info),
+            cross_db_snapshot_backfill_info: self.cross_db_snapshot_backfill_info,
+        }
+    }
 }
 
 pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
@@ -64,15 +74,10 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     );
     fn mark_ready(&self, options: MarkReadyOptions);
 
-    fn post_collect_command<'a>(
-        &'a self,
-        command: &'a CommandContext,
-    ) -> impl Future<Output = MetaResult<()>> + Send + 'a;
-
-    fn post_collect_create_snapshot_backfill<'a>(
-        &'a self,
-        info: &'a CreateSnapshotBackfillJobInfo,
-    ) -> impl Future<Output = MetaResult<()>> + Send + 'a;
+    fn post_collect_command(
+        &self,
+        command: PostCollectCommand,
+    ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String);
 
