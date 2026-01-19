@@ -370,8 +370,7 @@ create source pg_source with (
  port = '${PGPORT:5432}',
  username = secret pg_username,
  password = secret pg_pwd,
- database.name = '${PGDATABASE:postgres}',
- slot.name = 'pg_slot'
+ database.name = '${PGDATABASE:postgres}'
 );
 
 statement ok
