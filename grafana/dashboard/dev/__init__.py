@@ -4,7 +4,7 @@ from ..common import *
 
 sections: List[Callable[[Panels], list]] = []
 
-SECTION_HEADER_HEIGHT = 1.3
+SECTION_HEADER_HEIGHT = 2
 
 
 def section(func: Callable[[Panels], list]):
