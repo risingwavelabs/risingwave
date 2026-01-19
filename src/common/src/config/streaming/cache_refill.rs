@@ -77,4 +77,12 @@ impl CacheRefillPolicy {
             PbCacheRefillPolicy::Both => Self::Both,
         }
     }
+
+    pub fn for_streaming(&self) -> bool {
+        matches!(self, Self::Streaming | Self::Both)
+    }
+
+    pub fn for_serving(&self) -> bool {
+        matches!(self, Self::Serving | Self::Both)
+    }
 }
