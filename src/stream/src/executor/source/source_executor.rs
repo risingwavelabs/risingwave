@@ -75,7 +75,10 @@ pub struct SourceExecutor<S: StateStore> {
     is_shared_non_cdc: bool,
 
     /// Local barrier manager for reporting source load finished events
-    _barrier_manager: LocalBarrierManager,
+    barrier_manager: LocalBarrierManager,
+
+    /// Track whether we have already reported CDC offset update (report only once)
+    cdc_offset_reported: bool,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -98,7 +101,8 @@ impl<S: StateStore> SourceExecutor<S> {
             system_params,
             rate_limit_rps,
             is_shared_non_cdc,
-            _barrier_manager: barrier_manager,
+            barrier_manager,
+            cdc_offset_reported: false,
         }
     }
 
@@ -829,6 +833,30 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
 
+                    // Report CDC source offset updated only the first time
+                    // Check if any updated split is a CDC split with non-empty offset
+                    if !self.cdc_offset_reported {
+                        let has_non_empty_cdc_offset = updated_splits.values().any(|split| {
+                            split.is_cdc_split() && !split.get_cdc_split_offset().is_empty()
+                        });
+                        if has_non_empty_cdc_offset {
+                            // Report only once, then ignore all subsequent offset updates
+                            self.barrier_manager.report_cdc_source_offset_updated(
+                                epoch,
+                                self.actor_ctx.id,
+                                source_id,
+                            );
+                            tracing::info!(
+                                actor_id = %self.actor_ctx.id,
+                                source_id = %source_id,
+                                epoch = ?epoch,
+                                "Reported CDC source offset updated to meta (first time only)"
+                            );
+                            // Mark as reported to prevent any future reports, even if offset changes
+                            self.cdc_offset_reported = true;
+                        }
+                    }
+
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
                         && let Some(task_builder) = &mut wait_checkpoint_task_builder
@@ -907,7 +935,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     self.stream_source_core
                         .updated_splits_in_epoch
-                        .extend(latest_state);
+                        .extend(latest_state.clone());
 
                     let card = chunk.cardinality();
                     if card == 0 {

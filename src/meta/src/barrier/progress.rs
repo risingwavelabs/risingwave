@@ -399,6 +399,7 @@ enum CreateMviewStatus {
         /// Table IDs whose locality provider state tables need to be truncated
         table_ids_to_truncate: Vec<TableId>,
     },
+    CdcSourceInit,
     Finished {
         table_ids_to_truncate: Vec<TableId>,
     },
@@ -485,6 +486,7 @@ impl CreateMviewProgressTracker {
     pub fn gen_backfill_progress(&self) -> String {
         match &self.status {
             CreateMviewStatus::Backfilling { progress, .. } => progress.calculate_progress(),
+            CreateMviewStatus::CdcSourceInit => "Initializing CDC source...".to_owned(),
             CreateMviewStatus::Finished { .. } => "100%".to_owned(),
         }
     }
@@ -620,6 +622,7 @@ impl CreateMviewProgressTracker {
                 pending_backfill_nodes,
                 ..
             } => Some(pending_backfill_nodes.drain(..)),
+            CreateMviewStatus::CdcSourceInit => None,
             CreateMviewStatus::Finished { .. } => None,
         }
         .into_iter()
@@ -628,22 +631,31 @@ impl CreateMviewProgressTracker {
 
     pub(super) fn collect_staging_commit_info(
         &mut self,
-    ) -> (bool, impl Iterator<Item = TableId> + '_) {
-        let (is_finished, table_ids) = match &mut self.status {
+    ) -> (bool, Box<dyn Iterator<Item = TableId> + '_>) {
+        match &mut self.status {
             CreateMviewStatus::Backfilling {
                 table_ids_to_truncate,
                 ..
-            } => (false, table_ids_to_truncate),
+            } => (false, Box::new(table_ids_to_truncate.drain(..))),
+            CreateMviewStatus::CdcSourceInit => (false, Box::new(std::iter::empty())),
             CreateMviewStatus::Finished {
                 table_ids_to_truncate,
                 ..
-            } => (true, table_ids_to_truncate),
-        };
-        (is_finished, table_ids.drain(..))
+            } => (true, Box::new(table_ids_to_truncate.drain(..))),
+        }
     }
 
     pub(super) fn is_finished(&self) -> bool {
         matches!(self.status, CreateMviewStatus::Finished { .. })
+    }
+
+    /// Mark CDC source as finished when offset is updated.
+    pub(super) fn mark_cdc_source_finished(&mut self) {
+        if matches!(self.status, CreateMviewStatus::CdcSourceInit) {
+            self.status = CreateMviewStatus::Finished {
+                table_ids_to_truncate: vec![],
+            };
+        }
     }
 
     pub(super) fn into_tracking_job(self) -> TrackingJob {
@@ -656,18 +668,33 @@ impl CreateMviewProgressTracker {
     /// Add a new create-mview DDL command to track.
     ///
     /// If the actors to track are empty, return the given command as it can be finished immediately.
+    /// For CDC sources, mark as `CdcSourceInit` instead of Finished.
     pub fn new(info: &CreateStreamingJobCommandInfo, version_stats: &HummockVersionStats) -> Self {
         tracing::trace!(?info, "add job to track");
         let CreateStreamingJobCommandInfo {
             stream_job_fragments,
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
+            streaming_job,
             ..
         } = info;
         let job_id = stream_job_fragments.stream_job_id();
         let actors = stream_job_fragments.tracking_progress_actor_ids();
         let tracking_job = TrackingJob::new(&info.stream_job_fragments);
         if actors.is_empty() {
+            // Check if this is a CDC source job
+            let is_cdc_source = matches!(
+                streaming_job,
+                crate::manager::StreamingJob::Source(source)
+                    if source.info.as_ref().map(|info| info.cdc_source_job).unwrap_or(false)
+            );
+            if is_cdc_source {
+                // Mark CDC source as CdcSourceInit, will be finished when offset is updated
+                return Self {
+                    tracking_job,
+                    status: CreateMviewStatus::CdcSourceInit,
+                };
+            }
             // The command can be finished immediately.
             return Self {
                 tracking_job,
