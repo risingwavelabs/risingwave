@@ -18,7 +18,6 @@ use risingwave_storage::store::{
 use rw_futures_util::drop_either_future;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::time::{Instant, Sleep, sleep_until};
-use tokio_stream::StreamExt;
 use tokio_stream::adapters::Peekable;
 use tracing::Instrument;
 
@@ -473,8 +472,8 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
         buffer: &mut SyncedLogStoreBuffer,
         metrics: &SyncedKvLogStoreMetrics,
     ) -> StreamResult<(DispatchExecutorInner, ConsumerFutureEvent, ReadFuture<S>)> {
-        if !barriers.is_empty() {
-            if let ConsumerFuture::ReadingChunk { .. } = self {
+        if !barriers.is_empty()
+            && let ConsumerFuture::ReadingChunk { .. } = self {
                 let msg = barriers
                     .pop_back()
                     .expect("barrier queue should not be empty!");
@@ -485,7 +484,6 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
                 );
                 *self = Self::dispatch(inner, msg, read_future);
             }
-        }
         match self {
             ConsumerFuture::ReadingChunk { read_future, .. } => {
                 let chunk = read_future
@@ -702,12 +700,10 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                     let should_wait_for_upstream =
                         barriers.is_empty() && buffer.is_empty() && consumer_idle;
                     let consumer_future = async {
-                        if pause_stream
+                        let should_pause_consumer = pause_stream
                             && barriers.is_empty()
-                            && matches!(&consumer_future_state, ConsumerFuture::ReadingChunk { .. })
-                        {
-                            pending().await
-                        } else if should_wait_for_upstream {
+                            && matches!(&consumer_future_state, ConsumerFuture::ReadingChunk { .. });
+                        if should_pause_consumer || should_wait_for_upstream {
                             pending().await
                         } else {
                             consumer_future_state
@@ -932,9 +928,7 @@ mod tests {
     };
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::receiver::ReceiverExecutor;
-    use crate::executor::{
-        ActorContext, BarrierInner as Barrier, Execute as _, MessageInner as Message,
-    };
+    use crate::executor::{ActorContext, BarrierInner as Barrier, MessageInner as Message};
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 
     fn init_logger() {
@@ -966,7 +960,7 @@ mod tests {
         // Dispatcher setup mirrors the simple dispatcher in dispatch.rs tests.
         let dispatcher = stream_plan::Dispatcher {
             r#type: DispatcherType::Simple as _,
-            dispatcher_id: 7,
+            dispatcher_id: 7.into(),
             downstream_actor_id: vec![downstream_actor],
             output_mapping: PbDispatchOutputMapping::identical(0).into(),
             ..Default::default()
@@ -1046,7 +1040,7 @@ mod tests {
 
         let dispatcher = stream_plan::Dispatcher {
             r#type: DispatcherType::Simple as _,
-            dispatcher_id: 7,
+            dispatcher_id: 7.into(),
             downstream_actor_id: vec![downstream_actor],
             output_mapping: PbDispatchOutputMapping::identical(2).into(),
             ..Default::default()
