@@ -76,7 +76,7 @@ pub enum FeatureNotAvailable {
     // TODO(license): refine error message to include tier name & better instructions
     #[error(
         "feature {feature:?} is not available based on your license\n\n\
-        Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command."
+        Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command. For more information, visit https://go.risingwave.com/premium."
     )]
     NotAvailable { feature: Feature },
 
