@@ -312,13 +312,18 @@ declare_id_types!(
     ConnectionId,
     SecretId,
     SubscriberId,
-    LocalOperatorId,
-    PartialGraphId
+    LocalOperatorId
 );
 
 declare_id_type!(ObjectId, u32, 256);
 
-declare_id_types!(u64, GlobalOperatorId, StreamNodeLocalOperatorId, ExecutorId);
+declare_id_types!(
+    u64,
+    GlobalOperatorId,
+    StreamNodeLocalOperatorId,
+    ExecutorId,
+    PartialGraphId
+);
 
 macro_rules! impl_as {
     (@func $target_id_name:ident, $alias_name:ident) => {

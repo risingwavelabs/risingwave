@@ -464,7 +464,7 @@ impl<'a> IntoIterator for &'a InflightStreamingJobInfo {
 
 #[derive(Debug)]
 pub struct InflightDatabaseInfo {
-    database_id: DatabaseId,
+    pub(super) database_id: DatabaseId,
     jobs: HashMap<JobId, InflightStreamingJobInfo>,
     fragment_location: HashMap<FragmentId, JobId>,
     pub(super) shared_actor_infos: SharedActorInfos,
@@ -1100,8 +1100,10 @@ impl InflightDatabaseInfo {
         let new_fragment_infos = info
             .into_iter()
             .flat_map(|(info, is_snapshot_backfill)| {
-                let partial_graph_id =
-                    to_partial_graph_id(is_snapshot_backfill.then_some(info.streaming_job.id()));
+                let partial_graph_id = to_partial_graph_id(
+                    self.database_id,
+                    is_snapshot_backfill.then_some(info.streaming_job.id()),
+                );
                 info.stream_job_fragments
                     .new_fragment_info(&info.init_split_assignment)
                     .map(move |(fragment_id, info)| (fragment_id, info, partial_graph_id))
@@ -1133,14 +1135,19 @@ impl InflightDatabaseInfo {
                             fragment_id,
                             fragment,
                             // we assume that replace job only happens in database partial graph
-                            to_partial_graph_id(None),
+                            to_partial_graph_id(self.database_id, None),
                         )
                     }),
             )
             .collect_vec();
         let mut builder = FragmentEdgeBuilder::new(
             existing_fragment_ids
-                .map(|fragment_id| (self.fragment(fragment_id), to_partial_graph_id(None)))
+                .map(|fragment_id| {
+                    (
+                        self.fragment(fragment_id),
+                        to_partial_graph_id(self.database_id, None),
+                    )
+                })
                 .chain(
                     new_fragment_infos
                         .iter()

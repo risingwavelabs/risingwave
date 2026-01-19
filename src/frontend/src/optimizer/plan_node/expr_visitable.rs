@@ -14,7 +14,7 @@
 
 use super::*;
 
-/// Vistis expressions in a `PlanRef`.
+/// Visits expressions in a `PlanRef`.
 /// To visit recursively, call `visit_exprs_recursive` on [`VisitExprsRecursive`].
 pub trait ExprVisitable {
     fn visit_exprs(&self, _v: &mut dyn ExprVisitor) {}
