@@ -47,6 +47,21 @@ pub fn handle_set(
     // Strip double and single quotes
     let string_val = set_var_to_param_str(&value);
 
+    // Check connection existence for iceberg_engine_connection
+    let param_name = name.real_value().to_lowercase();
+    if param_name.eq_ignore_ascii_case("iceberg_engine_connection") {
+        if let Some(val) = string_val.as_deref() {
+            if !val.is_empty() {
+                if let Some((schema_name, connection_name)) = val.split_once('.') {
+                    handler_args.session.get_connection_by_name(
+                        Some(schema_name.to_owned()),
+                        connection_name,
+                    )?;
+                }
+            }
+        }
+    }
+
     let mut status = ParameterStatus::default();
 
     struct Reporter<'a> {
@@ -65,7 +80,7 @@ pub fn handle_set(
     // In future we can add converter/parser to make the API more robust.
     // We remark that the name of session parameter is always case-insensitive.
     handler_args.session.set_config_report(
-        &name.real_value().to_lowercase(),
+        &param_name,
         string_val,
         Reporter {
             status: &mut status,
