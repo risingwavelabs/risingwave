@@ -18,8 +18,8 @@ use risingwave_common::session_config::join_encoding_type::JoinEncodingType;
 use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType};
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::AsOfJoinNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 
 use super::stream::prelude::*;
 use super::utils::{
