@@ -59,6 +59,51 @@ impl ToText for Decimal {
     }
 }
 
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub struct DecimalRef<'a>(&'a Decimal);
+
+impl<'a> DecimalRef<'a> {
+    pub fn to_owned_scalar(&self) -> Decimal {
+        *self.0
+    }
+}
+
+impl std::fmt::Display for DecimalRef<'_> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+impl ToText for DecimalRef<'_> {
+    fn write<W: std::fmt::Write>(&self, f: &mut W) -> std::fmt::Result {
+        write!(f, "{self}")
+    }
+
+    fn write_with_type<W: std::fmt::Write>(&self, ty: &DataType, f: &mut W) -> std::fmt::Result {
+        match ty {
+            DataType::Decimal => self.write(f),
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl ToSql for DecimalRef<'_> {
+    accepts!(NUMERIC);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        self.0.to_sql(ty, out)
+    }
+}
+
 impl Decimal {
     /// Used by `PrimitiveArray` to serialize the array to protobuf.
     pub fn to_protobuf(self, output: &mut impl Write) -> ArrayResult<usize> {
