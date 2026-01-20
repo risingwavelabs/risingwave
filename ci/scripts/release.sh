@@ -6,6 +6,7 @@ set -euo pipefail
 SKIP_RELEASE=${SKIP_RELEASE:-0}
 REPO_ROOT=${PWD}
 ARCH="$(uname -m)"
+CARGO_PROFILE=${CARGO_PROFILE:-production}
 
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
@@ -76,13 +77,13 @@ if [ "${ARCH}" == "aarch64" ]; then
   export JEMALLOC_SYS_WITH_LG_PAGE=16
 fi
 
-cargo build -p risingwave_cmd_all --features "rw-static-link" --features udf --features datafusion --features openssl-vendored --profile production
-cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --features openssl-vendored --profile production
+cargo build -p risingwave_cmd_all --features "rw-static-link" --features udf --features datafusion --features openssl-vendored --profile "${CARGO_PROFILE}"
+cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --features openssl-vendored --profile "${CARGO_PROFILE}"
 
 echo "--- check link info"
-check_link_info production
+check_link_info "${CARGO_PROFILE}"
 
-cd target/production && chmod +x risingwave risectl
+cd target/"${CARGO_PROFILE}" && chmod +x risingwave risectl
 
 if [ "${SKIP_RELEASE}" -ne 1 ]; then
   echo "--- Upload nightly binary to s3"
@@ -103,7 +104,7 @@ cd "${REPO_ROOT}"/java && mvn -B package -Dmaven.test.skip=true -Dno-build-rust
 if [[ -n "${BUILDKITE_TAG}" ]]; then
   echo "--- Collect all release assets"
   cd "${REPO_ROOT}" && mkdir release-assets && cd release-assets
-  cp -r "${REPO_ROOT}"/target/production/* .
+  cp -r "${REPO_ROOT}"/target/"${CARGO_PROFILE}"/* .
   mv "${REPO_ROOT}"/java/connector-node/assembly/target/risingwave-connector-1.0.0.tar.gz risingwave-connector-"${BUILDKITE_TAG}".tar.gz
   tar -zxvf risingwave-connector-"${BUILDKITE_TAG}".tar.gz libs
   ls -l
