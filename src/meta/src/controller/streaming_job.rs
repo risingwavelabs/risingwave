@@ -38,6 +38,7 @@ use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt, match_sink
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::refresh_job::RefreshState;
+use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
@@ -132,6 +133,7 @@ impl CatalogController {
             config_override: Set(Some(ctx.config_override.to_string())),
             parallelism: Set(streaming_parallelism),
             backfill_parallelism: Set(backfill_parallelism),
+            backfill_orders: Set(None),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
             is_serverless_backfill: Set(is_serverless_backfill),
@@ -463,6 +465,7 @@ impl CatalogController {
         stream_job_fragments: &StreamJobFragmentsToCreate,
         streaming_job: &StreamingJob,
         for_replace: bool,
+        backfill_orders: Option<BackfillOrders>,
     ) -> MetaResult<()> {
         self.prepare_streaming_job(
             stream_job_fragments.stream_job_id(),
@@ -470,6 +473,7 @@ impl CatalogController {
             &stream_job_fragments.downstreams,
             for_replace,
             Some(streaming_job),
+            backfill_orders,
         )
         .await
     }
@@ -487,6 +491,7 @@ impl CatalogController {
         downstreams: &FragmentDownstreamRelation,
         for_replace: bool,
         creating_streaming_job: Option<&'a StreamingJob>,
+        backfill_orders: Option<BackfillOrders>,
     ) -> MetaResult<()> {
         let fragments = Self::prepare_fragment_models_from_fragments(job_id, get_fragments())?;
 
@@ -502,6 +507,15 @@ impl CatalogController {
 
         // Ensure the job exists.
         ensure_job_not_canceled(job_id, &txn).await?;
+
+        if let Some(backfill_orders) = backfill_orders {
+            let job = streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                backfill_orders: Set(Some(backfill_orders)),
+                ..Default::default()
+            };
+            job.update(&txn).await?;
+        }
 
         let state_table_ids = fragments
             .iter()

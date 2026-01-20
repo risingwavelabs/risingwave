@@ -1146,9 +1146,15 @@ impl DdlController {
             _ => {}
         }
 
+        let backfill_orders = ctx.fragment_backfill_ordering.clone().into();
         self.metadata_manager
             .catalog_controller
-            .prepare_stream_job_fragments(&stream_job_fragments, streaming_job, false)
+            .prepare_stream_job_fragments(
+                &stream_job_fragments,
+                streaming_job,
+                false,
+                Some(backfill_orders),
+            )
             .await?;
 
         // create streaming jobs.
@@ -1505,6 +1511,7 @@ impl DdlController {
                             &empty_downstreams,
                             true,
                             None,
+                            None,
                         )
                         .await?;
                 }
@@ -1512,7 +1519,7 @@ impl DdlController {
 
             self.metadata_manager
                 .catalog_controller
-                .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true)
+                .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true, None)
                 .await?;
 
             self.stream_manager

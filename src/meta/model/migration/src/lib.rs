@@ -65,6 +65,7 @@ mod m20251208_134652_clean_watermark_indices;
 mod m20251224_142321_sink_schema_change;
 mod m20251231_000000_sink_ignore_delete;
 mod m20260119_153927_streaming_job_is_serverless_backfill;
+mod m20260120_120000_streaming_job_backfill_orders;
 mod utils;
 
 pub struct Migrator;
@@ -168,6 +169,7 @@ impl MigratorTrait for Migrator {
             Box::new(m20251224_142321_sink_schema_change::Migration),
             Box::new(m20251231_000000_sink_ignore_delete::Migration),
             Box::new(m20260119_153927_streaming_job_is_serverless_backfill::Migration),
+            Box::new(m20260120_120000_streaming_job_backfill_orders::Migration),
         ]
     }
 }

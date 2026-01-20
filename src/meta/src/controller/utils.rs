@@ -30,6 +30,7 @@ use risingwave_common::{bail, hash};
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
+use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::{
@@ -2330,6 +2331,7 @@ pub struct StreamingJobExtraInfo {
     pub timezone: Option<String>,
     pub config_override: Arc<str>,
     pub job_definition: String,
+    pub backfill_orders: Option<BackfillOrders>,
 }
 
 impl StreamingJobExtraInfo {
@@ -2348,12 +2350,19 @@ pub async fn get_streaming_job_extra_info<C>(
 where
     C: ConnectionTrait,
 {
-    let pairs: Vec<(JobId, Option<String>, Option<String>)> = StreamingJob::find()
+    #[expect(clippy::type_complexity)]
+    let pairs: Vec<(
+        JobId,
+        Option<String>,
+        Option<String>,
+        Option<BackfillOrders>,
+    )> = StreamingJob::find()
         .select_only()
         .columns([
             streaming_job::Column::JobId,
             streaming_job::Column::Timezone,
             streaming_job::Column::ConfigOverride,
+            streaming_job::Column::BackfillOrders,
         ])
         .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
         .into_tuple()
@@ -2366,7 +2375,7 @@ where
 
     let result = pairs
         .into_iter()
-        .map(|(job_id, timezone, config_override)| {
+        .map(|(job_id, timezone, config_override, backfill_orders)| {
             let job_definition = definitions.remove(&job_id).unwrap_or_default();
             (
                 job_id,
@@ -2374,6 +2383,7 @@ where
                     timezone,
                     config_override: config_override.unwrap_or_default().into(),
                     job_definition,
+                    backfill_orders,
                 },
             )
         })

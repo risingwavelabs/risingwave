@@ -30,6 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
@@ -38,6 +39,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::source::{PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
@@ -59,6 +61,7 @@ use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
 use super::{BarrierKind, TracedEpoch};
+use crate::barrier::BackfillOrderState;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
@@ -108,6 +111,36 @@ pub(super) fn from_partial_graph_id(
         Some(JobId::new(raw_creating_job_id))
     };
     (database_id.into(), creating_job_id)
+}
+
+fn build_locality_fragment_state_table_mapping(
+    fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+) -> HashMap<FragmentId, Vec<TableId>> {
+    let mut mapping = HashMap::new();
+
+    for (fragment_id, fragment_info) in fragment_infos {
+        let mut state_table_ids = Vec::new();
+        visit_stream_node_cont(&fragment_info.nodes, |stream_node| {
+            if let Some(NodeBody::LocalityProvider(locality_provider)) =
+                stream_node.node_body.as_ref()
+            {
+                let state_table_id = locality_provider
+                    .state_table
+                    .as_ref()
+                    .expect("must have state table")
+                    .id;
+                state_table_ids.push(state_table_id);
+                false
+            } else {
+                true
+            }
+        });
+        if !state_table_ids.is_empty() {
+            mapping.insert(*fragment_id, state_table_ids);
+        }
+    }
+
+    mapping
 }
 
 struct ControlStreamNode {
@@ -615,6 +648,7 @@ impl ControlStreamManager {
         &mut self,
         database_id: DatabaseId,
         jobs: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
+        backfill_orders: HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
         state_table_log_epochs: &mut HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         fragment_relations: &FragmentDownstreamRelation,
@@ -825,11 +859,20 @@ impl ControlStreamManager {
                 .into_iter()
                 .map(|(job_id, (fragment_infos, is_background_creating))| {
                     let status = if is_background_creating {
+                        let backfill_ordering =
+                            backfill_orders.get(&job_id).cloned().unwrap_or_default();
+                        let locality_fragment_state_table_mapping =
+                            build_locality_fragment_state_table_mapping(&fragment_infos);
+                        let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
+                            &backfill_ordering,
+                            &fragment_infos,
+                            locality_fragment_state_table_mapping,
+                        );
                         CreateStreamingJobStatus::Creating {
                             tracker: CreateMviewProgressTracker::recover(
                                 job_id,
                                 &fragment_infos,
-                                Default::default(),
+                                backfill_order_state,
                                 hummock_version_stats,
                             ),
                         }
