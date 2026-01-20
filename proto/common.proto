@@ -24,6 +24,7 @@ message HostAddress {
 message ActorInfo {
   uint32 actor_id = 1;
   HostAddress host = 2;
+  uint64 partial_graph_id = 3;
 }
 
 enum WorkerType {

@@ -30,6 +30,10 @@ pub trait Metadata: Display + Send + Sync {
     fn hummock_version_ref(&self) -> &HummockVersion;
 
     fn hummock_version(self) -> HummockVersion;
+
+    fn storage_url(&self) -> BackupResult<String>;
+
+    fn storage_directory(&self) -> BackupResult<String>;
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]

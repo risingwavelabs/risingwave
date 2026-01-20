@@ -344,15 +344,10 @@ impl MetadataManager {
         Ok(ret)
     }
 
-    pub async fn list_background_creating_jobs(&self) -> MetaResult<Vec<JobId>> {
-        let jobs = self
-            .catalog_controller
+    pub async fn list_background_creating_jobs(&self) -> MetaResult<HashSet<JobId>> {
+        self.catalog_controller
             .list_background_creating_jobs(false, None)
-            .await?;
-
-        let jobs = jobs.into_iter().map(|(id, _, _)| id).collect();
-
-        Ok(jobs)
+            .await
     }
 
     pub async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
@@ -715,6 +710,28 @@ impl MetadataManager {
             .get_job_fragment_backfill_scan_type(job_id)
             .await?;
         Ok(backfill_types)
+    }
+
+    pub async fn collect_unreschedulable_backfill_jobs(
+        &self,
+        job_ids: impl IntoIterator<Item = &JobId>,
+    ) -> MetaResult<HashSet<JobId>> {
+        let mut unreschedulable = HashSet::new();
+
+        for job_id in job_ids {
+            let scan_types = self
+                .catalog_controller
+                .get_job_fragment_backfill_scan_type(*job_id)
+                .await?;
+            if scan_types
+                .values()
+                .any(|scan_type| !scan_type.is_reschedulable())
+            {
+                unreschedulable.insert(*job_id);
+            }
+        }
+
+        Ok(unreschedulable)
     }
 }
 

@@ -25,8 +25,8 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_meta_model::{CreateType, WorkerId};
-use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_meta_model::WorkerId;
+use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
@@ -43,7 +43,9 @@ use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::rpc::ControlStreamManager;
-use crate::barrier::{BackfillOrderState, BarrierKind, CreateStreamingJobCommandInfo, TracedEpoch};
+use crate::barrier::{
+    BackfillOrderState, BackfillProgress, BarrierKind, CreateStreamingJobCommandInfo, TracedEpoch,
+};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
@@ -62,8 +64,6 @@ pub(crate) struct CreatingJobInfo {
 pub(crate) struct CreatingStreamingJobControl {
     database_id: DatabaseId,
     pub(super) job_id: JobId,
-    definition: String,
-    create_type: CreateType,
     pub(super) snapshot_backfill_upstream_tables: HashSet<TableId>,
     snapshot_epoch: u64,
 
@@ -109,7 +109,6 @@ impl CreatingStreamingJobControl {
         );
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             job_id,
-            info.definition.clone(),
             &fragment_infos,
             backfill_order_state,
             version_stat,
@@ -203,8 +202,6 @@ impl CreatingStreamingJobControl {
 
         Ok(Self {
             database_id,
-            definition: info.definition.clone(),
-            create_type: info.create_type.into(),
             job_id,
             snapshot_backfill_upstream_tables,
             barrier_control,
@@ -292,7 +289,6 @@ impl CreatingStreamingJobControl {
 
     fn recover_consuming_snapshot(
         job_id: JobId,
-        definition: &String,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         snapshot_epoch: u64,
         committed_epoch: u64,
@@ -304,7 +300,6 @@ impl CreatingStreamingJobControl {
         let mut pending_non_checkpoint_barriers = vec![];
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             job_id,
-            definition.clone(),
             &info.fragment_infos,
             Default::default(),
             version_stat,
@@ -376,7 +371,6 @@ impl CreatingStreamingJobControl {
     pub(crate) fn recover(
         database_id: DatabaseId,
         job_id: JobId,
-        definition: String,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         snapshot_epoch: u64,
@@ -391,7 +385,6 @@ impl CreatingStreamingJobControl {
     ) -> MetaResult<Self> {
         debug!(
             %job_id,
-            definition,
             "recovered creating job"
         );
         let mut barrier_control = CreatingStreamingJobBarrierControl::new(
@@ -448,7 +441,6 @@ impl CreatingStreamingJobControl {
         let (status, first_barrier_info) = if committed_epoch < snapshot_epoch {
             Self::recover_consuming_snapshot(
                 job_id,
-                &definition,
                 upstream_table_log_epochs,
                 snapshot_epoch,
                 committed_epoch,
@@ -481,8 +473,6 @@ impl CreatingStreamingJobControl {
         Ok(Self {
             database_id,
             job_id,
-            definition,
-            create_type: CreateType::Background,
             snapshot_backfill_upstream_tables,
             snapshot_epoch,
             node_actors,
@@ -499,18 +489,18 @@ impl CreatingStreamingJobControl {
         self.barrier_control.is_empty()
     }
 
-    pub(crate) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
+    pub(crate) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
         self.barrier_control.is_valid_after_worker_err(worker_id)
             && self
                 .status
                 .fragment_infos()
                 .map(|fragment_infos| {
-                    InflightFragmentInfo::contains_worker(fragment_infos.values(), worker_id)
+                    !InflightFragmentInfo::contains_worker(fragment_infos.values(), worker_id)
                 })
                 .unwrap_or(true)
     }
 
-    pub(crate) fn gen_ddl_progress(&self) -> DdlProgress {
+    pub(crate) fn gen_backfill_progress(&self) -> BackfillProgress {
         let progress = match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot {
                 create_mview_tracker,
@@ -519,8 +509,8 @@ impl CreatingStreamingJobControl {
                 if create_mview_tracker.is_finished() {
                     "Snapshot finished".to_owned()
                 } else {
-                    let progress = create_mview_tracker.gen_ddl_progress();
-                    format!("Snapshot [{}]", progress.progress)
+                    let progress = create_mview_tracker.gen_backfill_progress();
+                    format!("Snapshot [{}]", progress)
                 }
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
@@ -529,7 +519,7 @@ impl CreatingStreamingJobControl {
             } => {
                 format!(
                     "LogStore [{}]",
-                    log_store_progress_tracker.gen_ddl_progress()
+                    log_store_progress_tracker.gen_backfill_progress()
                 )
             }
             CreatingStreamingJobStatus::Finishing(..) => {
@@ -542,11 +532,9 @@ impl CreatingStreamingJobControl {
                 unreachable!()
             }
         };
-        DdlProgress {
-            id: self.job_id.as_raw_id() as u64,
-            statement: self.definition.clone(),
-            create_type: self.create_type.as_str().to_owned(),
+        BackfillProgress {
             progress,
+            backfill_type: PbBackfillType::SnapshotBackfill,
         }
     }
 
@@ -568,6 +556,12 @@ impl CreatingStreamingJobControl {
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
     ) -> MetaResult<()> {
+        let (state_table_ids, nodes_to_sync_table) = if let Some(state_table_ids) = state_table_ids
+        {
+            (Some(state_table_ids), Some(node_actors.keys().copied()))
+        } else {
+            (None, None)
+        };
         let node_to_collect = control_stream_manager.inject_barrier(
             database_id,
             Some(job_id),
@@ -575,6 +569,7 @@ impl CreatingStreamingJobControl {
             &barrier_info,
             node_actors,
             state_table_ids.into_iter().flatten().copied(),
+            nodes_to_sync_table.into_iter().flatten(),
             new_actors,
         )?;
         barrier_control.enqueue_epoch(

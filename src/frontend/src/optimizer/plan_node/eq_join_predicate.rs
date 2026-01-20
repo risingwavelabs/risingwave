@@ -189,12 +189,13 @@ impl EqJoinPredicate {
             .collect()
     }
 
-    pub(crate) fn inequality_pairs(&self) -> (usize, Vec<(usize, InequalityInputPair)>) {
-        (
-            self.left_cols_num,
-            self.other_cond()
-                .extract_inequality_keys(self.left_cols_num, self.right_cols_num),
-        )
+    /// Returns a list of `(conjunction_index, InequalityInputPair)` where:
+    /// - `left_idx` is the column index from the left input
+    /// - `right_idx` is the column index from the right input (NOT offset by `left_cols_num`)
+    /// - `op` is the comparison operator
+    pub(crate) fn inequality_pairs_v2(&self) -> Vec<(usize, InequalityInputPair)> {
+        self.other_cond()
+            .extract_inequality_keys(self.left_cols_num, self.right_cols_num)
     }
 
     /// Note: `right_col_index` starts from `0`
@@ -343,6 +344,7 @@ impl EqJoinPredicateDisplay<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> std::fmt::Result {
         let that = self.eq_join_predicate;
         let mut eq_keys = that.eq_keys().iter();
+        let mut printed_any = false;
         if let Some((k1, k2, null_safe)) = eq_keys.next() {
             write!(
                 f,
@@ -361,6 +363,7 @@ impl EqJoinPredicateDisplay<'_> {
                     input_schema: self.input_schema
                 }
             )?;
+            printed_any = true;
         }
         for (k1, k2, null_safe) in eq_keys {
             write!(
@@ -380,16 +383,22 @@ impl EqJoinPredicateDisplay<'_> {
                     input_schema: self.input_schema
                 }
             )?;
+            printed_any = true;
         }
         if !that.other_cond.always_true() {
             write!(
                 f,
-                " AND {}",
+                "{}{}",
+                if printed_any { " AND " } else { "" },
                 ConditionDisplay {
                     condition: &that.other_cond,
                     input_schema: self.input_schema
                 }
             )?;
+            printed_any = true;
+        }
+        if !printed_any {
+            write!(f, "true")?;
         }
 
         Ok(())

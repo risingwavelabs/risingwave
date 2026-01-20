@@ -32,7 +32,7 @@ Caused by these errors (recent errors listed first):
   2: failed to validate sink
   3: feature DynamoDbSink is not available based on your license
 
-Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command. For more information, visit https://go.risingwave.com/premium.
 
 
 statement error
@@ -51,7 +51,7 @@ Caused by these errors (recent errors listed first):
   2: failed to validate sink
   3: feature RedisSinkStream is not available based on your license
 
-Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command. For more information, visit https://go.risingwave.com/premium.
 
 
 statement error
@@ -75,7 +75,7 @@ Caused by these errors (recent errors listed first):
   2: failed to validate sink
   3: feature SnowflakeSink is not available based on your license
 
-Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command. For more information, visit https://go.risingwave.com/premium.
 
 
 statement error
@@ -95,7 +95,7 @@ Caused by these errors (recent errors listed first):
   2: failed to validate sink
   3: feature OpenSearchSink is not available based on your license
 
-Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command. For more information, visit https://go.risingwave.com/premium.
 
 
 statement error
@@ -120,7 +120,7 @@ Caused by these errors (recent errors listed first):
   2: failed to validate sink
   3: feature BigQuerySink is not available based on your license
 
-Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command.
+Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command. For more information, visit https://go.risingwave.com/premium.
 
 
 statement ok
