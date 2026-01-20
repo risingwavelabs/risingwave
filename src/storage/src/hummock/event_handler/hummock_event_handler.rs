@@ -72,12 +72,13 @@ impl BufferTracker {
         let flush_threshold = (capacity as f32 * config.shared_buffer_flush_ratio) as usize;
         let shared_buffer_min_batch_flush_size =
             config.shared_buffer_min_batch_flush_size_mb * (1 << 20);
-        assert!(
-            flush_threshold < capacity,
-            "flush_threshold {} should be less or equal to capacity {}",
-            flush_threshold,
-            capacity
-        );
+        if flush_threshold >= capacity {
+            warn!(
+                "flush_threshold {} should be less or equal to capacity {}",
+                flush_threshold,
+                capacity
+            );
+        }
         Self::new(
             capacity,
             flush_threshold,
@@ -207,6 +208,7 @@ struct HummockEventHandlerMetrics {
     event_handler_on_upload_finish_latency: Histogram,
     event_handler_on_apply_version_update: Histogram,
     event_handler_on_recv_version_update: Histogram,
+    event_handler_on_spiller: Histogram,
 }
 
 pub struct HummockEventHandler {
@@ -349,6 +351,9 @@ impl HummockEventHandler {
             event_handler_on_recv_version_update: state_store_metrics
                 .event_handler_latency
                 .with_label_values(&["recv_version_update"]),
+            event_handler_on_spiller: state_store_metrics
+                .event_handler_latency
+                .with_label_values(&["spiller"]),
         };
 
         let uploader = HummockUploader::new(
@@ -675,7 +680,8 @@ impl HummockEventHandler {
     fn handle_hummock_event(&mut self, event: HummockEvent) {
         match event {
             HummockEvent::BufferMayFlush => {
-                self.uploader.may_flush();
+                self.uploader
+                    .may_flush(&self.metrics.event_handler_on_spiller);
             }
             HummockEvent::SyncEpoch {
                 sync_result_sender,
@@ -712,7 +718,8 @@ impl HummockEventHandler {
                     imms.first().map(|imm| imm.table_id),
                 );
                 self.uploader.add_imms(instance_id, imms);
-                self.uploader.may_flush();
+                self.uploader
+                    .may_flush(&self.metrics.event_handler_on_spiller);
             }
 
             HummockEvent::LocalSealEpoch {
