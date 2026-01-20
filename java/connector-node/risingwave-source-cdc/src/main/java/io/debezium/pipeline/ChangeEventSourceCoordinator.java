@@ -449,6 +449,10 @@ public class ChangeEventSourceCoordinator<P extends Partition, O extends OffsetC
         // Emit an initial heartbeat once streaming is established so downstream consumers can
         // observe liveness immediately, without waiting for the first interval to elapse.
         if (eventDispatcher.heartbeatsEnabled()) {
+            if (offsetContext.getOffset() == null || offsetContext.getOffset().isEmpty()) {
+                LOGGER.info("No offset found, skipping the initial heartbeat");
+                return;
+            }
             LOGGER.info("Emit the initial heartbeat.");
             eventDispatcher.alwaysDispatchHeartbeatEvent(partition, offsetContext);
         }
