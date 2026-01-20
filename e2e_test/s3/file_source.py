@@ -12,6 +12,111 @@ from io import StringIO
 from minio import Minio
 import gzip
 from functools import partial
+import pyarrow as pa
+import pyarrow.parquet as pq
+
+
+def _test_parquet_struct_field_subset(minio_client: Minio):
+    """Generate a Parquet file with struct superset fields and verify RW can read a subset.
+
+    Upstream Parquet schema:
+      - id: int32
+      - s: struct<foo:int32, bar:string, baz:int32>
+
+    RisingWave table schema (subset):
+      - id: int
+      - s: struct<foo:int, bar:varchar>
+    """
+
+    # 1) Generate Parquet locally.
+    run_id = str(random.randint(1000, 9999))
+    local_path = f"parquet_struct_subset_{run_id}.parquet"
+    s3_key = f"test_parquet_struct_subset/{run_id}.parquet"
+
+    id_arr = pa.array([1, 2], type=pa.int32())
+    foo = pa.array([10, 20], type=pa.int32())
+    bar = pa.array(["a", "b"], type=pa.string())
+    baz = pa.array([100, 200], type=pa.int32())
+    s_arr = pa.StructArray.from_arrays([foo, bar, baz], names=["foo", "bar", "baz"])
+
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int32(), nullable=False),
+            pa.field(
+                "s",
+                pa.struct(
+                    [
+                        pa.field("foo", pa.int32(), nullable=True),
+                        pa.field("bar", pa.string(), nullable=True),
+                        pa.field("baz", pa.int32(), nullable=True),
+                    ]
+                ),
+                nullable=True,
+            ),
+        ]
+    )
+    table = pa.Table.from_arrays([id_arr, s_arr], schema=schema)
+    pq.write_table(table, local_path, compression="snappy", version="2.6")
+
+    # 2) Upload to MinIO.
+    minio_client.fput_object(
+        bucket_name="hummock001",
+        object_name=s3_key,
+        file_path=local_path,
+    )
+
+    # 3) Create RW table that only reads subset fields (foo, bar).
+    conn = psycopg2.connect(host="localhost", port="4566", user="root", database="dev")
+    cur = conn.cursor()
+
+    table_name = "s3_test_parquet_struct_subset"
+    cur.execute(f"drop table if exists {table_name};")
+    cur.execute(
+        f"""
+CREATE TABLE {table_name}(
+  id int,
+  s STRUCT<foo INT, bar VARCHAR>
+) WITH (
+  connector = 's3',
+  match_pattern = '{s3_key}',
+  s3.region_name = 'custom',
+  s3.bucket_name = 'hummock001',
+  s3.credentials.access = 'hummockadmin',
+  s3.credentials.secret = 'hummockadmin',
+  s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+  refresh.interval.sec = 1
+) FORMAT PLAIN ENCODE PARQUET;
+"""
+    )
+
+    # Wait for file to be ingested.
+    MAX_RETRIES = 40
+    for retry_no in range(MAX_RETRIES):
+        cur.execute(f"select count(*) from {table_name}")
+        result = cur.fetchone()
+        if result[0] == 2:
+            break
+        print(
+            f"[retry {retry_no}] Now got {result[0]} rows in table, 2 expected, wait 5s"
+        )
+        sleep(5)
+
+    # Verify we can read subset fields from struct.
+    cur.execute(f"select id, s.foo, s.bar from {table_name} order by id")
+    rows = cur.fetchall()
+    assert rows == [(1, 10, "a"), (2, 20, "b")], f"unexpected rows: {rows}"
+    print("Test parquet struct subset read pass")
+
+    # Cleanup RW & MinIO & local.
+    cur.execute(f"drop table {table_name};")
+    cur.close()
+    conn.close()
+
+    minio_client.remove_object(bucket_name="hummock001", object_name=s3_key)
+    try:
+        os.remove(local_path)
+    except OSError:
+        pass
 
 def gen_data(file_num, item_num_per_file):
     assert item_num_per_file % 2 == 0, \
@@ -381,3 +486,7 @@ if __name__ == "__main__":
     # clean up s3 files in test_incremental dir
     for idx, _ in enumerate(formatted_files):
         client.remove_object(bucket_name="hummock001", object_name=_s3(idx, 0))
+
+    # Parquet struct subset read test.
+    print("Test parquet struct subset read...\n")
+    _test_parquet_struct_field_subset(client)
