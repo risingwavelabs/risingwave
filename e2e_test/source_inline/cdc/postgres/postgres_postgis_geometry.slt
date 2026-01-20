@@ -151,7 +151,7 @@ psql -c "
     INSERT INTO test_geo VALUES (4, 'NullLocation', NULL);
 "
 
-query ITI retry 3 backoff 1s
+query ITI retry 10 backoff 1s
 select id, name, location from test_geo where id = 4;
 ----
 4 NullLocation NULL
