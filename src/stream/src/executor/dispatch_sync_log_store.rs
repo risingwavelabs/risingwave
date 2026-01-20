@@ -970,7 +970,7 @@ mod tests {
         // Prepare downstream output channels before creating the executor so `collect_outputs` can
         // resolve them immediately.
         let (new_output_request_tx, new_output_request_rx) = unbounded_channel();
-        let (down_tx, mut down_rx) = channel_for_test();
+        let (down_tx, down_rx) = channel_for_test();
         new_output_request_tx
             .send((downstream_actor, NewOutputRequest::Local(down_tx)))
             .unwrap();
@@ -1024,7 +1024,7 @@ mod tests {
         .unwrap();
 
         // Drive the executor: send the first barrier and ensure it is surfaced.
-        let mut barrier_stream = Box::new(executor).execute();
+        let barrier_stream = Box::new(executor).execute();
         pin_mut!(barrier_stream);
 
         tx.send(Message::Barrier(first_barrier.clone().into_dispatcher()).into())

@@ -475,6 +475,7 @@ impl StreamActorManager {
         Ok(actor)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn create_actor_with_log_store_dispatcher<S: StateStore>(
         self: Arc<Self>,
         actor: BuildActorInfo,

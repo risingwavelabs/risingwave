@@ -115,7 +115,6 @@ impl DispatchExecutorMetrics {
 struct DispatchExecutorInner {
     dispatchers: Vec<DispatcherWithMetrics>,
     actor_id: ActorId,
-    fragment_id: FragmentId,
     actor_config: Arc<StreamingConfig>,
     metrics: DispatchExecutorMetrics,
     new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
@@ -508,7 +507,6 @@ impl DispatchExecutor {
             inner: DispatchExecutorInner {
                 dispatchers,
                 actor_id,
-                fragment_id,
                 actor_config,
                 metrics,
                 new_output_request_rx,
