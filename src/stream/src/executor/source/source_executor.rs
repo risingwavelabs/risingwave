@@ -461,6 +461,39 @@ impl<S: StateStore> SourceExecutor<S> {
         Ok(())
     }
 
+    /// Report CDC source offset updated only the first time.
+    fn maybe_report_cdc_source_offset(
+        &self,
+        updated_splits: &HashMap<SplitId, SplitImpl>,
+        epoch: EpochPair,
+        source_id: SourceId,
+        cdc_offset_reported: &mut bool,
+        must_wait_cdc_offset_before_report: bool,
+    ) {
+        // Report CDC source offset updated only the first time
+        if !*cdc_offset_reported
+            && (!must_wait_cdc_offset_before_report
+                || updated_splits
+                    .values()
+                    .any(|split| split.is_cdc_split() && !split.get_cdc_split_offset().is_empty()))
+        {
+            // Report only once, then ignore all subsequent offset updates
+            self.barrier_manager.report_cdc_source_offset_updated(
+                epoch,
+                self.actor_ctx.id,
+                source_id,
+            );
+            tracing::info!(
+                actor_id = %self.actor_ctx.id,
+                source_id = %source_id,
+                epoch = ?epoch,
+                "Reported CDC source offset updated to meta (first time only)"
+            );
+            // Mark as reported to prevent any future reports, even if offset changes
+            *cdc_offset_reported = true;
+        }
+    }
+
     /// A source executor with a stream source receives:
     /// 1. Barrier messages
     /// 2. Data from external source
@@ -482,7 +515,7 @@ impl<S: StateStore> SourceExecutor<S> {
         let first_epoch = first_barrier.epoch;
         // Track whether we have already reported CDC offset update (report only once).
         let mut cdc_offset_reported = false;
-        let mut must_wait_cdc_offset_before_report = false;
+        let mut must_wait_cdc_offset_before_report = true;
         let mut boot_state =
             if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
                 tracing::debug!(?splits, "boot with splits");
@@ -838,28 +871,13 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
 
-                    // Report CDC source offset updated only the first time
-                    if !cdc_offset_reported
-                        && (!must_wait_cdc_offset_before_report
-                            || updated_splits.values().any(|split| {
-                                split.is_cdc_split() && !split.get_cdc_split_offset().is_empty()
-                            }))
-                    {
-                        // Report only once, then ignore all subsequent offset updates
-                        self.barrier_manager.report_cdc_source_offset_updated(
-                            epoch,
-                            self.actor_ctx.id,
-                            source_id,
-                        );
-                        tracing::info!(
-                            actor_id = %self.actor_ctx.id,
-                            source_id = %source_id,
-                            epoch = ?epoch,
-                            "Reported CDC source offset updated to meta (first time only)"
-                        );
-                        // Mark as reported to prevent any future reports, even if offset changes
-                        cdc_offset_reported = true;
-                    }
+                    self.maybe_report_cdc_source_offset(
+                        &updated_splits,
+                        epoch,
+                        source_id,
+                        &mut cdc_offset_reported,
+                        must_wait_cdc_offset_before_report,
+                    );
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
                     if barrier.kind.is_checkpoint()
