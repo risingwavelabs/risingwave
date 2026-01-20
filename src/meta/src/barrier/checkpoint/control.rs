@@ -225,10 +225,19 @@ impl CheckpointControl {
                     .into_mut()
                     .expect_running("should not have command when not running"),
                 Entry::Vacant(entry) => match &command {
-                    Command::CreateStreamingJob {
-                        job_type: CreateStreamingJobType::Normal,
-                        ..
-                    } => {
+                    Command::CreateStreamingJob { info, job_type, .. } => {
+                        let CreateStreamingJobType::Normal = job_type else {
+                            if cfg!(debug_assertions) {
+                                panic!(
+                                    "unexpected first job of type {job_type:?} with info {info:?}"
+                                );
+                            } else {
+                                for notifier in notifiers {
+                                    notifier.notify_start_failed(anyhow!("unexpected job_type {job_type:?} for first job {} in database {database_id}", info.streaming_job.id()).into());
+                                }
+                                return Ok(());
+                            }
+                        };
                         let new_database = DatabaseCheckpointControl::new(
                             database_id,
                             self.env.shared_actor_infos().clone(),
@@ -238,7 +247,11 @@ impl CheckpointControl {
                             .insert(DatabaseCheckpointControlStatus::Running(new_database))
                             .expect_running("just initialized as running")
                     }
-                    Command::Flush | Command::Pause | Command::Resume => {
+                    Command::Flush
+                    | Command::Pause
+                    | Command::Resume
+                    | Command::DropStreamingJobs { .. }
+                    | Command::DropSubscription { .. } => {
                         for mut notifier in notifiers {
                             notifier.notify_started();
                             notifier.notify_collected();
@@ -246,11 +259,28 @@ impl CheckpointControl {
                         warn!(?command, "skip command for empty database");
                         return Ok(());
                     }
-                    _ => {
-                        panic!(
-                            "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
-                            database_id, command
-                        )
+                    Command::RescheduleFragment { .. }
+                    | Command::ReplaceStreamJob(_)
+                    | Command::SourceChangeSplit(_)
+                    | Command::Throttle { .. }
+                    | Command::CreateSubscription { .. }
+                    | Command::ConnectorPropsChange(_)
+                    | Command::Refresh { .. }
+                    | Command::ListFinish { .. }
+                    | Command::LoadFinish { .. }
+                    | Command::ResetSource { .. } => {
+                        if cfg!(debug_assertions) {
+                            panic!(
+                                "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
+                                database_id, command
+                            )
+                        } else {
+                            warn!(%database_id, ?command, "database not exist when handling command");
+                            for notifier in notifiers {
+                                notifier.notify_start_failed(anyhow!("database {database_id} not exist when handling command {command:?}").into());
+                            }
+                            return Ok(());
+                        }
                     }
                 },
             };
