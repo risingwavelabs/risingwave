@@ -59,6 +59,9 @@ pub struct OptimizerContext {
     /// Store the mapping between `share_id` and the corresponding
     /// `PlanRef`, used by rcte's planning. (e.g., in `LogicalCteRef`)
     rcte_cache: RefCell<HashMap<ShareId, PlanRef>>,
+    /// Mapping from iceberg table identifier to current snapshot id.
+    /// Used to keep same snapshot id when multiple scans from the same iceberg table exist in a query.
+    iceberg_snapshot_id_map: RefCell<HashMap<String, Option<i64>>>,
 
     /// Last assigned plan node ID.
     last_plan_node_id: Cell<i32>,
@@ -106,6 +109,7 @@ impl OptimizerContext {
             total_rule_applied: RefCell::new(0),
             overwrite_options,
             rcte_cache: RefCell::new(HashMap::new()),
+            iceberg_snapshot_id_map: RefCell::new(HashMap::new()),
 
             last_plan_node_id: Cell::new(RESERVED_ID_NUM.into()),
             last_correlated_id: Cell::new(0),
@@ -132,6 +136,7 @@ impl OptimizerContext {
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
             rcte_cache: RefCell::new(HashMap::new()),
+            iceberg_snapshot_id_map: RefCell::new(HashMap::new()),
 
             last_plan_node_id: Cell::new(0),
             last_correlated_id: Cell::new(0),
@@ -285,6 +290,10 @@ impl OptimizerContext {
 
     pub fn insert_rcte_cache_plan(&self, id: ShareId, plan: PlanRef) {
         self.rcte_cache.borrow_mut().insert(id, plan);
+    }
+
+    pub fn iceberg_snapshot_id_map(&self) -> RefMut<'_, HashMap<String, Option<i64>>> {
+        self.iceberg_snapshot_id_map.borrow_mut()
     }
 }
 

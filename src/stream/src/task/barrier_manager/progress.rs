@@ -21,7 +21,7 @@ use risingwave_pb::stream_service::barrier_complete_response::PbCreateMviewProgr
 
 use crate::executor::ActorContext;
 use crate::task::barrier_manager::LocalBarrierEvent::ReportCreateProgress;
-use crate::task::barrier_worker::managed_state::DatabaseManagedBarrierState;
+use crate::task::barrier_worker::managed_state::PartialGraphState;
 use crate::task::cdc_progress::CdcTableBackfillState;
 use crate::task::{ActorId, LocalBarrierManager};
 
@@ -95,7 +95,7 @@ impl Display for BackfillState {
     }
 }
 
-impl DatabaseManagedBarrierState {
+impl PartialGraphState {
     pub(crate) fn update_create_mview_progress(
         &mut self,
         epoch: EpochPair,
@@ -103,19 +103,14 @@ impl DatabaseManagedBarrierState {
         actor: ActorId,
         state: BackfillState,
     ) {
-        if let Some(actor_state) = self.actor_states.get(&actor)
-            && let Some(graph_state) = self.graph_states.get_mut(&actor_state.partial_graph_id)
+        if let Some((prev_fragment_id, _)) = self
+            .graph_state
+            .create_mview_progress
+            .entry(epoch.curr)
+            .or_default()
+            .insert(actor, (fragment_id, state))
         {
-            if let Some((prev_fragment_id, _)) = graph_state
-                .create_mview_progress
-                .entry(epoch.curr)
-                .or_default()
-                .insert(actor, (fragment_id, state))
-            {
-                assert_eq!(prev_fragment_id, fragment_id)
-            }
-        } else {
-            warn!(?epoch, %actor, ?state, "ignore create mview progress");
+            assert_eq!(prev_fragment_id, fragment_id)
         }
     }
 
@@ -126,9 +121,9 @@ impl DatabaseManagedBarrierState {
         state: CdcTableBackfillState,
     ) {
         if let Some(actor_state) = self.actor_states.get(&actor)
-            && let Some(graph_state) = self.graph_states.get_mut(&actor_state.partial_graph_id)
+            && actor_state.inflight_barriers.contains(&epoch.prev)
         {
-            graph_state
+            self.graph_state
                 .cdc_table_backfill_progress
                 .entry(epoch.curr)
                 .or_default()

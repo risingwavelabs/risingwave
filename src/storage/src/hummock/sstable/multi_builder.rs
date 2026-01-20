@@ -619,6 +619,7 @@ mod tests {
                 FilterKeyExtractorImpl::FullKey(FullKeyFilterKeyExtractor),
                 table_id_to_vnode,
                 table_id_to_watermark_serde,
+                HashMap::default(),
             ));
 
             let mut builder = CapacitySplitTableBuilder::new(

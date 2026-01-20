@@ -853,9 +853,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                         .state_table
                         .commit_may_switch_consistent_op(barrier.epoch, op_consistency_level)
                         .await?;
-                    if !post_commit.inner().is_consistent_op() {
-                        assert_eq!(self.conflict_behavior, ConflictBehavior::Overwrite);
-                    }
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_context.id);
 
