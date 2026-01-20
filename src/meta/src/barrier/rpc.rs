@@ -62,6 +62,7 @@ use uuid::Uuid;
 
 use super::{BarrierKind, TracedEpoch};
 use crate::barrier::BackfillOrderState;
+use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, CreatingStreamingJobControl, DatabaseCheckpointControl,
@@ -679,8 +680,12 @@ impl ControlStreamManager {
         fn build_mutation(
             splits: &HashMap<ActorId, Vec<SplitImpl>>,
             cdc_table_snapshot_split_assignment: HashMap<ActorId, PbCdcTableSnapshotSplits>,
+            backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
             is_paused: bool,
         ) -> Mutation {
+            let backfill_nodes_to_pause = get_nodes_with_backfill_dependencies(backfill_orders)
+                .into_iter()
+                .collect();
             Mutation::Add(AddMutation {
                 // Actors built during recovery is not treated as newly added actors.
                 actor_dispatchers: Default::default(),
@@ -691,8 +696,7 @@ impl ControlStreamManager {
                 }),
                 pause: is_paused,
                 subscriptions_to_add: Default::default(),
-                // TODO(kwannoel): recover using backfill order plan
-                backfill_nodes_to_pause: Default::default(),
+                backfill_nodes_to_pause,
                 new_upstream_sinks: Default::default(),
             })
         }
@@ -958,9 +962,23 @@ impl ControlStreamManager {
                 InflightFragmentInfo::actor_ids_to_collect(database_jobs.values().flatten());
             let database_job_source_splits =
                 collect_source_splits(database_jobs.values().flatten(), source_splits);
+            let database_backfill_orders = database_jobs
+                .values()
+                .flat_map(|job| {
+                    if matches!(job.status, CreateStreamingJobStatus::Creating { .. }) {
+                        backfill_orders
+                            .get(&job.job_id)
+                            .cloned()
+                            .unwrap_or_default()
+                    } else {
+                        HashMap::new()
+                    }
+                })
+                .collect();
             let mutation = build_mutation(
                 &database_job_source_splits,
                 cdc_table_snapshot_split_assignment,
+                &database_backfill_orders,
                 is_paused,
             );
 
@@ -1010,9 +1028,11 @@ impl ControlStreamManager {
             if is_paused {
                 bail!("should not pause when having snapshot backfill job {job_id}");
             }
+            let job_backfill_orders = backfill_orders.get(&job_id).cloned().unwrap_or_default();
             let mutation = build_mutation(
                 &database_job_source_splits,
                 Default::default(), // no cdc backfill job for
+                &job_backfill_orders,
                 false,
             );
 
@@ -1033,7 +1053,7 @@ impl ControlStreamManager {
                     fragment_relations,
                     hummock_version_stats,
                     node_actors,
-                    mutation.clone(),
+                    mutation,
                     self,
                 )?,
             );
