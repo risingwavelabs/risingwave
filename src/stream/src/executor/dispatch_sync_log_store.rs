@@ -956,7 +956,7 @@ mod tests {
             .try_init();
     }
 
-    /// Build a minimal SyncLogStoreDispatchExecutor and ensure it can consume the first barrier.
+    /// Build a minimal `SyncLogStoreDispatchExecutor` and ensure it can consume the first barrier.
     #[tokio::test]
     async fn test_init_sync_log_store_dispatch_executor() {
         init_logger();
