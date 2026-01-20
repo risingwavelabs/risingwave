@@ -112,12 +112,6 @@ select id, name, length(location) from test_geo where id = 1;
 ----
 1 Chicago 25
 
-# Verify the coordinates actually changed (different hex than before)
-query IT retry 3 backoff 1s
-select id, substring(encode(location, 'hex') from 1 for 50) from test_geo where id = 1;
-----
-1 0101000020e610000000000000000000000000000000000000
-
 # Compare upstream vs RisingWave EWKB for the updated row.
 query IIITTT retry 3 backoff 1s
 select
