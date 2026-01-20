@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 pub use risingwave_common::id::ActorId;
 
+use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentId, StreamJobFragments};
 
 #[derive(Clone, Debug, Default)]
@@ -85,6 +86,70 @@ impl BackfillOrderState {
                         remaining_dependencies: Default::default(),
                         children: backfill_orders
                             .get(&fragment_id)
+                            .cloned()
+                            .unwrap_or_else(Vec::new),
+                    },
+                );
+            }
+        }
+
+        for (fragment_id, children) in backfill_orders {
+            for child in children {
+                let child_node = backfill_nodes.get_mut(child).unwrap();
+                child_node.remaining_dependencies.insert(*fragment_id);
+            }
+        }
+
+        let mut current_backfill_nodes = HashMap::new();
+        let mut remaining_backfill_nodes = HashMap::new();
+        for (fragment_id, node) in backfill_nodes {
+            if node.remaining_dependencies.is_empty() {
+                current_backfill_nodes.insert(fragment_id, node);
+            } else {
+                remaining_backfill_nodes.insert(fragment_id, node);
+            }
+        }
+
+        Self {
+            current_backfill_nodes,
+            remaining_backfill_nodes,
+            actor_to_fragment_id,
+            locality_fragment_state_table_mapping,
+        }
+    }
+
+    pub fn recover_from_fragment_infos(
+        backfill_orders: &HashMap<FragmentId, Vec<FragmentId>>,
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
+    ) -> Self {
+        tracing::debug!(?backfill_orders, "initialize backfill order state from recovery");
+        let actor_to_fragment_id = fragment_infos
+            .iter()
+            .flat_map(|(fragment_id, fragment)| {
+                fragment
+                    .actors
+                    .keys()
+                    .map(|actor_id| (*actor_id, *fragment_id))
+            })
+            .collect();
+
+        let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
+
+        for (fragment_id, fragment) in fragment_infos {
+            if fragment.fragment_type_mask.contains_any([
+                FragmentTypeFlag::StreamScan,
+                FragmentTypeFlag::SourceScan,
+                FragmentTypeFlag::LocalityProvider,
+            ]) {
+                backfill_nodes.insert(
+                    *fragment_id,
+                    BackfillNode {
+                        fragment_id: *fragment_id,
+                        remaining_actors: fragment.actors.keys().copied().collect(),
+                        remaining_dependencies: Default::default(),
+                        children: backfill_orders
+                            .get(fragment_id)
                             .cloned()
                             .unwrap_or_else(Vec::new),
                     },

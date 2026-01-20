@@ -33,6 +33,8 @@ pub struct Model {
     pub config_override: Option<String>,
     pub parallelism: StreamingParallelism,
     pub backfill_parallelism: Option<StreamingParallelism>,
+    #[sea_orm(column_type = "JsonBinary", nullable)]
+    pub backfill_orders: Option<BackfillOrders>,
     pub max_parallelism: i32,
     pub specific_resource_group: Option<String>,
 }

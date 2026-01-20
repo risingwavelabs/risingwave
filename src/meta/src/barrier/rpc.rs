@@ -31,13 +31,18 @@ use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::tracing::TracingContext;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::SplitImpl;
+use risingwave_meta_model::prelude::StreamingJob;
+use risingwave_meta_model::streaming_job::BackfillOrders;
+use risingwave_meta_model::streaming_job;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::source::{PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
@@ -65,6 +70,7 @@ use crate::barrier::checkpoint::{
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::FragmentEdgeBuilder;
+use crate::barrier::BackfillOrderState;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
     SubscriberType,
@@ -82,6 +88,7 @@ use crate::stream::cdc::{
 };
 use crate::stream::{StreamFragmentGraph, build_actor_connector_splits};
 use crate::{MetaError, MetaResult};
+use sea_orm::{ConnectionTrait, EntityTrait, QueryFilter, QuerySelect};
 
 pub(super) fn to_partial_graph_id(job_id: Option<JobId>) -> PartialGraphId {
     job_id
@@ -100,6 +107,81 @@ pub(super) fn from_partial_graph_id(partial_graph_id: PartialGraphId) -> Option<
     } else {
         Some(JobId::new(partial_graph_id))
     }
+}
+
+async fn load_backfill_orders<C>(
+    conn: &C,
+    job_ids: impl IntoIterator<Item = JobId>,
+) -> MetaResult<HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>>>
+where
+    C: ConnectionTrait,
+{
+    let job_ids: Vec<JobId> = job_ids.into_iter().collect();
+    if job_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+
+    let rows: Vec<(JobId, Option<BackfillOrders>)> = StreamingJob::find()
+        .select_only()
+        .columns([
+            streaming_job::Column::JobId,
+            streaming_job::Column::BackfillOrders,
+        ])
+        .filter(streaming_job::Column::JobId.is_in(job_ids))
+        .into_tuple()
+        .all(conn)
+        .await?;
+
+    Ok(rows
+        .into_iter()
+        .map(|(job_id, orders)| {
+            let ordering = orders
+                .unwrap_or_default()
+                .0
+                .into_iter()
+                .map(|(fragment_id, downstreams)| {
+                    (
+                        fragment_id as FragmentId,
+                        downstreams
+                            .into_iter()
+                            .map(|id| id as FragmentId)
+                            .collect(),
+                    )
+                })
+                .collect();
+            (job_id, ordering)
+        })
+        .collect())
+}
+
+fn build_locality_fragment_state_table_mapping(
+    fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+) -> HashMap<FragmentId, Vec<TableId>> {
+    let mut mapping = HashMap::new();
+
+    for (fragment_id, fragment_info) in fragment_infos {
+        let mut state_table_ids = Vec::new();
+        visit_stream_node_cont(&fragment_info.nodes, |stream_node| {
+            if let Some(NodeBody::LocalityProvider(locality_provider)) =
+                stream_node.node_body.as_ref()
+            {
+                let state_table_id = locality_provider
+                    .state_table
+                    .as_ref()
+                    .expect("must have state table")
+                    .id;
+                state_table_ids.push(state_table_id);
+                false
+            } else {
+                true
+            }
+        });
+        if !state_table_ids.is_empty() {
+            mapping.insert(*fragment_id, state_table_ids);
+        }
+    }
+
+    mapping
 }
 
 struct ControlStreamNode {
@@ -616,6 +698,8 @@ impl ControlStreamManager {
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
     ) -> MetaResult<DatabaseInitialBarrierCollector> {
         self.add_partial_graph(database_id, None);
+        let backfill_orderings =
+            load_backfill_orders(&self.env.meta_store_ref().conn, jobs.keys().copied()).await?;
         fn collect_source_splits(
             fragment_infos: impl Iterator<Item = &InflightFragmentInfo>,
             source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
@@ -813,11 +897,20 @@ impl ControlStreamManager {
                 .into_iter()
                 .map(|(job_id, (fragment_infos, is_background_creating))| {
                     let status = if is_background_creating {
+                        let backfill_ordering =
+                            backfill_orderings.get(&job_id).cloned().unwrap_or_default();
+                        let locality_fragment_state_table_mapping =
+                            build_locality_fragment_state_table_mapping(&fragment_infos);
+                        let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
+                            &backfill_ordering,
+                            &fragment_infos,
+                            locality_fragment_state_table_mapping,
+                        );
                         CreateStreamingJobStatus::Creating {
                             tracker: CreateMviewProgressTracker::recover(
                                 job_id,
                                 &fragment_infos,
-                                Default::default(),
+                                backfill_order_state,
                                 hummock_version_stats,
                             ),
                             is_serverless: false, // serverless backfill not support background ddl yet

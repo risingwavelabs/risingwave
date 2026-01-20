@@ -42,6 +42,7 @@ use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
 use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
@@ -91,9 +92,10 @@ use crate::stream::cdc::{
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
     CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
-    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
-    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
-    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, create_source_worker,
+    FragmentBackfillOrder, FragmentGraphDownstreamContext, FragmentGraphUpstreamContext,
+    GlobalStreamManagerRef, ReplaceStreamJobContext, ReschedulePolicy, SourceChange,
+    SourceManagerRef, StreamFragmentGraph, UpstreamSinkInfo,
+    check_sink_fragments_support_refresh_schema, create_source_worker,
     rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
@@ -113,6 +115,20 @@ impl DropMode {
             DropMode::Restrict
         }
     }
+}
+
+fn to_backfill_orders(fragment_backfill_ordering: &FragmentBackfillOrder) -> BackfillOrders {
+    BackfillOrders(
+        fragment_backfill_ordering
+            .iter()
+            .map(|(fragment_id, downstreams)| {
+                (
+                    *fragment_id as u32,
+                    downstreams.iter().map(|id| *id as u32).collect(),
+                )
+            })
+            .collect(),
+    )
 }
 
 #[derive(strum::AsRefStr)]
@@ -1147,9 +1163,15 @@ impl DdlController {
             _ => {}
         }
 
+        let backfill_orders = to_backfill_orders(&ctx.fragment_backfill_ordering);
         self.metadata_manager
             .catalog_controller
-            .prepare_stream_job_fragments(&stream_job_fragments, streaming_job, false)
+            .prepare_stream_job_fragments(
+                &stream_job_fragments,
+                streaming_job,
+                false,
+                Some(backfill_orders),
+            )
             .await?;
 
         // create streaming jobs.
@@ -1506,6 +1528,7 @@ impl DdlController {
                             &empty_downstreams,
                             true,
                             None,
+                            None,
                         )
                         .await?;
                 }
@@ -1513,7 +1536,7 @@ impl DdlController {
 
             self.metadata_manager
                 .catalog_controller
-                .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true)
+                .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true, None)
                 .await?;
 
             self.stream_manager
