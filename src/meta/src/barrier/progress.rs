@@ -949,12 +949,16 @@ mod tests {
         use crate::model::StreamJobFragmentsToCreate;
 
         // Create a CDC source with cdc_source_job = true
-        let mut source_info = StreamSourceInfo::default();
-        source_info.cdc_source_job = true;
+        let mut source_info = StreamSourceInfo {
+            cdc_source_job: true,
+            ..Default::default()
+        };
 
-        let mut source = PbSource::default();
-        source.id = risingwave_common::id::SourceId::new(100).into();
-        source.info = Some(source_info);
+        let mut source = PbSource {
+            id: risingwave_common::id::SourceId::new(100).into(),
+            info: Some(source_info),
+            ..Default::default()
+        };
 
         // Create empty fragments (no actors to track)
         let fragments = StreamJobFragments::for_test(JobId::new(100), BTreeMap::new());
@@ -967,7 +971,7 @@ mod tests {
             stream_job_fragments,
             upstream_fragment_downstreams: Default::default(),
             init_split_assignment: Default::default(),
-            definition: "CREATE SOURCE ...".to_string(),
+            definition: "CREATE SOURCE ...".to_owned(),
             job_type: StreamingJobType::Source,
             create_type: CreateType::Foreground,
             streaming_job: StreamingJob::Source(source),
