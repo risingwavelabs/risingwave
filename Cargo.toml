@@ -382,6 +382,12 @@ inherits = "release"
 incremental = false
 lto = "thin"
 
+[profile.thin-production]
+inherits = "production"
+debug = "line-tables-only"
+split-debuginfo = "packed"
+rustflags = ["-Z", "debuginfo-compression=zlib"]
+
 [profile.ci-release]
 inherits = "release"
 incremental = false
