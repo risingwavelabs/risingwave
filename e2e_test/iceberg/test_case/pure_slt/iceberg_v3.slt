@@ -51,10 +51,38 @@ where schema_name = 'public'
 ----
 t
 
+query ?? retry 6 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3'
+  and content = 'EqualityDeletes';
+----
+t
+
 query ??? rowsort retry 3 backoff 1s
 select * from t_v3;
 ----
 1 alice 150
+3 charlie 300
+
+# generate eq deletes to test the reader of mixed delete files in v3
+statement ok
+delete from t_v3 where id = 1;
+
+statement ok
+FLUSH;
+
+query ?? retry 6 backoff 1s
+select count(*) > 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3'
+  and content = 'EqualityDeletes';
+----
+t
+
+query ??? rowsort retry 3 backoff 1s
+select * from t_v3;
+----
 3 charlie 300
 
 # This compaction won't clean up puffin files, but only generate new data files.
@@ -73,10 +101,17 @@ where schema_name = 'public'
 ----
 t
 
+query ?? retry 3 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_v3'
+  and content in ('EqualityDeletes', 'PositionDeletes');
+----
+t
+
 query ??? rowsort
 select * from t_v3;
 ----
-1 alice 150
 3 charlie 300
 
 statement ok
