@@ -9,7 +9,6 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Iceberg Compaction Metrics",
             [
-                panels.subheader("Commit"),
                 panels.timeseries_count(
                     "Iceberg Compaction Commit Count",
                     "iceberg compaction commit count",
@@ -20,9 +19,9 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("IO"),
+
                 panels.timeseries_count(
-                    "Iceberg Compaction Input File Count",
+                    "Iceberg Compaction Input File counts",
                     "iceberg compaction input file counts",
                     [
                         panels.target(
@@ -44,7 +43,7 @@ def _(outer_panels: Panels):
                 ),
 
                 panels.timeseries_count(
-                    "Iceberg Compaction Output File Count",
+                    "Iceberg Compaction Output File counts",
                     "iceberg compaction output file counts",
                     [
                         panels.target(
@@ -92,7 +91,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("DataFusion"),
+
                 panels.timeseries_count(
                     "Iceberg Compaction Execution Error Count",
                     "iceberg compaction execution error count",

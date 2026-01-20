@@ -9,7 +9,6 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Hummock (Write)",
             [
-                panels.subheader("Uploader"),
                 panels.timeseries_bytes(
                     "Uploader Memory Size",
                     "This metric shows the real memory usage of uploader.",
@@ -49,7 +48,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Build and Sync SSTable Duration",
+                    "Build and Sync Sstable Duration",
                     "Histogram of time spent on compacting shared buffer to remote storage.",
                     [
                         *quantile(
@@ -91,7 +90,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Uploader Task Count",
+                    "Uploader - Tasks Count",
                     "",
                     [
                         panels.target(
@@ -116,7 +115,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Uploader Task Size",
+                    "Uploader - Task Size",
                     "",
                     [
                         panels.target(
@@ -131,7 +130,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Write"),
                 panels.timeseries_ops(
                     "Write Ops",
                     "",
@@ -251,9 +249,8 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Event Handling"),
                 panels.timeseries_count(
-                    "Event Handler Pending Event Count",
+                    "Event handler pending event number",
                     "",
                     [
                         panels.target(
@@ -263,7 +260,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Event Handler Latency",
+                    "Event handle latency",
                     "",
                     [
                         *quantile(

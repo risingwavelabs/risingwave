@@ -27,7 +27,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Processing"),
                 panels.timeseries_latency(
                     "Real Process Time",
                     "",
@@ -41,7 +40,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Versions"),
                 panels.timeseries_bytes(
                     "Version Size",
                     "",
@@ -87,7 +85,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Tables"),
                 panels.timeseries_kilobytes(
                     "Table Size",
                     "",
@@ -122,7 +119,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Objects"),
                 panels.timeseries_count(
                     "Object Total Number",
                     """
@@ -179,25 +175,25 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                     ],
                 ),
                 panels.timeseries_count(
-                    "Table Change Log Object Count",
-                    "Per table change log object count",
-                    [
-                        panels.target(
-                            f"{metric('storage_table_change_log_object_count')}",
-                            "{{table_id}}",
-                        ),
-                    ],
-                ),
+                        "Table Change Log Object Count",
+                        "Per table change log object count",
+                        [
+                            panels.target(
+                                f"{metric('storage_table_change_log_object_count')}",
+                                "{{table_id}}",
+                            ),
+                        ],
+                    ),
                 panels.timeseries_bytes(
-                    "Table Change Log Object Size",
-                    "Per table change log object size",
-                    [
-                        panels.target(
-                            f"{metric('storage_table_change_log_object_size')}",
-                            "{{table_id}}",
-                        ),
-                    ],
-                ),
+                        "Table Change Log Object Size",
+                        "Per table change log object size",
+                        [
+                            panels.target(
+                                f"{metric('storage_table_change_log_object_size')}",
+                                "{{table_id}}",
+                            ),
+                        ],
+                    ),
                 panels.timeseries_count(
                     "Delta Log Total Number",
                     "total number of hummock version delta log",
@@ -225,7 +221,6 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                         ),
                     ],
                 ),
-                panels.subheader("Compaction & GC"),
                 panels.timeseries_count(
                     "Write Stop Compaction Groups",
                     "When certain per compaction group threshold is exceeded (e.g. number of level 0 sub-level in LSMtree), write op to that compaction group is stopped temporarily. Check log for detail reason of write stop.",
@@ -284,7 +279,6 @@ Additionally, a metric on all objects (including dangling ones) is updated with 
                         ),
                     ],
                 ),
-                panels.subheader("Time Travel"),
                 panels.timeseries_count(
                     "State Table Count",
                     "The number of state_tables in each CG",

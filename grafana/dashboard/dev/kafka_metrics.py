@@ -9,7 +9,6 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Kafka Metrics",
             [
-                panels.subheader("Source Offsets"),
                 panels.timeseries_count(
                     "Kafka high watermark and source latest message",
                     "Kafka high watermark by source and partition and source latest message by partition, source and actor",
@@ -24,7 +23,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Producer Queue"),
                 panels.timeseries_count(
                     "Message Count in Producer Queue",
                     "Current number of messages in producer queues",
@@ -65,7 +63,6 @@ def _(outer_panels: Panels):
                         )
                     ],
                 ),
-                panels.subheader("Broker"),
                 panels.timeseries_count(
                     "Message Count Pending to Transmit (per broker)",
                     "Number of messages awaiting transmission to broker",
@@ -176,9 +173,8 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Topics"),
                 panels.timeseries_latency_ms(
-                    "Topic Metadata Age",
+                    "Topic Metadata_age Age",
                     "Age of metadata from broker for this topic (milliseconds)",
                     [
                         panels.target(
@@ -215,39 +211,38 @@ def _(outer_panels: Panels):
                             f"{metric('rdkafka_topic_batchsize_out_of_range')}",
                             "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
                         ),
+                        panels.timeseries_count(
+                            "Topic Batch Messages",
+                            "Batch message counts",
+                            [
+                                panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_avg')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
+                                ),
+                                panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_p75')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
+                                ),
+                                panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_p90')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
+                                ),
+                                panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_p99')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
+                                ),
+                                panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_p99_99')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
+                                ),
+                                panels.target(
+                                    f"{metric('rdkafka_topic_batchcnt_out_of_range')}",
+                                    "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
+                                ),
+                            ],
+                        ),
                     ],
                 ),
-                panels.timeseries_count(
-                    "Topic Batch Messages",
-                    "Batch message counts",
-                    [
-                        panels.target(
-                            f"{metric('rdkafka_topic_batchcnt_avg')}",
-                            "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
-                        ),
-                        panels.target(
-                            f"{metric('rdkafka_topic_batchcnt_p75')}",
-                            "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
-                        ),
-                        panels.target(
-                            f"{metric('rdkafka_topic_batchcnt_p90')}",
-                            "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
-                        ),
-                        panels.target(
-                            f"{metric('rdkafka_topic_batchcnt_p99')}",
-                            "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
-                        ),
-                        panels.target(
-                            f"{metric('rdkafka_topic_batchcnt_p99_99')}",
-                            "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
-                        ),
-                        panels.target(
-                            f"{metric('rdkafka_topic_batchcnt_out_of_range')}",
-                            "id {{ id }}, client_id {{ client_id}}, broker {{ broker }}, topic {{ topic }}",
-                        ),
-                    ],
-                ),
-                panels.subheader("Consumer"),
                 panels.timeseries_count(
                     "Message to be Transmitted",
                     "Number of messages ready to be produced in transmit queue",
@@ -259,7 +254,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Message in Prefetch Queue",
+                    "Message in pre fetch queue",
                     "Number of pre-fetched messages in fetch queue",
                     [
                         panels.target(
@@ -269,7 +264,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Next Offset to Fetch",
+                    "Next offset to fetch",
                     "Next offset to fetch",
                     [
                         panels.target(

@@ -23,7 +23,7 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Hummock Tiered Cache",
             [
-                panels.subheader("Cache"),
+                # hybrid
                 panels.timeseries_ops(
                     "Hybrid Cache Ops",
                     "",
@@ -58,6 +58,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                # memory
                 panels.timeseries_ops(
                     "Memory Cache Ops",
                     "",
@@ -88,6 +89,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                # storage
                 panels.timeseries_ops(
                     "Disk Cache Ops",
                     "",
@@ -158,7 +160,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Disk IO"),
+                # disk
                 panels.timeseries_ops(
                     "Disk Ops",
                     "",
@@ -193,7 +195,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Refill"),
+                # refill
                 panels.timeseries_ops(
                     "Refill Ops",
                     "",
@@ -209,7 +211,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes_per_sec(
-                    "Refill Throughput",
+                    "Data Refill Throughput",
                     "",
                     [
                         panels.target(
@@ -264,7 +266,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_ops(
-                    "Inheritance - Unit Inheritance Ops",
+                    "Inheritance - Unit inheritance Ops",
                     "",
                     [
                         panels.target(
@@ -274,7 +276,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Inheritance - Unit Inheritance Ratio",
+                    "Inheritance - Unit inheritance Ratio",
                     "",
                     [
                         panels.target(

@@ -7,11 +7,11 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Ad hoc Queries (Batch & Frontend)",
+            "Adhoc queries (Batch & Frontend)",
             [
                 panels.subheader("Batch"),
                 panels.timeseries_row(
-                    "Exchange Recv Row Count",
+                    "Exchange Recv Row Number",
                     "",
                     [
                         panels.target(
@@ -21,7 +21,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Batch MPP Task Count",
+                    "Batch Mpp Task Number",
                     "",
                     [
                         panels.target(
@@ -45,7 +45,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "Batch Heartbeat Worker Count",
+                    "Batch Heartbeat Worker Number",
                     "",
                     [
                         panels.target(
@@ -75,7 +75,7 @@ def _(outer_panels: Panels):
                 ),
                 panels.timeseries_bytes_per_sec(
                     "Batch Spill Throughput",
-                    "Disk throughputs of spilling-out in the batch query engine",
+                    "Disk throughputs of spilling-out in the bacth query engine",
                     [
                         panels.target(
                             f"sum(rate({metric('batch_spill_read_bytes')}[$__rate_interval]))by({COMPONENT_LABEL}, {NODE_LABEL})",
@@ -151,9 +151,8 @@ def _(outer_panels: Panels):
                     ],
                     ["last"],
                 ),
-                panels.subheader("Subscriptions"),
                 panels.timeseries_count(
-                    "Subscription Cursor Count",
+                    "Subscription Cursor Nums",
                     "The number of valid and invalid subscription cursor",
                     [
                         panels.target(
@@ -177,7 +176,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency_ms(
-                    "Subscription Cursor Query Duration (ms)",
+                    "Subscription Cursor Query Duration(ms)",
                     "The amount of time a query exists inside the cursor",
                     [
                         *quantile(
@@ -190,7 +189,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency_ms(
-                    "Subscription Cursor Declare Duration (ms)",
+                    "Subscription Cursor Declare Duration(ms)",
                     "Subscription cursor duration of declare",
                     [
                         *quantile(
@@ -203,7 +202,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency_ms(
-                    "Subscription Cursor Fetch Duration (ms)",
+                    "Subscription Cursor Fetch Duration(ms)",
                     "Subscription cursor duration of fetch",
                     [
                         *quantile(
@@ -216,7 +215,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency_ms(
-                    "Subscription Cursor Last Fetch Duration (ms)",
+                    "Subscription Cursor Last Fetch Duration(ms)",
                     "Since the last fetch, the time up to now",
                     [
                         *quantile(

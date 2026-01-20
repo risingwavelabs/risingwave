@@ -9,7 +9,6 @@ def _(outer_panels: Panels):
         outer_panels.row_collapsed(
             "Sink Metrics",
             [
-                panels.subheader("Remote Sink"),
                 panels.timeseries_rowsps(
                     "Remote Sink (Java) Throughput",
                     "The rows sent by remote sink to the Java connector process",
@@ -20,7 +19,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Commit"),
                 panels.timeseries_latency(
                     "Commit Duration",
                     "",
@@ -39,7 +37,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Log Store"),
                 panels.timeseries_epoch(
                     "Log Store Read/Write Epoch",
                     "",
@@ -91,7 +88,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Log Store Consume Throughput (rows)",
+                    "Log Store Consume Throughput(rows)",
                     "",
                     [
                         panels.target(
@@ -101,7 +98,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Executor Log Store Consume Throughput (rows)",
+                    "Executor Log Store Consume Throughput(rows)",
                     "",
                     [
                         panels.target(
@@ -112,7 +109,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytesps(
-                    "Log Store Consume Throughput (MB/s)",
+                    "Log Store Consume Throughput(MB/s)",
                     "",
                     [
                         panels.target(
@@ -122,7 +119,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytesps(
-                    "Executor Log Store Consume Throughput (MB/s)",
+                    "Executor Log Store Consume Throughput(MB/s)",
                     "",
                     [
                         panels.target(
@@ -133,7 +130,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Log Store Write Throughput (rows)",
+                    "Log Store Write Throughput(rows)",
                     "",
                     [
                         panels.target(
@@ -147,7 +144,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("KV Log Store"),
                 panels.timeseries_ops(
                     "Kv Log Store Read Storage Row Ops",
                     "",
@@ -217,7 +213,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Rewind Delay (s)",
+                    "Rewind delay (second)",
                     "",
                     [
                         panels.target(
@@ -226,7 +222,6 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.subheader("Buffers"),
                 panels.timeseries_bytes(
                     "Chunk Buffer Size",
                     "Total size of chunks buffered in a barrier",
