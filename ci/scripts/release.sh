@@ -38,8 +38,11 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify
 source "$HOME/.cargo/env"
 rustup show
 source ci/scripts/common.sh
-unset RUSTC_WRAPPER # disable sccache
 unset RUSTC_WORKSPACE_WRAPPER # disable rustc-workspace-wrapper, for coverage instrumentation
+
+echo "--- Install sccache"
+cargo install -y --locked cargo-binstall
+cargo binstall -y --locked sccache@10.0.0
 
 echo "--- Install protoc3"
 PROTOC_ARCH=${ARCH}
@@ -82,6 +85,10 @@ cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --featur
 
 echo "--- check link info"
 check_link_info "${CARGO_PROFILE}"
+
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
 
 cd target/"${CARGO_PROFILE}" && chmod +x risingwave risectl
 du -sh risingwave risingwave.dwp risectl
