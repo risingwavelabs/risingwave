@@ -1,5 +1,26 @@
 from ..common import *
 from . import section
+from streaming_actors import _actor_busy_rate_expr
+
+def _relation_busy_rate_expr(rate_interval: str):
+    actor_busy_rate_expr = _actor_busy_rate_expr(rate_interval)
+    relation_busy_rate_expr = (
+        f"topk(1,"
+        f"  ({actor_busy_rate_expr}) * on (fragment_id) group_right {metric('table_info')}"
+        f") by (materialized_view_id)"
+    )
+    relation_busy_rate_with_metadata_expr = (
+        f"label_replace(({relation_busy_rate_expr}), 'id', '$1', 'materialized_view_id', '(.*)')"
+        f"* on (id) group_left (name, type) {metric('relation_info')}"
+    )
+    return relation_busy_rate_with_metadata_expr
+
+def _relation_busy_rate_target(panels: Panels, rate_interval: str):
+    return panels.target(
+        _relation_busy_rate_expr(rate_interval),
+        "name {{name}} id {{id}} type {{type}} fragment {{fragment_id}}",
+    )
+
 
 def _sum_fragment_metric_by_mv(expr: str) -> str:
     return (
@@ -18,9 +39,9 @@ def _(outer_panels: Panels):
     )
     return [
         outer_panels.row_collapsed(
-            "Streaming (Source/Sink/Materialized View/Barrier)",
+            "[Streaming] Streaming (Source/Sink/Materialized View/Barrier)",
             [
-                panels.subheader("General"),
+                panels.subheader("Relation Level Metrics"),
                 panels.timeseries_percentage(
                     "CPU Usage Per Streaming Job",
                     "The figure shows the CPU usage of each streaming job",
@@ -33,6 +54,34 @@ def _(outer_panels: Panels):
                             f") * on(id) group_left(name, type) {metric('relation_info')}",
                             "{{type}} {{name}} id {{id}}",
                         )
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Relation Busy Rate",
+                    "The rate that a relation is busy, i.e. the busy rate of its busiest actor.",
+                    [
+                        _relation_busy_rate_target(panels, "$__rate_interval"),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Relation Busy Rate (10m)",
+                    "The rate that a relation is busy, i.e. the busy rate of its busiest actor, over the last 10 minutes.",
+                    [
+                        _relation_busy_rate_target(panels, "10m"),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Relation Busy Rate (5m)",
+                    "The rate that a relation is busy, i.e. the busy rate of its busiest actor, over the last 5 minutes.",
+                    [
+                        _relation_busy_rate_target(panels, "5m"),
+                    ],
+                ),
+                panels.timeseries_percentage(
+                    "Relation Busy Rate (3m)",
+                    "The rate that a relation is busy, i.e. the busy rate of its busiest actor, over the last 3 minutes.",
+                    [
+                        _relation_busy_rate_target(panels, "3m"),
                     ],
                 ),
 

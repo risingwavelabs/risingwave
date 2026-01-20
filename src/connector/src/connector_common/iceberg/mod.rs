@@ -18,7 +18,7 @@ mod mock_catalog;
 mod storage_catalog;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use ::iceberg::io::{
     S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
@@ -26,11 +26,13 @@ use ::iceberg::io::{
 use ::iceberg::table::Table;
 use ::iceberg::{Catalog, CatalogBuilder, TableIdent};
 use anyhow::{Context, anyhow};
+use iceberg::io::object_cache::ObjectCache;
 use iceberg::io::{
     ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT,
     GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
+use moka::future::Cache as MokaCache;
 use phf::{Set, phf_set};
 use risingwave_common::bail;
 use risingwave_common::error::IcebergError;
@@ -39,6 +41,7 @@ use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 use serde_with::serde_as;
 use url::Url;
+use uuid::Uuid;
 use with_options::WithOptions;
 
 use crate::connector_common::common::DISABLE_DEFAULT_CREDENTIAL;
@@ -168,6 +171,13 @@ pub struct IcebergCommon {
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub vended_credentials: Option<bool>,
 }
+
+// Matches iceberg::io::object_cache default size (32MB).
+// TODO: change it after object cache get refactored.
+const DEFAULT_OBJECT_CACHE_SIZE_BYTES: u64 = 32 * 1024 * 1024;
+const SHARED_OBJECT_CACHE_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
+const SHARED_OBJECT_CACHE_MAX_TABLES: u64 =
+    SHARED_OBJECT_CACHE_BUDGET_BYTES / DEFAULT_OBJECT_CACHE_SIZE_BYTES;
 
 impl EnforceSecret for IcebergCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
@@ -789,6 +799,30 @@ impl IcebergCommon {
             .to_table_ident()
             .context("Unable to parse table name")?;
 
-        catalog.load_table(&table_id).await.map_err(Into::into)
+        let table = catalog.load_table(&table_id).await?;
+        Ok(rebuild_table_with_shared_cache(table).await)
     }
+}
+
+/// Get a globally shared object cache keyed by table UUID to avoid reuse after drop & recreate.
+pub(crate) async fn shared_object_cache(
+    init_object_cache: Arc<ObjectCache>,
+    table_uuid: Uuid,
+) -> Arc<ObjectCache> {
+    static CACHE: LazyLock<MokaCache<Uuid, Arc<ObjectCache>>> = LazyLock::new(|| {
+        MokaCache::builder()
+            .max_capacity(SHARED_OBJECT_CACHE_MAX_TABLES)
+            .build()
+    });
+
+    CACHE
+        .get_with(table_uuid, async { init_object_cache })
+        .await
+}
+
+pub async fn rebuild_table_with_shared_cache(table: Table) -> Table {
+    let table_uuid = table.metadata().uuid();
+    let init_object_cache = table.object_cache();
+    let object_cache = shared_object_cache(init_object_cache, table_uuid).await;
+    table.with_object_cache(object_cache)
 }

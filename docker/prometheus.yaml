@@ -23,7 +23,7 @@ scrape_configs:
 
   - job_name: compactor
     static_configs:
-      - targets: ["compactor-0:1260"]
+      - targets: ["compactor-0:1260","compactor-1:1261"]
 
   - job_name: frontend
     static_configs:

@@ -146,6 +146,10 @@ impl ScaleController {
         let removed_actors: HashSet<_> = &prev_ids - &curr_ids;
         let added_actor_ids: HashSet<_> = &curr_ids - &prev_ids;
         let kept_ids: HashSet<_> = prev_ids.intersection(&curr_ids).cloned().collect();
+        debug_assert!(
+            kept_ids.is_empty(),
+            "kept actors found in scale; expected full rebuild, prev={prev_ids:?}, curr={curr_ids:?}, kept={kept_ids:?}"
+        );
 
         let mut added_actors = HashMap::new();
         for &actor_id in &added_actor_ids {
@@ -577,14 +581,6 @@ impl ScaleController {
 
         let all_related_fragment_ids = all_related_fragment_ids.into_iter().collect_vec();
 
-        // let all_fragments_from_db: HashMap<_, _> = Fragment::find()
-        //     .filter(fragment::Column::FragmentId.is_in(all_related_fragment_ids.clone()))
-        //     .all(&txn)
-        //     .await?
-        //     .into_iter()
-        //     .map(|f| (f.fragment_id, f))
-        //     .collect();
-
         let all_prev_fragments: HashMap<_, _> = {
             let read_guard = self.env.shared_actor_infos().read_guard();
             all_related_fragment_ids
@@ -763,6 +759,15 @@ impl ScaleController {
                 fragment_actors: all_fragment_actors,
             };
 
+            if let Command::RescheduleFragment { reschedules, .. } = &command {
+                debug_assert!(
+                    reschedules
+                        .values()
+                        .all(|reschedule| reschedule.vnode_bitmap_updates.is_empty()),
+                    "RescheduleFragment command carries vnode_bitmap_updates, expected full rebuild"
+                );
+            }
+
             commands.insert(*database_id, command);
         }
 
@@ -816,22 +821,10 @@ impl GlobalStreamManager {
             .list_background_creating_jobs()
             .await?;
 
-        let skipped_jobs = if !background_streaming_jobs.is_empty() {
-            let jobs = self
-                .scale_controller
-                .resolve_related_no_shuffle_jobs(&background_streaming_jobs)
-                .await?;
-
-            tracing::info!(
-                "skipping parallelism control of background jobs {:?} and associated jobs {:?}",
-                background_streaming_jobs,
-                jobs
-            );
-
-            jobs
-        } else {
-            HashSet::new()
-        };
+        let unreschedulable_jobs = self
+            .metadata_manager
+            .collect_unreschedulable_backfill_jobs(&background_streaming_jobs)
+            .await?;
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
             .metadata_manager
@@ -851,7 +844,7 @@ impl GlobalStreamManager {
                 idx_a.cmp(idx_b).then(database_a.cmp(database_b))
             })
             .map(|(_, database_id, job_id)| (*database_id, *job_id))
-            .filter(|(_, job_id)| !skipped_jobs.contains(job_id))
+            .filter(|(_, job_id)| !unreschedulable_jobs.contains(job_id))
             .collect_vec();
 
         if job_ids.is_empty() {

@@ -917,6 +917,7 @@ pub(crate) mod tests {
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
             table_id_to_watermark_serde,
+            HashMap::default(),
         ));
 
         let compact_ctx = get_compactor_context(&storage);
