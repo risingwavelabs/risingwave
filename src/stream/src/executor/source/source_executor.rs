@@ -935,7 +935,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
                     self.stream_source_core
                         .updated_splits_in_epoch
-                        .extend(latest_state.clone());
+                        .extend(latest_state);
 
                     let card = chunk.cardinality();
                     if card == 0 {
