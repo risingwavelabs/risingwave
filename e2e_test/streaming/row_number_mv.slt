@@ -1,0 +1,37 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE rn_mv_source(x int, y int);
+
+statement ok
+CREATE MATERIALIZED VIEW mv_row_number_equals_two AS
+SELECT x, y, rank FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) AS rank FROM rn_mv_source
+) WHERE rank = 2;
+
+statement ok
+INSERT INTO rn_mv_source VALUES
+    (1, 1), (1, 2), (1, 3),
+    (2, 10), (2, 20), (2, 30);
+
+query III rowsort
+SELECT * FROM mv_row_number_equals_two;
+----
+1  2  2
+2  20 2
+
+query III rowsort
+SELECT x, y, rank FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) AS rank
+    FROM rn_mv_source
+) WHERE rank = 2;
+----
+1  2  2
+2  20 2
+
+statement ok
+DROP MATERIALIZED VIEW mv_row_number_equals_two;
+
+statement ok
+DROP TABLE rn_mv_source;
