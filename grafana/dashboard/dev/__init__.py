@@ -17,10 +17,6 @@ from . import cluster_alerts as _
 from . import cluster_errors as _
 from . import cluster_essential as _
 
-# Resource
-from . import network_connection as _
-from . import memory_manager as _
-
 # Metadata
 from . import streaming_metadata as _
 from . import system_params as _
@@ -66,6 +62,8 @@ from . import grpc_meta as _
 # Misc
 from . import udf as _
 from . import vector_search as _
+from . import network_connection as _
+from . import memory_manager as _
 
 def generate_panels(panels: Panels):
     return [x for s in sections for x in s(panels)]
