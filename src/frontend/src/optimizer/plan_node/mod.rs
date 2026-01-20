@@ -1042,7 +1042,6 @@ mod logical_agg;
 mod logical_apply;
 mod logical_cdc_scan;
 mod logical_changelog;
-mod logical_cte_ref;
 mod logical_dedup;
 mod logical_delete;
 mod logical_except;
@@ -1063,7 +1062,6 @@ mod logical_now;
 mod logical_over_window;
 mod logical_project;
 mod logical_project_set;
-mod logical_recursive_union;
 mod logical_scan;
 mod logical_share;
 mod logical_source;
@@ -1178,7 +1176,6 @@ pub use logical_agg::LogicalAgg;
 pub use logical_apply::LogicalApply;
 pub use logical_cdc_scan::LogicalCdcScan;
 pub use logical_changelog::LogicalChangeLog;
-pub use logical_cte_ref::LogicalCteRef;
 pub use logical_dedup::LogicalDedup;
 pub use logical_delete::LogicalDelete;
 pub use logical_except::LogicalExcept;
@@ -1204,7 +1201,6 @@ pub use logical_over_window::LogicalOverWindow;
 pub use logical_postgres_query::LogicalPostgresQuery;
 pub use logical_project::LogicalProject;
 pub use logical_project_set::LogicalProjectSet;
-pub use logical_recursive_union::LogicalRecursiveUnion;
 pub use logical_scan::LogicalScan;
 pub use logical_share::LogicalShare;
 pub use logical_source::LogicalSource;
@@ -1323,8 +1319,6 @@ macro_rules! for_all_plan_nodes {
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
             , { Logical, IcebergIntermediateScan }
-            , { Logical, RecursiveUnion }
-            , { Logical, CteRef }
             , { Logical, ChangeLog }
             , { Logical, FileScan }
             , { Logical, PostgresQuery }
