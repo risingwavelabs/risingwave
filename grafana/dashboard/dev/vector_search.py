@@ -14,7 +14,7 @@ def _(outer_panels: Panels):
 
     return [
         outer_panels.row_collapsed(
-            "[Misc] Vector Search",
+            "Vector Search",
             [
                 panels.timeseries_ops(
                     "Cache Ops",
