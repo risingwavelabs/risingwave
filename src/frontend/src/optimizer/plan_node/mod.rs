@@ -1123,6 +1123,7 @@ mod batch_postgres_query;
 mod batch_mysql_query;
 mod derive;
 mod logical_file_scan;
+mod logical_iceberg_intermediate_scan;
 mod logical_iceberg_scan;
 mod logical_postgres_query;
 
@@ -1187,6 +1188,7 @@ pub use logical_filter::LogicalFilter;
 pub use logical_gap_fill::LogicalGapFill;
 pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
+pub use logical_iceberg_intermediate_scan::LogicalIcebergIntermediateScan;
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
@@ -1320,6 +1322,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
+            , { Logical, IcebergIntermediateScan }
             , { Logical, RecursiveUnion }
             , { Logical, CteRef }
             , { Logical, ChangeLog }
