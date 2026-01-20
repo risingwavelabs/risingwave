@@ -124,7 +124,6 @@ macro_rules! impl_primitive_for_others {
 }
 
 impl_primitive_for_others! {
-    { Decimal, Decimal, Decimal },
     { Interval, Interval, Interval },
     { Date, Date, Date },
     { Time, Time, Time },

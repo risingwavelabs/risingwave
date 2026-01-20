@@ -356,6 +356,12 @@ impl From<Int256Array> for ArrayImpl {
     }
 }
 
+impl From<DecimalArray> for ArrayImpl {
+    fn from(arr: DecimalArray) -> Self {
+        Self::Decimal(arr)
+    }
+}
+
 impl From<BoolArray> for ArrayImpl {
     fn from(arr: BoolArray) -> Self {
         Self::Bool(arr)
