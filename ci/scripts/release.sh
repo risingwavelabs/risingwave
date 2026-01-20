@@ -38,8 +38,8 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify
 source "$HOME/.cargo/env"
 rustup show
 source ci/scripts/common.sh
-unset RUSTC_WRAPPER # disable sccache
-unset RUSTC_WORKSPACE_WRAPPER
+# unset RUSTC_WRAPPER # disable sccache
+unset RUSTC_WORKSPACE_WRAPPER # disable rustc-workspace-wrapper, for coverage instrumentation
 
 echo "--- Install protoc3"
 PROTOC_ARCH=${ARCH}
@@ -84,6 +84,7 @@ echo "--- check link info"
 check_link_info "${CARGO_PROFILE}"
 
 cd target/"${CARGO_PROFILE}" && chmod +x risingwave risectl
+du -sh risingwave risingwave.dwp risectl
 
 if [ "${SKIP_RELEASE}" -ne 1 ]; then
   echo "--- Upload nightly binary to s3"
