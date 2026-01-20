@@ -1066,6 +1066,7 @@ mod tests {
                 timezone: Some("UTC".to_owned()),
                 config_override: "cfg".into(),
                 job_definition: "definition".to_owned(),
+                backfill_orders: None,
             },
         )]);
 

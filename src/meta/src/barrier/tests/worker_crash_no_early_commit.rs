@@ -263,6 +263,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
                 ]),
             )]),
         )]),
+        backfill_orders: Default::default(),
         state_table_committed_epochs: HashMap::from_iter([
             (table1, initial_epoch),
             (table2, initial_epoch),
