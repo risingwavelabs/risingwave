@@ -322,6 +322,7 @@ impl From<TryWaitEpochOptions> for TracedTryWaitEpochOptions {
 #[derive(Clone, Copy)]
 pub struct NewReadSnapshotOptions {
     pub table_id: TableId,
+    pub table_option: TableOption,
 }
 
 #[derive(Clone)]
@@ -507,8 +508,6 @@ pub struct ReadOptions {
     pub prefix_hint: Option<Bytes>,
     pub prefetch_options: PrefetchOptions,
     pub cache_policy: CachePolicy,
-
-    pub retention_seconds: Option<u32>,
 }
 
 impl From<TracedReadOptions> for ReadOptions {
@@ -517,7 +516,6 @@ impl From<TracedReadOptions> for ReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
-            retention_seconds: value.retention_seconds,
         }
     }
 }
@@ -527,6 +525,7 @@ impl ReadOptions {
         self,
         table_id: TableId,
         epoch: Option<HummockReadEpoch>,
+        table_option: TableOption,
     ) -> TracedReadOptions {
         let value = self;
         let (read_version_from_backup, read_committed) = match epoch {
@@ -540,7 +539,7 @@ impl ReadOptions {
             prefix_hint: value.prefix_hint.map(|b| b.into()),
             prefetch_options: value.prefetch_options.into(),
             cache_policy: value.cache_policy.into(),
-            retention_seconds: value.retention_seconds,
+            retention_seconds: table_option.retention_seconds,
             table_id: table_id.into(),
             read_version_from_backup,
             read_committed,

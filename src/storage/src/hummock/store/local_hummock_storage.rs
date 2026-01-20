@@ -111,6 +111,7 @@ impl LocalHummockFlushedSnapshotReader {
         hummock_version_reader: &'a HummockVersionReader,
         read_version: &HummockReadVersionRef,
         user_key: UserKey<Bytes>,
+        table_option: TableOption,
         read_options: ReadOptions,
         on_key_value_fn: impl KeyValueFn<'a, O>,
         epoch: HummockEpoch,
@@ -132,6 +133,7 @@ impl LocalHummockFlushedSnapshotReader {
                 user_key.table_key,
                 epoch,
                 user_key.table_id,
+                table_option,
                 read_options,
                 read_snapshot,
                 on_key_value_fn,
@@ -155,6 +157,7 @@ impl LocalHummockFlushedSnapshotReader {
                 table_key_range,
                 epoch,
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_snapshot,
             )
@@ -177,6 +180,7 @@ impl LocalHummockFlushedSnapshotReader {
                 table_key_range,
                 epoch,
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_snapshot,
                 None,
@@ -224,6 +228,7 @@ impl LocalHummockStorage {
                 table_key_range,
                 epoch,
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_snapshot,
                 Some(self.mem_table_iter()),
@@ -245,6 +250,7 @@ impl LocalHummockStorage {
                 table_key_range,
                 epoch,
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_snapshot,
                 Some(self.mem_table_rev_iter()),
@@ -256,6 +262,7 @@ impl LocalHummockStorage {
 #[derive(Clone)]
 pub struct LocalHummockFlushedSnapshotReader {
     table_id: TableId,
+    table_option: TableOption,
     read_version: HummockReadVersionRef,
     hummock_version_reader: HummockVersionReader,
 }
@@ -272,6 +279,7 @@ impl StateStoreGet for LocalHummockFlushedSnapshotReader {
             &self.hummock_version_reader,
             &self.read_version,
             key,
+            self.table_option,
             read_options,
             on_key_value_fn,
             MAX_EPOCH,
@@ -317,6 +325,7 @@ impl StateStoreGet for LocalHummockStorage {
                     &self.hummock_version_reader,
                     &self.read_version,
                     key,
+                    self.table_option,
                     read_options,
                     on_key_value_fn,
                     self.epoch(),
@@ -438,7 +447,6 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
                             &key,
                             &value,
                             sanity_check_reader,
-                            self.table_option,
                             &self.op_consistency_level,
                         )
                         .await?;
@@ -455,7 +463,6 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
                             &key,
                             &old_value,
                             sanity_check_reader,
-                            self.table_option,
                             &self.op_consistency_level,
                         )
                         .await?;
@@ -473,7 +480,6 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
                             &old_value,
                             &new_value,
                             sanity_check_reader,
-                            self.table_option,
                             &self.op_consistency_level,
                         )
                         .await?;
@@ -624,6 +630,7 @@ impl LocalHummockStorage {
         );
         LocalHummockFlushedSnapshotReader {
             table_id: self.table_id,
+            table_option: self.table_option,
             read_version: self.read_version.clone(),
             hummock_version_reader: self.hummock_version_reader.clone(),
         }
