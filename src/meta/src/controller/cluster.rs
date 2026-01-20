@@ -617,9 +617,19 @@ impl ClusterControllerInner {
         // For each hostname, we only consider the maximum resource, in case a host has multiple nodes.
         let mut per_host = HashMap::new();
 
+        // Note: Meta node itself is not a "worker" and thus won't register via `add_worker_node`.
+        // Still, for license/RWU enforcement we should include the resources used by the meta node.
+        per_host.insert(
+            hostname(),
+            ClusterResource {
+                total_cpu_cores: total_cpu_available() as _,
+                total_memory_bytes: system_memory_available_bytes() as _,
+            },
+        );
+
         for info in self.worker_extra_info.values() {
             let r = per_host
-                .entry(info.resource.hostname.as_str())
+                .entry(info.resource.hostname.clone())
                 .or_insert_with(ClusterResource::default);
 
             r.total_cpu_cores = max(r.total_cpu_cores, info.resource.total_cpu_cores);
