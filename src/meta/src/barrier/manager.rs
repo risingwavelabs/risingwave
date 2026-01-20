@@ -68,29 +68,29 @@ impl GlobalBarrierManager {
             .await?;
         Ok(job_info
             .into_iter()
-            .map(|(job_id, definition, init_at, create_type)| {
-                let BackfillProgress {
-                    progress,
-                    is_serverless,
-                    backfill_type,
-                } = backfill_progress.remove(&job_id).unwrap_or_else(|| {
-                    warn!(%job_id, "background job has no ddl progress");
-                    BackfillProgress {
-                        progress: "0.0%".into(),
-                        is_serverless: false,
-                        backfill_type: PbBackfillType::NormalBackfill,
+            .map(
+                |(job_id, definition, init_at, create_type, is_serverless_backfill)| {
+                    let BackfillProgress {
+                        progress,
+                        backfill_type,
+                    } = backfill_progress.remove(&job_id).unwrap_or_else(|| {
+                        warn!(%job_id, "background job has no ddl progress");
+                        BackfillProgress {
+                            progress: "0.0%".into(),
+                            backfill_type: PbBackfillType::NormalBackfill,
+                        }
+                    });
+                    DdlProgress {
+                        id: job_id.as_raw_id() as u64,
+                        statement: definition,
+                        create_type: create_type.as_str().into(),
+                        initialized_at_time_millis: datetime_to_timestamp_millis(init_at),
+                        progress,
+                        is_serverless_backfill,
+                        backfill_type: backfill_type as _,
                     }
-                });
-                DdlProgress {
-                    id: job_id.as_raw_id() as u64,
-                    statement: definition,
-                    create_type: create_type.as_str().into(),
-                    initialized_at_time_millis: datetime_to_timestamp_millis(init_at),
-                    progress,
-                    is_serverless_backfill: is_serverless,
-                    backfill_type: backfill_type as _,
-                }
-            })
+                },
+            )
             .collect())
     }
 

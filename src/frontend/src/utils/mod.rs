@@ -38,6 +38,8 @@ pub(crate) mod group_by;
 pub mod overwrite_options;
 pub use group_by::*;
 pub use overwrite_options::*;
+mod iceberg_predicate;
+pub use iceberg_predicate::*;
 
 use crate::expr::{Expr, ExprImpl, ExprRewriter, InputRef};
 
