@@ -38,7 +38,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify
 source "$HOME/.cargo/env"
 rustup show
 source ci/scripts/common.sh
-# unset RUSTC_WRAPPER # disable sccache
+unset RUSTC_WRAPPER # disable sccache
 unset RUSTC_WORKSPACE_WRAPPER # disable rustc-workspace-wrapper, for coverage instrumentation
 
 echo "--- Install protoc3"
