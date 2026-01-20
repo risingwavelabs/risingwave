@@ -1291,6 +1291,7 @@ mod tests {
             backfill_parallelism: None,
             max_parallelism: 1,
             specific_resource_group: None,
+            is_serverless_backfill: false,
         };
 
         let database_model = database::Model {
@@ -1387,6 +1388,7 @@ mod tests {
             backfill_parallelism: None,
             max_parallelism: 2,
             specific_resource_group: None,
+            is_serverless_backfill: false,
         };
 
         let database_model = database::Model {
@@ -1511,6 +1513,7 @@ mod tests {
             backfill_parallelism: None,
             max_parallelism: 2,
             specific_resource_group: None,
+            is_serverless_backfill: false,
         };
 
         let database_model = database::Model {

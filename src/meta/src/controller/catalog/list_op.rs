@@ -99,14 +99,14 @@ impl CatalogController {
         &self,
         include_initial: bool,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<Vec<(JobId, String, DateTime)>> {
+    ) -> MetaResult<HashSet<JobId>> {
         Ok(self
             .list_creating_jobs(include_initial, false, database_id)
             .await?
             .into_iter()
-            .map(|(job_id, definition, init_at, create_type)| {
+            .map(|(job_id, _, _, create_type, _)| {
                 assert_eq!(create_type, CreateType::Background);
-                (job_id, definition, init_at)
+                job_id
             })
             .collect())
     }
@@ -116,7 +116,7 @@ impl CatalogController {
         include_initial: bool,
         include_foreground: bool,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<Vec<(JobId, String, DateTime, CreateType)>> {
+    ) -> MetaResult<Vec<(JobId, String, DateTime, CreateType, bool)>> {
         let inner = self.inner.read().await;
         let create_type_cond = if include_foreground {
             SimpleExpr::from(true)
@@ -132,22 +132,27 @@ impl CatalogController {
             .map(|database_id| object::Column::DatabaseId.eq(database_id))
             .unwrap_or_else(|| SimpleExpr::from(true));
         let filter_cond = create_type_cond.and(status_cond).and(database_cond);
-        let mut table_info: Vec<(JobId, String, DateTime, CreateType)> = Table::find()
+        let object_columns = [object::Column::InitializedAt];
+        let streaming_job_columns = [
+            streaming_job::Column::CreateType,
+            streaming_job::Column::IsServerlessBackfill,
+        ];
+        let mut table_info: Vec<(JobId, String, DateTime, CreateType, bool)> = Table::find()
             .select_only()
             .columns([table::Column::TableId, table::Column::Definition])
-            .column(object::Column::InitializedAt)
-            .column(streaming_job::Column::CreateType)
+            .columns(object_columns)
+            .columns(streaming_job_columns)
             .join(JoinType::LeftJoin, table::Relation::Object1.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(filter_cond.clone())
             .into_tuple()
             .all(&inner.db)
             .await?;
-        let sink_info: Vec<(JobId, String, DateTime, CreateType)> = Sink::find()
+        let sink_info: Vec<(JobId, String, DateTime, CreateType, bool)> = Sink::find()
             .select_only()
             .columns([sink::Column::SinkId, sink::Column::Definition])
-            .column(object::Column::InitializedAt)
-            .column(streaming_job::Column::CreateType)
+            .columns(object_columns)
+            .columns(streaming_job_columns)
             .join(JoinType::LeftJoin, sink::Relation::Object.def())
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
             .filter(filter_cond)

@@ -74,8 +74,6 @@ pub(crate) struct CreatingStreamingJobControl {
     status: CreatingStreamingJobStatus,
 
     upstream_lag: LabelGuardedIntGauge,
-
-    is_serverless: bool,
 }
 
 impl CreatingStreamingJobControl {
@@ -223,7 +221,6 @@ impl CreatingStreamingJobControl {
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
             node_actors,
             state_table_ids,
-            is_serverless: info.is_serverless,
         })
     }
 
@@ -485,7 +482,6 @@ impl CreatingStreamingJobControl {
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
-            is_serverless: false, // serverless backfill not supported background ddl yet.
         })
     }
 
@@ -538,7 +534,6 @@ impl CreatingStreamingJobControl {
         };
         BackfillProgress {
             progress,
-            is_serverless: self.is_serverless,
             backfill_type: PbBackfillType::SnapshotBackfill,
         }
     }

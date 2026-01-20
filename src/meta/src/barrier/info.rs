@@ -407,10 +407,7 @@ pub enum SubscriberType {
 #[derive(Debug)]
 pub(super) enum CreateStreamingJobStatus {
     Init,
-    Creating {
-        tracker: CreateMviewProgressTracker,
-        is_serverless: bool,
-    },
+    Creating { tracker: CreateMviewProgressTracker },
     Created,
 }
 
@@ -494,16 +491,12 @@ impl InflightDatabaseInfo {
             .iter()
             .filter_map(|(job_id, job)| match &job.status {
                 CreateStreamingJobStatus::Init => None,
-                CreateStreamingJobStatus::Creating {
-                    tracker,
-                    is_serverless,
-                } => {
+                CreateStreamingJobStatus::Creating { tracker } => {
                     let progress = tracker.gen_backfill_progress();
                     Some((
                         *job_id,
                         BackfillProgress {
                             progress,
-                            is_serverless: *is_serverless,
                             backfill_type: PbBackfillType::NormalBackfill,
                         },
                     ))
@@ -575,7 +568,6 @@ impl InflightDatabaseInfo {
                             &mut job_info.status,
                             CreateStreamingJobStatus::Creating {
                                 tracker: CreateMviewProgressTracker::new(info, version_stats),
-                                is_serverless: info.is_serverless,
                             },
                         ) else {
                             unreachable!("should be init before collect the first barrier")

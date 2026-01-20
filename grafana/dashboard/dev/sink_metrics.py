@@ -232,6 +232,38 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Sink without Log Store"),
+                # TODO: These 2 metrics should be deprecated because they are unaware of Log Store
+                # Let's remove them when all sinks are migrated to Log Store
+                # NOTE(kwannoel): Need to confirm for sink-into-table sinks
+                panels.timeseries_rowsps(
+                    "Sink Executor Throughput (rows/s)",
+                    "The number of rows streamed into the SinkExecutor per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
+                            "sink {{sink_id}} {{sink_name}}",
+                        ),
+                        panels.target_hidden(
+                            f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
+                            "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "Sink Executor Throughput (MB/s)",
+                    "The figure shows the number of bytes written SinkExecutor per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    [
+                        panels.target(
+                            f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)) / (1000*1000)",
+                            "sink {{sink_id}} {{sink_name}}",
+                        ),
+                        panels.target_hidden(
+                            f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}) / (1000*1000)",
+                            "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]

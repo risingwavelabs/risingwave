@@ -42,6 +42,7 @@ use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
+use risingwave_pb::ddl_service::streaming_job_resource_type;
 use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
@@ -113,11 +114,16 @@ impl CatalogController {
         ctx: StreamContext,
         streaming_parallelism: StreamingParallelism,
         max_parallelism: usize,
-        specific_resource_group: Option<String>, // todo: can we move it to StreamContext?
+        resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: Option<StreamingParallelism>,
     ) -> MetaResult<JobId> {
         let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
         let job_id = obj.oid.as_job_id();
+        let specific_resource_group = resource_type.resource_group();
+        let is_serverless_backfill = matches!(
+            &resource_type,
+            streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(_)
+        );
         let job = streaming_job::ActiveModel {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Initial),
@@ -128,6 +134,7 @@ impl CatalogController {
             backfill_parallelism: Set(backfill_parallelism),
             max_parallelism: Set(max_parallelism as _),
             specific_resource_group: Set(specific_resource_group),
+            is_serverless_backfill: Set(is_serverless_backfill),
         };
         job.insert(txn).await?;
 
@@ -147,7 +154,7 @@ impl CatalogController {
         parallelism: &Option<Parallelism>,
         max_parallelism: usize,
         mut dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         backfill_parallelism: &Option<Parallelism>,
     ) -> MetaResult<()> {
         let inner = self.inner.write().await;
@@ -218,7 +225,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -248,7 +255,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -267,7 +274,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -327,7 +334,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -360,7 +367,7 @@ impl CatalogController {
                     ctx.clone(),
                     streaming_parallelism,
                     max_parallelism,
-                    specific_resource_group,
+                    resource_type,
                     backfill_parallelism.clone(),
                 )
                 .await?;
@@ -496,47 +503,51 @@ impl CatalogController {
         // Ensure the job exists.
         ensure_job_not_canceled(job_id, &txn).await?;
 
-        for fragment in fragments {
-            let fragment_id = fragment.fragment_id;
-            let state_table_ids = fragment.state_table_ids.inner_ref().clone();
+        let state_table_ids = fragments
+            .iter()
+            .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
+            .collect_vec();
 
-            let fragment = fragment.into_active_model();
-            Fragment::insert(fragment).exec(&txn).await?;
+        if !fragments.is_empty() {
+            let fragment_models = fragments
+                .into_iter()
+                .map(|fragment| fragment.into_active_model())
+                .collect_vec();
+            Fragment::insert_many(fragment_models).exec(&txn).await?;
+        }
 
-            // Fields including `fragment_id` and `vnode_count` were placeholder values before.
-            // After table fragments are created, update them for all tables.
-            if !for_replace {
-                let all_tables = StreamJobFragments::collect_tables(get_fragments());
-                for state_table_id in state_table_ids {
-                    // Table's vnode count is not always the fragment's vnode count, so we have to
-                    // look up the table from `TableFragments`.
-                    // See `ActorGraphBuilder::new`.
-                    let table = all_tables
-                        .get(&state_table_id)
-                        .unwrap_or_else(|| panic!("table {} not found", state_table_id));
-                    assert_eq!(table.id, state_table_id);
-                    assert_eq!(table.fragment_id, fragment_id);
-                    let vnode_count = table.vnode_count();
+        // Fields including `fragment_id` and `vnode_count` were placeholder values before.
+        // After table fragments are created, update them for all tables.
+        if !for_replace {
+            let all_tables = StreamJobFragments::collect_tables(get_fragments());
+            for state_table_id in state_table_ids {
+                // Table's vnode count is not always the fragment's vnode count, so we have to
+                // look up the table from `TableFragments`.
+                // See `ActorGraphBuilder::new`.
+                let table = all_tables
+                    .get(&state_table_id)
+                    .unwrap_or_else(|| panic!("table {} not found", state_table_id));
+                assert_eq!(table.id, state_table_id);
+                let vnode_count = table.vnode_count();
 
-                    table::ActiveModel {
-                        table_id: Set(state_table_id as _),
-                        fragment_id: Set(Some(fragment_id)),
-                        vnode_count: Set(vnode_count as _),
-                        ..Default::default()
+                table::ActiveModel {
+                    table_id: Set(state_table_id as _),
+                    fragment_id: Set(Some(table.fragment_id)),
+                    vnode_count: Set(vnode_count as _),
+                    ..Default::default()
+                }
+                .update(&txn)
+                .await?;
+
+                if need_notify {
+                    let mut table = table.clone();
+                    // In production, definition was replaced but still needed for notification.
+                    if cfg!(not(debug_assertions)) && table.id == job_id.as_raw_id() {
+                        table.definition = definition.clone().unwrap();
                     }
-                    .update(&txn)
-                    .await?;
-
-                    if need_notify {
-                        let mut table = table.clone();
-                        // In production, definition was replaced but still needed for notification.
-                        if cfg!(not(debug_assertions)) && table.id == job_id.as_raw_id() {
-                            table.definition = definition.clone().unwrap();
-                        }
-                        objects_to_notify.push(PbObject {
-                            object_info: Some(PbObjectInfo::Table(table)),
-                        });
-                    }
+                    objects_to_notify.push(PbObject {
+                        object_info: Some(PbObjectInfo::Table(table)),
+                    });
                 }
             }
         }
@@ -994,7 +1005,7 @@ impl CatalogController {
             ctx,
             parallelism,
             original_max_parallelism as _,
-            None,
+            streaming_job_resource_type::ResourceType::Regular(true),
             None,
         )
         .await?;

@@ -539,9 +539,27 @@ static REWRITE_SOURCE_FOR_BATCH: LazyLock<OptimizationStage> = LazyLock::new(|| 
         "Rewrite Source For Batch",
         vec![
             SourceToKafkaScanRule::create(),
-            SourceToIcebergScanRule::create(),
+            // For Iceberg, we use the intermediate scan to defer metadata reading
+            // until after predicate pushdown and column pruning
+            SourceToIcebergIntermediateScanRule::create(),
         ],
         ApplyOrder::TopDown,
+    )
+});
+
+static MATERIALIZE_ICEBERG_SCAN: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Materialize Iceberg Scan",
+        vec![IcebergIntermediateScanRule::create()],
+        ApplyOrder::TopDown,
+    )
+});
+
+static ICEBERG_COUNT_STAR: LazyLock<OptimizationStage> = LazyLock::new(|| {
+    OptimizationStage::new(
+        "Iceberg Count Star Optimization",
+        vec![IcebergCountStarRule::create()],
+        ApplyOrder::BottomUp,
     )
 });
 
@@ -893,10 +911,18 @@ impl LogicalOptimizer {
             plan = Self::predicate_pushdown(plan, explain_trace, &ctx);
         }
 
+        // Materialize Iceberg intermediate scans after predicate pushdown and column pruning.
+        // This converts LogicalIcebergIntermediateScan to LogicalIcebergScan with anti-joins
+        // for delete files.
+        plan = plan.optimize_by_rules(&MATERIALIZE_ICEBERG_SCAN)?;
+
         plan = plan.optimize_by_rules(&CONSTANT_OUTPUT_REMOVE)?;
         plan = plan.optimize_by_rules(&PROJECT_REMOVE)?;
 
         plan = plan.optimize_by_rules(&COMMON_SUB_EXPR_EXTRACT)?;
+
+        // This need to be apply after PROJECT_REMOVE to ensure there is no projection between agg and iceberg scan.
+        plan = plan.optimize_by_rules(&ICEBERG_COUNT_STAR)?;
 
         plan = plan.optimize_by_rules(&PULL_UP_HOP)?;
 
