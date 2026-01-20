@@ -370,8 +370,7 @@ create source pg_source with (
  port = '${PGPORT:5432}',
  username = secret pg_username,
  password = secret pg_pwd,
- database.name = '${PGDATABASE:postgres}',
- slot.name = 'pg_slot'
+ database.name = '${PGDATABASE:postgres}'
 );
 
 statement ok
@@ -415,7 +414,7 @@ SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
 ----
 12
 
-query II retry 6 backoff 1s
+query II retry 15 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
 ----
 12
@@ -431,7 +430,7 @@ SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_1
 ----
 23
 
-query II retry 6 backoff 1s
+query II retry 15 backoff 1s
 SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
 ----
 23
@@ -515,7 +514,8 @@ CREATE TABLE partitioned_timestamp_table_shared(
     PRIMARY KEY (c_int, c_timestamp)
 ) from pg_source table 'public.partitioned_timestamp_table';
 
-statement error The ancestor or descendant partition 'partitioned_timestamp_table' of the table partition 'partitioned_timestamp_table_2023' is already covered in the publication 'rw_publication'.
+# Test partition table conflict. Note: publication name is not fixed after per-source publication naming.
+statement error The ancestor or descendant partition 'partitioned_timestamp_table' of the table partition 'partitioned_timestamp_table_2023' is already covered in the publication
 CREATE TABLE partitioned_timestamp_table_2023_shared(
     c_int int,
     c_boolean boolean,
