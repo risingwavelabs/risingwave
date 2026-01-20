@@ -21,6 +21,15 @@ SELECT * FROM mv_row_number_equals_two;
 1  2  2
 2  20 2
 
+query III rowsort
+SELECT x, y, rank FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY x ORDER BY y) AS rank
+    FROM rn_mv_source
+) WHERE rank = 2;
+----
+1  2  2
+2  20 2
+
 statement ok
 DROP MATERIALIZED VIEW mv_row_number_equals_two;
 
