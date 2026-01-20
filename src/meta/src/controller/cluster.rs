@@ -166,6 +166,7 @@ impl ClusterController {
             )
             .await?;
 
+        // Keep license manager in sync with the latest cluster resource.
         self.update_cluster_resource_for_license().await?;
 
         Ok(worker_id)
@@ -200,10 +201,10 @@ impl ClusterController {
                 .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Node(worker.clone()))
                 .await;
-            if worker.r#type() == PbWorkerType::ComputeNode {
-                self.update_cluster_resource_for_license().await?;
-            }
         }
+
+        // Keep license manager in sync with the latest cluster resource.
+        self.update_cluster_resource_for_license().await?;
 
         // Notify local subscribers.
         // Note: Any type of workers may pin some hummock resource. So `HummockManager` expect this
