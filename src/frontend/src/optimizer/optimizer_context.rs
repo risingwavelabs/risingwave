@@ -54,6 +54,10 @@ pub struct OptimizerContext {
     /// Store the configs can be overwritten in with clause
     /// if not specified, use the value from session variable.
     overwrite_options: OverwriteOptions,
+    /// Mapping from iceberg table identifier to current snapshot id.
+    /// Used to keep same snapshot id when multiple scans from the same iceberg table exist in a query.
+    iceberg_snapshot_id_map: RefCell<HashMap<String, Option<i64>>>,
+
     /// Last assigned plan node ID.
     last_plan_node_id: Cell<i32>,
     /// Last assigned correlated ID.
@@ -99,6 +103,8 @@ impl OptimizerContext {
             session_timezone,
             total_rule_applied: RefCell::new(0),
             overwrite_options,
+            iceberg_snapshot_id_map: RefCell::new(HashMap::new()),
+
             last_plan_node_id: Cell::new(RESERVED_ID_NUM.into()),
             last_correlated_id: Cell::new(0),
             last_expr_display_id: Cell::new(RESERVED_ID_NUM.into()),
@@ -123,6 +129,8 @@ impl OptimizerContext {
             session_timezone: RefCell::new(SessionTimezone::new("UTC".into())),
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
+            iceberg_snapshot_id_map: RefCell::new(HashMap::new()),
+
             last_plan_node_id: Cell::new(0),
             last_correlated_id: Cell::new(0),
             last_expr_display_id: Cell::new(0),
@@ -267,6 +275,10 @@ impl OptimizerContext {
 
     pub fn get_session_timezone(&self) -> String {
         self.session_timezone.borrow().timezone()
+    }
+
+    pub fn iceberg_snapshot_id_map(&self) -> RefMut<'_, HashMap<String, Option<i64>>> {
+        self.iceberg_snapshot_id_map.borrow_mut()
     }
 }
 

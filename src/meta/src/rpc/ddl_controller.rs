@@ -948,7 +948,6 @@ impl DdlController {
             self.validate_table_for_sink(target_table).await?;
         }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
-        let specific_resource_group = resource_type.resource_group();
         let check_ret = self
             .metadata_manager
             .catalog_controller
@@ -958,7 +957,7 @@ impl DdlController {
                 &fragment_graph.parallelism,
                 fragment_graph.max_parallelism as _,
                 dependencies,
-                specific_resource_group,
+                resource_type.clone(),
                 &fragment_graph.backfill_parallelism,
             )
             .await;

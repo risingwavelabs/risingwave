@@ -832,7 +832,6 @@ impl ControlStreamManager {
                                 Default::default(),
                                 hummock_version_stats,
                             ),
-                            is_serverless: false, // serverless backfill not support background ddl yet
                         }
                     } else {
                         CreateStreamingJobStatus::Created
