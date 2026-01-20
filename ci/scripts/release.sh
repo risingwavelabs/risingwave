@@ -41,7 +41,7 @@ source ci/scripts/common.sh
 unset RUSTC_WORKSPACE_WRAPPER # disable rustc-workspace-wrapper, for coverage instrumentation
 
 echo "--- Install sccache"
-cargo install -y --locked cargo-binstall
+curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
 cargo binstall -y --locked sccache@10.0.0
 
 echo "--- Install protoc3"
