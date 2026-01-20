@@ -51,12 +51,13 @@ pub fn handle_set(
     let param_name = name.real_value().to_lowercase();
     if param_name.eq_ignore_ascii_case("iceberg_engine_connection")
         && let Some(val) = string_val.as_deref()
-            && !val.is_empty()
-                && let Some((schema_name, connection_name)) = val.split_once('.') {
-                    handler_args
-                        .session
-                        .get_connection_by_name(Some(schema_name.to_owned()), connection_name)?;
-                }
+        && !val.is_empty()
+        && let Some((schema_name, connection_name)) = val.split_once('.')
+    {
+        handler_args
+            .session
+            .get_connection_by_name(Some(schema_name.to_owned()), connection_name)?;
+    }
 
     let mut status = ParameterStatus::default();
 
