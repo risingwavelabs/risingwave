@@ -76,9 +76,6 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Local barrier manager for reporting source load finished events
     barrier_manager: LocalBarrierManager,
-
-    /// Track whether we have already reported CDC offset update (report only once)
-    cdc_offset_reported: bool,
 }
 
 impl<S: StateStore> SourceExecutor<S> {
@@ -102,7 +99,6 @@ impl<S: StateStore> SourceExecutor<S> {
             rate_limit_rps,
             is_shared_non_cdc,
             barrier_manager,
-            cdc_offset_reported: false,
         }
     }
 
@@ -484,9 +480,18 @@ impl<S: StateStore> SourceExecutor<S> {
                 )
             })?;
         let first_epoch = first_barrier.epoch;
+        // Track whether we have already reported CDC offset update (report only once).
+        let mut cdc_offset_reported = false;
+        let mut must_wait_cdc_offset_before_report = false;
         let mut boot_state =
             if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
                 tracing::debug!(?splits, "boot with splits");
+                // Skip report for non-CDC.
+                cdc_offset_reported = !splits.iter().any(|split| split.is_cdc_split());
+                // Only for MySQL and SQL Server CDC, we need to wait for the offset to be non-empty before reporting.
+                must_wait_cdc_offset_before_report = splits.iter().any(|split| {
+                    matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
+                });
                 splits.to_vec()
             } else {
                 Vec::default()
@@ -834,27 +839,26 @@ impl<S: StateStore> SourceExecutor<S> {
                     let updated_splits = self.persist_state_and_clear_cache(epoch).await?;
 
                     // Report CDC source offset updated only the first time
-                    // Check if any updated split is a CDC split with non-empty offset
-                    if !self.cdc_offset_reported {
-                        let has_non_empty_cdc_offset = updated_splits.values().any(|split| {
-                            split.is_cdc_split() && !split.get_cdc_split_offset().is_empty()
-                        });
-                        if has_non_empty_cdc_offset {
-                            // Report only once, then ignore all subsequent offset updates
-                            self.barrier_manager.report_cdc_source_offset_updated(
-                                epoch,
-                                self.actor_ctx.id,
-                                source_id,
-                            );
-                            tracing::info!(
-                                actor_id = %self.actor_ctx.id,
-                                source_id = %source_id,
-                                epoch = ?epoch,
-                                "Reported CDC source offset updated to meta (first time only)"
-                            );
-                            // Mark as reported to prevent any future reports, even if offset changes
-                            self.cdc_offset_reported = true;
-                        }
+                    if !cdc_offset_reported
+                        && (!must_wait_cdc_offset_before_report
+                            || updated_splits.values().any(|split| {
+                                split.is_cdc_split() && !split.get_cdc_split_offset().is_empty()
+                            }))
+                    {
+                        // Report only once, then ignore all subsequent offset updates
+                        self.barrier_manager.report_cdc_source_offset_updated(
+                            epoch,
+                            self.actor_ctx.id,
+                            source_id,
+                        );
+                        tracing::info!(
+                            actor_id = %self.actor_ctx.id,
+                            source_id = %source_id,
+                            epoch = ?epoch,
+                            "Reported CDC source offset updated to meta (first time only)"
+                        );
+                        // Mark as reported to prevent any future reports, even if offset changes
+                        cdc_offset_reported = true;
                     }
 
                     // when handle a checkpoint barrier, spawn a task to wait for epoch commit notification
