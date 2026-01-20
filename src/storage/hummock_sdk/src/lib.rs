@@ -457,6 +457,7 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
                         "ignore specified current epoch and set it to u64::MAX"
                     );
                 }
+                let todo = 0;
                 HummockReadEpoch::NoWait(HummockEpoch::MAX)
             }
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
