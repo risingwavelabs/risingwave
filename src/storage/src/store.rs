@@ -26,7 +26,7 @@ use risingwave_common::array::{Op, VectorRef};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{Epoch, EpochPair};
+use risingwave_common::util::epoch::{Epoch, EpochPair, MAX_EPOCH};
 use risingwave_common::vector::distance::DistanceMeasurement;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange};
@@ -548,12 +548,14 @@ impl ReadOptions {
     }
 }
 
-pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<&u32>) -> u64 {
-    let base_epoch = Epoch(base_epoch);
+pub fn gen_min_epoch(base_epoch: u64, retention_seconds: Option<u32>) -> u64 {
     match retention_seconds {
         Some(retention_seconds_u32) => {
-            base_epoch
-                .subtract_ms(*retention_seconds_u32 as u64 * 1000)
+            if base_epoch == MAX_EPOCH {
+                panic!("generate min epoch for MAX_EPOCH");
+            }
+            Epoch(base_epoch)
+                .subtract_ms(retention_seconds_u32 as u64 * 1000)
                 .0
         }
         None => 0,
