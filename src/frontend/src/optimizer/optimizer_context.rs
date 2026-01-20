@@ -14,6 +14,7 @@
 
 use core::fmt::Formatter;
 use std::cell::{Cell, RefCell, RefMut};
+use std::collections::HashMap;
 use std::marker::PhantomData;
 use std::rc::Rc;
 use std::sync::Arc;
