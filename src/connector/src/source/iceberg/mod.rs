@@ -25,7 +25,6 @@ use futures_async_stream::{for_await, try_stream};
 use iceberg::Catalog;
 use iceberg::expr::{BoundPredicate, Predicate as IcebergPredicate};
 use iceberg::scan::FileScanTask;
-use iceberg::spec::FormatVersion;
 use iceberg::table::Table;
 pub use parquet_file_handler::*;
 use phf::{Set, phf_set};
