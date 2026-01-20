@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use futures::FutureExt;
-use futures::stream::BoxStream;
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::bitmap::BitmapBuilder;
@@ -30,10 +29,6 @@ use risingwave_common::row::RowExt;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{self, PbDispatcher};
-use risingwave_storage::monitor::MonitoredStateStore;
-use risingwave_storage::store_impl::HummockStorageType;
-#[cfg(debug_assertions)]
-use risingwave_storage::store_impl::{MemoryStateStoreType, SledStateStoreType};
 use smallvec::{SmallVec, smallvec};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;

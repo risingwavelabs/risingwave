@@ -20,7 +20,6 @@ use anyhow::anyhow;
 use async_recursion::async_recursion;
 use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
-use prometheus::local;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
@@ -36,7 +35,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_pb::stream_service::inject_barrier_request::BuildActorInfo;
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::BatchTable;
-use risingwave_storage::{StateStore, StateStoreImpl, dispatch_state_store};
+use risingwave_storage::{StateStore, dispatch_state_store};
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::task::JoinHandle;
