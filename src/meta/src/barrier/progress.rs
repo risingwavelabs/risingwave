@@ -949,13 +949,13 @@ mod tests {
         use crate::model::StreamJobFragmentsToCreate;
 
         // Create a CDC source with cdc_source_job = true
-        let mut source_info = StreamSourceInfo {
+        let source_info = StreamSourceInfo {
             cdc_source_job: true,
             ..Default::default()
         };
 
-        let mut source = PbSource {
-            id: risingwave_common::id::SourceId::new(100).into(),
+        let source = PbSource {
+            id: risingwave_common::id::SourceId::new(100),
             info: Some(source_info),
             ..Default::default()
         };
