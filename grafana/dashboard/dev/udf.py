@@ -7,7 +7,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Misc] User Defined Function",
+            "User Defined Function",
             [
                 panels.timeseries_count(
                     "UDF Calls Count",
