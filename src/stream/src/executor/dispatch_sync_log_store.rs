@@ -473,17 +473,18 @@ impl<S: StateStoreRead> ConsumerFuture<S> {
         metrics: &SyncedKvLogStoreMetrics,
     ) -> StreamResult<(DispatchExecutorInner, ConsumerFutureEvent, ReadFuture<S>)> {
         if !barriers.is_empty()
-            && let ConsumerFuture::ReadingChunk { .. } = self {
-                let msg = barriers
-                    .pop_back()
-                    .expect("barrier queue should not be empty!");
+            && let ConsumerFuture::ReadingChunk { .. } = self
+        {
+            let msg = barriers
+                .pop_back()
+                .expect("barrier queue should not be empty!");
 
-                let (read_future, inner) = must_match!(
-                    std::mem::replace(self, ConsumerFuture::Empty),
-                    ConsumerFuture::ReadingChunk { read_future, inner } => (read_future, inner)
-                );
-                *self = Self::dispatch(inner, msg, read_future);
-            }
+            let (read_future, inner) = must_match!(
+                std::mem::replace(self, ConsumerFuture::Empty),
+                ConsumerFuture::ReadingChunk { read_future, inner } => (read_future, inner)
+            );
+            *self = Self::dispatch(inner, msg, read_future);
+        }
         match self {
             ConsumerFuture::ReadingChunk { read_future, .. } => {
                 let chunk = read_future
@@ -702,7 +703,10 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                     let consumer_future = async {
                         let should_pause_consumer = pause_stream
                             && barriers.is_empty()
-                            && matches!(&consumer_future_state, ConsumerFuture::ReadingChunk { .. });
+                            && matches!(
+                                &consumer_future_state,
+                                ConsumerFuture::ReadingChunk { .. }
+                            );
                         if should_pause_consumer || should_wait_for_upstream {
                             pending().await
                         } else {

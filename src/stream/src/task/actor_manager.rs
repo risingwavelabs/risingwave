@@ -20,6 +20,7 @@ use anyhow::anyhow;
 use async_recursion::async_recursion;
 use futures::{FutureExt, TryFutureExt};
 use itertools::Itertools;
+use prometheus::local;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnId, Field, Schema};
@@ -29,7 +30,9 @@ use risingwave_common::util::runtime::BackgroundShutdownRuntime;
 use risingwave_pb::id::{ExecutorId, GlobalOperatorId};
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{self, StreamNode, StreamScanNode, StreamScanType};
+use risingwave_pb::stream_plan::{
+    self, StreamNode, StreamScanNode, StreamScanType, SyncLogStoreNode,
+};
 use risingwave_pb::stream_service::inject_barrier_request::BuildActorInfo;
 use risingwave_storage::monitor::HummockTraceFutureExt;
 use risingwave_storage::table::batch_table::BatchTable;
@@ -46,8 +49,8 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    GenericDispatchExecutor, SnapshotBackfillExecutor, SyncLogStoreDispatchConfig,
-    SyncLogStoreDispatchExecutor, SyncedKvLogStoreMetrics, TroublemakerExecutor, WrapperExecutor,
+    SnapshotBackfillExecutor, SyncLogStoreDispatchConfig, SyncLogStoreDispatchExecutor,
+    SyncedKvLogStoreMetrics, TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -430,7 +433,60 @@ impl StreamActorManager {
         local_barrier_manager: LocalBarrierManager,
         new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
         actor_config: Arc<StreamingConfig>,
-    ) -> StreamResult<Actor<GenericDispatchExecutor>> {
+    ) -> StreamResult<Actor<DispatchExecutor>> {
+        let actor_context = ActorContext::create(
+            &actor,
+            fragment_id,
+            self.env.total_mem_usage(),
+            self.streaming_metrics.clone(),
+            self.env.meta_client(),
+            actor_config,
+            self.env.clone(),
+        );
+        let vnode_bitmap = actor.vnode_bitmap.as_ref().map(|b| b.into());
+        let expr_context = actor.expr_context.clone().unwrap();
+
+        let (executor, subtasks) = self
+            .create_nodes(
+                fragment_id,
+                &node,
+                self.env.clone(),
+                &actor_context,
+                vnode_bitmap,
+                &local_barrier_manager,
+            )
+            .await?;
+
+        let dispatcher = DispatchExecutor::new(
+            executor,
+            new_output_request_rx,
+            actor.dispatchers,
+            &actor_context,
+        )
+        .await?;
+
+        let actor = Actor::new(
+            dispatcher,
+            subtasks,
+            self.streaming_metrics.clone(),
+            actor_context.clone(),
+            expr_context,
+            local_barrier_manager,
+        );
+        Ok(actor)
+    }
+
+    async fn create_actor_with_log_store_dispatcher<S: StateStore>(
+        self: Arc<Self>,
+        actor: BuildActorInfo,
+        fragment_id: FragmentId,
+        node: Arc<StreamNode>,
+        local_barrier_manager: LocalBarrierManager,
+        new_output_request_rx: UnboundedReceiver<(ActorId, NewOutputRequest)>,
+        actor_config: Arc<StreamingConfig>,
+        sync: Box<SyncLogStoreNode>,
+        state_store: S,
+    ) -> StreamResult<Actor<SyncLogStoreDispatchExecutor<S>>> {
         let actor_context = ActorContext::create(
             &actor,
             fragment_id,
@@ -450,60 +506,42 @@ impl StreamActorManager {
             "sync_log_store_dispatch",
             "sync_log_store_dispatch",
         );
-        let (node, sync_log_store_args) = match node.get_node_body()? {
-            NodeBody::SyncLogStore(sync) => {
-                let sync = sync.clone();
-                let [input] = node.input.as_slice() else {
-                    bail!("SyncLogStore should be at fragment exit and have exactly 1 input");
-                };
-                let input = input.clone();
 
-                let table = sync
-                    .log_store_table
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("missing log_store_table in SyncLogStoreNode"))?
-                    .clone();
+        let table = sync
+            .log_store_table
+            .as_ref()
+            .ok_or_else(|| anyhow!("missing log_store_table in SyncLogStoreNode"))?
+            .clone();
 
-                #[allow(deprecated)]
-                let pause_duration_ms = sync.pause_duration_ms.map_or(
-                    actor_context
-                        .config
-                        .developer
-                        .sync_log_store_pause_duration_ms,
-                    |v| v as usize,
-                );
+        #[allow(deprecated)]
+        let pause_duration_ms = sync.pause_duration_ms.map_or(
+            actor_context
+                .config
+                .developer
+                .sync_log_store_pause_duration_ms,
+            |v| v as usize,
+        );
 
-                #[allow(deprecated)]
-                let max_buffer_size = sync.buffer_size.map_or(
-                    actor_context.config.developer.sync_log_store_buffer_size,
-                    |v| v as usize,
-                );
+        #[allow(deprecated)]
+        let max_buffer_size = sync.buffer_size.map_or(
+            actor_context.config.developer.sync_log_store_buffer_size,
+            |v| v as usize,
+        );
 
-                let serde = LogStoreRowSerde::new(
-                    &table,
-                    vnode_bitmap.clone().map(|b: Bitmap| b.into()),
-                    &KV_LOG_STORE_V2_INFO,
-                );
+        let serde = LogStoreRowSerde::new(
+            &table,
+            vnode_bitmap.clone().map(|b: Bitmap| b.into()),
+            &KV_LOG_STORE_V2_INFO,
+        );
 
-                (
-                    Arc::new(input),
-                    Some((
-                        table.id,
-                        serde,
-                        max_buffer_size,
-                        pause_duration_ms,
-                        sync.aligned,
-                        chunk_size,
-                    )),
-                )
-            }
-            _ => (node.clone(), None),
+        let [input] = node.input.as_slice() else {
+            bail!("SyncLogStoreNode should have exactly one input");
         };
 
         let (executor, subtasks) = self
             .create_nodes(
                 fragment_id,
-                &node,
+                input,
                 self.env.clone(),
                 &actor_context,
                 vnode_bitmap,
@@ -511,91 +549,25 @@ impl StreamActorManager {
             )
             .await?;
 
-        let dispatcher = match sync_log_store_args {
-            Some((table_id, serde, max_buffer_size, pause_duration_ms, aligned, chunk_size)) => {
-                match self.env.state_store() {
-                    StateStoreImpl::HummockStateStore(store) => {
-                        let log_store_config = SyncLogStoreDispatchConfig {
-                            table_id,
-                            serde: serde.clone(),
-                            state_store: store.clone(),
-                            max_buffer_size,
-                            pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
-                            aligned,
-                            chunk_size,
-                            metrics: log_store_metrics,
-                        };
-                        let inner = SyncLogStoreDispatchExecutor::new(
-                            executor,
-                            new_output_request_rx,
-                            actor.dispatchers,
-                            &actor_context,
-                            log_store_config,
-                        )
-                        .await?;
-                        GenericDispatchExecutor::SyncLogStoreHummock(inner)
-                    }
-                    StateStoreImpl::MemoryStateStore(store) => {
-                        #[cfg(debug_assertions)]
-                        {
-                            let log_store_config = SyncLogStoreDispatchConfig {
-                                table_id,
-                                serde: serde.clone(),
-                                state_store: store.clone(),
-                                max_buffer_size,
-                                pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
-                                aligned,
-                                chunk_size,
-                                metrics: log_store_metrics,
-                            };
-                            let inner = SyncLogStoreDispatchExecutor::new(
-                                executor,
-                                new_output_request_rx,
-                                actor.dispatchers,
-                                &actor_context,
-                                log_store_config,
-                            )
-                            .await?;
-                            GenericDispatchExecutor::SyncLogStoreMemory(inner)
-                        }
-                    }
-                    StateStoreImpl::SledStateStore(store) => {
-                        #[cfg(debug_assertions)]
-                        {
-                            let log_store_config = SyncLogStoreDispatchConfig {
-                                table_id,
-                                serde: serde.clone(),
-                                state_store: store.clone(),
-                                max_buffer_size,
-                                pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
-                                aligned,
-                                chunk_size,
-                                metrics: log_store_metrics,
-                            };
-                            let inner = SyncLogStoreDispatchExecutor::new(
-                                executor,
-                                new_output_request_rx,
-                                actor.dispatchers,
-                                &actor_context,
-                                log_store_config,
-                            )
-                            .await?;
-                            GenericDispatchExecutor::SyncLogStoreSled(inner)
-                        }
-                    }
-                }
-            }
-            None => {
-                let inner = DispatchExecutor::new(
-                    executor,
-                    new_output_request_rx,
-                    actor.dispatchers,
-                    &actor_context,
-                )
-                .await?;
-                GenericDispatchExecutor::Direct(inner)
-            }
+        let log_store_config = SyncLogStoreDispatchConfig {
+            table_id: table.id,
+            serde: serde.clone(),
+            state_store: state_store.clone(),
+            max_buffer_size,
+            pause_duration_ms: Duration::from_millis(pause_duration_ms as _),
+            aligned: sync.aligned,
+            chunk_size,
+            metrics: log_store_metrics,
         };
+
+        let dispatcher = SyncLogStoreDispatchExecutor::new(
+            executor,
+            new_output_request_rx,
+            actor.dispatchers,
+            &actor_context,
+            log_store_config,
+        )
+        .await?;
 
         let actor = Actor::new(
             dispatcher,
@@ -628,27 +600,56 @@ impl StreamActorManager {
         let handle = {
             let trace_span = format!("Actor {actor_id}: `{}`", stream_actor_ref.mview_definition);
             let barrier_manager = local_barrier_manager;
+            let node_body = node.get_node_body().unwrap().clone();
             // wrap the future of `create_actor` with `boxed` to avoid stack overflow
-            let actor = self
-                .clone()
-                .create_actor(
-                    actor.clone(),
-                    fragment_id,
-                    node,
-                    barrier_manager.clone(),
-                    new_output_request_rx,
-                    actor_config,
-                )
-                .and_then(|actor| actor.run())
-                .map(move |result| {
-                    if let Err(err) = result {
+            let actor = match node_body {
+                NodeBody::SyncLogStore(sync) => {
+                    dispatch_state_store!(self.env.state_store(), store, {
+                        self
+                        .clone()
+                        .create_actor_with_log_store_dispatcher(
+                            actor,
+                            fragment_id,
+                            node,
+                            barrier_manager.clone(),
+                            new_output_request_rx,
+                            actor_config,
+                            sync,
+                            store,
+                        )
+                        .and_then(|actor| actor.run())
+                        .map(move |result| {
+                            if let Err(err) = result {
+                                tracing::error!(%actor_id, error = ?err.as_report(), "actor exit with error");
+                                barrier_manager.notify_failure(actor_id, err);
+                            }
+                        })
+                        .boxed()
+                    })
+                }
+                _ => {
+                    self
+                    .clone()
+                    .create_actor(
+                        actor,
+                        fragment_id,
+                        node,
+                        barrier_manager.clone(),
+                        new_output_request_rx,
+                        actor_config,
+                    )
+                    .and_then(|actor| actor.run())
+                    .map(move |result| {
+                        if let Err(err) = result {
                         // TODO: check error type and panic if it's unexpected.
                         // Intentionally use `?` on the report to also include the backtrace.
                         tracing::error!(%actor_id, error = ?err.as_report(), "actor exit with error");
                         barrier_manager.notify_failure(actor_id, err);
-                    }
-                })
-                .boxed();
+                        }
+                    })
+                    .boxed()
+                }
+            };
             let traced = match &self.await_tree_reg {
                 Some(m) => m
                     .register(await_tree_key::Actor(actor_id), trace_span)
