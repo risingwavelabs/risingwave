@@ -517,11 +517,6 @@ impl CatalogController {
             .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
             .collect_vec();
 
-        let state_table_ids = fragments
-            .iter()
-            .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
-            .collect_vec();
-
         let fragment_insert_start = Instant::now();
         if !fragments.is_empty() {
             let fragment_models = fragments
