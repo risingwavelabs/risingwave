@@ -1087,6 +1087,25 @@ where
     Ok(related_objects)
 }
 
+/// Load streaming jobs by job ids.
+pub(crate) async fn load_streaming_jobs_by_ids<C>(
+    txn: &C,
+    job_ids: impl IntoIterator<Item = JobId>,
+) -> MetaResult<HashMap<JobId, streaming_job::Model>>
+where
+    C: ConnectionTrait,
+{
+    let job_ids: HashSet<JobId> = job_ids.into_iter().collect();
+    if job_ids.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let jobs = streaming_job::Entity::find()
+        .filter(streaming_job::Column::JobId.is_in(job_ids.clone()))
+        .all(txn)
+        .await?;
+    Ok(jobs.into_iter().map(|job| (job.job_id, job)).collect())
+}
+
 #[derive(Clone, DerivePartialModel, FromQueryResult)]
 #[sea_orm(entity = "UserPrivilege")]
 pub struct PartialUserPrivilege {
@@ -1798,8 +1817,13 @@ pub async fn rename_relation(
                 ..Default::default()
             };
             active_model.update(txn).await?;
+            let streaming_job = streaming_job::Entity::find_by_id($object_id.as_raw_id())
+                .one(txn)
+                .await?;
             to_update_relations.push(PbObject {
-                object_info: Some(PbObjectInfo::$entity(ObjectModel(relation, obj).into())),
+                object_info: Some(PbObjectInfo::$entity(
+                    ObjectModel(relation, obj, streaming_job).into(),
+                )),
             });
             old_name
         }};
@@ -1838,6 +1862,9 @@ pub async fn rename_relation(
                 .one(txn)
                 .await?
                 .unwrap();
+            let streaming_job = streaming_job::Entity::find_by_id(index.index_id.as_job_id())
+                .one(txn)
+                .await?;
             index.name = object_name.into();
             let index_table_id = index.index_table_id;
             let old_name = rename_relation!(Table, table, table_id, index_table_id);
@@ -1850,7 +1877,9 @@ pub async fn rename_relation(
             };
             active_model.update(txn).await?;
             to_update_relations.push(PbObject {
-                object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
+                object_info: Some(PbObjectInfo::Index(
+                    ObjectModel(index, obj.unwrap(), streaming_job).into(),
+                )),
             });
             old_name
         }
@@ -1944,9 +1973,12 @@ pub async fn rename_relation_refer(
                 ..Default::default()
             };
             active_model.update(txn).await?;
+            let streaming_job = streaming_job::Entity::find_by_id($object_id.as_raw_id())
+                .one(txn)
+                .await?;
             to_update_relations.push(PbObject {
                 object_info: Some(PbObjectInfo::$entity(
-                    ObjectModel(relation, obj.unwrap()).into(),
+                    ObjectModel(relation, obj.unwrap(), streaming_job).into(),
                 )),
             });
         }};
