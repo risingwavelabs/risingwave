@@ -384,9 +384,7 @@ lto = "thin"
 
 [profile.thin-production]
 inherits = "production"
-debug = "line-tables-only"
-split-debuginfo = "packed"
-rustflags = ["-Z", "debuginfo-compression=zlib"]
+debug = 0 # no debug info, only symbols
 
 [profile.ci-release]
 inherits = "release"
