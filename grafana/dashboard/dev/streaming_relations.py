@@ -1,6 +1,6 @@
 from ..common import *
 from . import section
-from streaming_actors import _actor_busy_rate_expr
+from .streaming_common import _actor_busy_rate_expr
 
 def _relation_busy_rate_expr(rate_interval: str):
     actor_busy_rate_expr = _actor_busy_rate_expr(rate_interval)
@@ -39,9 +39,9 @@ def _(outer_panels: Panels):
     )
     return [
         outer_panels.row_collapsed(
-            "[Streaming] Streaming Relation Metrics",
+            "Streaming Relation Metrics",
             [
-                panels.subheader("Relation Level Metrics"),
+                panels.subheader("CPU Usage By Relation"),
                 panels.timeseries_percentage(
                     "CPU Usage Per Streaming Job",
                     "The figure shows the CPU usage of each streaming job",
@@ -56,6 +56,7 @@ def _(outer_panels: Panels):
                         )
                     ],
                 ),
+                panels.subheader("Busy Rate By Relation"),
                 panels.timeseries_percentage(
                     "Relation Busy Rate",
                     "The rate that a relation is busy, i.e. the busy rate of its busiest actor.",
@@ -84,6 +85,7 @@ def _(outer_panels: Panels):
                         _relation_busy_rate_target(panels, "3m"),
                     ],
                 ),
+                panels.subheader("Latency By Relation"),
                 # FIXME(kwannoel): We should use the max timestamp of the database, rather than cluster level.
                 panels.timeseries_latency(
                     "Latency of Materialize Views & Sinks",
@@ -105,6 +107,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Epoch By Relation"),
                 panels.timeseries_epoch(
                     "Current Epoch of Materialize Views",
                     "The current epoch that the Materialize Executors are processing. If an MV's epoch is far behind the others, "
@@ -117,6 +120,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Throughput By Relation"),
                 panels.timeseries_rowsps(
                     "Materialized View Throughput (rows/s)",
                     "The figure shows the number of rows written into each materialized view per second.",
@@ -128,6 +132,17 @@ def _(outer_panels: Panels):
                         panels.target_hidden(
                             f"rate({table_metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
                             "mview {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.subheader("Cache Memory Usage By Relation"),
+                panels.timeseries_bytes(
+                    "Executor Cache Memory Usage of Materialized Views",
+                    "Memory usage aggregated by materialized views",
+                    [
+                        panels.target(
+                            f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
+                            "materialized view {{materialized_view_id}}",
                         ),
                     ],
                 ),

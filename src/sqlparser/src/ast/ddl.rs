@@ -1053,7 +1053,7 @@ impl fmt::Display for ReferentialAction {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebhookSourceInfo {
     pub secret_ref: Option<SecretRefValue>,
-    pub signature_expr: Expr,
+    pub signature_expr: Option<Expr>,
     pub wait_for_persistence: bool,
     pub is_batched: bool,
 }
