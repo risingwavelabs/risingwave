@@ -511,7 +511,10 @@ class Panels:
 
     def subheader(self, title="", content="", height=1):
         gridPos = self.layout.next_row()
+        # Keep layout state consistent with the actual panel height, otherwise the next panel may overlap
+        # when callers use a custom `height`.
         gridPos.h = height
+        self.layout.h = height
         return Text(
             title=title,
             gridPos=gridPos,

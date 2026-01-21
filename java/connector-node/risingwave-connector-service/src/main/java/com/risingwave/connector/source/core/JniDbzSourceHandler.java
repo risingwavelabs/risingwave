@@ -102,6 +102,10 @@ public class JniDbzSourceHandler {
 
     public void commitOffset(String encodedOffset) throws InterruptedException {
         try {
+            if (encodedOffset.isEmpty()) {
+                LOG.debug("Engine#{}: commit offset is empty", config.getSourceId());
+                return;
+            }
             DebeziumOffset offset =
                     DebeziumOffsetSerializer.INSTANCE.deserialize(
                             encodedOffset.getBytes(StandardCharsets.UTF_8));

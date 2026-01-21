@@ -225,10 +225,19 @@ impl CheckpointControl {
                     .into_mut()
                     .expect_running("should not have command when not running"),
                 Entry::Vacant(entry) => match &command {
-                    Command::CreateStreamingJob {
-                        job_type: CreateStreamingJobType::Normal,
-                        ..
-                    } => {
+                    Command::CreateStreamingJob { info, job_type, .. } => {
+                        let CreateStreamingJobType::Normal = job_type else {
+                            if cfg!(debug_assertions) {
+                                panic!(
+                                    "unexpected first job of type {job_type:?} with info {info:?}"
+                                );
+                            } else {
+                                for notifier in notifiers {
+                                    notifier.notify_start_failed(anyhow!("unexpected job_type {job_type:?} for first job {} in database {database_id}", info.streaming_job.id()).into());
+                                }
+                                return Ok(());
+                            }
+                        };
                         let new_database = DatabaseCheckpointControl::new(
                             database_id,
                             self.env.shared_actor_infos().clone(),
@@ -238,7 +247,11 @@ impl CheckpointControl {
                             .insert(DatabaseCheckpointControlStatus::Running(new_database))
                             .expect_running("just initialized as running")
                     }
-                    Command::Flush | Command::Pause | Command::Resume => {
+                    Command::Flush
+                    | Command::Pause
+                    | Command::Resume
+                    | Command::DropStreamingJobs { .. }
+                    | Command::DropSubscription { .. } => {
                         for mut notifier in notifiers {
                             notifier.notify_started();
                             notifier.notify_collected();
@@ -246,11 +259,28 @@ impl CheckpointControl {
                         warn!(?command, "skip command for empty database");
                         return Ok(());
                     }
-                    _ => {
-                        panic!(
-                            "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
-                            database_id, command
-                        )
+                    Command::RescheduleFragment { .. }
+                    | Command::ReplaceStreamJob(_)
+                    | Command::SourceChangeSplit(_)
+                    | Command::Throttle { .. }
+                    | Command::CreateSubscription { .. }
+                    | Command::ConnectorPropsChange(_)
+                    | Command::Refresh { .. }
+                    | Command::ListFinish { .. }
+                    | Command::LoadFinish { .. }
+                    | Command::ResetSource { .. } => {
+                        if cfg!(debug_assertions) {
+                            panic!(
+                                "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
+                                database_id, command
+                            )
+                        } else {
+                            warn!(%database_id, ?command, "database not exist when handling command");
+                            for notifier in notifiers {
+                                notifier.notify_start_failed(anyhow!("database {database_id} not exist when handling command {command:?}").into());
+                            }
+                            return Ok(());
+                        }
                     }
                 },
             };
@@ -404,10 +434,34 @@ impl CheckpointControl {
         worker_id: WorkerId,
         resp: ResetPartialGraphResponse,
     ) {
-        let (database_id, _) = from_partial_graph_id(resp.partial_graph_id);
+        let (database_id, creating_job) = from_partial_graph_id(resp.partial_graph_id);
         match self.databases.get_mut(&database_id).expect("should exist") {
-            DatabaseCheckpointControlStatus::Running(_) => {
-                unreachable!("should not receive reset database resp when running")
+            DatabaseCheckpointControlStatus::Running(database) => {
+                if let Some(creating_job_id) = creating_job {
+                    let Entry::Occupied(mut entry) = database
+                        .creating_streaming_job_controls
+                        .entry(creating_job_id)
+                    else {
+                        if cfg!(debug_assertions) {
+                            panic!(
+                                "receive reset partial graph resp on non-existing creating job: {resp:?}"
+                            )
+                        }
+                        warn!(
+                            %database_id,
+                            %creating_job_id,
+                            %worker_id,
+                            ?resp,
+                            "ignore reset partial graph resp on non-existing creating job on running database"
+                        );
+                        return;
+                    };
+                    if entry.get_mut().on_reset_partial_graph_resp(worker_id, resp) {
+                        entry.remove();
+                    }
+                } else {
+                    unreachable!("should not receive reset database resp when database running")
+                }
             }
             DatabaseCheckpointControlStatus::Recovering(state) => {
                 state.on_reset_partial_graph_resp(worker_id, resp)
@@ -976,24 +1030,33 @@ impl DatabaseCheckpointControl {
             (None, vec![])
         };
 
-        for job_to_cancel in command
-            .as_ref()
-            .map(Command::jobs_to_drop)
-            .into_iter()
-            .flatten()
+        if let Some(Command::DropStreamingJobs {
+            streaming_job_ids, ..
+        }) = &command
         {
-            if self
-                .creating_streaming_job_controls
-                .contains_key(&job_to_cancel)
-            {
-                warn!(
-                    job_id = %job_to_cancel,
-                    "ignore cancel command on creating streaming job"
-                );
-                for notifier in notifiers {
-                    notifier
-                        .notify_start_failed(anyhow!("cannot cancel creating streaming job, the job will continue creating until created or recovery").into());
+            if streaming_job_ids.len() > 1 {
+                for job_to_cancel in streaming_job_ids {
+                    if self
+                        .creating_streaming_job_controls
+                        .contains_key(job_to_cancel)
+                    {
+                        warn!(
+                            job_id = %job_to_cancel,
+                            "ignore multi-job cancel command on creating snapshot backfill streaming job"
+                        );
+                        for notifier in notifiers {
+                            notifier
+                                .notify_start_failed(anyhow!("cannot cancel creating snapshot backfill streaming job with other jobs, \
+                                the job will continue creating until created or recovery. Please cancel the snapshot backfilling job in a single DDL ").into());
+                        }
+                        return Ok(());
+                    }
                 }
+            } else if let Some(job_to_drop) = streaming_job_ids.iter().next()
+                && let Some(creating_job) =
+                    self.creating_streaming_job_controls.get_mut(job_to_drop)
+                && creating_job.drop(&mut notifiers, control_stream_manager)
+            {
                 return Ok(());
             }
         }
