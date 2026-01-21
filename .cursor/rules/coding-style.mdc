@@ -5,6 +5,4 @@ alwaysApply: true
 ---
 # Coding Style
 
-- Always write code comments in English.
-- Write simple, easy-to-read and easy-to-maintain code.
-- Use `cargo fmt` to format the code if needed.
+Canonical coding style lives in `AGENTS.md` (English comments, simple/maintainable code, follow existing patterns, `cargo fmt` when needed).
