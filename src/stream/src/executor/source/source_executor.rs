@@ -467,11 +467,11 @@ impl<S: StateStore> SourceExecutor<S> {
         updated_splits: &HashMap<SplitId, SplitImpl>,
         epoch: EpochPair,
         source_id: SourceId,
-        cdc_offset_reported: &mut bool,
+        must_report_cdc_offset_once: &mut bool,
         must_wait_cdc_offset_before_report: bool,
     ) {
         // Report CDC source offset updated only the first time
-        if !*cdc_offset_reported
+        if *must_report_cdc_offset_once
             && (!must_wait_cdc_offset_before_report
                 || updated_splits
                     .values()
@@ -490,7 +490,7 @@ impl<S: StateStore> SourceExecutor<S> {
                 "Reported CDC source offset updated to meta (first time only)"
             );
             // Mark as reported to prevent any future reports, even if offset changes
-            *cdc_offset_reported = true;
+            *must_report_cdc_offset_once = false;
         }
     }
 
@@ -513,20 +513,22 @@ impl<S: StateStore> SourceExecutor<S> {
                 )
             })?;
         let first_epoch = first_barrier.epoch;
-        let (mut boot_state, cdc_offset_reported, must_wait_cdc_offset_before_report) =
+        // must_report_cdc_offset is true if and only if the source is a CDC source.
+        // must_wait_cdc_offset_before_report is true if and only if the source is a MySQL or SQL Server CDC source.
+        let (mut boot_state, mut must_report_cdc_offset_once, must_wait_cdc_offset_before_report) =
             if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
                 // CDC source must reach this branch.
                 tracing::debug!(?splits, "boot with splits");
                 // Skip report for non-CDC.
-                let cdc_offset_reported = !splits.iter().any(|split| split.is_cdc_split());
+                let must_report_cdc_offset_once = splits.iter().any(|split| split.is_cdc_split());
                 // Only for MySQL and SQL Server CDC, we need to wait for the offset to be non-empty before reporting.
-                let must_wait_cdc_offset_before_report = !cdc_offset_reported
+                let must_wait_cdc_offset_before_report = must_report_cdc_offset_once
                     && splits.iter().any(|split| {
                         matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
                     });
                 (
                     splits.to_vec(),
-                    cdc_offset_reported,
+                    must_report_cdc_offset_once,
                     must_wait_cdc_offset_before_report,
                 )
             } else {
@@ -878,7 +880,7 @@ impl<S: StateStore> SourceExecutor<S> {
                         &updated_splits,
                         epoch,
                         source_id,
-                        &mut cdc_offset_reported,
+                        &mut must_report_cdc_offset_once,
                         must_wait_cdc_offset_before_report,
                     );
 
