@@ -245,7 +245,7 @@ impl CatalogController {
             subscription_state: Set(SubscriptionState::Created.into()),
             ..Default::default()
         };
-        job.update(&txn).await?;
+        Subscription::update(job).exec(&txn).await?;
 
         let _ = grant_default_privileges_automatically(&txn, subscription_id).await?;
 

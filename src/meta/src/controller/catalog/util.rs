@@ -107,12 +107,12 @@ impl CatalogController {
         }
 
         for (table_id, cdc_table_id) in cdc_table_ids {
-            table::ActiveModel {
+            Table::update(table::ActiveModel {
                 table_id: Set(table_id as _),
                 cdc_table_id: Set(Some(cdc_table_id)),
                 ..Default::default()
-            }
-            .update(&txn)
+            })
+            .exec(&txn)
             .await?;
         }
         txn.commit().await?;
