@@ -20,27 +20,19 @@ use risingwave_pb::meta::table_cache_refill_policies::table_cache_refill_policy:
 use serde_with::{DeserializeFromStr, SerializeDisplay};
 
 #[derive(
-    Copy,
-    Default,
-    Debug,
-    Clone,
-    PartialEq,
-    Eq,
-    Display,
-    EnumAsInner,
-    SerializeDisplay,
-    DeserializeFromStr,
+    Copy, Debug, Clone, PartialEq, Eq, Display, EnumAsInner, SerializeDisplay, DeserializeFromStr,
 )]
 #[display(style = "snake_case")]
 pub enum CacheRefillPolicy {
-    /// Use global default cache refilll policy.
-    #[default]
-    Default,
-    /// Enable cache refill for streaming optimization.
+    /// Enable normal cache refill for the table.
+    Enabled,
+    //// Disable cache refill for the table.
+    Disabled,
+    /// Enable cache refill optimized for streaming workloads for this table.
     Streaming,
-    /// Enable cache refill for serving optimization.
+    /// Enable cache refill optimized for serving workloads for this table.
     Serving,
-    /// Enable cache refill for both streaming and serving optimizations.
+    /// Enable cache refill optimized for both streaming and serving workloads for this table.
     Both,
 }
 
@@ -50,11 +42,12 @@ impl FromStr for CacheRefillPolicy {
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         let s = s.to_ascii_lowercase().replace('-', "_");
         match s.as_str() {
-            "default" => Ok(Self::Default),
+            "enabled" => Ok(Self::Enabled),
+            "disabled" => Ok(Self::Disabled),
             "streaming" => Ok(Self::Streaming),
             "serving" => Ok(Self::Serving),
             "both" => Ok(Self::Both),
-            _ => Err("expect one of [default, streaming, serving, both]"),
+            _ => Err("expect one of [enabled, disabled, streaming, serving, both]"),
         }
     }
 }
@@ -62,19 +55,22 @@ impl FromStr for CacheRefillPolicy {
 impl CacheRefillPolicy {
     pub fn to_protobuf(self) -> PbCacheRefillPolicy {
         match self {
-            Self::Default => PbCacheRefillPolicy::Unspecified,
+            Self::Enabled => PbCacheRefillPolicy::Enabled,
+            Self::Disabled => PbCacheRefillPolicy::Disabled,
             Self::Streaming => PbCacheRefillPolicy::Streaming,
             Self::Serving => PbCacheRefillPolicy::Serving,
             Self::Both => PbCacheRefillPolicy::Both,
         }
     }
 
-    pub fn from_protobuf(pb: PbCacheRefillPolicy) -> Self {
+    pub fn from_protobuf(pb: PbCacheRefillPolicy) -> Option<Self> {
         match pb {
-            PbCacheRefillPolicy::Unspecified => Self::Default,
-            PbCacheRefillPolicy::Streaming => Self::Streaming,
-            PbCacheRefillPolicy::Serving => Self::Serving,
-            PbCacheRefillPolicy::Both => Self::Both,
+            PbCacheRefillPolicy::Unspecified => None,
+            PbCacheRefillPolicy::Enabled => Some(Self::Enabled),
+            PbCacheRefillPolicy::Disabled => Some(Self::Disabled),
+            PbCacheRefillPolicy::Streaming => Some(Self::Streaming),
+            PbCacheRefillPolicy::Serving => Some(Self::Serving),
+            PbCacheRefillPolicy::Both => Some(Self::Both),
         }
     }
 

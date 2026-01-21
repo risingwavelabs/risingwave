@@ -152,6 +152,8 @@ impl RwConfig {
 pub mod default {
 
     pub mod developer {
+        use crate::config::streaming::CacheRefillPolicy;
+
         pub fn meta_cached_traces_num() -> u32 {
             256
         }
@@ -405,6 +407,10 @@ pub mod default {
 
         pub fn sync_log_store_buffer_size() -> usize {
             2048
+        }
+
+        pub fn cache_refill_policy() -> CacheRefillPolicy {
+            CacheRefillPolicy::Enabled
         }
     }
 }

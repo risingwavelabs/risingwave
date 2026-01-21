@@ -266,8 +266,8 @@ pub struct StreamingDeveloperConfig {
     pub over_window_cache_policy: OverWindowCachePolicy,
 
     /// Cache refill policy for streaming cache refill feature.
-    /// Can be `default`, `streaming`, `serving` or `both`.
-    #[serde(default)]
+    /// Can be `unspecified`, `disabled`, `streaming`, `serving` or `both`.
+    #[serde(default = "default::developer::cache_refill_policy")]
     pub cache_refill_policy: CacheRefillPolicy,
 
     #[serde(default, flatten)]

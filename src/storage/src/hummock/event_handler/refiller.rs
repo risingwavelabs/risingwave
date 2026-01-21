@@ -214,6 +214,9 @@ pub struct CacheRefillConfig {
 
     /// Skip inheritance filter.s
     pub skip_inheritance_filter: bool,
+
+    /// Default table cache refill policy.
+    pub table_cache_refill_default_policy: CacheRefillPolicy,
 }
 
 impl CacheRefillConfig {
@@ -238,6 +241,8 @@ impl CacheRefillConfig {
             threshold: options.cache_refill_threshold,
             skip_recent_filter: options.cache_refill_skip_recent_filter,
             skip_inheritance_filter: options.cache_refill_skip_inheritance_filter,
+            table_cache_refill_default_policy: options
+                .cache_refill_table_cache_refill_default_policy,
         }
     }
 }
@@ -255,13 +260,24 @@ pub(crate) type SpawnRefillTask = Arc<
         + 'static,
 >;
 
-#[derive(Debug, Default)]
-struct TableCacheRefillVnodes {
+#[derive(Debug)]
+struct TableCacheRefillContext {
     streaming: HashMap<TableId, Bitmap>,
     serving: HashMap<TableId, Bitmap>,
+    policies: HashMap<TableId, CacheRefillPolicy>,
+    default_policy: CacheRefillPolicy,
 }
 
-impl TableCacheRefillVnodes {
+impl TableCacheRefillContext {
+    pub fn new(default_policy: CacheRefillPolicy) -> Self {
+        Self {
+            streaming: HashMap::new(),
+            serving: HashMap::new(),
+            policies: HashMap::new(),
+            default_policy,
+        }
+    }
+
     /// Check whether the given sstable block should be refilled according to the vnode mapping.
     fn check_table_refill_vnodes(&self, sstable: &Sstable, block_index: usize) -> bool {
         let block_smallest_key =
@@ -321,8 +337,7 @@ pub(crate) struct CacheRefiller {
     spawn_refill_task: SpawnRefillTask,
 
     role: Role,
-    table_cache_refill_policies: HashMap<TableId, CacheRefillPolicy>,
-    table_cache_refill_vnodes: Arc<RwLock<TableCacheRefillVnodes>>,
+    table_cache_refill_context: Arc<RwLock<TableCacheRefillContext>>,
     read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
     serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
 }
@@ -337,19 +352,20 @@ impl CacheRefiller {
     ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
-        let table_cache_refill_vnodes = Arc::new(RwLock::new(TableCacheRefillVnodes::default()));
+        let table_cache_refill_context = Arc::new(RwLock::new(TableCacheRefillContext::new(
+            config.table_cache_refill_default_policy,
+        )));
         Self {
             queue: VecDeque::new(),
             context: CacheRefillContext {
                 config,
                 concurrency,
                 sstable_store,
-                table_cache_refill_vnodes: table_cache_refill_vnodes.clone(),
+                table_cache_refill_context: table_cache_refill_context.clone(),
             },
             spawn_refill_task,
             role,
-            table_cache_refill_policies: HashMap::new(),
-            table_cache_refill_vnodes,
+            table_cache_refill_context,
             read_version_mapping,
             serving_table_vnode_mapping: HashMap::new(),
         }
@@ -389,13 +405,14 @@ impl CacheRefiller {
 
     pub(crate) fn update_table_cache_refill_policies(
         &mut self,
-        policies: HashMap<TableId, CacheRefillPolicy>,
+        policies: HashMap<TableId, Option<CacheRefillPolicy>>,
     ) {
+        let mut table_cache_refill_context = self.table_cache_refill_context.write();
         for (table_id, policy) in policies {
-            if policy == CacheRefillPolicy::Default {
-                self.table_cache_refill_policies.remove(&table_id);
+            if let Some(policy) = policy {
+                table_cache_refill_context.policies.insert(table_id, policy);
             } else {
-                self.table_cache_refill_policies.insert(table_id, policy);
+                table_cache_refill_context.policies.remove(&table_id);
             }
             self.update_table_cache_refill_vnodes(table_id);
         }
@@ -435,15 +452,15 @@ impl CacheRefiller {
     }
 
     pub(crate) fn update_table_cache_refill_vnodes(&self, table_id: TableId) {
-        let policy = self
-            .table_cache_refill_policies
+        let mut table_cache_refill_context = self.table_cache_refill_context.write();
+        let policy = table_cache_refill_context
+            .policies
             .get(&table_id)
             .copied()
-            .unwrap_or_default();
-        let mut table_cache_refill_vnodes = self.table_cache_refill_vnodes.write();
+            .unwrap_or(table_cache_refill_context.default_policy);
 
-        table_cache_refill_vnodes.streaming.remove(&table_id);
-        table_cache_refill_vnodes.serving.remove(&table_id);
+        table_cache_refill_context.streaming.remove(&table_id);
+        table_cache_refill_context.serving.remove(&table_id);
 
         if self.role.for_streaming()
             && policy.for_streaming()
@@ -451,7 +468,7 @@ impl CacheRefiller {
         {
             for read_version in mapping.values() {
                 let vnodes = read_version.read().vnodes();
-                table_cache_refill_vnodes
+                table_cache_refill_context
                     .streaming
                     .entry(table_id)
                     .and_modify(|bitmap| *bitmap |= vnodes.as_ref())
@@ -463,7 +480,7 @@ impl CacheRefiller {
             && policy.for_serving()
             && let Some(vnodes) = self.serving_table_vnode_mapping.get(&table_id)
         {
-            table_cache_refill_vnodes
+            table_cache_refill_context
                 .serving
                 .insert(table_id, vnodes.clone());
         }
@@ -506,7 +523,7 @@ pub(crate) struct CacheRefillContext {
     config: Arc<CacheRefillConfig>,
     concurrency: Arc<Semaphore>,
     sstable_store: SstableStoreRef,
-    table_cache_refill_vnodes: Arc<RwLock<TableCacheRefillVnodes>>,
+    table_cache_refill_context: Arc<RwLock<TableCacheRefillContext>>,
 }
 
 struct DataCacheRefillTaskGenerator<'a> {
@@ -577,7 +594,7 @@ impl DataCacheRefillTaskGenerator<'_> {
             }
 
             // Filter by table cache refill vnodes.
-            tasks = self.filter_by_table_cache_refill_vnodes(tasks);
+            tasks = self.filter_by_table_cache_refill_policy(tasks);
         }
 
         tasks
@@ -683,21 +700,35 @@ impl DataCacheRefillTaskGenerator<'_> {
         filtered.into_iter().collect()
     }
 
-    fn filter_by_table_cache_refill_vnodes(
+    /// Filter tasks by table cache refill policy and related table id and vnode mapping.
+    fn filter_by_table_cache_refill_policy(
         &self,
         mut tasks: Vec<DataCacheRefillTask>,
     ) -> Vec<DataCacheRefillTask> {
-        let table_cache_refill_vnodes = self.context.table_cache_refill_vnodes.read();
-        let check = |vnodes: &RwLockReadGuard<'_, TableCacheRefillVnodes>,
+        let table_cache_refill_context = self.context.table_cache_refill_context.read();
+        let check = |context: &RwLockReadGuard<'_, TableCacheRefillContext>,
                      task: &DataCacheRefillTask| {
             for blk in task.blks.start..task.blks.end {
-                if vnodes.check_table_refill_vnodes(&task.sst, blk) {
-                    return true;
+                let policy = context
+                    .policies
+                    .get(&task.sst.meta.block_metas[blk].table_id())
+                    .copied()
+                    .unwrap_or(context.default_policy);
+                match policy {
+                    CacheRefillPolicy::Enabled => return true,
+                    CacheRefillPolicy::Streaming
+                    | CacheRefillPolicy::Serving
+                    | CacheRefillPolicy::Both
+                        if context.check_table_refill_vnodes(&task.sst, blk) =>
+                    {
+                        return true;
+                    }
+                    _ => {}
                 }
             }
             false
         };
-        tasks.retain(|task| check(&table_cache_refill_vnodes, task));
+        tasks.retain(|task| check(&table_cache_refill_context, task));
         tasks
     }
 }

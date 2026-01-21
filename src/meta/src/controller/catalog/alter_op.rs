@@ -1049,9 +1049,7 @@ impl CatalogController {
                 }
             }
 
-            merged
-                .map(|config| config.developer.cache_refill_policy)
-                .unwrap_or_default()
+            merged.map(|config| config.developer.cache_refill_policy)
         };
 
         streaming_job::ActiveModel {
@@ -1062,22 +1060,24 @@ impl CatalogController {
         .update(&txn)
         .await?;
 
+        txn.commit().await?;
+
         let internal_tables: Vec<TableId> = Table::find()
             .select_only()
             .column(table::Column::TableId)
             .filter(table::Column::BelongsToJobId.eq(job_id))
             .into_tuple()
-            .all(&txn)
+            .all(&inner.db)
             .await?;
-
-        txn.commit().await?;
 
         let table_refill_policies = PbTableCacheRefillPolicies {
             policies: internal_tables
                 .into_iter()
                 .map(|table_id| {
                     let mut p = PbTableCacheRefillPolicy::default();
-                    p.set_policy(cache_refill_policy.to_protobuf());
+                    if let Some(policy) = cache_refill_policy {
+                        p.set_policy(policy.to_protobuf());
+                    }
                     p.table_id = table_id.as_raw_id();
                     p
                 })

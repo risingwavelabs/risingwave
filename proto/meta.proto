@@ -672,10 +672,18 @@ message TableCacheRefillPolicies {
     CacheRefillPolicy policy = 2;
 
     enum CacheRefillPolicy {
+      /// Unspecified policy, use global default configuration.
       UNSPECIFIED = 0;
-      STREAMING = 1;
-      SERVING = 2;
-      BOTH = 3;
+      /// Enable normal cache refill for the table.
+      ENABLED = 1;
+      /// Disable cache refill for the table.
+      DISABLED = 2;
+      /// Enable cache refill optimized for streaming workloads for this table.
+      STREAMING = 3;
+      /// Enable cache refill optimized for serving workloads for this table.
+      SERVING = 4;
+      /// Enable cache refill optimized for both streaming and serving workloads for this table.
+      BOTH = 5;
     }
   }
 }
