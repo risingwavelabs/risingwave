@@ -446,7 +446,7 @@ def test_order_table_with_pk():
     drop_table_subscription()
 
 def test_order_table_with_row_id():
-    print(f"test_order_table_with_pk")
+    print(f"test_order_table_with_row_id")
     create_table_subscription()
     conn = psycopg2.connect(
         host="localhost",
