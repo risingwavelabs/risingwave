@@ -31,7 +31,6 @@ use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{BatchQueryEpoch, batch_query_epoch};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sstable_info::SstableInfo;
-use tracing::warn;
 
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::TableStatsMap;
@@ -451,14 +450,8 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
                 HummockVersionId::new(epoch.hummock_version_id),
             ),
             batch_query_epoch::Epoch::Current(epoch) => {
-                if epoch != HummockEpoch::MAX {
-                    warn!(
-                        epoch,
-                        "ignore specified current epoch and set it to u64::MAX"
-                    );
-                }
-                let todo = 0;
-                HummockReadEpoch::NoWait(HummockEpoch::MAX)
+                assert_ne!(epoch, HummockEpoch::MAX);
+                HummockReadEpoch::NoWait(epoch)
             }
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
             batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
