@@ -1,11 +1,10 @@
 name: Grafana Generate Check
 
 on:
-  pull_request:
+  push:
     branches: [main]
     paths:
       - grafana/**
-  workflow_dispatch:
 
 jobs:
   verify-grafana-dashboards:
