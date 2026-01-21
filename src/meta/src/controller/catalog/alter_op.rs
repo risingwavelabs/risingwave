@@ -594,6 +594,13 @@ impl CatalogController {
                     ObjectModel(function, obj, None).into(),
                 ));
             }
+            ObjectType::Secret => {
+                let secret = Secret::find_by_id(object_id.as_secret_id())
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("secret", object_id))?;
+                objects.push(PbObjectInfo::Secret(ObjectModel(secret, obj).into()));
+            }
             _ => unreachable!("not supported object type: {:?}", object_type),
         };
 

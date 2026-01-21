@@ -1401,8 +1401,14 @@ pub async fn handle(
                 alter_secret::handle_alter_secret(handler_args, name, with_options, new_credential)
                     .await
             }
-            AlterSecretOperation::ChangeOwner { new_owner_name: _ } => {
-                unimplemented!()
+            AlterSecretOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_SECRET,
+                )
+                .await
             }
         },
         Statement::AlterFragment {
