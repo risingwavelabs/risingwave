@@ -162,7 +162,6 @@ async fn compaction_group_id_by_table_id(session: &mut Session, table_id: u64) -
 
 #[tokio::test]
 async fn test_pk_prefix_column_watermark_state_cleaning() {
-    // The vnode watermark reclaim will be triggered, so the SST will be reclaimed.
     let config = crate::compaction::cluster_config(10);
     let mut cluster = Cluster::start(config).await.unwrap();
     // wait for the service to be ready
@@ -177,7 +176,6 @@ async fn test_pk_prefix_column_watermark_state_cleaning() {
 
 #[tokio::test]
 async fn test_pk_non_prefix_column_watermark_state_cleaning() {
-    // The vnode watermark reclaim will be triggered, so the SST will be reclaimed.
     let config = crate::compaction::cluster_config(10);
     let mut cluster = Cluster::start(config).await.unwrap();
     // wait for the service to be ready
@@ -192,7 +190,6 @@ async fn test_pk_non_prefix_column_watermark_state_cleaning() {
 
 #[tokio::test]
 async fn test_non_pk_column_watermark_state_cleaning() {
-    // The vnode watermark reclaim will be triggered, so the SST will be reclaimed.
     let config = crate::compaction::cluster_config(10);
     let mut cluster = Cluster::start(config).await.unwrap();
     // wait for the service to be ready
