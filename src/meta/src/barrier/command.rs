@@ -43,7 +43,7 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
@@ -358,10 +358,10 @@ pub enum Command {
     SourceChangeSplit(SplitState),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
-    /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
+    /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
     Throttle {
         jobs: HashSet<JobId>,
-        config: HashMap<FragmentId, Option<u32>>,
+        config: HashMap<FragmentId, ThrottleConfig>,
     },
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
@@ -900,13 +900,9 @@ impl Command {
             }
 
             Command::Throttle { config, .. } => {
-                let mut fragment_to_apply = HashMap::new();
-                for (fragment_id, limit) in config {
-                    fragment_to_apply.insert(*fragment_id, RateLimit { rate_limit: *limit });
-                }
-
+                let config = config.clone();
                 Some(Mutation::Throttle(ThrottleMutation {
-                    fragment_throttle: fragment_to_apply,
+                    fragment_throttle: config,
                 }))
             }
 
