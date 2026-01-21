@@ -230,6 +230,22 @@ impl NotificationManager {
         self.notify_without_version(SubscribeType::Hummock.into(), operation, info)
     }
 
+    pub fn notify_hummock_with_worker_key_without_version(
+        &self,
+        worker_key: Option<WorkerKey>,
+        operation: Operation,
+        info: Info,
+    ) {
+        self.notify_without_version(
+            Target {
+                subscribe_type: SubscribeType::Hummock,
+                worker_key,
+            },
+            operation,
+            info,
+        )
+    }
+
     pub fn notify_compactor_without_version(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Compactor.into(), operation, info)
     }

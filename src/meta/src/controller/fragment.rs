@@ -123,6 +123,7 @@ pub struct FragmentParallelismInfo {
     pub distribution_type: FragmentDistributionType,
     pub actor_count: usize,
     pub vnode_count: usize,
+    pub state_table_ids: HashSet<TableId>,
 }
 
 #[easy_ext::ext(FragmentTypeMaskExt)]
@@ -416,6 +417,7 @@ impl CatalogController {
                     distribution_type: fragment.distribution_type.into(),
                     actor_count: fragment.actors.len() as _,
                     vnode_count: fragment.vnode_count,
+                    state_table_ids: fragment.state_table_ids.clone(),
                 },
             );
         }
