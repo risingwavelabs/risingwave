@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::{Entry as HashMapEntry, HashMap};
+use std::collections::hash_map::HashMap;
 use std::collections::{HashSet, VecDeque};
 use std::future::poll_fn;
 use std::hash::Hash;
@@ -432,12 +432,7 @@ impl CacheRefiller {
             }
             Operation::Update => {
                 for (table_id, bitmap) in mapping {
-                    match self.serving_table_vnode_mapping.entry(table_id) {
-                        HashMapEntry::Occupied(mut o) => *o.get_mut() |= bitmap,
-                        HashMapEntry::Vacant(v) => {
-                            v.insert(bitmap);
-                        }
-                    }
+                    self.serving_table_vnode_mapping.insert(table_id, bitmap);
                     self.update_table_cache_refill_vnodes(table_id);
                 }
             }
