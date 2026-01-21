@@ -682,11 +682,16 @@ impl CreateMviewProgressTracker {
         let actors = stream_job_fragments.tracking_progress_actor_ids();
         let tracking_job = TrackingJob::new(&info.stream_job_fragments);
         if actors.is_empty() {
-            // Check if this is a CDC source job
+            // NOTE: This CDC source detection uses hardcoded property checks and should be replaced
+            // with a more reliable identification method in the future.
             let is_cdc_source = matches!(
                 streaming_job,
                 crate::manager::StreamingJob::Source(source)
-                    if source.info.as_ref().map(|info| info.cdc_source_job).unwrap_or(false)
+                    if source.info.as_ref().map(|info| info.is_shared()).unwrap_or(false) && source
+                    .get_with_properties()
+                    .get("connector")
+                    .map(|connector| connector.to_lowercase().contains("-cdc"))
+                    .unwrap_or(false)
             );
             if is_cdc_source {
                 // Mark CDC source as CdcSourceInit, will be finished when offset is updated
