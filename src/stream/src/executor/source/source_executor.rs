@@ -513,21 +513,24 @@ impl<S: StateStore> SourceExecutor<S> {
                 )
             })?;
         let first_epoch = first_barrier.epoch;
-        // Track whether we have already reported CDC offset update (report only once).
-        let mut cdc_offset_reported = false;
-        let mut must_wait_cdc_offset_before_report = true;
-        let mut boot_state =
+        let (mut boot_state, cdc_offset_reported, must_wait_cdc_offset_before_report) =
             if let Some(splits) = first_barrier.initial_split_assignment(self.actor_ctx.id) {
+                // CDC source must reach this branch.
                 tracing::debug!(?splits, "boot with splits");
                 // Skip report for non-CDC.
-                cdc_offset_reported = !splits.iter().any(|split| split.is_cdc_split());
+                let cdc_offset_reported = !splits.iter().any(|split| split.is_cdc_split());
                 // Only for MySQL and SQL Server CDC, we need to wait for the offset to be non-empty before reporting.
-                must_wait_cdc_offset_before_report = splits.iter().any(|split| {
-                    matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
-                });
-                splits.to_vec()
+                let must_wait_cdc_offset_before_report = !cdc_offset_reported
+                    && splits.iter().any(|split| {
+                        matches!(split, SplitImpl::MysqlCdc(_) | SplitImpl::SqlServerCdc(_))
+                    });
+                (
+                    splits.to_vec(),
+                    cdc_offset_reported,
+                    must_wait_cdc_offset_before_report,
+                )
             } else {
-                Vec::default()
+                (Vec::default(), true, true)
             };
         let is_pause_on_startup = first_barrier.is_pause_on_startup();
         let mut is_uninitialized = first_barrier.is_newly_added(self.actor_ctx.id);
