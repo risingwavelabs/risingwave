@@ -1342,6 +1342,15 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterFunctionOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_FUNCTION,
+                )
+                .await
+            }
         },
         Statement::AlterConnection { name, operation } => match operation {
             AlterConnectionOperation::SetSchema { new_schema_name } => {

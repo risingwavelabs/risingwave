@@ -3805,8 +3805,13 @@ impl Parser<'_> {
             } else {
                 return self.expected("SCHEMA after SET");
             }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterFunctionOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else {
-            return self.expected("SET after ALTER FUNCTION");
+            return self.expected("SET or OWNER TO after ALTER FUNCTION");
         };
 
         Ok(Statement::AlterFunction {
