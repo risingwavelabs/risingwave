@@ -851,7 +851,8 @@ pub async fn handle(
             AlterTableOperation::SetSourceRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
-                    PbThrottleTarget::TableWithSource,
+                    PbThrottleTarget::Table,
+                    risingwave_pb::common::PbThrottleType::Source,
                     name,
                     rate_limit,
                 )
@@ -864,7 +865,8 @@ pub async fn handle(
             AlterTableOperation::SetDmlRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
-                    PbThrottleTarget::TableDml,
+                    PbThrottleTarget::Table,
+                    risingwave_pb::common::PbThrottleType::Dml,
                     name,
                     rate_limit,
                 )
@@ -891,7 +893,8 @@ pub async fn handle(
             AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
-                    PbThrottleTarget::CdcTable,
+                    PbThrottleTarget::Table,
+                    risingwave_pb::common::PbThrottleType::Backfill,
                     name,
                     rate_limit,
                 )
@@ -1038,6 +1041,7 @@ pub async fn handle(
                     alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                         handler_args,
                         PbThrottleTarget::Mv,
+                        risingwave_pb::common::PbThrottleType::Backfill,
                         name,
                         rate_limit,
                     )
@@ -1167,6 +1171,17 @@ pub async fn handle(
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
                     PbThrottleTarget::Sink,
+                    risingwave_pb::common::PbThrottleType::Sink,
+                    name,
+                    rate_limit,
+                )
+                .await
+            }
+            AlterSinkOperation::SetBackfillRateLimit { rate_limit } => {
+                alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
+                    handler_args,
+                    PbThrottleTarget::Sink,
+                    risingwave_pb::common::PbThrottleType::Backfill,
                     name,
                     rate_limit,
                 )
@@ -1262,6 +1277,7 @@ pub async fn handle(
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit(
                     handler_args,
                     PbThrottleTarget::Source,
+                    risingwave_pb::common::PbThrottleType::Source,
                     name,
                     rate_limit,
                 )
@@ -1379,6 +1395,7 @@ pub async fn handle(
                 alter_streaming_rate_limit::handle_alter_streaming_rate_limit_by_id(
                     &handler_args.session,
                     PbThrottleTarget::Fragment,
+                    risingwave_pb::common::PbThrottleType::Backfill,
                     *fragment_id,
                     rate_limit,
                     StatementType::SET_VARIABLE,
