@@ -123,17 +123,6 @@ async fn test_vnode_watermark_reclaim_impl(
         .unwrap();
 
     tokio::time::sleep(Duration::from_secs(5)).await;
-    async fn compaction_group_id_by_table_id(session: &mut Session, table_id: u64) -> u64 {
-        session
-            .run(format!(
-                "SELECT id FROM rw_hummock_compaction_group_configs where member_tables @> '[{}]'::jsonb;",
-                table_id
-            ))
-            .await
-            .unwrap()
-            .parse::<u64>()
-            .unwrap()
-    }
     let original_compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
     // Move the table to a dedicated group to prevent its vnode watermark from being reclaimed during the compaction of other tables.
     cluster
@@ -141,7 +130,6 @@ async fn test_vnode_watermark_reclaim_impl(
         .await
         .unwrap();
     let compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
-
     session
         .run("INSERT INTO t2 VALUES (now(), 1);")
         .await
@@ -158,4 +146,124 @@ async fn test_vnode_watermark_reclaim_impl(
     assert_compaction_group_sst_count(compaction_group_id, 0, 0, session).await;
     assert_compaction_group_sst_count(compaction_group_id, 6, 1, session).await;
     compaction_group_id
+}
+
+async fn compaction_group_id_by_table_id(session: &mut Session, table_id: u64) -> u64 {
+    session
+        .run(format!(
+            "SELECT id FROM rw_hummock_compaction_group_configs where member_tables @> '[{}]'::jsonb;",
+            table_id
+        ))
+        .await
+        .unwrap()
+        .parse::<u64>()
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_pk_prefix_column_watermark_state_cleaning() {
+    // The vnode watermark reclaim will be triggered, so the SST will be reclaimed.
+    let config = crate::compaction::cluster_config(10);
+    let mut cluster = Cluster::start(config).await.unwrap();
+    // wait for the service to be ready
+    tokio::time::sleep(Duration::from_secs(15)).await;
+    let mut session = cluster.start_session();
+    session
+        .run("CREATE TABLE t (id int, ts timestamp primary key, watermark for ts as ts - interval '1 minute' with ttl);")
+        .await
+        .unwrap();
+    test_watermark_state_cleaning_impl(&mut cluster, &mut session, true).await;
+}
+
+#[tokio::test]
+async fn test_pk_non_prefix_column_watermark_state_cleaning() {
+    // The vnode watermark reclaim will be triggered, so the SST will be reclaimed.
+    let config = crate::compaction::cluster_config(10);
+    let mut cluster = Cluster::start(config).await.unwrap();
+    // wait for the service to be ready
+    tokio::time::sleep(Duration::from_secs(15)).await;
+    let mut session = cluster.start_session();
+    session
+        .run("CREATE TABLE t (id int, ts timestamp, primary key (id, ts), watermark for ts as ts - interval '1 minute' with ttl);")
+        .await
+        .unwrap();
+    test_watermark_state_cleaning_impl(&mut cluster, &mut session, false).await;
+}
+
+#[tokio::test]
+async fn test_non_pk_column_watermark_state_cleaning() {
+    // The vnode watermark reclaim will be triggered, so the SST will be reclaimed.
+    let config = crate::compaction::cluster_config(10);
+    let mut cluster = Cluster::start(config).await.unwrap();
+    // wait for the service to be ready
+    tokio::time::sleep(Duration::from_secs(15)).await;
+    let mut session = cluster.start_session();
+    session
+        .run("CREATE TABLE t (id int primary key, ts timestamp, watermark for ts as ts - interval '1 minute' with ttl);")
+        .await
+        .unwrap();
+    test_watermark_state_cleaning_impl(&mut cluster, &mut session, false).await;
+}
+
+async fn test_watermark_state_cleaning_impl(
+    cluster: &mut Cluster,
+    session: &mut Session,
+    is_storage_read_filtered_by_watermark: bool,
+) {
+    session
+        .run("INSERT INTO t values (2, '2025-10-01 01:43:00+00');")
+        .await
+        .unwrap();
+    session.run("FLUSH;").await.unwrap();
+    session
+        .run("INSERT INTO t values (1, '2025-10-01 01:45:00+00');")
+        .await
+        .unwrap();
+    session.run("FLUSH;").await.unwrap();
+
+    let table_id = session
+        .run("SELECT id FROM rw_tables;")
+        .await
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    let compaction_group_id = compaction_group_id_by_table_id(session, table_id).await;
+    // This assertion relies on the fact that storage does not filter out rows older than the watermark; compaction is responsible for removing them.
+    if !is_storage_read_filtered_by_watermark {
+        let before_compacion = session
+            .run("SELECT string_agg(id::varchar, ',' ORDER BY id) FROM t;")
+            .await
+            .unwrap();
+        assert_eq!(before_compacion, "1,2");
+    }
+    let storage_key_count = session
+        .run(format!(
+            "SELECT total_key_count FROM rw_table_stats WHERE id = {};",
+            table_id
+        ))
+        .await
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    assert_eq!(storage_key_count, 2);
+    cluster
+        .trigger_manual_compaction(compaction_group_id, 0)
+        .await
+        .unwrap();
+    tokio::time::sleep(Duration::from_secs(5)).await;
+    let after_compacion = session
+        .run("SELECT string_agg(id::varchar, ',' ORDER BY id) FROM t;")
+        .await
+        .unwrap();
+    assert_eq!(after_compacion, "1");
+    let storage_key_count = session
+        .run(format!(
+            "SELECT total_key_count FROM rw_table_stats WHERE id = {};",
+            table_id
+        ))
+        .await
+        .unwrap()
+        .parse::<u64>()
+        .unwrap();
+    assert_eq!(storage_key_count, 1);
 }
