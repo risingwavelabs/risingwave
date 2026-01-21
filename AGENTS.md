@@ -26,6 +26,7 @@ Single source of truth for agent/tool instructions in this repository. Other ins
 - Logs: `.risingwave/log`.
 - Unit/Parser/Planner tests: standard Rust/Tokio; parser `./risedev update-parser-test`; planner `./risedev run-planner-test [name]` and `./risedev do-apply-planner-test` (`./risedev dapt`).
 - `./risedev` is safe to run automatically.
+- Workflow refs: `CONTRIBUTING.md`, `docs/dev/src/build-and-run/intro.md`, `docs/dev/src/tests/intro.md`, `docs/dev/src/ci.md`.
 
 ## Coding Style (canonical)
 - Comments in English; keep code simple, easy to read/maintain.
