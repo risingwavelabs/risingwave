@@ -968,8 +968,11 @@ impl HummockManager {
             if is_success {
                 success_count += 1;
                 version.apply_compact_task(&compact_task);
-                if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version())
-                {
+                if purge_prost_table_stats(
+                    &mut version_stats.table_stats,
+                    version.latest_version(),
+                    &HashSet::default(),
+                ) {
                     self.metrics.version_stats.reset();
                     versioning.local_metrics.clear();
                 }
