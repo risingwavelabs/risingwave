@@ -37,8 +37,6 @@ def _(outer_panels: Panels):
 - Lagging Version: the checkpointed or pinned version id is lagging behind the current version id. Check 'Hummock Manager' section in dev dashboard.
 - Lagging Compaction: there are too many ssts in L0. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard, and take care of the type of 'Commit Flush Bytes' and 'Compaction Throughput', whether the throughput is too low.
 - Lagging Vacuum: there are too many stale files waiting to be cleaned. This can be caused by compactor failure or lag of compactor resource. Check 'Compaction' section in dev dashboard.
-- Abnormal Meta Cache Memory: the meta cache memory usage is too large, exceeding the expected 10 percent.
-- Abnormal Block Cache Memory: the block cache memory usage is too large, exceeding the expected 10 percent.
 - Abnormal Uploading Memory Usage: uploading memory is more than 70 percent of the expected, and is about to spill.
 - Write Stall: Compaction cannot keep up. Stall foreground write, Check 'Compaction' section in dev dashboard.
 - Abnormal Version Size: the size of the version is too large, exceeding the expected 300MB. Check 'Hummock Manager' section in dev dashboard.
@@ -53,8 +51,8 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"(({metric('storage_current_version_id')} - {metric('storage_checkpoint_version_id')}) >= bool 100) + "
-                            + f"(({metric('storage_current_version_id')} - {metric('storage_min_pinned_version_id')}) >= bool 100)",
+                            f"(({metric('storage_current_version_id')} - {metric('storage_checkpoint_version_id')}) >= bool 1000) + "
+                            + f"(({metric('storage_current_version_id')} - {metric('storage_min_pinned_version_id')}) >= bool 1000)",
                             "Lagging Version",
                         ),
                         panels.target(
@@ -63,16 +61,8 @@ def _(outer_panels: Panels):
                             "Lagging Compaction",
                         ),
                         panels.target(
-                            f"{metric('storage_stale_object_count')} >= bool 200",
+                            f"min_over_time({metric('storage_stale_object_count')}[5m]) >= bool 200",
                             "Lagging Vacuum",
-                        ),
-                        panels.target(
-                            f"{metric('state_store_meta_cache_usage_ratio')} >= bool 1.1",
-                            "Abnormal Meta Cache Memory",
-                        ),
-                        panels.target(
-                            f"{metric('state_store_block_cache_usage_ratio')} >= bool 1.1",
-                            "Abnormal Block Cache Memory",
                         ),
                         panels.target(
                             f"{metric('state_store_uploading_memory_usage_ratio')} >= bool 0.7",
@@ -91,7 +81,7 @@ def _(outer_panels: Panels):
                             "Abnormal Delta Log Number",
                         ),
                         panels.target(
-                            f"{metric('state_store_event_handler_pending_event')} >= bool 10000000",
+                            f"sum({metric('state_store_event_handler_pending_event')}) by  >= bool 10000000",
                             "Abnormal Pending Event Number",
                         ),
                         panels.target(
