@@ -781,6 +781,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             let BarrierWorkerRuntimeInfoSnapshot {
                 active_streaming_nodes,
                 database_job_infos,
+                mut backfill_orders,
                 mut state_table_committed_epochs,
                 mut state_table_log_epochs,
                 mut mv_depended_subscriptions,
@@ -811,9 +812,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 let mut failed_databases = HashMap::new();
                 for (database_id, jobs) in database_job_infos {
                     let mut injected_creating_jobs = HashSet::new();
+                    let database_backfill_orders = jobs.keys().map(|job_id| (*job_id, backfill_orders.remove(job_id).unwrap_or_default())).collect();
                     let result = control_stream_manager.inject_database_initial_barrier(
                         database_id,
                         jobs,
+                        database_backfill_orders,
                         &mut state_table_committed_epochs,
                         &mut state_table_log_epochs,
                         &fragment_relations,

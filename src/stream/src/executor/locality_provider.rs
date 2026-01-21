@@ -461,6 +461,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         let pk_indices = state_table.pk_indices().iter().cloned().collect_vec();
 
         let need_backfill = !backfill_state.is_completed();
+        let mut report_finished_on_first_barrier = !need_backfill;
 
         let need_buffering = backfill_state
             .per_vnode
@@ -819,6 +820,14 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     progress_table
                         .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                         .await?;
+                    if report_finished_on_first_barrier {
+                        self.progress.finish_with_buffered_rows(
+                            barrier.epoch,
+                            0, // report 0 rows since already finished and the state is purged, we enter this branch only after recovery.
+                            0,
+                        );
+                        report_finished_on_first_barrier = false;
+                    }
                     yield Message::Barrier(barrier);
                 }
                 _ => {
