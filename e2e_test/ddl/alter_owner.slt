@@ -236,7 +236,7 @@ create secret secret_1 with (
   backend = 'meta'
 ) as 'demo_secret';
 
-statement ok 
+statement ok
 ALTER SECRET secret_1 OWNER TO user1;
 
 query TT
