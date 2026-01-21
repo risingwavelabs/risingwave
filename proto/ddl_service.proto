@@ -412,6 +412,17 @@ message RisectlListStateTablesResponse {
   repeated catalog.Table tables = 1;
 }
 
+// Used by risectl
+message RisectlResumeBackfillRequest {
+  oneof target {
+    uint32 job_id = 1;
+    uint32 fragment_id = 2;
+  }
+}
+
+// Used by risectl
+message RisectlResumeBackfillResponse {}
+
 message CreateIndexRequest {
   catalog.Index index = 1;
   catalog.Table index_table = 2;
@@ -687,6 +698,7 @@ service DdlService {
   rpc AlterResourceGroup(AlterResourceGroupRequest) returns (AlterResourceGroupResponse);
   rpc DropTable(DropTableRequest) returns (DropTableResponse);
   rpc RisectlListStateTables(RisectlListStateTablesRequest) returns (RisectlListStateTablesResponse);
+  rpc RisectlResumeBackfill(RisectlResumeBackfillRequest) returns (RisectlResumeBackfillResponse);
   rpc CreateView(CreateViewRequest) returns (CreateViewResponse);
   rpc DropView(DropViewRequest) returns (DropViewResponse);
   rpc CreateIndex(CreateIndexRequest) returns (CreateIndexResponse);

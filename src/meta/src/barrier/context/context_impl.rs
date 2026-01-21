@@ -484,6 +484,7 @@ impl CommandContext {
             Command::DropSubscription { .. } => {}
             Command::ListFinish { .. } | Command::LoadFinish { .. } | Command::Refresh { .. } => {}
             Command::ResetSource { .. } => {}
+            Command::ResumeBackfill { .. } => {}
         }
 
         Ok(())

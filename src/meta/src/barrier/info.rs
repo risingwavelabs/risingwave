@@ -38,7 +38,6 @@ use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
-use crate::MetaResult;
 use crate::barrier::cdc_progress::{CdcProgress, CdcTableBackfillTracker};
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
@@ -48,6 +47,7 @@ use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::rebuild_fragment_mapping;
 use crate::manager::NotificationManagerRef;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamJobFragments};
+use crate::{MetaError, MetaResult};
 
 #[derive(Debug, Clone)]
 pub struct SharedActorInfo {
@@ -484,6 +484,48 @@ impl InflightDatabaseInfo {
             .fragment_infos
             .get(&fragment_id)
             .expect("should exist")
+    }
+
+    pub(super) fn backfill_fragment_ids_for_job(
+        &self,
+        job_id: JobId,
+    ) -> MetaResult<HashSet<FragmentId>> {
+        let job = self
+            .jobs
+            .get(&job_id)
+            .ok_or_else(|| MetaError::invalid_parameter(format!("job {} not found", job_id)))?;
+        Ok(job
+            .fragment_infos
+            .iter()
+            .filter_map(|(fragment_id, fragment)| {
+                fragment
+                    .fragment_type_mask
+                    .contains_any([
+                        FragmentTypeFlag::StreamScan,
+                        FragmentTypeFlag::SourceScan,
+                        FragmentTypeFlag::LocalityProvider,
+                    ])
+                    .then_some(*fragment_id)
+            })
+            .collect())
+    }
+
+    pub(super) fn is_backfill_fragment(&self, fragment_id: FragmentId) -> MetaResult<bool> {
+        let job_id = self.fragment_location.get(&fragment_id).ok_or_else(|| {
+            MetaError::invalid_parameter(format!("fragment {} not found", fragment_id))
+        })?;
+        let fragment = self
+            .jobs
+            .get(job_id)
+            .expect("should exist")
+            .fragment_infos
+            .get(&fragment_id)
+            .expect("should exist");
+        Ok(fragment.fragment_type_mask.contains_any([
+            FragmentTypeFlag::StreamScan,
+            FragmentTypeFlag::SourceScan,
+            FragmentTypeFlag::LocalityProvider,
+        ]))
     }
 
     pub fn gen_backfill_progress(&self) -> impl Iterator<Item = (JobId, BackfillProgress)> + '_ {
@@ -1038,7 +1080,8 @@ impl InflightDatabaseInfo {
                 | Command::ConnectorPropsChange(_)
                 | Command::Refresh { .. }
                 | Command::ListFinish { .. }
-                | Command::LoadFinish { .. } => {
+                | Command::LoadFinish { .. }
+                | Command::ResumeBackfill { .. } => {
                     return None;
                 }
                 Command::CreateStreamingJob { info, job_type, .. } => {
