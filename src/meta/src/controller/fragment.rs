@@ -1797,25 +1797,30 @@ impl CatalogController {
     where
         C: ConnectionTrait,
     {
-        let incoming_sinks = self
-            .get_table_incoming_sinks_in_txn(txn, target_table.id)
+        let incoming_sinks = Sink::find()
+            .filter(sink::Column::TargetTable.eq(target_table.id))
+            .all(txn)
             .await?;
 
-        let sink_ids = incoming_sinks.iter().map(|s| s.id).collect_vec();
+        let sink_ids = incoming_sinks.iter().map(|s| s.sink_id).collect_vec();
         let sink_fragment_ids = get_sink_fragment_by_ids(txn, sink_ids).await?;
 
         let mut upstream_sink_infos = Vec::with_capacity(incoming_sinks.len());
-        for pb_sink in &incoming_sinks {
+        for sink in &incoming_sinks {
             let sink_fragment_id =
                 sink_fragment_ids
-                    .get(&pb_sink.id)
+                    .get(&sink.sink_id)
                     .cloned()
                     .ok_or(anyhow::anyhow!(
                         "sink fragment not found for sink id {}",
-                        pb_sink.id
+                        sink.sink_id
                     ))?;
             let upstream_info = build_upstream_sink_info(
-                pb_sink,
+                sink.sink_id,
+                sink.original_target_columns
+                    .as_ref()
+                    .map(|cols| cols.to_protobuf())
+                    .unwrap_or_default(),
                 sink_fragment_id,
                 target_table,
                 target_fragment_id,

@@ -1,4 +1,4 @@
-// Copyright 2022 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,6 @@
 
 use risingwave_common::config::ServerConfig;
 use risingwave_common_service::ProfileServiceImpl;
-use risingwave_pb::compactor::compactor_service_server::CompactorService;
-use risingwave_pb::compactor::{
-    DispatchCompactionTaskRequest, DispatchCompactionTaskResponse, EchoRequest, EchoResponse,
-};
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, GetProfileStatsRequest, GetProfileStatsResponse,
@@ -26,63 +22,16 @@ use risingwave_pb::monitor_service::{
     ProfilingResponse, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
     TieredCacheTracingResponse,
 };
-use risingwave_storage::hummock::compactor::CompactionAwaitTreeRegRef;
-use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
-use tokio::sync::mpsc;
 use tonic::{Request, Response, Status};
 
-#[derive(Default)]
-pub struct CompactorServiceImpl {
-    sender: Option<mpsc::UnboundedSender<Request<DispatchCompactionTaskRequest>>>,
-}
-impl CompactorServiceImpl {
-    pub fn new(sender: mpsc::UnboundedSender<Request<DispatchCompactionTaskRequest>>) -> Self {
-        Self {
-            sender: Some(sender),
-        }
-    }
-}
-#[async_trait::async_trait]
-impl CompactorService for CompactorServiceImpl {
-    async fn echo(&self, _request: Request<EchoRequest>) -> Result<Response<EchoResponse>, Status> {
-        Ok(Response::new(EchoResponse {}))
-    }
-
-    async fn dispatch_compaction_task(
-        &self,
-        request: Request<DispatchCompactionTaskRequest>,
-    ) -> Result<Response<DispatchCompactionTaskResponse>, Status> {
-        match &self.sender.as_ref() {
-            Some(sender) => {
-                sender
-                    .send(request)
-                    .expect("DispatchCompactionTaskRequest should be able to send");
-            }
-            None => {
-                tracing::error!(
-                    "fail to send DispatchCompactionTaskRequest, sender has not been initialized."
-                );
-            }
-        }
-        Ok(Response::new(DispatchCompactionTaskResponse {
-            status: None,
-        }))
-    }
-}
-
-/// Compactor implementation of monitor RPCs, including profiling and compaction await-tree.
+/// Frontend implementation of monitor RPCs, currently reusing the profile service only.
 pub struct MonitorServiceImpl {
-    await_tree_reg: Option<CompactionAwaitTreeRegRef>,
     profile_service: ProfileServiceImpl,
 }
 
 impl MonitorServiceImpl {
-    pub fn new(
-        await_tree_reg: Option<CompactionAwaitTreeRegRef>,
-        server_config: ServerConfig,
-    ) -> Self {
+    pub fn new(server_config: ServerConfig) -> Self {
         Self {
-            await_tree_reg,
             profile_service: ProfileServiceImpl::new(server_config),
         }
     }
@@ -94,18 +43,7 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<StackTraceRequest>,
     ) -> Result<Response<StackTraceResponse>, Status> {
-        let compaction_task_traces = match &self.await_tree_reg {
-            None => Default::default(),
-            Some(await_tree_reg) => await_tree_reg
-                .collect::<Compaction>()
-                .into_iter()
-                .map(|(k, v)| (format!("{k:?}"), v.to_string()))
-                .collect(),
-        };
-        Ok(Response::new(StackTraceResponse {
-            compaction_task_traces,
-            ..Default::default()
-        }))
+        Err(Status::unimplemented("not implemented in frontend node"))
     }
 
     async fn profiling(
@@ -140,26 +78,20 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<GetStreamingStatsRequest>,
     ) -> Result<Response<GetStreamingStatsResponse>, Status> {
-        Err(Status::unimplemented(
-            "Get Back Pressure unimplemented in compactor",
-        ))
+        Err(Status::unimplemented("not implemented in frontend node"))
     }
 
     async fn tiered_cache_tracing(
         &self,
-        _: Request<TieredCacheTracingRequest>,
+        _request: Request<TieredCacheTracingRequest>,
     ) -> Result<Response<TieredCacheTracingResponse>, Status> {
-        Err(Status::unimplemented(
-            "Tiered Cache Tracing unimplemented in compactor",
-        ))
+        Err(Status::unimplemented("not implemented in frontend node"))
     }
 
     async fn get_profile_stats(
         &self,
         _request: Request<GetProfileStatsRequest>,
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
-        Err(Status::unimplemented(
-            "Get Profile Stats unimplemented in compactor",
-        ))
+        Err(Status::unimplemented("not implemented in frontend node"))
     }
 }

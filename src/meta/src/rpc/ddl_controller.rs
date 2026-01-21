@@ -47,7 +47,7 @@ use risingwave_meta_model::{
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
 };
 use risingwave_pb::catalog::{
-    Comment, Connection, CreateType, Database, Function, PbSink, PbTable, Schema, Secret, Source,
+    Comment, Connection, CreateType, Database, Function, PbTable, Schema, Secret, Source,
     Subscription, Table, View,
 };
 use risingwave_pb::common::PbActorLocation;
@@ -57,6 +57,7 @@ use risingwave_pb::ddl_service::{
     alter_swap_rename_request, streaming_job_resource_type,
 };
 use risingwave_pb::meta::table_fragments::PbActorStatus;
+use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     PbDispatchOutputMapping, PbStreamFragmentGraph, PbStreamNode, PbUpstreamSinkInfo,
@@ -1146,9 +1147,15 @@ impl DdlController {
             _ => {}
         }
 
+        let backfill_orders = ctx.fragment_backfill_ordering.clone().into();
         self.metadata_manager
             .catalog_controller
-            .prepare_stream_job_fragments(&stream_job_fragments, streaming_job, false)
+            .prepare_stream_job_fragments(
+                &stream_job_fragments,
+                streaming_job,
+                false,
+                Some(backfill_orders),
+            )
             .await?;
 
         // create streaming jobs.
@@ -1505,6 +1512,7 @@ impl DdlController {
                             &empty_downstreams,
                             true,
                             None,
+                            None,
                         )
                         .await?;
                 }
@@ -1512,7 +1520,7 @@ impl DdlController {
 
             self.metadata_manager
                 .catalog_controller
-                .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true)
+                .prepare_stream_job_fragments(&stream_job_fragments, &streaming_job, true, None)
                 .await?;
 
             self.stream_manager
@@ -1864,7 +1872,8 @@ impl DdlController {
                 .get_mview_fragment_by_id(table_id.as_job_id())
                 .await?;
             let upstream_sink_info = build_upstream_sink_info(
-                sink,
+                sink.id,
+                sink.original_target_columns.clone(),
                 sink_fragment.fragment_id as _,
                 target_table,
                 mview_fragment_id,
@@ -2311,13 +2320,14 @@ fn report_create_object(
 }
 
 pub fn build_upstream_sink_info(
-    sink: &PbSink,
+    sink_id: SinkId,
+    original_target_columns: Vec<PbColumnCatalog>,
     sink_fragment_id: FragmentId,
     target_table: &PbTable,
     target_fragment_id: FragmentId,
 ) -> MetaResult<UpstreamSinkInfo> {
-    let sink_columns = if !sink.original_target_columns.is_empty() {
-        sink.original_target_columns.clone()
+    let sink_columns = if !original_target_columns.is_empty() {
+        original_target_columns.clone()
     } else {
         // This is due to the fact that the value did not exist in earlier versions,
         // which means no schema changes such as `ADD/DROP COLUMN` have been made to the table.
@@ -2371,10 +2381,10 @@ pub fn build_upstream_sink_info(
     let current_target_columns = target_table.get_columns();
     let project_exprs = build_select_node_list(&sink_columns, current_target_columns)?;
     Ok(UpstreamSinkInfo {
-        sink_id: sink.id,
+        sink_id,
         sink_fragment_id: sink_fragment_id as _,
         sink_output_fields,
-        sink_original_target_columns: sink.get_original_target_columns().clone(),
+        sink_original_target_columns: original_target_columns,
         project_exprs,
         new_sink_downstream: new_downstream_relation,
     })

@@ -518,6 +518,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
         };
         let DatabaseRuntimeInfoSnapshot {
             job_infos,
+            backfill_orders,
             mut state_table_committed_epochs,
             mut state_table_log_epochs,
             mut mv_depended_subscriptions,
@@ -532,6 +533,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             control_stream_manager.inject_database_initial_barrier(
                 self.database_id,
                 job_infos,
+                backfill_orders,
                 &mut state_table_committed_epochs,
                 &mut state_table_log_epochs,
                 &fragment_relations,
