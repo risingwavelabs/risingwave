@@ -33,3 +33,20 @@ jobs:
           git diff
           echo "::endgroup::"
           git diff --exit-code
+      - name: Generate production Grafana dashboards
+        env:
+          DASHBOARD_NAMESPACE_FILTER_ENABLED: "true"
+          DASHBOARD_RISINGWAVE_NAME_FILTER_ENABLED: "true"
+          DASHBOARD_DYNAMIC_SOURCE: "true"
+          DASHBOARD_UID: ${{ secrets.RISINGWAVE_PROD_GRAFANA_DASHBOARD_UID }}
+        run: |
+          set -euo pipefail
+          ./grafana/generate.sh
+          mkdir -p grafana/prod-dashboard
+          cp grafana/risingwave-*-dashboard.json grafana/prod-dashboard/
+      - name: Upload production Grafana dashboards
+        uses: actions/upload-artifact@v4
+        with:
+          name: grafana-prod-dashboards
+          path: grafana/prod-dashboard/*.json
+          if-no-files-found: error
