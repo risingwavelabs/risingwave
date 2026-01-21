@@ -449,10 +449,7 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
                 epoch.epoch,
                 HummockVersionId::new(epoch.hummock_version_id),
             ),
-            batch_query_epoch::Epoch::Current(epoch) => {
-                assert_ne!(epoch, HummockEpoch::MAX);
-                HummockReadEpoch::NoWait(epoch)
-            }
+            batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::NoWait(epoch),
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
             batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
         }

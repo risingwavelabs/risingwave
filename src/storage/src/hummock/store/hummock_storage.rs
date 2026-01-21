@@ -370,6 +370,7 @@ impl HummockStorageReadSnapshot {
             }
             HummockReadEpoch::NoWait(epoch) => {
                 self.build_read_version_tuple_from_all(epoch, self.table_id, key_range)
+                    .await
             }
         }
     }
@@ -427,7 +428,7 @@ impl HummockStorageReadSnapshot {
         ))
     }
 
-    fn build_read_version_tuple_from_all(
+    async fn build_read_version_tuple_from_all(
         &self,
         epoch: u64,
         table_id: TableId,
@@ -440,11 +441,11 @@ impl HummockStorageReadSnapshot {
         let ret = if let Some(info) = info
             && epoch <= info.committed_epoch
         {
-            if epoch < info.committed_epoch {
-                return Err(
-                    HummockError::expired_epoch(table_id, info.committed_epoch, epoch).into(),
-                );
-            }
+            let pinned_version = if epoch < info.committed_epoch {
+                pinned_version
+            } else {
+                self.get_epoch_hummock_version(epoch, table_id).await?
+            };
             // read committed_version directly without build snapshot
             get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)
         } else {

@@ -265,6 +265,7 @@ pub struct LocalHummockFlushedSnapshotReader {
     table_option: TableOption,
     read_version: HummockReadVersionRef,
     hummock_version_reader: HummockVersionReader,
+    epoch: HummockEpoch,
 }
 
 impl StateStoreGet for LocalHummockFlushedSnapshotReader {
@@ -282,7 +283,7 @@ impl StateStoreGet for LocalHummockFlushedSnapshotReader {
             self.table_option,
             read_options,
             on_key_value_fn,
-            MAX_EPOCH,
+            self.epoch,
         )
         .await
     }
@@ -297,7 +298,7 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::Iter>> + '_ {
-        self.iter_flushed(key_range, read_options, MAX_EPOCH)
+        self.iter_flushed(key_range, read_options, self.epoch)
             .instrument(tracing::trace_span!("hummock_iter"))
     }
 
@@ -306,7 +307,7 @@ impl StateStoreRead for LocalHummockFlushedSnapshotReader {
         key_range: TableKeyRange,
         read_options: ReadOptions,
     ) -> impl Future<Output = StorageResult<Self::RevIter>> + '_ {
-        self.rev_iter_flushed(key_range, read_options, MAX_EPOCH)
+        self.rev_iter_flushed(key_range, read_options, self.epoch)
             .instrument(tracing::trace_span!("hummock_rev_iter"))
     }
 }
@@ -389,7 +390,12 @@ impl LocalStateStore for LocalHummockStorage {
     }
 
     fn new_flushed_snapshot_reader(&self) -> Self::FlushedSnapshotReader {
-        self.new_flushed_snapshot_reader_inner()
+        assert_eq!(
+            self.table_option.retention_seconds, None,
+            "flushed snapshot reader should not work with table {} with ttl",
+            self.table_id
+        );
+        self.new_flushed_snapshot_reader_inner(MAX_EPOCH)
     }
 
     fn get_table_watermark(&self, vnode: VirtualNode) -> Option<Bytes> {
@@ -431,7 +437,7 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
             None
         };
         let sanity_check_flushed_snapshot_reader = if sanity_check_enabled() {
-            Some(self.new_flushed_snapshot_reader_inner())
+            Some(self.new_flushed_snapshot_reader_inner(self.epoch()))
         } else {
             None
         };
@@ -622,17 +628,16 @@ impl LocalHummockStorage {
         Ok(read_version.update_vnode_bitmap(vnodes))
     }
 
-    fn new_flushed_snapshot_reader_inner(&self) -> LocalHummockFlushedSnapshotReader {
-        assert_eq!(
-            self.table_option.retention_seconds, None,
-            "flushed snapshot reader should not work with table {} with ttl",
-            self.table_id
-        );
+    fn new_flushed_snapshot_reader_inner(
+        &self,
+        epoch: HummockEpoch,
+    ) -> LocalHummockFlushedSnapshotReader {
         LocalHummockFlushedSnapshotReader {
             table_id: self.table_id,
             table_option: self.table_option,
             read_version: self.read_version.clone(),
             hummock_version_reader: self.hummock_version_reader.clone(),
+            epoch,
         }
     }
 
