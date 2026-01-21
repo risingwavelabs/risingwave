@@ -306,7 +306,13 @@ pub enum AlterConnectionOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterSecretOperation {
-    ChangeCredential { new_credential: Value },
+    ChangeCredential {
+        with_options: Vec<SqlOption>,
+        new_credential: Value,
+    },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -701,8 +707,19 @@ impl fmt::Display for AlterConnectionOperation {
 impl fmt::Display for AlterSecretOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AlterSecretOperation::ChangeCredential { new_credential } => {
-                write!(f, "AS {new_credential}")
+            AlterSecretOperation::ChangeCredential {
+                new_credential,
+                with_options,
+            } => {
+                write!(
+                    f,
+                    "WITH ({}) AS {}",
+                    display_comma_separated(with_options),
+                    new_credential
+                )
+            }
+            AlterSecretOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
             }
         }
     }
