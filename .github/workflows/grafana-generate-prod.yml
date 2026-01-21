@@ -28,7 +28,7 @@ jobs:
           DASHBOARD_NAMESPACE_FILTER_ENABLED: "true"
           DASHBOARD_RISINGWAVE_NAME_FILTER_ENABLED: "true"
           DASHBOARD_DYNAMIC_SOURCE: "true"
-          DASHBOARD_UID: ${{ secrets.RISINGWAVE_PROD_GRAFANA_DASHBOARD_UID }}
+          DASHBOARD_UID: ${{ vars.RISINGWAVE_PROD_GRAFANA_DASHBOARD_UID }}
         run: |
           set -euo pipefail
           ./grafana/generate.sh

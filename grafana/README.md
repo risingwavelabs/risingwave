@@ -25,7 +25,7 @@ pip install -r requirements.txt
 Don't forget to include the generated `risingwave-<xxx>-dashboard.json` in the commit.
 
 A separate workflow generates production dashboards on merges to `main` when the
-`RISINGWAVE_PROD_GRAFANA_DASHBOARD_UID` secret is configured, and uploads them as
+`RISINGWAVE_PROD_GRAFANA_DASHBOARD_UID` variable is configured, and uploads them as
 an artifact named `grafana-prod-dashboards`.
 
 ## Update without Restarting Grafana (to localhost:3001)
