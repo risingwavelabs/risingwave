@@ -37,8 +37,6 @@ echo "--- Install rust"
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- --no-modify-path --default-toolchain none -y
 source "$HOME/.cargo/env"
 rustup show
-source ci/scripts/common.sh
-unset RUSTC_WORKSPACE_WRAPPER # disable rustc-workspace-wrapper, for coverage instrumentation
 
 echo "--- Install sccache"
 curl -L --proto '=https' --tlsv1.2 -sSf https://raw.githubusercontent.com/cargo-bins/cargo-binstall/main/install-from-binstall-release.sh | bash
@@ -73,6 +71,9 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
 fi
 
 echo "--- Build risingwave release binary"
+source ci/scripts/common.sh
+unset RUSTC_WORKSPACE_WRAPPER # disable rustc-workspace-wrapper, for coverage instrumentation
+
 export ENABLE_BUILD_DASHBOARD=1
 if [ "${ARCH}" == "aarch64" ]; then
   # enable large page size support for jemalloc
@@ -85,6 +86,10 @@ cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --featur
 
 echo "--- Check link info"
 check_link_info "${CARGO_PROFILE}"
+
+echo "--- Show sccache stats"
+sccache --show-stats
+sccache --zero-stats
 
 echo "--- Check binary size"
 cd target/"${CARGO_PROFILE}" && chmod +x risingwave risectl
