@@ -93,7 +93,7 @@ sccache --zero-stats
 
 echo "--- Check binary size"
 cd target/"${CARGO_PROFILE}" && chmod +x risingwave risectl
-du -sh risingwave risingwave.dwp risectl
+du -sh risingwave* risectl
 
 if [ "${SKIP_RELEASE}" -ne 1 ]; then
   echo "--- Upload nightly binary to s3"
