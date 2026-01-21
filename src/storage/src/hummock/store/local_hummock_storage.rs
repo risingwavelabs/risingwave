@@ -98,8 +98,6 @@ pub struct LocalHummockStorage {
 
     hummock_version_reader: HummockVersionReader,
 
-    stats: Arc<HummockStateStoreMetrics>,
-
     table_memory_metrics: Arc<TableMemoryMetrics>,
 
     write_limiter: WriteLimiterRef,
@@ -499,12 +497,8 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
             && self.mem_table.kv_size.size() > self.mem_table_spill_threshold
         {
             if self.spill_offset < MAX_SPILL_TIMES {
-                let table_id_label = self.table_id.to_string();
                 self.flush().await?;
-                self.stats
-                    .mem_table_spill_counts
-                    .with_label_values(&[table_id_label.as_str()])
-                    .inc();
+                self.table_memory_metrics.mem_table_spill_counts.inc();
             } else {
                 tracing::warn!("No mem table spill occurs, the gap epoch exceeds available range.");
             }
@@ -645,16 +639,10 @@ impl LocalHummockStorage {
         let epoch = self.epoch();
         let table_id = self.table_id;
 
-        let table_id_label = table_id.to_string();
-        self.stats
+        self.table_memory_metrics
             .write_batch_tuple_counts
-            .with_label_values(&[table_id_label.as_str()])
             .inc_by(sorted_items.len() as _);
-        let timer = self
-            .stats
-            .write_batch_duration
-            .with_label_values(&[table_id_label.as_str()])
-            .start_timer();
+        let timer = self.table_memory_metrics.write_batch_duration.start_timer();
 
         let imm_size = if !sorted_items.is_empty() {
             let (size, old_value_size) =
@@ -690,7 +678,7 @@ impl LocalHummockStorage {
                 SharedBufferBatchOldValues::new(
                     old_values,
                     old_value_size,
-                    self.stats.old_value_size.clone(),
+                    self.table_memory_metrics.old_value_size.clone(),
                 )
             });
 
@@ -702,7 +690,8 @@ impl LocalHummockStorage {
                 old_values,
                 size,
                 table_id,
-                Some((tracker, self.table_memory_metrics.clone())),
+                self.table_memory_metrics.clone(),
+                Some(tracker),
             );
             self.spill_offset += 1;
             let imm_size = imm.size();
@@ -728,9 +717,8 @@ impl LocalHummockStorage {
 
         timer.observe_duration();
 
-        self.stats
+        self.table_memory_metrics
             .write_batch_size
-            .with_label_values(&[table_id_label.as_str()])
             .observe(imm_size as _);
         Ok(imm_size)
     }
@@ -749,7 +737,11 @@ impl LocalHummockStorage {
         version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
         mem_table_spill_threshold: usize,
     ) -> Self {
-        let stats = hummock_version_reader.stats().clone();
+        let table_memory_metrics = Arc::new(TableMemoryMetrics::new(
+            hummock_version_reader.stats(),
+            option.table_id,
+            option.is_replicated,
+        ));
         Self {
             mem_table: MemTable::new(option.table_id, option.op_consistency_level.clone()),
             spill_offset: 0,
@@ -763,8 +755,7 @@ impl LocalHummockStorage {
             event_sender,
             memory_limiter,
             hummock_version_reader,
-            table_memory_metrics: Arc::new(TableMemoryMetrics::new(&stats, option.table_id)),
-            stats,
+            table_memory_metrics,
             write_limiter,
             version_update_notifier_tx,
             mem_table_spill_threshold,

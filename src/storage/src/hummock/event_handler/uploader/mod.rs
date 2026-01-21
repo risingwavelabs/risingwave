@@ -28,7 +28,7 @@ use std::task::{Context, Poll, ready};
 use futures::FutureExt;
 use itertools::Itertools;
 use more_asserts::assert_gt;
-use prometheus::{HistogramTimer, IntGauge};
+use prometheus::{Histogram, HistogramTimer, IntGauge};
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::UintGauge;
@@ -86,6 +86,7 @@ pub type SpawnUploadTask = Arc<
 pub struct UploadTaskInfo {
     pub task_size: usize,
     pub epochs: Vec<HummockEpoch>,
+    pub table_ids: HashSet<TableId>,
     pub imm_ids: HashMap<LocalInstanceId, Vec<ImmId>>,
 }
 
@@ -265,6 +266,10 @@ impl UploadingTask {
         let task_info = UploadTaskInfo {
             task_size,
             epochs,
+            table_ids: payload
+                .values()
+                .flat_map(|imms| imms.iter().map(|imm| imm.table_id()))
+                .collect(),
             imm_ids,
         };
         context
@@ -1499,11 +1504,12 @@ impl HummockUploader {
         self.context.pinned_version = pinned_version;
     }
 
-    pub(crate) fn may_flush(&mut self) -> bool {
+    pub(crate) fn may_flush(&mut self, spiller_latency: &Histogram) -> bool {
         let UploaderState::Working(data) = &mut self.state else {
             return false;
         };
         if self.context.buffer_tracker.need_flush() {
+            let timer = spiller_latency.start_timer();
             let mut spiller = Spiller::new(&mut data.unsync_data);
             let mut curr_batch_flush_size = 0;
             // iterate from older epoch to newer epoch
@@ -1532,6 +1538,7 @@ impl HummockUploader {
                     curr_batch_flush_size += task_size;
                 }
             }
+            timer.observe_duration();
             data.check_upload_task_consistency();
             curr_batch_flush_size > 0
         } else {
@@ -1766,6 +1773,7 @@ pub(crate) mod tests {
 
     use futures::FutureExt;
     use risingwave_common::catalog::TableId;
+    use risingwave_common::metrics::LabelGuardedHistogram;
     use risingwave_common::util::epoch::EpochExt;
     use risingwave_hummock_sdk::HummockEpoch;
     use risingwave_hummock_sdk::vector_index::{
@@ -1794,6 +1802,10 @@ pub(crate) mod tests {
             table_ids: HashSet<TableId>,
         ) {
             self.start_sync_epoch(sync_result_sender, vec![(epoch, table_ids)]);
+        }
+
+        pub(super) fn may_flush_for_test(&mut self) -> bool {
+            self.may_flush(&LabelGuardedHistogram::test_histogram::<1>())
         }
     }
 
@@ -2234,7 +2246,7 @@ pub(crate) mod tests {
             new_task_notifier(get_payload_imm_ids(&epoch1_spill_payload12));
         let (await_start2, finish_tx2) =
             new_task_notifier(get_payload_imm_ids(&epoch2_spill_payload));
-        uploader.may_flush();
+        uploader.may_flush_for_test();
         await_start1.await;
         await_start2.await;
 
@@ -2257,7 +2269,7 @@ pub(crate) mod tests {
         let epoch1_spill_payload3 = HashMap::from_iter([(instance_id1, vec![imm1_3.clone()])]);
         let (await_start1_3, finish_tx1_3) =
             new_task_notifier(get_payload_imm_ids(&epoch1_spill_payload3));
-        uploader.may_flush();
+        uploader.may_flush_for_test();
         await_start1_3.await;
         let imm1_4 = gen_imm_with_limiter(epoch1, memory_limiter).await;
         uploader.add_imm(instance_id1, imm1_4.clone());
@@ -2282,14 +2294,14 @@ pub(crate) mod tests {
         uploader.add_imm(instance_id1, imm3_1.clone());
         let (await_start3_1, finish_tx3_1) =
             new_task_notifier(get_payload_imm_ids(&epoch3_spill_payload1));
-        uploader.may_flush();
+        uploader.may_flush_for_test();
         await_start3_1.await;
         let imm3_2 = gen_imm_with_limiter(epoch3, memory_limiter).await;
         let epoch3_spill_payload2 = HashMap::from_iter([(instance_id2, vec![imm3_2.clone()])]);
         uploader.add_imm(instance_id2, imm3_2.clone());
         let (await_start3_2, finish_tx3_2) =
             new_task_notifier(get_payload_imm_ids(&epoch3_spill_payload2));
-        uploader.may_flush();
+        uploader.may_flush_for_test();
         await_start3_2.await;
         let imm3_3 = gen_imm_with_limiter(epoch3, memory_limiter).await;
         uploader.add_imm(instance_id1, imm3_3.clone());
@@ -2471,12 +2483,12 @@ pub(crate) mod tests {
         }
         let imm = gen_imm_with_limiter(epoch1, Some(memory_limiter.as_ref())).await;
         uploader.add_imm(instance_id1, imm);
-        assert!(uploader.may_flush());
+        assert!(uploader.may_flush_for_test());
 
         for _ in 0..10 {
             let imm = gen_imm_with_limiter(epoch1, Some(memory_limiter.as_ref())).await;
             uploader.add_imm(instance_id1, imm);
-            assert!(!uploader.may_flush());
+            assert!(!uploader.may_flush_for_test());
         }
     }
 }

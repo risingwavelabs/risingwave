@@ -20,11 +20,6 @@ def _(outer_panels: Panels):
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
-                            f"sum({metric('state_store_uploader_uploading_task_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "uploading task size - {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        panels.target(
                             f"sum({metric('state_store_uploader_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "uploader imm size - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
@@ -44,6 +39,21 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"sum({metric('state_store_old_value_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
                             "old value size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({table_metric('state_store_uploader_per_table_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id)",
+                            "Uploader per-table imm size - {{table_id}} @ {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({table_metric('state_store_per_table_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL}, table_id)",
+                            "Per-table imm size - {{table_id}} @ {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                        ),
+                        panels.target(
+                            f"sum({metric('state_store_per_table_imm_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "All imm size - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
@@ -95,17 +105,13 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"sum(irate({table_metric('state_store_merge_imm_task_counts')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)",
-                            "merge imm tasks - {{table_id}} @ {{%s}}" % NODE_LABEL,
-                        ),
-                        panels.target(
                             f"sum(irate({metric('state_store_spill_task_counts')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},uploader_stage)",
-                            "Uploader spill tasks - {{uploader_stage}} @ {{%s}}"
+                            "Uploader spill tasks count rate - {{uploader_stage}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
                         panels.target(
                             f"sum({metric('state_store_uploader_uploading_task_count')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "uploading task count - {{%s}} @ {{%s}}"
+                            "Uploader total task count - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                         panels.target(
@@ -120,15 +126,15 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"sum(rate({table_metric('state_store_merge_imm_memory_sz')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},table_id)",
-                            "Merging tasks memory size - {{table_id}} @ {{%s}}"
+                            f"sum(rate({metric('state_store_spill_task_size')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},uploader_stage)",
+                            "Uploader spill tasks size rate - {{uploader_stage}} @ {{%s}}"
                             % NODE_LABEL,
                         ),
                         panels.target(
-                            f"sum(rate({metric('state_store_spill_task_size')}[$__rate_interval])) by ({COMPONENT_LABEL},{NODE_LABEL},uploader_stage)",
-                            "Uploading tasks size - {{uploader_stage}} @ {{%s}}"
-                            % NODE_LABEL,
-                        ),
+                            f"sum({metric('state_store_uploader_uploading_task_size')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
+                            "Total uploading task size - {{%s}} @ {{%s}}"
+                            % (COMPONENT_LABEL, NODE_LABEL),
+                            ),
                     ],
                 ),
                 panels.subheader("Write"),
@@ -257,8 +263,8 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"sum({metric('state_store_event_handler_pending_event')}) by ({COMPONENT_LABEL}, {NODE_LABEL})",
-                            "{{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
+                            f"sum({metric('state_store_event_handler_pending_event')}) by ({COMPONENT_LABEL}, {NODE_LABEL}, event_type)",
+                            "{{event_type}} {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],
                 ),

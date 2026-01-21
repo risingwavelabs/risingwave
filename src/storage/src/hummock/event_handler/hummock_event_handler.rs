@@ -207,6 +207,7 @@ struct HummockEventHandlerMetrics {
     event_handler_on_upload_finish_latency: Histogram,
     event_handler_on_apply_version_update: Histogram,
     event_handler_on_recv_version_update: Histogram,
+    event_handler_on_spiller: Histogram,
 }
 
 pub struct HummockEventHandler {
@@ -349,6 +350,9 @@ impl HummockEventHandler {
             event_handler_on_recv_version_update: state_store_metrics
                 .event_handler_latency
                 .with_label_values(&["recv_version_update"]),
+            event_handler_on_spiller: state_store_metrics
+                .event_handler_latency
+                .with_label_values(&["spiller"]),
         };
 
         let uploader = HummockUploader::new(
@@ -744,7 +748,8 @@ impl HummockEventHandler {
     fn handle_hummock_event(&mut self, event: HummockEvent) {
         match event {
             HummockEvent::BufferMayFlush => {
-                self.uploader.may_flush();
+                self.uploader
+                    .may_flush(&self.metrics.event_handler_on_spiller);
             }
             HummockEvent::SyncEpoch {
                 sync_result_sender,
@@ -781,7 +786,8 @@ impl HummockEventHandler {
                     imms.first().map(|imm| imm.table_id),
                 );
                 self.uploader.add_imms(instance_id, imms);
-                self.uploader.may_flush();
+                self.uploader
+                    .may_flush(&self.metrics.event_handler_on_spiller);
             }
 
             HummockEvent::LocalSealEpoch {

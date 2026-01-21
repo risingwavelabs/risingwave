@@ -136,12 +136,7 @@ pub(crate) async fn gen_imm_inner(
     )];
     let size = SharedBufferBatch::measure_batch_size(&sorted_items, None).0;
     let tracker = match limiter {
-        Some(limiter) => {
-            let tracker = limiter.require_memory(size as u64).await;
-            let per_table_tracker =
-                TableMemoryMetrics::new(&HummockStateStoreMetrics::unused(), table_id).into();
-            Some((tracker, per_table_tracker))
-        }
+        Some(limiter) => Some(limiter.require_memory(size as u64).await),
         None => None,
     };
     SharedBufferBatch::build_shared_buffer_batch(
@@ -151,6 +146,7 @@ pub(crate) async fn gen_imm_inner(
         None,
         size,
         table_id,
+        TableMemoryMetrics::for_test(),
         tracker,
     )
 }
