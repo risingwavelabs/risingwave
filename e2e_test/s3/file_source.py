@@ -102,7 +102,8 @@ CREATE TABLE {table_name}(
         sleep(5)
 
     # Verify we can read subset fields from struct.
-    cur.execute(f"select id, s.foo, s.bar from {table_name} order by id")
+    # RisingWave struct field access uses the Postgres-compatible syntax: (s).foo
+    cur.execute(f"select id, (s).foo, (s).bar from {table_name} order by id")
     rows = cur.fetchall()
     assert rows == [(1, 10, "a"), (2, 20, "b")], f"unexpected rows: {rows}"
     print("Test parquet struct subset read pass")

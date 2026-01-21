@@ -956,10 +956,7 @@ pub trait FromArrow {
                     // Field missing in Arrow struct. Fill SQL NULL with the expected RW type.
                     let rw_ty = self.from_field(expected_field)?;
                     let mut builder = ArrayBuilderImpl::with_type(len, rw_ty);
-                    for _ in 0..len {
-                        let datum: Datum = None;
-                        builder.append(datum);
-                    }
+                    builder.append_n(len, Datum::None);
                     Ok(Arc::new(builder.finish()))
                 }
             })
