@@ -24,7 +24,7 @@ pip install -r requirements.txt
 
 Don't forget to include the generated `risingwave-<xxx>-dashboard.json` in the commit.
 
-The Grafana generate check workflow also produces production dashboards when the
+A separate workflow generates production dashboards on merges to `main` when the
 `RISINGWAVE_PROD_GRAFANA_DASHBOARD_UID` secret is configured, and uploads them as
 an artifact named `grafana-prod-dashboards`.
 
