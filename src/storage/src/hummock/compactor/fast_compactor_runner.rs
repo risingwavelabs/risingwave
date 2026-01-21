@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
-use std::collections::{BTreeMap, HashSet};
+use std::collections::HashSet;
 use std::marker::PhantomData;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, atomic};
@@ -29,7 +29,6 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::TableStats;
-use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact_task_to_string};
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
@@ -442,10 +441,8 @@ impl<C: CompactionFilter> CompactorRunner<C> {
             task.non_pk_prefix_table_watermarks.clone(),
             compaction_catalog_agent_ref.clone(),
         );
-        // TODO: get value_table_watermarks from compaction task
-        let value_table_watermarks: BTreeMap<TableId, TableWatermarks> = BTreeMap::default();
         let value_skip_watermark_state = ValueSkipWatermarkState::from_safe_epoch_watermarks(
-            value_table_watermarks,
+            task.value_table_watermarks.clone(),
             compaction_catalog_agent_ref,
         );
 
