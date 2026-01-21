@@ -1916,10 +1916,6 @@ impl CatalogController {
                             node.rate_limit = rate_limit;
                             found = true;
                         }
-                        PbNodeBody::Sink(node) => {
-                            node.rate_limit = rate_limit;
-                            found = true;
-                        }
                         _ => {}
                     });
                 }

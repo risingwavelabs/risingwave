@@ -3636,12 +3636,14 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
+                AlterSinkOperation::SetBackfillRateLimit { rate_limit }
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterSinkOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
+                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {

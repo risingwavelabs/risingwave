@@ -34,6 +34,7 @@ use risingwave_connector::source::{
     StreamChunkWithState, WaitCheckpointTask, build_pulsar_ack_channel_id,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::id::SourceId;
 use risingwave_storage::store::TryWaitEpochOptions;
 use thiserror_ext::AsReport;
@@ -733,16 +734,17 @@ impl<S: StateStore> SourceExecutor<S> {
                                 );
                             }
                             Mutation::Throttle(fragment_to_apply) => {
-                                if let Some(new_rate_limit) =
+                                if let Some(entry) =
                                     fragment_to_apply.get(&self.actor_ctx.fragment_id)
-                                    && *new_rate_limit != self.rate_limit_rps
+                                    && entry.throttle_type() == ThrottleType::Source
+                                    && entry.rate_limit != self.rate_limit_rps
                                 {
                                     tracing::info!(
                                         "updating rate limit from {:?} to {:?}",
                                         self.rate_limit_rps,
-                                        *new_rate_limit
+                                        entry.rate_limit
                                     );
-                                    self.rate_limit_rps = *new_rate_limit;
+                                    self.rate_limit_rps = entry.rate_limit;
                                     // recreate from latest_split_info
                                     self.rebuild_stream_reader(&source_desc, &mut stream)?;
                                 }
