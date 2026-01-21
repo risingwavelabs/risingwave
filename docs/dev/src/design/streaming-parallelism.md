@@ -36,8 +36,8 @@ These variables control the initial number of parallel instances for streaming j
 
 #### `streaming_parallelism`
 
-**Type**: `ConfigParallelism`  
-**Default**: `default` (equivalent to `adaptive`)  
+**Type**: `ConfigParallelism`
+**Default**: `default` (equivalent to `adaptive`)
 **Description**: Global default for all streaming jobs.
 
 **Possible values**:
@@ -62,8 +62,8 @@ SET streaming_parallelism = 'adaptive';
 - `streaming_parallelism_for_sink`
 - `streaming_parallelism_for_backfill`
 
-**Type**: `ConfigParallelism`  
-**Default**: `default` (falls back to `streaming_parallelism`)  
+**Type**: `ConfigParallelism`
+**Default**: `default` (falls back to `streaming_parallelism`)
 
 **Example**:
 ```sql
@@ -83,8 +83,8 @@ These variables control how the system adjusts parallelism when the cluster size
 
 #### `streaming_parallelism_strategy`
 
-**Type**: `ConfigAdaptiveParallelismStrategy`  
-**Default**: `default` (follows system setting)  
+**Type**: `ConfigAdaptiveParallelismStrategy`
+**Default**: `default` (follows system setting)
 **Description**: Global default adaptive strategy for all streaming jobs.
 
 **Possible values**:
@@ -114,7 +114,7 @@ SET streaming_parallelism_strategy = 'RATIO(0.5)';
 - `streaming_parallelism_strategy_for_source` (default: `BOUNDED(4)`)
 - `streaming_parallelism_strategy_for_sink` (default: `default`)
 
-**Type**: `ConfigAdaptiveParallelismStrategy`  
+**Type**: `ConfigAdaptiveParallelismStrategy`
 **Description**: Type-specific adaptive parallelism strategies. Those with `default` fall back to `streaming_parallelism_strategy`.
 
 **Note**: As of the latest version, both `source` and `table` default to `BOUNDED(4)` to prevent overwhelming external systems and limit initial resource usage.
