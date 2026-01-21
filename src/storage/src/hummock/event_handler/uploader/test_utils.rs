@@ -51,6 +51,7 @@ use crate::hummock::event_handler::uploader::{
 };
 use crate::hummock::event_handler::{LocalInstanceId, TEST_LOCAL_INSTANCE_ID};
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::shared_buffer::TableMemoryMetrics;
 use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchId, SharedBufferValue,
 };
@@ -145,6 +146,7 @@ pub(crate) async fn gen_imm_inner(
         None,
         size,
         table_id,
+        TableMemoryMetrics::for_test(),
         tracker,
     )
 }

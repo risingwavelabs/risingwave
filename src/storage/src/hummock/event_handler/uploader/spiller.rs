@@ -303,7 +303,7 @@ mod tests {
             vec![imm2_4_1.batch_id()],
         )]));
 
-        uploader.may_flush();
+        uploader.may_flush_for_test();
         await_start1_1.await;
         await_start3.await;
         await_start2.await;

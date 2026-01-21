@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::RefCell;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::pin::pin;
 use std::sync::atomic::AtomicUsize;
@@ -24,7 +25,7 @@ use await_tree::{InstrumentAwait, SpanExt};
 use futures::FutureExt;
 use itertools::Itertools;
 use parking_lot::RwLock;
-use prometheus::{Histogram, IntGauge};
+use prometheus::{Histogram, IntGauge, IntGaugeVec};
 use risingwave_common::catalog::TableId;
 use risingwave_common::metrics::UintGauge;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
@@ -148,10 +149,10 @@ impl BufferTracker {
 #[derive(Clone)]
 pub struct HummockEventSender {
     inner: UnboundedSender<HummockEvent>,
-    event_count: IntGauge,
+    event_count: IntGaugeVec,
 }
 
-pub fn event_channel(event_count: IntGauge) -> (HummockEventSender, HummockEventReceiver) {
+pub fn event_channel(event_count: IntGaugeVec) -> (HummockEventSender, HummockEventReceiver) {
     let (tx, rx) = unbounded_channel();
     (
         HummockEventSender {
@@ -167,29 +168,46 @@ pub fn event_channel(event_count: IntGauge) -> (HummockEventSender, HummockEvent
 
 impl HummockEventSender {
     pub fn send(&self, event: HummockEvent) -> Result<(), SendError<HummockEvent>> {
+        let event_type = event.event_name();
         self.inner.send(event)?;
-        self.event_count.inc();
+        get_event_pending_gauge(&self.event_count, event_type).inc();
         Ok(())
     }
 }
 
 pub struct HummockEventReceiver {
     inner: UnboundedReceiver<HummockEvent>,
-    event_count: IntGauge,
+    event_count: IntGaugeVec,
 }
 
 impl HummockEventReceiver {
     async fn recv(&mut self) -> Option<HummockEvent> {
         let event = self.inner.recv().await?;
-        self.event_count.dec();
+        let event_type = event.event_name();
+        get_event_pending_gauge(&self.event_count, event_type).dec();
         Some(event)
     }
+}
+
+thread_local! {
+    static EVENT_PENDING_GAUGE_CACHE: RefCell<HashMap<&'static str, IntGauge>> = RefCell::new(HashMap::new());
+}
+
+fn get_event_pending_gauge(event_count: &IntGaugeVec, event_type: &'static str) -> IntGauge {
+    EVENT_PENDING_GAUGE_CACHE.with(|cache| {
+        cache
+            .borrow_mut()
+            .entry(event_type)
+            .or_insert_with(|| event_count.with_label_values(&[event_type]))
+            .clone()
+    })
 }
 
 struct HummockEventHandlerMetrics {
     event_handler_on_upload_finish_latency: Histogram,
     event_handler_on_apply_version_update: Histogram,
     event_handler_on_recv_version_update: Histogram,
+    event_handler_on_spiller: Histogram,
 }
 
 pub struct HummockEventHandler {
@@ -332,6 +350,9 @@ impl HummockEventHandler {
             event_handler_on_recv_version_update: state_store_metrics
                 .event_handler_latency
                 .with_label_values(&["recv_version_update"]),
+            event_handler_on_spiller: state_store_metrics
+                .event_handler_latency
+                .with_label_values(&["spiller"]),
         };
 
         let uploader = HummockUploader::new(
@@ -727,7 +748,8 @@ impl HummockEventHandler {
     fn handle_hummock_event(&mut self, event: HummockEvent) {
         match event {
             HummockEvent::BufferMayFlush => {
-                self.uploader.may_flush();
+                self.uploader
+                    .may_flush(&self.metrics.event_handler_on_spiller);
             }
             HummockEvent::SyncEpoch {
                 sync_result_sender,
@@ -764,7 +786,8 @@ impl HummockEventHandler {
                     imms.first().map(|imm| imm.table_id),
                 );
                 self.uploader.add_imms(instance_id, imms);
-                self.uploader.may_flush();
+                self.uploader
+                    .may_flush(&self.metrics.event_handler_on_spiller);
             }
 
             HummockEvent::LocalSealEpoch {

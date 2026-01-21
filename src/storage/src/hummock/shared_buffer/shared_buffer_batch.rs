@@ -23,14 +23,15 @@ use std::sync::atomic::Ordering::Relaxed;
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use prometheus::IntGauge;
 use risingwave_common::catalog::TableId;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_hummock_sdk::EpochWithGap;
 use risingwave_hummock_sdk::key::{FullKey, TableKey, TableKeyRange, UserKey};
 
 use crate::hummock::iterator::{
     Backward, DirectionEnum, Forward, HummockIterator, HummockIteratorDirection, ValueMeta,
 };
+use crate::hummock::shared_buffer::TableMemoryMetrics;
 use crate::hummock::utils::{MemoryTracker, range_overlap};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{HummockEpoch, HummockResult};
@@ -121,7 +122,7 @@ pub(crate) struct SharedBufferBatchOldValues {
     /// corresponding `new_value` is `Insert`, and contains the old values of `Update` and `Delete`.
     values: Vec<Bytes>,
     pub size: usize,
-    pub global_old_value_size: IntGauge,
+    pub global_old_value_size: LabelGuardedIntGauge,
 }
 
 impl Drop for SharedBufferBatchOldValues {
@@ -131,7 +132,11 @@ impl Drop for SharedBufferBatchOldValues {
 }
 
 impl SharedBufferBatchOldValues {
-    pub(crate) fn new(values: Vec<Bytes>, size: usize, global_old_value_size: IntGauge) -> Self {
+    pub(crate) fn new(
+        values: Vec<Bytes>,
+        size: usize,
+        global_old_value_size: LabelGuardedIntGauge,
+    ) -> Self {
         global_old_value_size.add(size as _);
         Self {
             values,
@@ -141,7 +146,7 @@ impl SharedBufferBatchOldValues {
     }
 
     pub(crate) fn for_test(values: Vec<Bytes>, size: usize) -> Self {
-        Self::new(values, size, IntGauge::new("test", "test").unwrap())
+        Self::new(values, size, LabelGuardedIntGauge::test_int_gauge::<1>())
     }
 }
 
@@ -155,6 +160,7 @@ pub(crate) struct SharedBufferBatchInner {
     /// Total size of all key-value items (excluding the `epoch` of value versions)
     size: usize,
     _tracker: Option<MemoryTracker>,
+    per_table_tracker: Arc<TableMemoryMetrics>,
     /// For a batch created from multiple batches, this will be
     /// the largest batch id among input batches
     batch_id: SharedBufferBatchId,
@@ -167,7 +173,8 @@ impl SharedBufferBatchInner {
         payload: Vec<SharedBufferItem>,
         old_values: Option<SharedBufferBatchOldValues>,
         size: usize,
-        _tracker: Option<MemoryTracker>,
+        table_metrics: Arc<TableMemoryMetrics>,
+        tracker: Option<MemoryTracker>,
     ) -> Self {
         assert!(!payload.is_empty());
         debug_assert!(payload.iter().is_sorted_by_key(|(key, _)| key));
@@ -187,13 +194,17 @@ impl SharedBufferBatchInner {
         }
 
         let batch_id = SHARED_BUFFER_BATCH_ID_GENERATOR.fetch_add(1, Relaxed);
+
+        table_metrics.inc_imm(size);
+
         SharedBufferBatchInner {
             entries,
             new_values,
             old_values,
             epochs: vec![epoch],
             size,
-            _tracker,
+            _tracker: tracker,
+            per_table_tracker: table_metrics,
             batch_id,
         }
     }
@@ -232,6 +243,7 @@ impl SharedBufferBatchInner {
             epochs,
             size,
             _tracker: tracker,
+            per_table_tracker: TableMemoryMetrics::for_test(),
             batch_id: imm_id,
         }
     }
@@ -268,6 +280,12 @@ impl SharedBufferBatchInner {
 impl PartialEq for SharedBufferBatchInner {
     fn eq(&self, other: &Self) -> bool {
         self.entries == other.entries && self.new_values == other.new_values
+    }
+}
+
+impl Drop for SharedBufferBatchInner {
+    fn drop(&mut self) {
+        self.per_table_tracker.dec_imm(self.size);
     }
 }
 
@@ -317,6 +335,7 @@ impl SharedBufferBatch {
                 sorted_items,
                 old_values,
                 size,
+                TableMemoryMetrics::for_test(),
                 None,
             )),
             table_id,
@@ -511,6 +530,7 @@ impl SharedBufferBatch {
         old_values: Option<SharedBufferBatchOldValues>,
         size: usize,
         table_id: TableId,
+        table_metrics: Arc<TableMemoryMetrics>,
         tracker: Option<MemoryTracker>,
     ) -> Self {
         let inner = SharedBufferBatchInner::new(
@@ -519,6 +539,7 @@ impl SharedBufferBatch {
             sorted_items,
             old_values,
             size,
+            table_metrics,
             tracker,
         );
         SharedBufferBatch {
@@ -535,8 +556,15 @@ impl SharedBufferBatch {
         size: usize,
         table_id: TableId,
     ) -> Self {
-        let inner =
-            SharedBufferBatchInner::new(epoch, spill_offset, sorted_items, None, size, None);
+        let inner = SharedBufferBatchInner::new(
+            epoch,
+            spill_offset,
+            sorted_items,
+            None,
+            size,
+            TableMemoryMetrics::for_test(),
+            None,
+        );
         SharedBufferBatch {
             inner: Arc::new(inner),
             table_id,
