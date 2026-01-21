@@ -83,13 +83,10 @@ fi
 cargo build -p risingwave_cmd_all --features "rw-static-link" --features udf --features datafusion --features openssl-vendored --profile "${CARGO_PROFILE}"
 cargo build -p risingwave_cmd --bin risectl --features "rw-static-link" --features openssl-vendored --profile "${CARGO_PROFILE}"
 
-echo "--- check link info"
+echo "--- Check link info"
 check_link_info "${CARGO_PROFILE}"
 
-echo "--- Show sccache stats"
-sccache --show-stats
-sccache --zero-stats
-
+echo "--- Check binary size"
 cd target/"${CARGO_PROFILE}" && chmod +x risingwave risectl
 du -sh risingwave risingwave.dwp risectl
 
