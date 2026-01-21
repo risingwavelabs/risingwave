@@ -962,6 +962,7 @@ mod tests {
         let source = PbSource {
             id: risingwave_common::id::SourceId::new(100),
             info: Some(source_info),
+            with_properties: BTreeMap::from([("connector".to_owned(), "fake-cdc".to_owned())]),
             ..Default::default()
         };
 
