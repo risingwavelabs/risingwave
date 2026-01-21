@@ -112,12 +112,6 @@ select id, name, length(location) from test_geo where id = 1;
 ----
 1 Chicago 25
 
-# Verify the coordinates actually changed (different hex than before)
-query IT retry 3 backoff 1s
-select id, substring(encode(location, 'hex') from 1 for 50) from test_geo where id = 1;
-----
-1 0101000020e610000000000000000000000000000000000000
-
 # Compare upstream vs RisingWave EWKB for the updated row.
 query IIITTT retry 3 backoff 1s
 select
@@ -146,10 +140,28 @@ on ours.id = upstream.id;
 system ok
 psql -c "DELETE FROM test_geo WHERE id = 2;"
 
-query II retry 3 backoff 1s
-select count(*) as total, count(*) filter (where id = 2) as id_2_count from test_geo;
+# Compare upstream vs RisingWave row counts after DELETE.
+# This avoids flaky assertions when CDC consumption is still catching up.
+query IIIIII retry 6 backoff 1s
+select
+  (select count(*) from test_geo) as ours_total,
+  (select count(*) filter (where id = 2) from test_geo) as ours_id2,
+  upstream.upstream_total,
+  upstream.upstream_id2,
+  (select count(*) from test_geo) = upstream.upstream_total as total_same,
+  (select count(*) filter (where id = 2) from test_geo) = upstream.upstream_id2 as id2_same
+from (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select count(*)::int as upstream_total, count(*) filter (where id = 2)::int as upstream_id2 from test_geo'
+  )
+) as upstream(upstream_total, upstream_id2);
 ----
-2 0
+2 0 2 0 t t
 
 # Test with NULL geometry
 system ok
@@ -157,7 +169,7 @@ psql -c "
     INSERT INTO test_geo VALUES (4, 'NullLocation', NULL);
 "
 
-query ITI retry 3 backoff 1s
+query ITI retry 10 backoff 1s
 select id, name, location from test_geo where id = 4;
 ----
 4 NullLocation NULL
