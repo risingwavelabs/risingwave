@@ -1,6 +1,22 @@
 from ..common import *
 from . import section
-from .streaming_common import _actor_busy_rate_target, _actor_busy_time_relative_target
+from .streaming_common import (
+    _actor_busy_rate_expr,
+    _actor_busy_rate_target,
+    _actor_busy_time_relative_target,
+    relabel_fragment_id_as_id,
+    topk_percent_expr,
+)
+
+def _fragment_peak_rate_with_id_at_step(expr: str, normalize_ns: bool = False) -> str:
+    """Compute the peak rate over the dashboard range and attach `id` from fragment_id.
+
+    Set normalize_ns=True when the input expression is in nanoseconds.
+    """
+    normalized_expr = f"({expr}) / 1000000000" if normalize_ns else expr
+    return relabel_fragment_id_as_id(
+        f"max_over_time(({normalized_expr})[$__range:$__interval])"
+    )
 
 @section
 def _(outer_panels: Panels):
@@ -8,10 +24,103 @@ def _(outer_panels: Panels):
     # We use this filter to suppress the actor-level panels if applicable.
     actor_level_filter = "actor_id!=''"
     panels = outer_panels.sub_panel()
+    actor_count_expr = (
+        f"clamp_min(sum({metric('stream_actor_count')}) by (fragment_id), 1)"
+    )
+    poll_duration_rate_expr = (
+        f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
+    )
+    poll_duration_expr = (
+        f"{poll_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
+    )
+    idle_duration_rate_expr = (
+        f"sum(rate({metric('stream_actor_idle_duration')}[$__rate_interval])) by (fragment_id)"
+    )
+    idle_duration_expr = (
+        f"{idle_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
+    )
+    scheduled_duration_rate_expr = (
+        f"sum(rate({metric('stream_actor_scheduled_duration')}[$__rate_interval])) by (fragment_id)"
+    )
+    scheduled_duration_expr = (
+        f"{scheduled_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
+    )
     return [
         outer_panels.row_collapsed(
             "Streaming Fragments",
             [
+                panels.subheader("Overview"),
+                panels.table_info(
+                    "Top Fragments by Busy Rate",
+                    "Top 10 fragments with the highest peak busy rate (%).",
+                    [
+                        panels.table_target(
+                            topk_percent_expr(
+                                _fragment_peak_rate_with_id_at_step(
+                                    _actor_busy_rate_expr("$__rate_interval")
+                                )
+                            )
+                        )
+                    ],
+                    ["id", "Value"],
+                    dict.fromkeys(["Time", "fragment_id"], True),
+                    {"Value": "rate"},
+                    {"rate": "percent"},
+                ),
+                panels.table_info(
+                    "Top Fragments by CPU Rate",
+                    "Top 10 fragments with the highest peak CPU rate (%).",
+                    [
+                        panels.table_target(
+                            topk_percent_expr(
+                                _fragment_peak_rate_with_id_at_step(
+                                    poll_duration_expr,
+                                    normalize_ns=True,
+                                )
+                            )
+                        )
+                    ],
+                    ["id", "Value"],
+                    dict.fromkeys(["Time", "fragment_id"], True),
+                    {"Value": "rate"},
+                    {"rate": "percent"},
+                ),
+                panels.table_info(
+                    "Top Fragments by Idle Rate",
+                    "Top 10 fragments with the highest peak idle rate (%).",
+                    [
+                        panels.table_target(
+                            topk_percent_expr(
+                                _fragment_peak_rate_with_id_at_step(
+                                    idle_duration_expr,
+                                    normalize_ns=True,
+                                )
+                            )
+                        )
+                    ],
+                    ["id", "Value"],
+                    dict.fromkeys(["Time", "fragment_id"], True),
+                    {"Value": "rate"},
+                    {"rate": "percent"},
+                ),
+                panels.table_info(
+                    "Top Fragments by Scheduling Delay Rate",
+                    "Top 10 fragments with the highest peak scheduling delay rate (%).",
+                    [
+                        panels.table_target(
+                            topk_percent_expr(
+                                _fragment_peak_rate_with_id_at_step(
+                                    scheduled_duration_expr,
+                                    normalize_ns=True,
+                                )
+                            )
+                        )
+                    ],
+                    ["id", "Value"],
+                    dict.fromkeys(["Time", "fragment_id"], True),
+                    {"Value": "rate"},
+                    {"rate": "percent"},
+                ),
                 panels.subheader("Busy Rate (IO + CPU Usage) by Fragment"),
                 panels.timeseries_percentage(
                     "Actor Busy Rate",
@@ -54,9 +163,7 @@ def _(outer_panels: Panels):
                     "This can be used to estimate the CPU usage of an actor",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
-                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
-                            f" / 1000000000",
+                            f"{poll_duration_expr} / 1000000000",
                             "fragment {{fragment_id}}",
                         ),
                     ],
@@ -86,9 +193,7 @@ def _(outer_panels: Panels):
                     "Idle time could be due to no data to process, or waiting for async operations like IO",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_actor_idle_duration')}[$__rate_interval])) by (fragment_id)"
-                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
-                            f" / 1000000000",
+                            f"{idle_duration_expr} / 1000000000",
                             "fragment {{fragment_id}}",
                         ),
                     ],
@@ -118,9 +223,7 @@ def _(outer_panels: Panels):
                     "Scheduling delay could be due to poor scheduling priority, or a lack of CPU resources - for instance if there are long polling durations, can be mitigated by scaling up the number of worker threads, or improving the concurrency of the operator",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_actor_scheduled_duration')}[$__rate_interval])) by (fragment_id)"
-                            f"/ on(fragment_id) sum({metric('stream_actor_count')}) by (fragment_id)"
-                            f" / 1000000000",
+                            f"{scheduled_duration_expr} / 1000000000",
                             "fragment {{fragment_id}}",
                         ),
                     ],
