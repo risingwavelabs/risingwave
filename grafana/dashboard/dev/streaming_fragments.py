@@ -8,10 +8,14 @@ from .streaming_common import (
     topk_percent_expr,
 )
 
-def _fragment_peak_rate_with_id_at_step(expr: str) -> str:
-    """Compute the peak rate over the dashboard range and attach `id` from fragment_id."""
+def _fragment_peak_rate_with_id_at_step(expr: str, normalize_ns: bool = False) -> str:
+    """Compute the peak rate over the dashboard range and attach `id` from fragment_id.
+
+    Set normalize_ns=True when the input expression is in nanoseconds.
+    """
+    normalized_expr = f"({expr}) / 1000000000" if normalize_ns else expr
     return relabel_fragment_id_as_id(
-        f"max_over_time(({expr})[$__range:$__interval])"
+        f"max_over_time(({normalized_expr})[$__range:$__interval])"
     )
 
 @section
@@ -27,19 +31,19 @@ def _(outer_panels: Panels):
         f"sum(rate({metric('stream_actor_poll_duration')}[$__rate_interval])) by (fragment_id)"
     )
     poll_duration_expr = (
-        f"{poll_duration_rate_expr} / on(fragment_id) {actor_count_expr} / 1000000000"
+        f"{poll_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
     )
     idle_duration_rate_expr = (
         f"sum(rate({metric('stream_actor_idle_duration')}[$__rate_interval])) by (fragment_id)"
     )
     idle_duration_expr = (
-        f"{idle_duration_rate_expr} / on(fragment_id) {actor_count_expr} / 1000000000"
+        f"{idle_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
     )
     scheduled_duration_rate_expr = (
         f"sum(rate({metric('stream_actor_scheduled_duration')}[$__rate_interval])) by (fragment_id)"
     )
     scheduled_duration_expr = (
-        f"{scheduled_duration_rate_expr} / on(fragment_id) {actor_count_expr} / 1000000000"
+        f"{scheduled_duration_rate_expr} / on(fragment_id) {actor_count_expr}"
     )
     return [
         outer_panels.row_collapsed(
@@ -70,7 +74,8 @@ def _(outer_panels: Panels):
                         panels.table_target(
                             topk_percent_expr(
                                 _fragment_peak_rate_with_id_at_step(
-                                    poll_duration_expr
+                                    poll_duration_expr,
+                                    normalize_ns=True,
                                 )
                             )
                         )
@@ -87,7 +92,8 @@ def _(outer_panels: Panels):
                         panels.table_target(
                             topk_percent_expr(
                                 _fragment_peak_rate_with_id_at_step(
-                                    idle_duration_expr
+                                    idle_duration_expr,
+                                    normalize_ns=True,
                                 )
                             )
                         )
@@ -104,7 +110,8 @@ def _(outer_panels: Panels):
                         panels.table_target(
                             topk_percent_expr(
                                 _fragment_peak_rate_with_id_at_step(
-                                    scheduled_duration_expr
+                                    scheduled_duration_expr,
+                                    normalize_ns=True,
                                 )
                             )
                         )
@@ -156,7 +163,7 @@ def _(outer_panels: Panels):
                     "This can be used to estimate the CPU usage of an actor",
                     [
                         panels.target(
-                            f"{poll_duration_expr}",
+                            f"{poll_duration_expr} / 1000000000",
                             "fragment {{fragment_id}}",
                         ),
                     ],
@@ -186,7 +193,7 @@ def _(outer_panels: Panels):
                     "Idle time could be due to no data to process, or waiting for async operations like IO",
                     [
                         panels.target(
-                            f"{idle_duration_expr}",
+                            f"{idle_duration_expr} / 1000000000",
                             "fragment {{fragment_id}}",
                         ),
                     ],
@@ -216,7 +223,7 @@ def _(outer_panels: Panels):
                     "Scheduling delay could be due to poor scheduling priority, or a lack of CPU resources - for instance if there are long polling durations, can be mitigated by scaling up the number of worker threads, or improving the concurrency of the operator",
                     [
                         panels.target(
-                            f"{scheduled_duration_expr}",
+                            f"{scheduled_duration_expr} / 1000000000",
                             "fragment {{fragment_id}}",
                         ),
                     ],
