@@ -81,6 +81,8 @@ pub struct CompactTask {
     pub max_sub_compaction: u32,
 
     pub max_kv_count_for_xor16: Option<u64>,
+
+    pub max_vnode_key_range_bytes: Option<u64>,
 }
 
 impl CompactTask {
@@ -127,6 +129,10 @@ impl CompactTask {
                 .values()
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
                 .sum::<usize>()
+            + self
+                .max_vnode_key_range_bytes
+                .map(|_| size_of::<u32>())
+                .unwrap_or_default()
             + self
                 .value_table_watermarks
                 .values()
@@ -238,6 +244,14 @@ impl CompactTask {
 
         crate::filter_utils::is_kv_count_too_large_for_xor16(kv_count, self.max_kv_count_for_xor16)
     }
+
+    /// Returns the effective vnode key-range hint limit (in bytes) for this compaction task.
+    ///
+    /// The hint is only meaningful when all input SSTs belong to a single table.
+    pub fn effective_max_vnode_key_range_bytes(&self) -> Option<usize> {
+        let limit = self.max_vnode_key_range_bytes.filter(|&v| v > 0)? as usize;
+        (self.build_compact_table_ids().len() == 1).then_some(limit)
+    }
 }
 
 fn split_watermark_serde_types(
@@ -339,6 +353,7 @@ impl From<PbCompactTask> for CompactTask {
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
+            max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -404,6 +419,7 @@ impl From<&PbCompactTask> for CompactTask {
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
+            max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -459,6 +475,7 @@ impl From<CompactTask> for PbCompactTask {
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
+            max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
         }
     }
 }
@@ -514,6 +531,7 @@ impl From<&CompactTask> for PbCompactTask {
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
+            max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
         }
     }
 }

@@ -29,6 +29,15 @@ use crate::monitor::CompactorMetrics;
 
 thread_local!(static LOCAL_METRICS: RefCell<HashMap<u32,LocalStoreMetrics>> = RefCell::new(HashMap::default()));
 
+#[cfg(test)]
+pub(crate) fn flush_local_metrics_for_test() {
+    LOCAL_METRICS.with_borrow_mut(|local_metrics| {
+        for metrics in local_metrics.values_mut() {
+            metrics.flush();
+        }
+    });
+}
+
 #[derive(Default, Debug)]
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
@@ -58,6 +67,9 @@ pub struct StoreLocalStatistic {
     pub staging_sst_get_count: u64,
     pub overlapping_get_count: u64,
     pub non_overlapping_get_count: u64,
+
+    pub vnode_checked_get_count: u64,
+    pub vnode_pruned_get_count: u64,
 
     #[cfg(all(debug_assertions, not(any(madsim, test, feature = "test"))))]
     reported: AtomicBool,
@@ -207,6 +219,8 @@ impl StoreLocalStatistic {
             || self.bloom_filter_true_negative_counts != 0
             || self.remote_io_time.load(Ordering::Relaxed) != 0
             || self.bloom_filter_check_counts != 0
+            || self.vnode_checked_get_count != 0
+            || self.vnode_pruned_get_count != 0
     }
 }
 
@@ -248,6 +262,9 @@ struct LocalStoreMetrics {
     staging_sst_get_count: LocalHistogram,
     overlapping_get_count: LocalHistogram,
     non_overlapping_get_count: LocalHistogram,
+
+    vnode_checked_get_count: LabelGuardedLocalIntCounter,
+    vnode_pruned_get_count: LabelGuardedLocalIntCounter,
 }
 
 const FLUSH_LOCAL_METRICS_TIMES: usize = 32;
@@ -352,6 +369,15 @@ impl LocalStoreMetrics {
             .with_label_values(&[table_id_label, "committed-non-overlapping-get"])
             .local();
 
+        let vnode_checked_get_count = metrics
+            .vnode_pruning_counts
+            .with_guarded_label_values(&[table_id_label, "get", "checked"])
+            .local();
+        let vnode_pruned_get_count = metrics
+            .vnode_pruning_counts
+            .with_guarded_label_values(&[table_id_label, "get", "pruned"])
+            .local();
+
         Self {
             cache_data_block_total,
             cache_data_block_miss,
@@ -377,6 +403,8 @@ impl LocalStoreMetrics {
             staging_sst_get_count,
             overlapping_get_count,
             non_overlapping_get_count,
+            vnode_checked_get_count,
+            vnode_pruned_get_count,
         }
     }
 
@@ -464,7 +492,9 @@ add_local_metrics_count!(
     skip_delete_key_count,
     get_shared_buffer_hit_counts,
     total_key_count,
-    processed_key_count
+    processed_key_count,
+    vnode_checked_get_count,
+    vnode_pruned_get_count
 );
 
 macro_rules! define_bloom_filter_metrics {

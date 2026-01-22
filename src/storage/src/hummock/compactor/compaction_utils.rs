@@ -121,24 +121,52 @@ impl CompactionStatistics {
 
 #[derive(Clone, Default)]
 pub struct TaskConfig {
-    pub key_range: KeyRange,
-    pub cache_policy: CachePolicy,
-    pub gc_delete_keys: bool,
-    pub retain_multiple_version: bool,
+    pub(crate) key_range: KeyRange,
+    pub(crate) cache_policy: CachePolicy,
+    pub(crate) gc_delete_keys: bool,
+    pub(crate) retain_multiple_version: bool,
     /// `stats_target_table_ids` decides whether a dropped key should be counted as table stats
     /// change. For an divided SST as input, a dropped key shouldn't be counted if its table id
     /// doesn't belong to this divided SST. See `Compactor::compact_and_build_sst`.
-    pub stats_target_table_ids: Option<HashSet<TableId>>,
-    pub task_type: PbTaskType,
-    pub use_block_based_filter: bool,
+    pub(crate) stats_target_table_ids: Option<HashSet<TableId>>,
+    pub(crate) use_block_based_filter: bool,
 
-    pub table_vnode_partition: BTreeMap<TableId, u32>,
+    pub(crate) table_vnode_partition: BTreeMap<TableId, u32>,
     /// `TableId` -> `TableSchema`
     /// Schemas in `table_schemas` are at least as new as the one used to create `input_ssts`.
     /// For a table with schema existing in `table_schemas`, its columns not in `table_schemas` but in `input_ssts` can be safely dropped.
-    pub table_schemas: HashMap<TableId, PbTableSchema>,
+    pub(crate) table_schemas: HashMap<TableId, PbTableSchema>,
     /// `disable_drop_column_optimization` should only be set in benchmark.
-    pub disable_drop_column_optimization: bool,
+    pub(crate) disable_drop_column_optimization: bool,
+}
+
+impl TaskConfig {
+    #[cfg(any(test, feature = "test"))]
+    pub fn for_test(
+        key_range: KeyRange,
+        cache_policy: CachePolicy,
+        gc_delete_keys: bool,
+        use_block_based_filter: bool,
+        table_schemas: HashMap<TableId, PbTableSchema>,
+    ) -> Self {
+        Self {
+            key_range,
+            cache_policy,
+            gc_delete_keys,
+            retain_multiple_version: false,
+            stats_target_table_ids: None,
+            use_block_based_filter,
+            table_vnode_partition: BTreeMap::default(),
+            table_schemas,
+            disable_drop_column_optimization: false,
+        }
+    }
+
+    #[cfg(any(test, feature = "test"))]
+    pub fn with_disable_drop_column_optimization(mut self, disable: bool) -> Self {
+        self.disable_drop_column_optimization = disable;
+        self
+    }
 }
 
 pub fn build_multi_compaction_filter(compact_task: &CompactTask) -> MultiCompactionFilter {
