@@ -15,6 +15,19 @@ enum BloomFilterType {
   BLOCKED = 2;
 }
 
+// Key range for a single vnode within an SST.
+// Keys are always represented as closed intervals: [min_key, max_key].
+message VnodeUserKeyRange {
+  bytes min_key = 1;
+  bytes max_key = 2;
+}
+
+// Optional per-vnode statistics for SSTs with few vnodes.
+// Enables more precise query pruning by providing vnode-level key ranges.
+message VnodeStatistics {
+  map<uint32, VnodeUserKeyRange> vnode_user_key_ranges = 1;
+}
+
 message SstableInfo {
   uint64 object_id = 1;
   uint64 sst_id = 2;
@@ -34,6 +47,10 @@ message SstableInfo {
   // In order to calculate more finely in the compaction strategy, we need to re-calculate the sst_size after split sst
   // `sst_size` represents the size of the sst instead of the object size(usually used in the meta).
   uint64 sst_size = 14;
+
+  // Optional per-vnode statistics for query pruning when the SST spans only a small set of vnodes.
+  // Only emitted when SST contains multiple vnodes to avoid redundancy with key_range.
+  VnodeStatistics vnode_statistics = 15;
 }
 
 enum LevelType {
@@ -496,6 +513,8 @@ message CompactTask {
   // The maximum key-value count threshold for using Xor16 filter.
   // When the number of keys exceeds this threshold, a BlockedXor16 filter will be used.
   optional uint64 max_kv_count_for_xor16 = 28;
+  // Max bytes for vnode-level key range hints to embed into output SSTs.
+  optional uint64 max_vnode_key_range_bytes = 29;
 }
 
 message LevelHandler {
@@ -799,6 +818,8 @@ message RiseCtlUpdateCompactionConfigRequest {
       uint64 vnode_aligned_level_size_threshold = 31;
       // The maximum key-value count threshold for using Xor16 filter
       uint64 max_kv_count_for_xor16 = 32;
+      // Max bytes for vnode key-range hints recorded into each SST.
+      uint64 max_vnode_key_range_bytes = 33;
     }
   }
   repeated uint64 compaction_group_ids = 1;
@@ -1040,6 +1061,9 @@ message CompactionConfig {
   //
   // Typical value: 256 * 1024 (256K keys).
   optional uint64 max_kv_count_for_xor16 = 32;
+
+  // Max bytes for vnode key-range hints recorded into each SST.
+  optional uint64 max_vnode_key_range_bytes = 33;
 }
 
 message TableStats {
