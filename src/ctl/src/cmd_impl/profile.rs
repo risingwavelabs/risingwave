@@ -33,6 +33,7 @@ pub enum ProfileWorkerType {
     Frontend,
     ComputeNode,
     Compactor,
+    Meta,
 }
 
 pub async fn cpu_profile(
@@ -167,6 +168,7 @@ fn selected_worker_types(values: &[ProfileWorkerType]) -> HashSet<WorkerType> {
             WorkerType::Frontend,
             WorkerType::ComputeNode,
             WorkerType::Compactor,
+            WorkerType::Meta,
         ]);
     }
     values.iter().map(|value| to_worker_type(*value)).collect()
@@ -177,6 +179,7 @@ fn to_worker_type(value: ProfileWorkerType) -> WorkerType {
         ProfileWorkerType::Frontend => WorkerType::Frontend,
         ProfileWorkerType::ComputeNode => WorkerType::ComputeNode,
         ProfileWorkerType::Compactor => WorkerType::Compactor,
+        ProfileWorkerType::Meta => WorkerType::Meta,
     }
 }
 
@@ -185,6 +188,7 @@ fn worker_type_label(worker_type: WorkerType) -> &'static str {
         WorkerType::Frontend => "frontend",
         WorkerType::ComputeNode => "compute-node",
         WorkerType::Compactor => "compactor",
+        WorkerType::Meta => "meta",
         _ => "unknown",
     }
 }
