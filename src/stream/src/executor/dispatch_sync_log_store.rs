@@ -862,7 +862,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                 write_future_state =
                                     WriteFuture::receive_from_upstream(stream, write_state);
                             }
-                            WriteFutureEvent::EndofStream => {
+                            WriteFutureEvent::EndOfStream => {
                                 write_done = true;
                                 write_future_state = WriteFuture::Empty;
                                 continue;
