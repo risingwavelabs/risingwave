@@ -1,0 +1,117 @@
+# Test for noop update elimination in hash dispatcher
+# When a table has columns that are projected out, updates to those columns
+# should be eliminated before reaching downstream operators.
+#
+# This test uses AS CHANGELOG to verify that noop updates are actually eliminated
+# and don't flow through to downstream operators.
+#
+# Issue: https://github.com/risingwavelabs/risingwave/issues/24568
+#        https://github.com/risingwavelabs/risingwave/issues/24579
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Create table t1 with an extra column (c3) that will be projected out
+statement ok
+CREATE TABLE t1 (
+    a INT PRIMARY KEY,
+    b INT,
+    c3 INT
+);
+
+# Create table t2 to join with t1
+statement ok
+CREATE TABLE t2 (
+    x INT,
+    y INT,
+    z INT,
+    PRIMARY KEY (x, y, z)
+);
+
+# Insert some data into t1
+statement ok
+INSERT INTO t1 VALUES (1, 10, 100), (2, 20, 200), (3, 30, 300);
+
+# Insert data into t2 with multiple rows per join key
+statement ok
+INSERT INTO t2 VALUES
+    (1, 0, 0), (1, 0, 1), (1, 0, 2),
+    (2, 1, 0), (2, 1, 1),
+    (3, 2, 0);
+
+# Create a materialized view with a LEFT OUTER join
+# The join uses t2.x = t1.a, but only outputs t1.a and t1.b (not t1.c3)
+# Updates to c3 should be noop updates after projection
+statement ok
+CREATE MATERIALIZED VIEW mv AS
+SELECT t2.x, t2.y, t2.z, t1.b
+FROM t2
+LEFT JOIN t1 ON t2.x = t1.a;
+
+# Create a changelog MV to capture all changes flowing through
+statement ok
+CREATE MATERIALIZED VIEW mv_log AS
+WITH sub AS CHANGELOG FROM mv
+SELECT * FROM sub;
+
+# Check initial changelog - should have 6 inserts
+query I
+SELECT count(*) FROM mv_log;
+----
+6
+
+# Update ONLY column c3 (not in output) - should be a noop after projection
+statement ok
+UPDATE t1 SET c3 = 999 WHERE a = 1;
+
+# Changelog should still be 6 if noop updates are eliminated
+# Without the fix, would see 6 more entries (3 deletes + 3 inserts)
+query I
+SELECT count(*) FROM mv_log;
+----
+6
+
+# Multiple noop updates should also be eliminated
+statement ok
+UPDATE t1 SET c3 = 888 WHERE a = 1;
+
+statement ok
+UPDATE t1 SET c3 = 777 WHERE a = 2;
+
+query I
+SELECT count(*) FROM mv_log;
+----
+6
+
+# Real update to column b - this SHOULD cause changes
+statement ok
+UPDATE t1 SET b = 11 WHERE a = 1;
+
+# Changelog should now have 12 entries: 6 original inserts + 3 deletes + 3 inserts
+query I
+SELECT count(*) FROM mv_log;
+----
+12
+
+# Multiple noop updates across multiple keys
+statement ok
+UPDATE t1 SET c3 = 111 WHERE a IN (1, 2, 3);
+
+# Changelog should still be 12 - noop updates should be eliminated
+query I
+SELECT count(*) FROM mv_log;
+----
+12
+
+# Cleanup
+statement ok
+DROP MATERIALIZED VIEW mv_log;
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP TABLE t2;
+
+statement ok
+DROP TABLE t1;
