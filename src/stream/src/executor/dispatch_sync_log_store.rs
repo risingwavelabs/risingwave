@@ -219,7 +219,7 @@ impl<S: LocalStateStore> WriteFuture<S> {
                     }
                     None => {
                         must_match!(replace(self, WriteFuture::Empty), WriteFuture::ReceiveFromUpstream { write_state, .. } => {
-                            Ok((stream, write_state, WriteFutureEvent::EndofStream))
+                            Ok((stream, write_state, WriteFutureEvent::EndOfStream))
                         })
                     }
                 }
