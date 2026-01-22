@@ -929,16 +929,12 @@ where
         });
 
         // Restore persisted table watermark.
-        //
-        // Note: currently the underlying local state store only exposes persisted watermarks for
-        // `PkPrefix` type (i.e., the first PK column), so we only restore in that case.
         let max_watermark_of_vnodes = distribution
             .vnodes()
             .iter_vnodes()
             .filter_map(|vnode| local_state_store.get_table_watermark(vnode))
             .max();
-        let committed_watermark = if let Some((deser, WatermarkSerdeType::PkPrefix)) =
-            watermark_serde.as_ref()
+        let committed_watermark = if let Some((deser, _)) = watermark_serde.as_ref()
             && let Some(max_watermark) = max_watermark_of_vnodes
         {
             let deserialized = deser.deserialize(&max_watermark).ok().and_then(|row| {
