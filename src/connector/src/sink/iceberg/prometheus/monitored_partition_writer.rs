@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use iceberg::Result;
-use iceberg::spec::DataFile;
+use iceberg::spec::{DataFile, PartitionKey};
 use iceberg::writer::function_writer::fanout_partition_writer::{
     FanoutPartitionWriter, FanoutPartitionWriterBuilder,
 };
@@ -44,8 +44,8 @@ impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriterBuilder<B> {
 impl<B: IcebergWriterBuilder> IcebergWriterBuilder for MonitoredFanoutPartitionedWriterBuilder<B> {
     type R = MonitoredFanoutPartitionedWriter<B>;
 
-    async fn build(self) -> Result<Self::R> {
-        let writer = self.inner.build().await?;
+    async fn build(self, partition_key: Option<PartitionKey>) -> Result<Self::R> {
+        let writer = self.inner.build(partition_key).await?;
         Ok(MonitoredFanoutPartitionedWriter {
             inner: writer,
             partition_num_metrics: self.partition_num_metrics,

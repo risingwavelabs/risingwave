@@ -93,7 +93,7 @@
       │   └─LogicalProject { exprs: [window_start, auction] }
       │     └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
       │       └─LogicalFilter { predicate: IsNotNull(date_time) }
-      │         └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+      │         └─LogicalSource { source: bid, is_shared: false, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
       └─LogicalProject { exprs: [max(count), window_start] }
         └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
           └─LogicalProject { exprs: [window_start, count] }
@@ -102,7 +102,7 @@
                 └─LogicalProject { exprs: [auction, window_start] }
                   └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
                     └─LogicalFilter { predicate: IsNotNull(date_time) }
-                      └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+                      └─LogicalSource { source: bid, is_shared: false, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [auction, count] }

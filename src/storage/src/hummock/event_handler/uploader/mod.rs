@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -485,6 +485,7 @@ struct LocalInstanceUnsyncData {
     // newer data comes first
     flushing_imms: VecDeque<SharedBufferBatchId>,
     is_destroyed: bool,
+    is_stopped: bool,
 }
 
 impl LocalInstanceUnsyncData {
@@ -496,11 +497,13 @@ impl LocalInstanceUnsyncData {
             sealed_data: VecDeque::new(),
             flushing_imms: Default::default(),
             is_destroyed: false,
+            is_stopped: false,
         }
     }
 
     fn add_imm(&mut self, imm: UploaderImm) {
         assert!(!self.is_destroyed);
+        assert!(!self.is_stopped);
         assert_eq!(self.table_id, imm.table_id);
         self.current_epoch_data
             .as_mut()
@@ -508,8 +511,7 @@ impl LocalInstanceUnsyncData {
             .add_imm(imm);
     }
 
-    fn local_seal_epoch(&mut self, next_epoch: HummockEpoch) -> HummockEpoch {
-        assert!(!self.is_destroyed);
+    fn local_seal_epoch(&mut self, next_epoch: HummockEpoch, stopped: bool) -> HummockEpoch {
         let data = self
             .current_epoch_data
             .as_mut()
@@ -517,9 +519,12 @@ impl LocalInstanceUnsyncData {
         let current_epoch = data.epoch;
         debug!(
             instance_id = self.instance_id,
-            next_epoch, current_epoch, "local seal epoch"
+            next_epoch, current_epoch, stopped, "local seal epoch"
         );
         assert_gt!(next_epoch, current_epoch);
+        assert!(!self.is_destroyed);
+        assert!(!self.is_stopped);
+        self.is_stopped = stopped;
         let epoch_data = replace(data, LocalInstanceEpochData::new(next_epoch));
         if !epoch_data.is_empty() {
             self.sealed_data.push_front(epoch_data);
@@ -655,10 +660,6 @@ struct TableUnsyncData {
     )>,
     spill_tasks: BTreeMap<HummockEpoch, VecDeque<UploadingTaskId>>,
     unsync_epochs: BTreeMap<HummockEpoch, ()>,
-    // Initialized to be `None`. Transform to `Some(_)` when called
-    // `local_seal_epoch` with a non-existing epoch, to mark that
-    // the fragment of the table has stopped.
-    stopped_next_epoch: Option<HummockEpoch>,
     // newer epoch at the front
     syncing_epochs: VecDeque<HummockEpoch>,
     max_synced_epoch: Option<HummockEpoch>,
@@ -672,7 +673,6 @@ impl TableUnsyncData {
             table_watermarks: None,
             spill_tasks: Default::default(),
             unsync_epochs: Default::default(),
-            stopped_next_epoch: None,
             syncing_epochs: Default::default(),
             max_synced_epoch: committed_epoch,
         }
@@ -883,45 +883,11 @@ impl UnsyncData {
             .instance_data
             .get_mut(&instance_id)
             .expect("should exist");
-        let epoch = instance_data.local_seal_epoch(next_epoch);
         // When drop/cancel a streaming job, for the barrier to stop actor, the
         // local instance will call `local_seal_epoch`, but the `next_epoch` won't be
         // called `start_epoch` because we have stopped writing on it.
-        if !table_data.unsync_epochs.contains_key(&next_epoch) {
-            if let Some(stopped_next_epoch) = table_data.stopped_next_epoch {
-                if stopped_next_epoch != next_epoch {
-                    let table_id = table_data.table_id;
-                    let unsync_epochs = table_data.unsync_epochs.keys().collect_vec();
-                    if cfg!(debug_assertions) {
-                        panic!(
-                            "table_id {} stop epoch {} different to prev stop epoch {}. unsync epochs: {:?}, syncing epochs {:?}, max_synced_epoch {:?}",
-                            table_id,
-                            next_epoch,
-                            stopped_next_epoch,
-                            unsync_epochs,
-                            table_data.syncing_epochs,
-                            table_data.max_synced_epoch
-                        );
-                    } else {
-                        warn!(
-                            %table_id,
-                            stopped_next_epoch,
-                            next_epoch,
-                            ?unsync_epochs,
-                            syncing_epochs = ?table_data.syncing_epochs,
-                            max_synced_epoch = ?table_data.max_synced_epoch,
-                            "different stop epoch"
-                        );
-                    }
-                }
-            } else {
-                if let Some(max_epoch) = table_data.max_epoch() {
-                    assert_gt!(next_epoch, max_epoch);
-                }
-                debug!(?table_id, epoch, next_epoch, "table data has stopped");
-                table_data.stopped_next_epoch = Some(next_epoch);
-            }
-        }
+        let stopped = !table_data.unsync_epochs.contains_key(&next_epoch);
+        let epoch = instance_data.local_seal_epoch(next_epoch, stopped);
         if let Some((direction, table_watermarks, watermark_type)) = opts.table_watermarks {
             table_data.add_table_watermarks(epoch, table_watermarks, direction, watermark_type);
         }
@@ -1692,15 +1658,19 @@ impl UploaderData {
 }
 
 impl HummockUploader {
-    pub(super) fn next_uploaded_sst(
+    pub(super) fn next_uploaded_ssts(
         &mut self,
-    ) -> impl Future<Output = Arc<StagingSstableInfo>> + '_ {
+    ) -> impl Future<Output = Vec<Arc<StagingSstableInfo>>> + '_ {
         poll_fn(|cx| {
             let UploaderState::Working(data) = &mut self.state else {
                 return Poll::Pending;
             };
 
-            if let Some((task_id, status, result)) = ready!(data.task_manager.poll_task_result(cx))
+            const MAX_BATCH_SIZE: usize = 16;
+
+            let mut ssts = None;
+            while let Poll::Ready(Some((task_id, status, result))) =
+                data.task_manager.poll_task_result(cx)
             {
                 match result {
                     Ok(sst) => {
@@ -1720,7 +1690,11 @@ impl HummockUploader {
                             }
                         }
                         data.check_upload_task_consistency();
-                        Poll::Ready(sst)
+                        let ssts = ssts.get_or_insert_with(|| Vec::with_capacity(MAX_BATCH_SIZE));
+                        ssts.push(sst);
+                        if ssts.len() >= MAX_BATCH_SIZE {
+                            break;
+                        }
                     }
                     Err((sync_id, e)) => {
                         let syncing_data =
@@ -1747,9 +1721,12 @@ impl HummockUploader {
                                 failed_epochs
                             ))
                         });
-                        Poll::Pending
+                        return Poll::Pending;
                     }
                 }
+            }
+            if let Some(ssts) = ssts {
+                Poll::Ready(ssts)
             } else {
                 Poll::Pending
             }
@@ -1875,6 +1852,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_uploader_basic() {
         let mut uploader = test_uploader(dummy_success_upload_future);
+        let mut sst_collector = UploadedSstCollector::default();
         let epoch1 = INITIAL_EPOCH.next_epoch();
         const VECTOR_INDEX_TABLE_ID: TableId = TableId::new(234);
         uploader.start_epoch(
@@ -1919,7 +1897,7 @@ pub(crate) mod tests {
         assert!(syncing_data.uploaded.is_empty());
         assert!(!syncing_data.remaining_uploading_tasks.is_empty());
 
-        let staging_sst = uploader.next_uploaded_sst().await;
+        let staging_sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&vec![epoch1], staging_sst.epochs());
         assert_eq!(
             &HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, vec![imm.batch_id()])]),
@@ -1979,6 +1957,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_uploader_destroy_instance_before_sync() {
         let mut uploader = test_uploader(dummy_success_upload_future);
+        let mut sst_collector = UploadedSstCollector::default();
         let epoch1 = INITIAL_EPOCH.next_epoch();
         uploader.start_epochs_for_test([epoch1]);
         let imm = gen_imm(epoch1).await;
@@ -1996,7 +1975,7 @@ pub(crate) mod tests {
         assert!(syncing_data.uploaded.is_empty());
         assert!(!syncing_data.remaining_uploading_tasks.is_empty());
 
-        let staging_sst = uploader.next_uploaded_sst().await;
+        let staging_sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&vec![epoch1], staging_sst.epochs());
         assert_eq!(
             &HashMap::from_iter([(TEST_LOCAL_INSTANCE_ID, vec![imm.batch_id()])]),
@@ -2121,7 +2100,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_uploader_poll_empty() {
         let mut uploader = test_uploader(dummy_success_upload_future);
-        let fut = uploader.next_uploaded_sst();
+        let fut = uploader.next_uploaded_ssts();
         let mut fut = pin!(fut);
         assert!(poll_fn(|cx| Poll::Ready(fut.as_mut().poll(cx).is_pending())).await);
     }
@@ -2129,6 +2108,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_uploader_empty_advance_mce() {
         let mut uploader = test_uploader(dummy_success_upload_future);
+        let mut sst_collector = UploadedSstCollector::default();
         let initial_pinned_version = uploader.context.pinned_version.clone();
         let epoch1 = INITIAL_EPOCH.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -2177,7 +2157,7 @@ pub(crate) mod tests {
         assert_eq!(epoch4, uploader.test_max_synced_epoch());
         assert_eq!(epoch6, uploader.test_max_syncing_epoch());
 
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_imm_ids([&imm]), sst.imm_ids());
 
         match sync_rx.await {
@@ -2203,6 +2183,7 @@ pub(crate) mod tests {
         };
         let (buffer_tracker, mut uploader, new_task_notifier) =
             prepare_uploader_order_test(&config, false);
+        let mut sst_collector = UploadedSstCollector::default();
 
         let epoch1 = INITIAL_EPOCH.next_epoch();
         let epoch2 = epoch1.next_epoch();
@@ -2244,11 +2225,11 @@ pub(crate) mod tests {
         assert_uploader_pending(&mut uploader).await;
 
         finish_tx1.send(()).unwrap();
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch1_spill_payload12), sst.imm_ids());
         assert_eq!(&vec![epoch1], sst.epochs());
 
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch2_spill_payload), sst.imm_ids());
         assert_eq!(&vec![epoch2], sst.epochs());
 
@@ -2265,7 +2246,7 @@ pub(crate) mod tests {
         let (await_start1_4, finish_tx1_4) =
             new_task_notifier(get_payload_imm_ids(&epoch1_sync_payload));
         uploader.local_seal_epoch_for_test(instance_id1, epoch1);
-        let (sync_tx1, mut sync_rx1) = oneshot::channel();
+        let (sync_tx1, sync_rx1) = oneshot::channel();
         uploader.start_single_epoch_sync(epoch1, sync_tx1, HashSet::from_iter([TEST_TABLE_ID]));
         await_start1_4.await;
 
@@ -2316,12 +2297,10 @@ pub(crate) mod tests {
         assert_uploader_pending(&mut uploader).await;
         finish_tx1_3.send(()).unwrap();
 
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch1_spill_payload3), sst.imm_ids());
 
-        assert!(poll_fn(|cx| Poll::Ready(sync_rx1.poll_unpin(cx).is_pending())).await);
-
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch1_sync_payload), sst.imm_ids());
 
         match sync_rx1.await {
@@ -2355,7 +2334,7 @@ pub(crate) mod tests {
         let (sync_tx2, sync_rx2) = oneshot::channel();
         uploader.start_single_epoch_sync(epoch2, sync_tx2, HashSet::from_iter([TEST_TABLE_ID]));
         uploader.local_seal_epoch_for_test(instance_id2, epoch3);
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload1), sst.imm_ids());
 
         match sync_rx2.await {
@@ -2398,13 +2377,13 @@ pub(crate) mod tests {
         assert_uploader_pending(&mut uploader).await;
 
         finish_tx3_2.send(()).unwrap();
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch3_spill_payload2), sst.imm_ids());
 
         finish_tx4_with_3_3.send(()).unwrap();
         assert!(poll_fn(|cx| Poll::Ready(sync_rx4.poll_unpin(cx).is_pending())).await);
 
-        let sst = uploader.next_uploaded_sst().await;
+        let sst = sst_collector.next(&mut uploader).await;
         assert_eq!(&get_payload_imm_ids(&epoch4_sync_payload), sst.imm_ids());
 
         match sync_rx4.await {

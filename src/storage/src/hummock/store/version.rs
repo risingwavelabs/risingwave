@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -230,6 +230,8 @@ pub struct HummockReadVersion {
     table_id: TableId,
     instance_id: LocalInstanceId,
 
+    is_initialized: bool,
+
     /// Local version for staging data.
     staging: StagingVersion,
 
@@ -278,8 +280,8 @@ impl HummockReadVersion {
                                     .committed_epoch,
                             ))
                         }
-
                         WatermarkSerdeType::NonPkPrefix => None, /* do not fill the non-pk prefix watermark to index */
+                        WatermarkSerdeType::Value => None,
                     },
                     None => None,
                 }
@@ -295,6 +297,7 @@ impl HummockReadVersion {
 
             is_replicated,
             vnodes,
+            is_initialized: false,
         }
     }
 
@@ -311,7 +314,13 @@ impl HummockReadVersion {
         self.table_id
     }
 
+    pub fn init(&mut self) {
+        assert!(!self.is_initialized);
+        self.is_initialized = true;
+    }
+
     pub fn add_imm(&mut self, imm: ImmutableMemtable) {
+        assert!(self.is_initialized);
         if let Some(item) = self
             .staging
             .pending_imms
@@ -516,6 +525,10 @@ impl HummockReadVersion {
             .and_then(|watermark_index| watermark_index.latest_watermark(vnode))
     }
 
+    pub fn is_initialized(&self) -> bool {
+        self.is_initialized
+    }
+
     pub fn is_replicated(&self) -> bool {
         self.is_replicated
     }
@@ -653,7 +666,12 @@ impl HummockVersionReader {
             TableKey(table_key.clone()),
             EpochWithGap::new(epoch, MAX_SPILL_TIMES),
         );
-        for local_sst in &uncommitted_ssts {
+        let single_table_key_range = table_key.clone()..=table_key.clone();
+
+        // prune uncommitted ssts with the keyrange
+        let pruned_uncommitted_ssts =
+            prune_overlapping_ssts(&uncommitted_ssts, table_id, &single_table_key_range);
+        for local_sst in pruned_uncommitted_ssts {
             local_stats.staging_sst_get_count += 1;
             if let Some(iter) = get_from_sstable_info(
                 self.sstable_store.clone(),
@@ -686,7 +704,6 @@ impl HummockVersionReader {
                 });
             }
         }
-        let single_table_key_range = table_key.clone()..=table_key.clone();
         // 3. read from committed_version sst file
         // Because SST meta records encoded key range,
         // the filter key needs to be encoded as well.

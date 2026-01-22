@@ -20,7 +20,7 @@ def _(outer_panels: Panels):
     read_op_filter = f"type=~'({'|'.join(read_op_types)})'"
     return [
         outer_panels.row_collapsed(
-            "Object Storage",
+            "[Storage] Object Storage",
             [
                 panels.timeseries_bytes_per_sec(
                     "Operation Throughput",

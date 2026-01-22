@@ -161,3 +161,6 @@ risedev slt 'e2e_test/sink/kafka/avro-decimal.slt'
 
 echo "testing avro-enum"
 risedev slt 'e2e_test/sink/kafka/avro-enum.slt'
+
+echo "testing bytes format"
+risedev slt 'e2e_test/sink/kafka/test_bytes_format.slt'

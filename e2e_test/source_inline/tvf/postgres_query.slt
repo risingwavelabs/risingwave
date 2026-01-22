@@ -39,6 +39,12 @@ create source postgres_cdc_source with (
 );
 
 
+# upstream requires ssl connection for `ssl_user`
+query I
+select * from postgres_query('$PGHOST', '$PGPORT', 'ssl_user', 'ssl_password', 'source_test', 'select 1;');
+----
+1
+
 query II retry 4 backoff 1s
 select * from postgres_query('$PGHOST', '$PGPORT', '$PGUSER', '$PGPASSWORD', 'source_test', 'select * from test where id > 90;');
 ----

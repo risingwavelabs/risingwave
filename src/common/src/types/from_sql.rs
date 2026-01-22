@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,6 +47,10 @@ impl<'a> FromSql<'a> for ScalarImpl {
             {
                 ScalarImpl::from(String::from_sql(ty, raw)?)
             }
+            // PostGIS geometry type: read as EWKB bytes
+            ref ty if ty.name() == "geometry" => {
+                ScalarImpl::from(Vec::<u8>::from_sql(ty, raw)?.into_boxed_slice())
+            }
             // Serial, Int256, Struct, List and Decimal are not supported here
             // Note: The Decimal type is specially handled in the `ScalarAdapter`.
             _ => {
@@ -78,6 +82,7 @@ impl<'a> FromSql<'a> for ScalarImpl {
         ) || (ty.name() == "citext"
             || ty.name() == "ltree"
             || ty.name() == "lquery"
-            || ty.name() == "ltxtquery")
+            || ty.name() == "ltxtquery"
+            || ty.name() == "geometry")
     }
 }

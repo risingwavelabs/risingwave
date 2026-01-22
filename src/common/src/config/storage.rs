@@ -119,6 +119,12 @@ pub struct StorageConfig {
     #[config_doc(nested)]
     pub meta_file_cache: FileCacheConfig,
 
+    /// sst serde happens when a sst meta is written to meta disk cache.
+    /// excluding bloom filter from serde can reduce the meta disk cache entry size
+    /// and reduce the disk io throughput at the cost of making the bloom filter useless
+    #[serde(default = "default::storage::sst_skip_bloom_filter_in_serde")]
+    pub sst_skip_bloom_filter_in_serde: bool,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub cache_refill: CacheRefillConfig,
@@ -155,6 +161,13 @@ pub struct StorageConfig {
     pub compactor_fast_max_compact_task_size: u64,
     #[serde(default = "default::storage::compactor_iter_max_io_retry_times")]
     pub compactor_iter_max_io_retry_times: usize,
+
+    /// If set, block metadata keys will be shortened when their length exceeds this threshold.
+    /// This reduces `SSTable` metadata size by storing only the minimal distinguishing prefix.
+    /// - `None`: Disabled (default)
+    /// - `Some(n)`: Only shorten keys with length >= n bytes
+    #[serde(default = "default::storage::shorten_block_meta_key_threshold")]
+    pub shorten_block_meta_key_threshold: Option<usize>,
 
     /// Deprecated: The window size of table info statistic history.
     #[serde(default = "default::storage::table_info_statistic_history_times")]
@@ -946,6 +959,10 @@ pub mod default {
             8
         }
 
+        pub fn shorten_block_meta_key_threshold() -> Option<usize> {
+            None
+        }
+
         pub fn compactor_max_sst_size() -> u64 {
             512 * 1024 * 1024 // 512m
         }
@@ -1025,6 +1042,10 @@ pub mod default {
 
         pub fn time_travel_version_cache_capacity() -> u64 {
             10
+        }
+
+        pub fn sst_skip_bloom_filter_in_serde() -> bool {
+            false
         }
 
         pub fn iceberg_compaction_enable_validate() -> bool {

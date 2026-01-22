@@ -26,8 +26,11 @@ table_backfill_progress as (select
   progress.job_id,
   progress.fragment_id,
   scan_info.backfill_target_relation_id,
-  case when scan_info.backfill_type = 'SNAPSHOT_BACKFILL' AND progress.min_epoch > scan_info.backfill_epoch
-  then concat('100% (', stats.total_key_count, '/', stats.total_key_count, ')')
+  case
+    when stats.total_key_count is null
+      then '100% (0/0)'
+    when scan_info.backfill_type = 'SNAPSHOT_BACKFILL' AND progress.min_epoch > scan_info.backfill_epoch
+      then concat('100% (', stats.total_key_count, '/', stats.total_key_count, ')')
   else
     concat(
       coalesce(progress.current_row_count::numeric / stats.total_key_count::numeric * 100, 0),
@@ -42,7 +45,7 @@ table_backfill_progress as (select
   end as progress
 FROM internal_backfill_progress() progress
 JOIN rw_backfill_info scan_info ON progress.job_id = scan_info.job_id AND progress.fragment_id = scan_info.fragment_id
-JOIN rw_table_stats stats ON scan_info.backfill_target_relation_id = stats.id
+LEFT JOIN rw_table_stats stats ON scan_info.backfill_target_relation_id = stats.id
 ),
 aggregated_source_backfill_progress as (
   select

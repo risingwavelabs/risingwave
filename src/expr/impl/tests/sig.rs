@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -74,6 +74,7 @@ fn test_func_sig_map() {
             "cast(numeric) -> bigint/character varying/double precision/integer/real/smallint",
             "cast(real) -> bigint/character varying/double precision/integer/numeric/smallint",
             "cast(rw_int256) -> character varying/double precision",
+            "cast(serial) -> bigint/timestamp with time zone",
             "cast(smallint) -> bigint/character varying/double precision/integer/numeric/real/rw_int256",
             "cast(time without time zone) -> character varying/interval",
             "cast(timestamp without time zone) -> character varying/date/time without time zone",

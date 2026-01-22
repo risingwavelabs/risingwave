@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -431,43 +431,55 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
             }
         };
 
-    let source_refresh_mode =
-        if let Some(source_refresh_mode_str) = with_options.remove(SOURCE_REFRESH_MODE_KEY) {
-            match source_refresh_mode_str.to_uppercase().as_str() {
-                "STREAMING" => {
-                    if source_refresh_interval_sec.is_some() {
-                        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                            "`{}` is not allowed when `{}` is 'STREAMING'",
-                            SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
-                        ))));
-                    }
-                    SourceRefreshMode {
-                        refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
-                    }
+    let mut is_full_reload = false;
+    let source_refresh_mode_str = with_options.remove(SOURCE_REFRESH_MODE_KEY);
+    let source_refresh_mode = if let Some(source_refresh_mode_str) = &source_refresh_mode_str {
+        Some(match source_refresh_mode_str.to_uppercase().as_str() {
+            "STREAMING" => {
+                if source_refresh_interval_sec.is_some() {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` is not allowed when `{}` is 'STREAMING'",
+                        SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+                    ))));
                 }
-                "FULL_RELOAD" => SourceRefreshMode {
+                SourceRefreshMode {
+                    refresh_mode: Some(RefreshMode::Streaming(SourceRefreshModeStreaming {})),
+                }
+            }
+            "FULL_RELOAD" => {
+                is_full_reload = true;
+                SourceRefreshMode {
                     refresh_mode: Some(RefreshMode::FullReload(SourceRefreshModeFullReload {
                         refresh_interval_sec: source_refresh_interval_sec,
                     })),
-                },
-                _ => {
-                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                        "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RELOAD'",
-                        SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
-                    ))));
                 }
             }
-        } else {
-            // also check the `refresh_interval_sec` is not provided when `refresh_mode` is not provided
-            if source_refresh_interval_sec.is_some() {
+            _ => {
                 return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
-                    "`{}` is not allowed when `{}` is not 'FULL_RELOAD'",
-                    SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+                    "Invalid key `{}`: {}, accepted values are 'STREAMING' and 'FULL_RELOAD'",
+                    SOURCE_REFRESH_MODE_KEY, source_refresh_mode_str
                 ))));
             }
-            return Ok(None);
-        };
-    Ok(Some(source_refresh_mode))
+        })
+    } else {
+        // also check the `refresh_interval_sec` is not provided when `refresh_mode` is not provided
+        if source_refresh_interval_sec.is_some() {
+            return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                "`{}` is not allowed when `{}` is not 'FULL_RELOAD'",
+                SOURCE_REFRESH_INTERVAL_SEC_KEY, SOURCE_REFRESH_MODE_KEY
+            ))));
+        }
+        None
+    };
+
+    // Batch connectors require FULL_RELOAD mode.
+    if with_options.is_batch_connector() && !is_full_reload {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+            "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
+            with_options.get_connector().unwrap(),
+        ))));
+    }
+    Ok(source_refresh_mode)
 }
 
 pub(crate) fn resolve_privatelink_in_with_option(

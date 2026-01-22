@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -84,6 +84,10 @@ def_anyhow_newtype! {
     openssl::error::ErrorStack => "OpenSSL error",
     risingwave_common::secret::SecretError => "Secret error",
     EnforceSecretError => transparent,
+
+    // ADBC errors
+    #[cfg(feature = "source-adbc_snowflake")]
+    adbc_core::error::Error => "ADBC error",
 }
 
 pub type ConnectorResult<T, E = ConnectorError> = std::result::Result<T, E>;

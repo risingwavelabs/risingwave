@@ -18,12 +18,15 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use bytes::BytesMut;
+use itertools::Itertools;
 use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
-use risingwave_common::catalog::{Field, Schema};
+use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::connector_service::{SinkMetadata, sink_metadata};
+use risingwave_pb::id::ExecutorId;
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::Deserialize;
 use serde_json::json;
 use serde_with::{DisplayFromStr, serde_as};
@@ -48,7 +51,6 @@ use crate::sink::snowflake_redshift::{
 use crate::sink::writer::SinkWriter;
 use crate::sink::{
     Result, SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
-    SinkWriterMetrics,
 };
 
 pub const REDSHIFT_SINK: &str = "redshift";
@@ -476,7 +478,7 @@ impl RedshiftSinkCommitter {
 
     async fn write_manifest_to_s3(
         s3_inner: &S3Common,
-        executor_id: u64,
+        executor_id: ExecutorId,
         paths: Vec<String>,
         table: &str,
     ) -> Result<String> {
@@ -602,12 +604,7 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
         Ok(())
     }
 
-    async fn commit(
-        &mut self,
-        epoch: u64,
-        metadata: Vec<SinkMetadata>,
-        add_columns: Option<Vec<Field>>,
-    ) -> Result<()> {
+    async fn commit_data(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
         if let Some(handle) = &self.periodic_task_handle {
             let is_finished = handle.is_finished();
             if is_finished {
@@ -651,7 +648,13 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                 SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
             })?;
             {
-                Self::write_manifest_to_s3(s3_inner, 0, paths, &self.config.table).await?;
+                Self::write_manifest_to_s3(
+                    s3_inner,
+                    ExecutorId::default(),
+                    paths,
+                    &self.config.table,
+                )
+                .await?;
             }
             tracing::info!(
                 "Manifest file written to S3 for sink id {} at epoch {}",
@@ -659,96 +662,133 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                 epoch
             );
         }
+        Ok(())
+    }
 
-        if let Some(add_columns) = add_columns {
+    async fn commit_schema_change(
+        &mut self,
+        _epoch: u64,
+        schema_change: PbSinkSchemaChange,
+    ) -> Result<()> {
+        use risingwave_pb::stream_plan::sink_schema_change::PbOp as SinkSchemaChangeOp;
+        let schema_change_op = schema_change
+            .op
+            .ok_or_else(|| SinkError::Coordinator(anyhow!("Invalid schema change operation")))?;
+        let SinkSchemaChangeOp::AddColumns(add_columns) = schema_change_op else {
+            return Err(SinkError::Coordinator(anyhow!(
+                "Only AddColumns schema change is supported for Redshift sink"
+            )));
+        };
+        if let Some(shutdown_sender) = &self.shutdown_sender {
+            // Send shutdown signal to the periodic task before altering the table
+            shutdown_sender
+                .send(())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        }
+        let sql = build_alter_add_column_sql(
+            self.config.schema.as_deref(),
+            &self.config.table,
+            &add_columns
+                .fields
+                .iter()
+                .map(|f| {
+                    (
+                        f.name.clone(),
+                        DataType::from(f.data_type.as_ref().unwrap()).to_string(),
+                    )
+                })
+                .collect_vec(),
+        );
+        let check_column_exists = |e: anyhow::Error| {
+            let err_str = e.to_report_string();
+            if regex::Regex::new(".+ of relation .+ already exists")
+                .unwrap()
+                .find(&err_str)
+                .is_none()
+            {
+                return Err(e);
+            }
+            warn!("redshift sink columns already exists. skipped");
+            Ok(())
+        };
+        self.client
+            .execute_sql_sync(vec![sql.clone()])
+            .await
+            .or_else(check_column_exists)?;
+        let merge_into_sql = if !self.is_append_only {
+            let cdc_table_name = self.config.cdc_table.as_ref().ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "intermediate.table.name is required for non-append-only sink"
+                ))
+            })?;
             let sql = build_alter_add_column_sql(
                 self.config.schema.as_deref(),
-                &self.config.table,
+                cdc_table_name,
                 &add_columns
+                    .fields
                     .iter()
-                    .map(|f| (f.name.clone(), f.data_type.to_string()))
+                    .map(|f| {
+                        (
+                            f.name.clone(),
+                            DataType::from(f.data_type.as_ref().unwrap()).to_string(),
+                        )
+                    })
                     .collect::<Vec<_>>(),
             );
-            let check_column_exists = |e: anyhow::Error| {
-                let err_str = e.to_report_string();
-                if regex::Regex::new(".+ of relation .+ already exists")
-                    .unwrap()
-                    .find(&err_str)
-                    .is_none()
-                {
-                    return Err(e);
-                }
-                warn!("redshift sink columns already exists. skipped");
-                Ok(())
-            };
             self.client
                 .execute_sql_sync(vec![sql.clone()])
                 .await
                 .or_else(check_column_exists)?;
-            if !self.is_append_only {
-                let cdc_table_name = self.config.cdc_table.as_ref().ok_or_else(|| {
+            self.all_column_names
+                .extend(add_columns.fields.iter().map(|f| f.name.clone()));
+            let merge_into_sql = build_create_merge_into_task_sql(
+                self.config.schema.as_deref(),
+                self.config.cdc_table.as_ref().ok_or_else(|| {
                     SinkError::Config(anyhow!(
                         "intermediate.table.name is required for non-append-only sink"
                     ))
-                })?;
-                let sql = build_alter_add_column_sql(
-                    self.config.schema.as_deref(),
-                    cdc_table_name,
-                    &add_columns
-                        .iter()
-                        .map(|f| (f.name.clone(), f.data_type.to_string()))
-                        .collect::<Vec<_>>(),
-                );
-                self.client
-                    .execute_sql_sync(vec![sql.clone()])
-                    .await
-                    .or_else(check_column_exists)?;
-                self.all_column_names
-                    .extend(add_columns.iter().map(|f| f.name.clone()));
+                })?,
+                &self.config.table,
+                &self.pk_column_names,
+                &self.all_column_names,
+            );
+            Some(merge_into_sql)
+        } else {
+            None
+        };
 
-                if let Some(shutdown_sender) = self.shutdown_sender.take() {
-                    let _ = shutdown_sender.send(());
-                }
-                if let Some(periodic_task_handle) = self.periodic_task_handle.take() {
-                    let _ = periodic_task_handle.await;
-                }
-
-                let (shutdown_sender, shutdown_receiver) = unbounded_channel();
-                let client = self.client.clone();
-                let merge_into_sql = build_create_merge_into_task_sql(
-                    self.config.schema.as_deref(),
-                    self.config.cdc_table.as_ref().ok_or_else(|| {
-                        SinkError::Config(anyhow!(
-                            "intermediate.table.name is required for non-append-only sink"
-                        ))
-                    })?,
-                    &self.config.table,
-                    &self.pk_column_names,
-                    &self.all_column_names,
-                );
-                let writer_target_interval_seconds = self.writer_target_interval_seconds;
-                let write_intermediate_interval_seconds = self.write_intermediate_interval_seconds;
-                let config = self.config.clone();
-                let sink_id = self.sink_id;
-                let is_append_only = self.is_append_only;
-                let periodic_task_handle = tokio::spawn(async move {
-                    Self::run_periodic_query_task(
-                        client,
-                        Some(merge_into_sql),
-                        config.with_s3,
-                        writer_target_interval_seconds,
-                        write_intermediate_interval_seconds,
-                        sink_id,
-                        config,
-                        is_append_only,
-                        shutdown_receiver,
-                    )
-                    .await;
-                });
-                self.shutdown_sender = Some(shutdown_sender);
-                self.periodic_task_handle = Some(periodic_task_handle);
-            }
+        if let Some(shutdown_sender) = self.shutdown_sender.take() {
+            let _ = shutdown_sender.send(());
         }
+        if let Some(periodic_task_handle) = self.periodic_task_handle.take() {
+            let _ = periodic_task_handle.await;
+        }
+
+        let (shutdown_sender, shutdown_receiver) = unbounded_channel();
+        let client = self.client.clone();
+
+        let writer_target_interval_seconds = self.writer_target_interval_seconds;
+        let write_intermediate_interval_seconds = self.write_intermediate_interval_seconds;
+        let config = self.config.clone();
+        let sink_id = self.sink_id;
+        let is_append_only = self.is_append_only;
+        let periodic_task_handle = tokio::spawn(async move {
+            Self::run_periodic_query_task(
+                client,
+                merge_into_sql,
+                config.with_s3,
+                writer_target_interval_seconds,
+                write_intermediate_interval_seconds,
+                sink_id,
+                config,
+                is_append_only,
+                shutdown_receiver,
+            )
+            .await;
+        });
+        self.shutdown_sender = Some(shutdown_sender);
+        self.periodic_task_handle = Some(periodic_task_handle);
+
         Ok(())
     }
 }

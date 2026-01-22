@@ -18,6 +18,12 @@
 import {
   Box,
   Button,
+  Popover,
+  PopoverArrow,
+  PopoverBody,
+  PopoverCloseButton,
+  PopoverContent,
+  PopoverTrigger,
   Table,
   TableContainer,
   Tbody,
@@ -35,8 +41,10 @@ import Title from "../components/Title"
 import useFetch from "../lib/api/fetch"
 import {
   Relation,
+  StreamingJob,
   getDatabases,
   getSchemas,
+  getStreamingJobs,
   getUsers,
 } from "../lib/api/streaming"
 import extractColumnInfo from "../lib/extractInfo"
@@ -139,18 +147,68 @@ export const connectorColumnSink: Column<RwSink> = {
   content: (r) => r.properties.connector ?? "unknown",
 }
 
-export const streamingJobColumns = [dependentsColumn, fragmentsColumn]
+export const configOverrideColumn: Column<Relation> = {
+  name: "Config Override",
+  width: 3,
+  content: (r) => {
+    const override = r.streamingJob?.configOverride?.trim()
+    if (!override) {
+      return "-"
+    }
+    return (
+      <Popover placement="auto" trigger="click">
+        <PopoverTrigger>
+          <Button size="sm" variant="link" colorScheme="blue">
+            C
+          </Button>
+        </PopoverTrigger>
+        <PopoverContent maxW="lg">
+          <PopoverArrow />
+          <PopoverCloseButton />
+          <PopoverBody fontFamily="mono" whiteSpace="pre-wrap">
+            {override}
+          </PopoverBody>
+        </PopoverContent>
+      </Popover>
+    )
+  },
+}
+
+export const streamingJobColumns = [
+  dependentsColumn,
+  fragmentsColumn,
+  configOverrideColumn,
+]
 
 export function Relations<R extends Relation>(
   title: string,
   getRelations: () => Promise<R[]>,
-  extraColumns: Column<R>[]
+  extraColumns: Column<R>[],
+  options?: {
+    withStreamingJobs?: boolean
+  }
 ) {
   const { response: relationList } = useFetch(async () => {
-    const relations = await getRelations()
-    const users = await getUsers()
-    const databases = await getDatabases()
-    const schemas = await getSchemas()
+    const streamingJobsPromise = options?.withStreamingJobs
+      ? getStreamingJobs()
+      : undefined
+    const [relations, users, databases, schemas] = await Promise.all([
+      getRelations(),
+      getUsers(),
+      getDatabases(),
+      getSchemas(),
+    ])
+    const streamingJobs = streamingJobsPromise
+      ? await streamingJobsPromise
+      : undefined
+    const streamingJobMap = streamingJobs?.reduce<Map<number, StreamingJob>>(
+      (acc, job) => {
+        acc.set(job.id, job)
+        return acc
+      },
+      new Map()
+    )
+
     return relations.map((r) => {
       // Add owner, schema, and database names. It's linear search but the list is small.
       const owner = users.find((u) => u.id === r.owner)
@@ -159,7 +217,8 @@ export function Relations<R extends Relation>(
       const schemaName = schema?.name
       const database = databases.find((d) => d.id === r.databaseId)
       const databaseName = database?.name
-      return { ...r, ownerName, schemaName, databaseName }
+      const streamingJob = streamingJobMap?.get(r.id)
+      return { streamingJob, ...r, ownerName, schemaName, databaseName }
     })
   })
   const [modalData, setModalId] = useCatalogModal(relationList)

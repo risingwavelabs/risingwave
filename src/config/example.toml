@@ -74,14 +74,14 @@ enable_legacy_table_migration = true
 
 [meta.compaction_config]
 max_bytes_for_level_base = 536870912
-max_bytes_for_level_multiplier = 5
+max_bytes_for_level_multiplier = 10
 max_compaction_bytes = 2147483648
 sub_level_max_compaction_bytes = 134217728
 level0_tier_compact_file_number = 12
 target_file_size_base = 33554432
 compaction_filter_mask = 6
 max_sub_compaction = 4
-level0_stop_write_threshold_sub_level_number = 300
+level0_stop_write_threshold_sub_level_number = 128
 level0_sub_level_compact_level_count = 3
 level0_overlapping_sub_level_compact_level_count = 12
 max_space_reclaim_bytes = 536870912
@@ -90,15 +90,16 @@ tombstone_reclaim_ratio = 40
 enable_emergency_picker = true
 max_level = 6
 sst_allowed_trivial_move_min_size = 4194304
-sst_allowed_trivial_move_max_count = 64
+sst_allowed_trivial_move_max_count = 256
 max_l0_compact_level_count = 42
 disable_auto_group_scheduling = false
 max_overlapping_level_size = 268435456
 emergency_level0_sst_file_count = 2000
 emergency_level0_sub_level_partition = 256
-level0_stop_write_threshold_max_sst_count = 10000
+level0_stop_write_threshold_max_sst_count = 5000
 level0_stop_write_threshold_max_size = 322122547200
-enable_optimize_l0_interval_selection = false
+enable_optimize_l0_interval_selection = true
+max_kv_count_for_xor16 = 262144
 
 [meta.developer]
 cached_traces_num = 256
@@ -178,7 +179,7 @@ auth_method = "password"
 in_flight_barrier_nums = 10000
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
-unsafe_enable_strict_consistency = true
+unsafe_disable_strict_consistency = false
 
 [streaming.developer]
 enable_executor_row_count = false
@@ -215,6 +216,7 @@ iceberg_list_interval_sec = 10
 iceberg_fetch_batch_size = 1024
 iceberg_sink_positional_delete_cache_size = 1024
 iceberg_sink_write_parquet_max_row_group_rows = 100000
+materialize_force_overwrite_on_no_check = false
 default_enable_mem_preload_state_table = false
 mem_preload_state_table_ids_whitelist = []
 mem_preload_state_table_ids_blacklist = []
@@ -243,6 +245,7 @@ compactor_max_task_multiplier = 3.0
 compactor_memory_available_proportion = 0.8
 sstable_id_remote_fetch_number = 10
 min_sstable_size_mb = 32
+sst_skip_bloom_filter_in_serde = false
 min_sst_size_for_streaming_upload = 33554432
 max_concurrent_compaction_task_number = 16
 max_preload_wait_time_mill = 0

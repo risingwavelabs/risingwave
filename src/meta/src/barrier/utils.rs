@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 
 use itertools::Itertools;
@@ -141,20 +140,10 @@ pub(super) fn collect_creating_job_commit_epoch_info(
     };
 }
 
-pub(super) type NodeToCollect = HashMap<WorkerId, bool>;
+pub(super) type NodeToCollect = HashSet<WorkerId>;
 pub(super) fn is_valid_after_worker_err(
-    node_to_collect: &mut NodeToCollect,
+    node_to_collect: &NodeToCollect,
     worker_id: WorkerId,
 ) -> bool {
-    match node_to_collect.entry(worker_id) {
-        Entry::Occupied(entry) => {
-            if *entry.get() {
-                entry.remove();
-                true
-            } else {
-                false
-            }
-        }
-        Entry::Vacant(_) => true,
-    }
+    !node_to_collect.contains(&worker_id)
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -44,13 +44,13 @@ impl StreamGroupTopN {
 
         let input = &core.input;
 
-        // FIXME(rc): Actually only watermark messages on the first group-by column are propagated
-        // acccoring to the current GroupTopN implementation. This should be fixed.
-        let watermark_columns = if input.append_only() {
-            input.watermark_columns().clone()
-        } else {
-            input.watermark_columns().retain_clone(&core.group_key)
-        };
+        // NOTE: The executor only forwards watermarks on the first group-by column.
+        // Keep the optimizer in sync so EOWC won't be enabled on unsupported plans.
+        //
+        // TODO: Actually it's also safe to forward watermarks on
+        // - other group key columns,
+        // - ascending ORDER BY columns on append-only input.
+        let watermark_columns = input.watermark_columns().retain_clone(&[core.group_key[0]]);
 
         let mut stream_key = core
             .stream_key()

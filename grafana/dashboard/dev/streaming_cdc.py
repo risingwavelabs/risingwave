@@ -7,7 +7,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Streaming CDC",
+            "[Source] Streaming CDC",
             [
                 panels.timeseries_rowsps(
                     "CDC Backfill Snapshot Read Throughput(rows)",

@@ -105,6 +105,9 @@ wait_standalone() {
   else
     echo "Standalone is ready"
   fi
+
+  echo "Waiting additional 5s for stability"
+  sleep 5
 }
 
 restart_standalone() {

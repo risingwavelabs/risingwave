@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -88,7 +88,7 @@ impl CompleteBarrierTask {
                     (
                         command_context
                             .as_ref()
-                            .map(|(command, _)| command.barrier_info.prev_epoch.value().0),
+                            .map(|(command, _)| command.barrier_info.prev_epoch()),
                         creating_job_epochs.clone(),
                     ),
                 )
@@ -196,7 +196,7 @@ impl CompleteBarrierTask {
         use risingwave_pb::meta::event_log;
         let event = event_log::EventBarrierComplete {
             prev_epoch: command_ctx.barrier_info.prev_epoch(),
-            cur_epoch: command_ctx.barrier_info.curr_epoch.value().0,
+            cur_epoch: command_ctx.barrier_info.curr_epoch(),
             duration_sec,
             command: command_ctx
                 .command

@@ -9,7 +9,7 @@ def _(outer_panels: Panels):
     grpc_filter = 'connection_type=~"grpc.*"'
     return [
         outer_panels.row_collapsed(
-            "Network connection",
+            "[Resource] Network connection",
             [
                 panels.timeseries_bytesps(
                     "Network throughput",

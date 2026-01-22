@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,26 +18,30 @@ mod mock_catalog;
 mod storage_catalog;
 
 use std::collections::HashMap;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use ::iceberg::io::{
     S3_ACCESS_KEY_ID, S3_ASSUME_ROLE_ARN, S3_ENDPOINT, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
 use ::iceberg::table::Table;
-use ::iceberg::{Catalog, TableIdent};
+use ::iceberg::{Catalog, CatalogBuilder, TableIdent};
 use anyhow::{Context, anyhow};
+use iceberg::io::object_cache::ObjectCache;
 use iceberg::io::{
     ADLS_ACCOUNT_KEY, ADLS_ACCOUNT_NAME, AZBLOB_ACCOUNT_KEY, AZBLOB_ACCOUNT_NAME, AZBLOB_ENDPOINT,
     GCS_CREDENTIALS_JSON, GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
+use moka::future::Cache as MokaCache;
 use phf::{Set, phf_set};
 use risingwave_common::bail;
+use risingwave_common::error::IcebergError;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 use serde_with::serde_as;
 use url::Url;
+use uuid::Uuid;
 use with_options::WithOptions;
 
 use crate::connector_common::common::DISABLE_DEFAULT_CREDENTIAL;
@@ -167,6 +171,13 @@ pub struct IcebergCommon {
     #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
     pub vended_credentials: Option<bool>,
 }
+
+// Matches iceberg::io::object_cache default size (32MB).
+// TODO: change it after object cache get refactored.
+const DEFAULT_OBJECT_CACHE_SIZE_BYTES: u64 = 32 * 1024 * 1024;
+const SHARED_OBJECT_CACHE_BUDGET_BYTES: u64 = 512 * 1024 * 1024;
+const SHARED_OBJECT_CACHE_MAX_TABLES: u64 =
+    SHARED_OBJECT_CACHE_BUDGET_BYTES / DEFAULT_OBJECT_CACHE_SIZE_BYTES;
 
 impl EnforceSecret for IcebergCommon {
     const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
@@ -667,20 +678,22 @@ impl IcebergCommon {
                     iceberg_configs.insert(format!("header.{}", header_name), header_value);
                 }
 
-                let config_builder =
-                    iceberg_catalog_rest::RestCatalogConfig::builder()
-                        .uri(self.catalog_uri.clone().with_context(|| {
-                            "`catalog.uri` must be set in rest catalog".to_owned()
-                        })?)
-                        .props(iceberg_configs);
-
-                let config = match &self.warehouse_path {
-                    Some(warehouse_path) => {
-                        config_builder.warehouse(warehouse_path.clone()).build()
-                    }
-                    None => config_builder.build(),
-                };
-                let catalog = iceberg_catalog_rest::RestCatalog::new(config);
+                iceberg_configs.insert(
+                    iceberg_catalog_rest::REST_CATALOG_PROP_URI.to_owned(),
+                    self.catalog_uri
+                        .clone()
+                        .with_context(|| "`catalog.uri` must be set in rest catalog".to_owned())?,
+                );
+                if let Some(warehouse_path) = &self.warehouse_path {
+                    iceberg_configs.insert(
+                        iceberg_catalog_rest::REST_CATALOG_PROP_WAREHOUSE.to_owned(),
+                        warehouse_path.clone(),
+                    );
+                }
+                let catalog = iceberg_catalog_rest::RestCatalogBuilder::default()
+                    .load("rest", iceberg_configs)
+                    .await
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
                 Ok(Arc::new(catalog))
             }
             "glue_rust" => {
@@ -717,18 +730,22 @@ impl IcebergCommon {
                         path_style_access.to_string(),
                     );
                 }
-                let config_builder =
-                    iceberg_catalog_glue::GlueCatalogConfig::builder()
-                        .warehouse(self.warehouse_path.clone().ok_or_else(|| {
-                            anyhow!("`warehouse.path` must be set in glue catalog")
-                        })?)
-                        .props(iceberg_configs);
-                let config = if let Some(uri) = self.catalog_uri.as_deref() {
-                    config_builder.uri(uri.to_owned()).build()
-                } else {
-                    config_builder.build()
-                };
-                let catalog = iceberg_catalog_glue::GlueCatalog::new(config).await?;
+                iceberg_configs.insert(
+                    iceberg_catalog_glue::GLUE_CATALOG_PROP_WAREHOUSE.to_owned(),
+                    self.warehouse_path
+                        .clone()
+                        .ok_or_else(|| anyhow!("`warehouse.path` must be set in glue catalog"))?,
+                );
+                if let Some(uri) = self.catalog_uri.as_deref() {
+                    iceberg_configs.insert(
+                        iceberg_catalog_glue::GLUE_CATALOG_PROP_URI.to_owned(),
+                        uri.to_owned(),
+                    );
+                }
+                let catalog = iceberg_catalog_glue::GlueCatalogBuilder::default()
+                    .load("glue", iceberg_configs)
+                    .await
+                    .map_err(|e| anyhow!(IcebergError::from(e)))?;
                 Ok(Arc::new(catalog))
             }
             catalog_type
@@ -782,6 +799,30 @@ impl IcebergCommon {
             .to_table_ident()
             .context("Unable to parse table name")?;
 
-        catalog.load_table(&table_id).await.map_err(Into::into)
+        let table = catalog.load_table(&table_id).await?;
+        Ok(rebuild_table_with_shared_cache(table).await)
     }
+}
+
+/// Get a globally shared object cache keyed by table UUID to avoid reuse after drop & recreate.
+pub(crate) async fn shared_object_cache(
+    init_object_cache: Arc<ObjectCache>,
+    table_uuid: Uuid,
+) -> Arc<ObjectCache> {
+    static CACHE: LazyLock<MokaCache<Uuid, Arc<ObjectCache>>> = LazyLock::new(|| {
+        MokaCache::builder()
+            .max_capacity(SHARED_OBJECT_CACHE_MAX_TABLES)
+            .build()
+    });
+
+    CACHE
+        .get_with(table_uuid, async { init_object_cache })
+        .await
+}
+
+pub async fn rebuild_table_with_shared_cache(table: Table) -> Table {
+    let table_uuid = table.metadata().uuid();
+    let init_object_cache = table.object_cache();
+    let object_cache = shared_object_cache(init_object_cache, table_uuid).await;
+    table.with_object_cache(object_cache)
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,7 +42,8 @@ macro_rules! for_all_classified_sources {
                 { BatchPosixFs, $crate::source::filesystem::opendal_source::BatchPosixFsProperties, $crate::source::filesystem::opendal_source::BatchPosixFsSplit },
                 { Azblob, $crate::source::filesystem::opendal_source::AzblobProperties, $crate::source::filesystem::OpendalFsSplit<$crate::source::filesystem::opendal_source::OpendalAzblob> },
                 { Test, $crate::source::test_source::TestSourceProperties, $crate::source::test_source::TestSourceSplit},
-                { Iceberg, $crate::source::iceberg::IcebergProperties, $crate::source::iceberg::IcebergSplit}
+                { Iceberg, $crate::source::iceberg::IcebergProperties, $crate::source::iceberg::IcebergSplit},
+                { AdbcSnowflake, $crate::source::adbc_snowflake::AdbcSnowflakeProperties, $crate::source::adbc_snowflake::AdbcSnowflakeSplit}
             }
             $(
                 ,$extra_args
@@ -240,6 +241,15 @@ macro_rules! impl_connection {
                     $connection_type_name => Some(
                         std::any::type_name::<$connection_type>()
                     ),
+                )*
+                _ => None,
+            }
+        }
+
+        pub fn pb_connection_type_to_connection_type(pb_connection_type: &risingwave_pb::catalog::connection_params::PbConnectionType) -> Option<&'static str> {
+            match pb_connection_type {
+                $(
+                    risingwave_pb::catalog::connection_params::PbConnectionType::$variant_name => Some($connection_type_name),
                 )*
                 _ => None,
             }

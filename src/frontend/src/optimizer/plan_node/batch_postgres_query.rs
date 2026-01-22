@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -88,6 +88,8 @@ impl ToBatchPb for BatchPostgresQuery {
             password: self.core.password.clone(),
             database: self.core.database.clone(),
             query: self.core.query.clone(),
+            ssl_mode: self.core.ssl_mode.clone().unwrap_or_default(),
+            ssl_root_cert: self.core.ssl_root_cert.clone().unwrap_or_default(),
         })
     }
 }

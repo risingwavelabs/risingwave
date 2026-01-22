@@ -18,7 +18,7 @@ use std::time::Instant;
 
 use anyhow::anyhow;
 use iceberg::spec::Operation;
-use iceberg::transaction::Transaction;
+use iceberg::transaction::{ApplyTransactionAction, Transaction};
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::id::WorkerId;
@@ -404,19 +404,18 @@ impl IcebergCompactionManager {
         let trigger_snapshot_count = iceberg_config.trigger_snapshot_count();
 
         // For `copy-on-write` mode, always use Full compaction regardless of config
-        let task_type = if should_enable_iceberg_cow(
-            iceberg_config.r#type.as_str(),
-            iceberg_config.write_mode.as_str(),
-        ) {
-            TaskType::Full
-        } else {
-            // For `merge-on-read` mode, use configured compaction_type
-            match iceberg_config.compaction_type() {
-                CompactionType::Full => TaskType::Full,
-                CompactionType::SmallFiles => TaskType::SmallFiles,
-                CompactionType::FilesWithDelete => TaskType::FilesWithDelete,
-            }
-        };
+        let task_type =
+            if should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode)
+            {
+                TaskType::Full
+            } else {
+                // For `merge-on-read` mode, use configured compaction_type
+                match iceberg_config.compaction_type() {
+                    CompactionType::Full => TaskType::Full,
+                    CompactionType::SmallFiles => TaskType::SmallFiles,
+                    CompactionType::FilesWithDelete => TaskType::FilesWithDelete,
+                }
+            };
 
         Ok(CompactionTrack {
             task_type,
@@ -667,10 +666,8 @@ impl IcebergCompactionManager {
         let mut elapsed_time = 0;
         let mut current_interval_secs = INITIAL_POLL_INTERVAL_SECS;
 
-        let cow = should_enable_iceberg_cow(
-            iceberg_config.r#type.as_str(),
-            iceberg_config.write_mode.as_str(),
-        );
+        let cow =
+            should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
 
         while elapsed_time < MAX_WAIT_TIME_SECS {
             let poll_interval = std::time::Duration::from_secs(current_interval_secs);
@@ -829,27 +826,21 @@ impl IcebergCompactionManager {
             "try trigger snapshots expiration",
         );
 
-        let tx = Transaction::new(&table);
+        let txn = Transaction::new(&table);
 
-        let mut expired_snapshots = tx.expire_snapshot();
-
-        expired_snapshots = expired_snapshots.expire_older_than(snapshot_expiration_timestamp_ms);
+        let mut expired_snapshots = txn
+            .expire_snapshot()
+            .expire_older_than(snapshot_expiration_timestamp_ms)
+            .clear_expire_files(iceberg_config.snapshot_expiration_clear_expired_files)
+            .clear_expired_meta_data(iceberg_config.snapshot_expiration_clear_expired_meta_data);
 
         if let Some(retain_last) = iceberg_config.snapshot_expiration_retain_last {
             expired_snapshots = expired_snapshots.retain_last(retain_last);
         }
 
-        expired_snapshots = expired_snapshots
-            .clear_expired_files(iceberg_config.snapshot_expiration_clear_expired_files);
-
-        expired_snapshots = expired_snapshots
-            .clear_expired_meta_data(iceberg_config.snapshot_expiration_clear_expired_meta_data);
-
         let tx = expired_snapshots
-            .apply()
-            .await
+            .apply(txn)
             .map_err(|e| SinkError::Iceberg(e.into()))?;
-
         tx.commit(catalog.as_ref())
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;

@@ -11,7 +11,7 @@ def _(outer_panels: Panels):
     mv_total_size_filter = "metric='materialized_view_total_size'"
     return [
         outer_panels.row_collapsed(
-            "Hummock Manager",
+            "[Storage] Hummock Manager",
             [
                 panels.timeseries_latency(
                     "Lock Time",

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -60,10 +60,11 @@ impl Distill for BatchNestedLoopJoin {
         vec.push(("type", Pretty::debug(&self.core.join_type)));
 
         let concat_schema = self.core.concat_schema();
+        let on = self.core.on.as_condition();
         vec.push((
             "predicate",
             Pretty::debug(&ConditionDisplay {
-                condition: &self.core.on,
+                condition: &on,
                 input_schema: &concat_schema,
             }),
         ));
@@ -113,7 +114,7 @@ impl ToBatchPb for BatchNestedLoopJoin {
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::NestedLoopJoin(NestedLoopJoinNode {
             join_type: self.core.join_type as i32,
-            join_cond: Some(ExprImpl::from(self.core.on.clone()).to_expr_proto()),
+            join_cond: Some(ExprImpl::from(self.core.on.as_condition()).to_expr_proto()),
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
         })
     }

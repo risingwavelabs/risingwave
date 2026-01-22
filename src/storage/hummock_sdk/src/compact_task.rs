@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -73,10 +73,13 @@ pub struct CompactTask {
     pub pk_prefix_table_watermarks: BTreeMap<TableId, TableWatermarks>,
 
     pub non_pk_prefix_table_watermarks: BTreeMap<TableId, TableWatermarks>,
+    pub value_table_watermarks: BTreeMap<TableId, TableWatermarks>,
 
     pub table_schemas: BTreeMap<TableId, PbTableSchema>,
 
     pub max_sub_compaction: u32,
+
+    pub max_kv_count_for_xor16: Option<u64>,
 }
 
 impl CompactTask {
@@ -120,6 +123,11 @@ impl CompactTask {
                 .sum::<usize>()
             + self
                 .non_pk_prefix_table_watermarks
+                .values()
+                .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
+                .sum::<usize>()
+            + self
+                .value_table_watermarks
                 .values()
                 .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
                 .sum::<usize>()
@@ -216,6 +224,50 @@ impl CompactTask {
             compaction_group_version_id_expected,
         )
     }
+
+    /// Determines whether to use block-based filter for this compaction task.
+    /// Returns true if the total key count exceeds the configured threshold.
+    pub fn should_use_block_based_filter(&self) -> bool {
+        let kv_count = self
+            .input_ssts
+            .iter()
+            .flat_map(|level| level.table_infos.iter())
+            .map(|sst| sst.total_key_count)
+            .sum::<u64>();
+
+        crate::filter_utils::is_kv_count_too_large_for_xor16(kv_count, self.max_kv_count_for_xor16)
+    }
+}
+
+fn split_watermark_serde_types(
+    pb_compact_task: &PbCompactTask,
+) -> (
+    BTreeMap<TableId, TableWatermarks>,
+    BTreeMap<TableId, TableWatermarks>,
+    BTreeMap<TableId, TableWatermarks>,
+) {
+    let mut pk_prefix_table_watermarks = BTreeMap::default();
+    let mut non_pk_prefix_table_watermarks = BTreeMap::default();
+    let mut value_table_watermarks = BTreeMap::default();
+    for (table_id, pbwatermark) in &pb_compact_task.table_watermarks {
+        let watermark = TableWatermarks::from(pbwatermark);
+        match watermark.watermark_type {
+            WatermarkSerdeType::PkPrefix => {
+                pk_prefix_table_watermarks.insert(*table_id, watermark);
+            }
+            WatermarkSerdeType::NonPkPrefix => {
+                non_pk_prefix_table_watermarks.insert(*table_id, watermark);
+            }
+            WatermarkSerdeType::Value => {
+                value_table_watermarks.insert(*table_id, watermark);
+            }
+        }
+    }
+    (
+        pk_prefix_table_watermarks,
+        non_pk_prefix_table_watermarks,
+        value_table_watermarks,
+    )
 }
 
 pub fn is_compaction_task_expired(
@@ -227,20 +279,8 @@ pub fn is_compaction_task_expired(
 
 impl From<PbCompactTask> for CompactTask {
     fn from(pb_compact_task: PbCompactTask) -> Self {
-        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks) = pb_compact_task
-            .table_watermarks
-            .into_iter()
-            .map(|(table_id, pb_table_watermark)| {
-                let table_watermark = TableWatermarks::from(pb_table_watermark);
-                (table_id, table_watermark)
-            })
-            .partition(|(_table_id, table_watermarke)| {
-                matches!(
-                    table_watermarke.watermark_type,
-                    WatermarkSerdeType::PkPrefix
-                )
-            });
-
+        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks, value_table_watermarks) =
+            split_watermark_serde_types(&pb_compact_task);
         #[expect(deprecated)]
         Self {
             input_ssts: pb_compact_task
@@ -289,6 +329,7 @@ impl From<PbCompactTask> for CompactTask {
                 .collect(),
             pk_prefix_table_watermarks,
             non_pk_prefix_table_watermarks,
+            value_table_watermarks,
             table_schemas: pb_compact_task
                 .table_schemas
                 .iter()
@@ -296,26 +337,15 @@ impl From<PbCompactTask> for CompactTask {
                 .collect(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
+            max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
         }
     }
 }
 
 impl From<&PbCompactTask> for CompactTask {
     fn from(pb_compact_task: &PbCompactTask) -> Self {
-        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks) = pb_compact_task
-            .table_watermarks
-            .iter()
-            .map(|(table_id, pb_table_watermark)| {
-                let table_watermark = TableWatermarks::from(pb_table_watermark);
-                (*table_id, table_watermark)
-            })
-            .partition(|(_table_id, table_watermarke)| {
-                matches!(
-                    table_watermarke.watermark_type,
-                    WatermarkSerdeType::PkPrefix
-                )
-            });
-
+        let (pk_prefix_table_watermarks, non_pk_prefix_table_watermarks, value_table_watermarks) =
+            split_watermark_serde_types(pb_compact_task);
         #[expect(deprecated)]
         Self {
             input_ssts: pb_compact_task
@@ -364,6 +394,7 @@ impl From<&PbCompactTask> for CompactTask {
                 .collect(),
             pk_prefix_table_watermarks,
             non_pk_prefix_table_watermarks,
+            value_table_watermarks,
             table_schemas: pb_compact_task
                 .table_schemas
                 .iter()
@@ -371,6 +402,7 @@ impl From<&PbCompactTask> for CompactTask {
                 .collect(),
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
+            max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
         }
     }
 }
@@ -418,12 +450,14 @@ impl From<CompactTask> for PbCompactTask {
                 .pk_prefix_table_watermarks
                 .into_iter()
                 .chain(compact_task.non_pk_prefix_table_watermarks)
+                .chain(compact_task.value_table_watermarks)
                 .map(|(table_id, table_watermark)| (table_id, table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,
             table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
+            max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
         }
     }
 }
@@ -471,12 +505,14 @@ impl From<&CompactTask> for PbCompactTask {
                 .pk_prefix_table_watermarks
                 .iter()
                 .chain(compact_task.non_pk_prefix_table_watermarks.iter())
+                .chain(compact_task.value_table_watermarks.iter())
                 .map(|(table_id, table_watermark)| (*table_id, table_watermark.into()))
                 .collect(),
             split_by_state_table: compact_task.split_by_state_table,
             table_schemas: compact_task.table_schemas.clone(),
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
+            max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
         }
     }
 }

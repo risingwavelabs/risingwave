@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,7 +56,7 @@ pub async fn handle_create_user(
 
         let session_user = user_reader
             .get_user_by_name(&session.user_name())
-            .ok_or_else(|| CatalogError::NotFound("user", session.user_name()))?;
+            .ok_or_else(|| CatalogError::not_found("user", session.user_name()))?;
 
         if !session_user.is_super {
             let require_super = stmt

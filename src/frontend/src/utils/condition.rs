@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -256,7 +256,11 @@ impl Condition {
     /// For [`EqJoinPredicate`], extract inequality conditions which connect left columns and right
     /// columns from other conditions.
     ///
-    /// The inequality conditions are transformed into `(left_col_id, right_col_id, offset)` pairs.
+    /// Returns a list of `(conjunction_index, InequalityInputPair)` where the pair contains
+    /// the left column index, right column index (NOT offset by `left_col_num`), and the comparison
+    /// operator.
+    ///
+    /// Only pure `InputRef <op> InputRef` conditions are extracted (no offsets like `+ INTERVAL`).
     ///
     /// [`EqJoinPredicate`]: crate::optimizer::plan_node::EqJoinPredicate
     pub(crate) fn extract_inequality_keys(
@@ -273,10 +277,28 @@ impl Condition {
             .filter_map(|(conjunction_idx, expr)| {
                 let input_bits = expr.collect_input_refs(left_col_num + right_col_num);
                 if input_bits.is_disjoint(&left_bit_map) || input_bits.is_disjoint(&right_bit_map) {
-                    None
+                    return None;
+                }
+
+                // Use as_comparison_cond which only matches pure InputRef <op> InputRef
+                let (left_input, op, right_input) = expr.as_comparison_cond()?;
+
+                // Ensure left is from left input and right is from right input
+                // as_comparison_cond normalizes to left.index < right.index
+                if left_input.index() < left_col_num
+                    && right_input.index() >= left_col_num
+                    && right_input.index() < left_col_num + right_col_num
+                {
+                    Some((
+                        conjunction_idx,
+                        InequalityInputPair::new(
+                            left_input.index(),
+                            right_input.index() - left_col_num, // Convert to right input index
+                            op,
+                        ),
+                    ))
                 } else {
-                    expr.as_input_comparison_cond()
-                        .map(|inequality_pair| (conjunction_idx, inequality_pair))
+                    None
                 }
             })
             .collect_vec()

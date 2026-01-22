@@ -1,10 +1,10 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -16,7 +16,7 @@
 // and the default From/To implementations.
 
 mod arrow_54;
-mod arrow_55;
+mod arrow_56;
 // These mods import mods above and may override some methods.
 mod arrow_deltalake;
 mod arrow_iceberg;
@@ -32,6 +32,11 @@ pub use reexport::*;
 /// For other RisingWave crates, they can directly use arrow re-exported here, without adding
 /// `arrow` dependencies in their `Cargo.toml`. And they don't need to care about the version.
 mod reexport {
+    pub use super::arrow_56::{
+        FromArrow as Arrow56FromArrow, ToArrow as Arrow56ToArrow, arrow_array as arrow_array_56,
+        arrow_buffer as arrow_buffer_56, arrow_cast as arrow_cast_56,
+        arrow_schema as arrow_schema_56,
+    };
     pub use super::arrow_deltalake::{
         FromArrow as DeltaLakeFromArrow, ToArrow as DeltaLakeToArrow,
         arrow_array as arrow_array_deltalake, arrow_buffer as arrow_buffer_deltalake,

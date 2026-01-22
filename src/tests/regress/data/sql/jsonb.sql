@@ -1464,12 +1464,25 @@ select jsonb_set('{"a": {"b": [1, 2, 3]}}', '{a, b, NULL}', '"new_value"');
 
 -- casts
 select 'true'::jsonb::bool AS v;
+--@ select 'null'::jsonb::bool AS v;
 select '[]'::jsonb::bool AS v;
 select '1.0'::jsonb::float AS v;
+--@ select 'null'::jsonb::float AS v;
 select '[1.0]'::jsonb::float AS v;
+--@ select '1.0'::jsonb::float4 AS v;
+--@ select 'null'::jsonb::float4 AS v;
+--@ select '[1.0]'::jsonb::float4 AS v;
+--@ select '12345'::jsonb::int2 AS v;
+--@ select 'null'::jsonb::int2 AS v;
+--@ select '"hello"'::jsonb::int2 AS v;
 select '12345'::jsonb::int4 AS v;
+--@ select 'null'::jsonb::int4 AS v;
 select '"hello"'::jsonb::int4 AS v;
+--@ select '12345'::jsonb::int8 AS v;
+--@ select 'null'::jsonb::int8 AS v;
+--@ select '"hello"'::jsonb::int8 AS v;
 select '12345'::jsonb::numeric AS v;
+--@ select 'null'::jsonb::numeric AS v;
 select '{}'::jsonb::numeric AS v;
 select '12345.05'::jsonb::numeric AS v;
 select '12345.05'::jsonb::float4 AS v;

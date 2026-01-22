@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,18 @@
 
 use std::collections::{HashMap, HashSet};
 use std::fmt::Debug;
+use std::iter;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::catalog::{ColumnDesc, TableId};
 use risingwave_common::hash::{VirtualNode, VnodeCountCompat};
+use risingwave_common::util::memcmp_encoding;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::OrderType;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
+use risingwave_common::util::value_encoding::{BasicSerde, EitherSerde, ValueRowDeserializer};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{TABLE_PREFIX_LEN, get_table_id};
 use risingwave_pb::catalog::Table;
@@ -30,6 +34,7 @@ use risingwave_rpc_client::error::{Result as RpcResult, RpcError};
 use thiserror_ext::AsReport;
 
 use crate::hummock::{HummockError, HummockResult};
+use crate::row_serde::value_serde::ValueRowSerdeNew;
 
 /// `FilterKeyExtractor` generally used to extract key which will store in BloomFilter
 pub trait FilterKeyExtractor: Send + Sync {
@@ -316,6 +321,7 @@ impl CompactionCatalogManager {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         let mut table_id_to_vnode = HashMap::new();
         let mut table_id_to_watermark_serde = HashMap::new();
+        let mut table_id_to_value_watermark_serde = HashMap::new();
 
         {
             let guard = self.table_id_to_catalog.read();
@@ -331,6 +337,10 @@ impl CompactionCatalogManager {
                     // watermark
                     table_id_to_watermark_serde
                         .insert(*table_id, build_watermark_col_serde(table_catalog));
+                    table_id_to_value_watermark_serde.insert(
+                        *table_id,
+                        build_value_watermark_col_serde(table_catalog).map(Arc::new),
+                    );
 
                     false
                 }
@@ -358,6 +368,7 @@ impl CompactionCatalogManager {
                     let key_extractor = FilterKeyExtractorImpl::from_table(&table);
                     let vnode = table.vnode_count();
                     let watermark_serde = build_watermark_col_serde(&table);
+                    let value_watermark_serde = build_value_watermark_col_serde(&table);
                     guard.insert(table_id, table);
                     // filter-key-extractor
                     multi_filter_key_extractor.register(table_id, key_extractor);
@@ -367,6 +378,8 @@ impl CompactionCatalogManager {
 
                     // watermark
                     table_id_to_watermark_serde.insert(table_id, watermark_serde);
+                    table_id_to_value_watermark_serde
+                        .insert(table_id, value_watermark_serde.map(Arc::new));
                 }
             }
         }
@@ -375,6 +388,7 @@ impl CompactionCatalogManager {
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
             table_id_to_watermark_serde,
+            table_id_to_value_watermark_serde,
         )))
     }
 
@@ -385,6 +399,7 @@ impl CompactionCatalogManager {
         let mut multi_filter_key_extractor = MultiFilterKeyExtractor::default();
         let mut table_id_to_vnode = HashMap::new();
         let mut table_id_to_watermark_serde = HashMap::new();
+        let mut value_table_id_to_watermark_serde = HashMap::new();
         for (table_id, table_catalog) in table_catalogs {
             // filter-key-extractor
             multi_filter_key_extractor
@@ -395,12 +410,17 @@ impl CompactionCatalogManager {
 
             // watermark
             table_id_to_watermark_serde.insert(table_id, build_watermark_col_serde(&table_catalog));
+            value_table_id_to_watermark_serde.insert(
+                table_id,
+                build_value_watermark_col_serde(&table_catalog).map(Arc::new),
+            );
         }
 
         Arc::new(CompactionCatalogAgent::new(
             FilterKeyExtractorImpl::Multi(multi_filter_key_extractor),
             table_id_to_vnode,
             table_id_to_watermark_serde,
+            value_table_id_to_watermark_serde,
         ))
     }
 }
@@ -415,6 +435,7 @@ pub struct CompactionCatalogAgent {
     // cache for reduce serde build
     table_id_to_watermark_serde:
         HashMap<StateTableId, Option<(OrderedRowSerde, OrderedRowSerde, usize)>>,
+    value_table_id_to_watermark_serde: HashMap<StateTableId, Option<ValueWatermarkColumnSerdeRef>>,
 }
 
 impl CompactionCatalogAgent {
@@ -425,11 +446,16 @@ impl CompactionCatalogAgent {
             StateTableId,
             Option<(OrderedRowSerde, OrderedRowSerde, usize)>,
         >,
+        value_table_id_to_watermark_serde: HashMap<
+            StateTableId,
+            Option<ValueWatermarkColumnSerdeRef>,
+        >,
     ) -> Self {
         Self {
             filter_key_extractor_manager,
             table_id_to_vnode,
             table_id_to_watermark_serde,
+            value_table_id_to_watermark_serde,
         }
     }
 
@@ -438,6 +464,7 @@ impl CompactionCatalogAgent {
             filter_key_extractor_manager: FilterKeyExtractorImpl::Dummy(DummyFilterKeyExtractor),
             table_id_to_vnode: Default::default(),
             table_id_to_watermark_serde: Default::default(),
+            value_table_id_to_watermark_serde: Default::default(),
         }
     }
 
@@ -455,10 +482,16 @@ impl CompactionCatalogAgent {
             .map(|table_id| (*table_id, None))
             .collect();
 
+        let value_table_id_to_watermark_serde = table_id_to_vnode
+            .keys()
+            .map(|table_id| (*table_id, None))
+            .collect();
+
         Arc::new(CompactionCatalogAgent::new(
             full_key_filter_key_extractor,
             table_id_to_vnode,
             table_id_to_watermark_serde,
+            value_table_id_to_watermark_serde,
         ))
     }
 }
@@ -494,6 +527,22 @@ impl CompactionCatalogAgent {
             .clone()
     }
 
+    pub fn value_watermark_serde(
+        &self,
+        table_id: StateTableId,
+    ) -> Option<ValueWatermarkColumnSerdeRef> {
+        self.value_table_id_to_watermark_serde
+            .get(&table_id)
+            .unwrap_or_else(|| {
+                panic!(
+                    "table_id not found {} all_table_ids {:?}",
+                    table_id,
+                    self.value_table_id_to_watermark_serde.keys()
+                )
+            })
+            .clone()
+    }
+
     pub fn table_id_to_vnode_ref(&self) -> &HashMap<StateTableId, usize> {
         &self.table_id_to_vnode
     }
@@ -509,9 +558,13 @@ pub type CompactionCatalogAgentRef = Arc<CompactionCatalogAgent>;
 fn build_watermark_col_serde(
     table_catalog: &Table,
 ) -> Option<(OrderedRowSerde, OrderedRowSerde, usize)> {
-    match table_catalog.clean_watermark_index_in_pk {
+    // Get clean watermark PK index using the helper method
+    let clean_watermark_index_in_pk = table_catalog.get_clean_watermark_index_in_pk_compat();
+
+    match clean_watermark_index_in_pk {
         None => {
             // non watermark table or watermark column is the first column (pk_prefix_watermark)
+            // TODO(ttl): if the watermark column is in the value, we may also get a `None` here, support it.
             None
         }
 
@@ -541,15 +594,123 @@ fn build_watermark_col_serde(
 
             assert_eq!(pk_data_types.len(), pk_order_types.len());
             let pk_serde = OrderedRowSerde::new(pk_data_types, pk_order_types);
-            let watermark_col_serde = pk_serde
-                .index(clean_watermark_index_in_pk as usize)
-                .into_owned();
-            Some((
-                pk_serde,
-                watermark_col_serde,
-                clean_watermark_index_in_pk as usize,
-            ))
+            let watermark_col_serde = pk_serde.index(clean_watermark_index_in_pk).into_owned();
+            Some((pk_serde, watermark_col_serde, clean_watermark_index_in_pk))
         }
+    }
+}
+
+fn build_value_watermark_col_serde(table_catalog: &Table) -> Option<ValueWatermarkColumnSerde> {
+    /// Returns the column index of non-pk watermark column.
+    pub fn try_get_non_pk_clean_watermark_column_index(table: &Table) -> Option<usize> {
+        table
+            .get_clean_watermark_column_indices()
+            .iter()
+            .filter_map(|&col_idx| {
+                if table
+                    .pk
+                    .iter()
+                    .any(|col_order| col_order.column_index == col_idx)
+                {
+                    return None;
+                }
+                Some(col_idx as usize)
+            })
+            .at_most_one()
+            .unwrap()
+    }
+
+    let clean_watermark_index = try_get_non_pk_clean_watermark_column_index(table_catalog)?;
+    Some(ValueWatermarkColumnSerde::new(
+        table_catalog,
+        clean_watermark_index,
+    ))
+}
+
+pub struct ValueWatermarkColumnSerde {
+    /// For `ColumnAwareSerde`, only 1 column is deserialized.
+    row_serde: EitherSerde,
+    /// For `ColumnAwareSerde`, index have been rewritten to 0.
+    watermark_index_in_de_row: usize,
+    watermark_column_mem_encoding_order: OrderType,
+}
+
+pub type ValueWatermarkColumnSerdeRef = Arc<ValueWatermarkColumnSerde>;
+
+impl ValueWatermarkColumnSerde {
+    fn new(table_catalog: &Table, clean_watermark_index: usize) -> Self {
+        let table_columns: Vec<ColumnDesc> = table_catalog
+            .columns
+            .iter()
+            .map(|col| col.column_desc.as_ref().unwrap().into())
+            .collect();
+        let pk_order_type = table_catalog
+            .pk
+            .iter()
+            .filter_map(|col_order| {
+                if col_order.column_index as usize == clean_watermark_index {
+                    return Some(OrderType::from_protobuf(
+                        col_order.get_order_type().unwrap(),
+                    ));
+                }
+                None
+            })
+            .at_most_one()
+            .unwrap();
+        // Correctness requires the assumption that a table contains at most one watermark column.
+        let watermark_column_mem_encoding_order = match pk_order_type {
+            Some(o) => o,
+            // Correctness requires the assumption that the order is the same as the one used in StateTable when serializing watermark for value column.
+            None => OrderType::ascending(),
+        };
+        // Correctness requires the assumption that the watermark column is stored in the value. (See comment on Table::value_indices.)
+        let Some(watermark_index_in_value_indices) = table_catalog
+            .value_indices
+            .iter()
+            .position(|p| *p as usize == clean_watermark_index)
+        else {
+            panic!(
+                "Watermark index {} not found in value_indices {:?}.",
+                clean_watermark_index, table_catalog.value_indices
+            );
+        };
+        let (row_serde, watermark_index_in_de_row) = if table_catalog.version.is_none() {
+            let row_serde = BasicSerde::new(
+                Arc::from_iter(table_catalog.value_indices.iter().map(|val| *val as usize)),
+                Arc::from(table_columns.into_boxed_slice()),
+            )
+            .into();
+            (row_serde, watermark_index_in_value_indices)
+        } else {
+            let row_serde = ColumnAwareSerde::new(
+                Arc::from_iter(iter::once(clean_watermark_index)),
+                Arc::from(table_columns.into_boxed_slice()),
+            )
+            .into();
+            // Only one column.
+            (row_serde, 0)
+        };
+        Self {
+            row_serde,
+            watermark_index_in_de_row,
+            watermark_column_mem_encoding_order,
+        }
+    }
+
+    pub fn deserialize(&self, encoded_bytes: &[u8]) -> HummockResult<Option<Vec<u8>>> {
+        let mut row = self
+            .row_serde
+            .deserialize(encoded_bytes)
+            .map_err(HummockError::decode_error)?;
+        if self.watermark_index_in_de_row >= row.len() {
+            // The watermark column has been dropped in column aware row encoding.
+            return Ok(None);
+        }
+        let datum = std::mem::take(&mut row[self.watermark_index_in_de_row]);
+        // Correctness requires on the assumption that the watermark is serialized using memcmp_encoding in StateTable.
+        let bytes = memcmp_encoding::encode_value(datum, self.watermark_column_mem_encoding_order)
+            .map_err(HummockError::encode_error)?;
+        Ok(Some(bytes.into()))
     }
 }
 
@@ -664,6 +825,7 @@ mod tests {
             dist_key_in_pk: vec![],
             cardinality: None,
             created_at_epoch: None,
+            #[expect(deprecated)]
             cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
@@ -677,7 +839,9 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
             refreshable: false,
             vector_index_info: None,
             cdc_table_type: None,

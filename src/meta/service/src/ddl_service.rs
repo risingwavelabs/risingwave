@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,9 +30,7 @@ use risingwave_meta::barrier::{BarrierScheduler, Command};
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
 use risingwave_meta::model::TableParallelism as ModelTableParallelism;
 use risingwave_meta::rpc::metrics::MetaMetrics;
-use risingwave_meta::stream::{
-    ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy, ThrottleConfig,
-};
+use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroupPolicy};
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
@@ -44,7 +42,7 @@ use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, Pb
 use risingwave_pb::ddl_service::ddl_service_server::DdlService;
 use risingwave_pb::ddl_service::drop_table_request::PbSourceId;
 use risingwave_pb::ddl_service::replace_job_plan::ReplaceMaterializedView;
-use risingwave_pb::ddl_service::*;
+use risingwave_pb::ddl_service::{streaming_job_resource_type, *};
 use risingwave_pb::frontend_service::GetTableReplacePlanRequest;
 use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::event_log;
@@ -95,6 +93,7 @@ impl DdlServiceImpl {
             stream_manager,
             source_manager,
             barrier_manager,
+            sink_manager.clone(),
         )
         .await;
         Self {
@@ -138,6 +137,10 @@ impl DdlServiceImpl {
         }
     }
 
+    fn default_streaming_job_resource_type() -> streaming_job_resource_type::ResourceType {
+        streaming_job_resource_type::ResourceType::Regular(true)
+    }
+
     pub fn start_migrate_table_fragments(&self) -> (JoinHandle<()>, Sender<()>) {
         tracing::info!("start migrate legacy table fragments task");
         let env = self.env.clone();
@@ -176,7 +179,6 @@ impl DdlServiceImpl {
                     let start = tokio::time::Instant::now();
                     let req = GetTableReplacePlanRequest {
                         database_id: table.database_id,
-                        owner: table.owner,
                         table_id: table.id,
                         cdc_table_change: None,
                     };
@@ -376,7 +378,7 @@ impl DdlService for DdlServiceImpl {
                         stream_job,
                         fragment_graph,
                         dependencies: HashSet::new(),
-                        specific_resource_group: None,
+                        resource_type: Self::default_streaming_job_resource_type(),
                         if_not_exists: req.if_not_exists,
                     })
                     .await?;
@@ -406,6 +408,30 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn reset_source(
+        &self,
+        request: Request<ResetSourceRequest>,
+    ) -> Result<Response<ResetSourceResponse>, Status> {
+        let request = request.into_inner();
+        let source_id = request.source_id;
+
+        tracing::info!(
+            source_id = %source_id,
+            "Received RESET SOURCE request, routing to DDL controller"
+        );
+
+        // Route to DDL controller
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::ResetSource(source_id))
+            .await?;
+
+        Ok(Response::new(ResetSourceResponse {
+            status: None,
+            version,
+        }))
+    }
+
     async fn create_sink(
         &self,
         request: Request<CreateSinkRequest>,
@@ -424,7 +450,7 @@ impl DdlService for DdlServiceImpl {
             stream_job,
             fragment_graph,
             dependencies,
-            specific_resource_group: None,
+            resource_type: Self::default_streaming_job_resource_type(),
             if_not_exists: req.if_not_exists,
         };
 
@@ -506,9 +532,9 @@ impl DdlService for DdlServiceImpl {
 
         let req = request.into_inner();
         let mview = req.get_materialized_view()?.clone();
-        let specific_resource_group = req.specific_resource_group.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req.get_dependencies().iter().copied().collect();
+        let resource_type = req.resource_type.unwrap().resource_type.unwrap();
 
         let stream_job = StreamingJob::MaterializedView(mview);
         let version = self
@@ -517,7 +543,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies,
-                specific_resource_group,
+                resource_type,
                 if_not_exists: req.if_not_exists,
             })
             .await?;
@@ -570,7 +596,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies: HashSet::new(),
-                specific_resource_group: None,
+                resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: req.if_not_exists,
             })
             .await?;
@@ -660,7 +686,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies,
-                specific_resource_group: None,
+                resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: request.if_not_exists,
             })
             .await?;
@@ -1231,7 +1257,6 @@ impl DdlService for DdlServiceImpl {
                 let resp = client
                     .get_table_replace_plan(GetTableReplacePlanRequest {
                         database_id: table.database_id,
-                        owner: table.owner,
                         table_id: table.id,
                         cdc_table_change: Some(table_change.clone()),
                     })
@@ -1482,7 +1507,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies: HashSet::new(),
-                specific_resource_group: None,
+                resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
             })
             .await?;
@@ -1554,7 +1579,7 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies,
-                specific_resource_group: None,
+                resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
             })
             .await;
@@ -1581,25 +1606,22 @@ impl DdlService for DdlServiceImpl {
         {
             let OptionalAssociatedSourceId::AssociatedSourceId(source_id) =
                 table_catalog.optional_associated_source_id.unwrap();
-            let actors_to_apply = self
+            let (jobs, fragments) = self
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
                 .await?;
-            let mutation: ThrottleConfig = actors_to_apply
-                .into_iter()
-                .map(|(fragment_id, actors)| {
-                    (
-                        fragment_id,
-                        actors
-                            .into_iter()
-                            .map(|actor_id| (actor_id, source_rate_limit))
-                            .collect::<HashMap<_, _>>(),
-                    )
-                })
-                .collect();
             let _ = self
                 .barrier_scheduler
-                .run_command(database_id, Command::Throttle(mutation))
+                .run_command(
+                    database_id,
+                    Command::Throttle {
+                        jobs,
+                        config: fragments
+                            .into_iter()
+                            .map(|fragment_id| (fragment_id, source_rate_limit))
+                            .collect(),
+                    },
+                )
                 .await?;
         }
 

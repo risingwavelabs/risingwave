@@ -23,8 +23,10 @@ import {
 import { getSinks } from "../lib/api/streaming"
 
 export default function Sinks() {
-  return Relations("Sinks", getSinks, [
-    connectorColumnSink,
-    ...streamingJobColumns,
-  ])
+  return Relations(
+    "Sinks",
+    getSinks,
+    [connectorColumnSink, ...streamingJobColumns],
+    { withStreamingJobs: true }
+  )
 }

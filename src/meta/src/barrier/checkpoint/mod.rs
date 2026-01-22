@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,6 @@ mod creating_job;
 mod recovery;
 mod state;
 
-pub(crate) use control::{CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl};
-pub(crate) use creating_job::CreatingStreamingJobControl;
+pub(super) use control::{CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl};
+pub(super) use creating_job::CreatingStreamingJobControl;
 pub(super) use state::BarrierWorkerState;

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -98,7 +98,7 @@ impl FragmentActorBuilder {
 
                 // Index the upstreams by the an internal edge ID.
                 let (upstream_fragment_id, _) = &self.upstreams[&EdgeId::Internal {
-                    link_id: stream_node.get_operator_id(),
+                    link_id: stream_node.get_operator_id().as_raw_id(),
                 }];
 
                 let upstream_fragment_id = upstream_fragment_id.as_global_id();

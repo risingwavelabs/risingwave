@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,6 +48,8 @@ impl LogicalPostgresQuery {
         password: String,
         database: String,
         query: String,
+        ssl_mode: Option<String>,
+        ssl_root_cert: Option<String>,
     ) -> Self {
         let core = generic::PostgresQuery {
             schema,
@@ -57,6 +59,8 @@ impl LogicalPostgresQuery {
             password,
             database,
             query,
+            ssl_mode,
+            ssl_root_cert,
             ctx,
         };
 

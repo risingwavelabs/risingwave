@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,7 +29,6 @@ pub mod panic;
 pub mod pretty_bytes;
 pub mod prost;
 pub mod query_log;
-pub mod quote_ident;
 pub use rw_resource_util as resource_util;
 pub mod functional;
 pub mod recursive;

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 use risingwave_common::bail;
+use risingwave_common::cast::datetime_to_timestamp_millis;
 use risingwave_common::hash::VnodeCount;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{
@@ -248,11 +249,13 @@ impl From<ObjectModel<table::Model>> for PbTable {
                 .cardinality
                 .map(|cardinality| cardinality.to_protobuf()),
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
+                    .0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
+            #[expect(deprecated)]
             cleaned_by_watermark: value.0.cleaned_by_watermark,
             stream_job_status: PbStreamJobStatus::Created as _,
             create_type: PbCreateType::Foreground as _,
@@ -269,7 +272,13 @@ impl From<ObjectModel<table::Model>> for PbTable {
             webhook_info: value.0.webhook_info.map(|info| info.to_protobuf()),
             job_id: value.0.belongs_to_job_id,
             engine: value.0.engine.map(|engine| PbEngine::from(engine) as i32),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: value.0.clean_watermark_index_in_pk,
+            clean_watermark_indices: value
+                .0
+                .clean_watermark_indices
+                .map(|indices| indices.0.iter().map(|&x| x as u32).collect())
+                .unwrap_or_default(),
             refreshable: value.0.refreshable,
             vector_index_info: value.0.vector_index_info.map(|index| index.to_protobuf()),
             cdc_table_type: value
@@ -302,10 +311,11 @@ impl From<ObjectModel<source::Model>> for PbSource {
             connection_id: value.0.connection_id,
             // todo: using the timestamp from the database directly.
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
+                    .0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             version: value.0.version as _,
             optional_associated_table_id: value.0.optional_associated_table_id.map(Into::into),
@@ -337,15 +347,17 @@ impl From<ObjectModel<sink::Model>> for PbSink {
             distribution_key: value.0.distribution_key.0,
             downstream_pk: value.0.downstream_pk.0,
             sink_type: PbSinkType::from(value.0.sink_type) as _,
+            raw_ignore_delete: value.0.ignore_delete,
             owner: value.1.owner_id as _,
             properties: value.0.properties.0,
             definition: value.0.definition,
             connection_id: value.0.connection_id,
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
+                    .0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             db_name: value.0.db_name,
             sink_from_name: value.0.sink_from_name,
@@ -377,10 +389,11 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             retention_seconds: value.0.retention_seconds as _,
             definition: value.0.definition,
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
+                    .0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
             created_at_cluster_version: value.1.created_at_cluster_version,
@@ -408,10 +421,11 @@ impl From<ObjectModel<index::Model>> for PbIndex {
                 .unwrap_or_default(),
             index_columns_len: value.0.index_columns_len as _,
             initialized_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.initialized_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
+                    .0,
             ),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             stream_job_status: PbStreamJobStatus::Created as _,
             initialized_at_cluster_version: value.1.initialized_at_cluster_version,
@@ -433,7 +447,7 @@ impl From<ObjectModel<view::Model>> for PbView {
             sql: value.0.definition,
             columns: value.0.columns.to_protobuf(),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             created_at_cluster_version: value.1.created_at_cluster_version,
         }
@@ -488,7 +502,7 @@ impl From<ObjectModel<function::Model>> for PbFunction {
                 .as_ref()
                 .and_then(|o| o.0.get("batch").map(|v| v == "true")),
             created_at_epoch: Some(
-                Epoch::from_unix_millis(value.1.created_at.and_utc().timestamp_millis() as _).0,
+                Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.created_at) as _).0,
             ),
             created_at_cluster_version: value.1.created_at_cluster_version,
         }

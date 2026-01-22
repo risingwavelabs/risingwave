@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,7 +52,7 @@ pub async fn handle_create_view(
     // plan the query to validate it and resolve dependencies
     let (dependent_relations, schema) = {
         let context = OptimizerContext::from_handler_args(handler_args);
-        let super::query::BatchQueryPlanResult {
+        let super::query::RwBatchQueryPlanResult {
             schema,
             dependent_relations,
             ..

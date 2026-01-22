@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use chrono::NaiveDateTime;
 use itertools::Itertools;
 use thiserror_ext::AsReport;
 
@@ -189,6 +190,10 @@ pub fn parse_bytes_traditional(s: &str, writer: &mut impl std::io::Write) -> Res
     }
 
     Ok(())
+}
+
+pub fn datetime_to_timestamp_millis(datetime: NaiveDateTime) -> i64 {
+    datetime.and_utc().timestamp_millis()
 }
 
 #[cfg(test)]

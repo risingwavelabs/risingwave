@@ -58,7 +58,8 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
 
     // Cache the latest file information to avoid listing files on every store operation
     private String cachedLatestFile = null;
-    private int cachedFileRecordCount = 0;
+    // Cache the actual records from the latest file to avoid redundant getObject() calls
+    private List<HistoryRecord> cachedLatestFileRecords = null;
 
     // Atomic sequence number for thread-safe increment
     private AtomicLong sequenceNumber = new AtomicLong(0);
@@ -155,31 +156,28 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
     protected void doStoreRecord(HistoryRecord record) {
         LOGGER.info("Storing new schema history record.");
         try {
-            // Use cached information to avoid expensive list operations
-            if (cachedLatestFile != null && cachedFileRecordCount < maxRecordsPerFile) {
-                // 1. Append to existing file using cached information
-                byte[] data = getObject(cachedLatestFile);
-                List<HistoryRecord> records = toHistoryRecords(data);
-                records.add(record);
-                putObject(cachedLatestFile, fromHistoryRecords(records));
-
-                // Update cache
-                cachedFileRecordCount++;
+            // Use cached information to avoid expensive list operations and getObject() calls
+            if (cachedLatestFile != null && cachedLatestFileRecords.size() < maxRecordsPerFile) {
+                // 1. Append to existing file using cached records (no getObject() needed!)
+                cachedLatestFileRecords.add(record);
+                putObject(cachedLatestFile, fromHistoryRecords(cachedLatestFileRecords));
 
                 LOGGER.info(
                         "Appended record to existing file: {} (now {} records)",
                         cachedLatestFile,
-                        cachedFileRecordCount);
+                        cachedLatestFileRecords.size());
             } else {
                 // 2. Create new file with next sequence number when current file is full or doesn't
                 // exist
                 long nextSequence = sequenceNumber.incrementAndGet();
                 String newFile = String.format("%s/schema_history_%d.dat", objectDir, nextSequence);
-                putObject(newFile, fromHistoryRecords(Collections.singletonList(record)));
+                List<HistoryRecord> newRecords = new ArrayList<>();
+                newRecords.add(record);
+                putObject(newFile, fromHistoryRecords(newRecords));
 
                 // Update cache to point to new file
                 cachedLatestFile = newFile;
-                cachedFileRecordCount = 1;
+                cachedLatestFileRecords = newRecords;
 
                 LOGGER.info(
                         "Created new schema history file: {} (sequence: {})",
@@ -317,11 +315,12 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
                 // Initialize cache when processing the last file to avoid re-reading it later
                 if (i == historyFiles.size() - 1) {
                     cachedLatestFile = filePath;
-                    cachedFileRecordCount = records.size();
+                    // Cache the records list to avoid getObject() on subsequent writes
+                    cachedLatestFileRecords = new ArrayList<>(records);
                     LOGGER.debug(
                             "Initialized cache: latest file {} with {} records",
                             cachedLatestFile,
-                            cachedFileRecordCount);
+                            cachedLatestFileRecords.size());
                 }
             } catch (Exception e) {
                 LOGGER.error("Failed to load history records from file: {}", filePath, e);
@@ -333,7 +332,7 @@ public class OpendalSchemaHistory extends AbstractFileBasedSchemaHistory {
         // If no files were loaded, reset cache
         if (historyFiles.isEmpty()) {
             cachedLatestFile = null;
-            cachedFileRecordCount = 0;
+            cachedLatestFileRecords = null;
             LOGGER.debug("No existing history files found, cache initialized as empty");
         }
 

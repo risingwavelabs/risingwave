@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -155,6 +155,7 @@ for_all_wrapped_id_fields! (
     common {
         ActorInfo {
             actor_id: ActorId,
+            partial_graph_id: PartialGraphId,
         }
         ActorLocation {
             worker_node_id: WorkerId,
@@ -266,6 +267,9 @@ for_all_wrapped_id_fields! (
         }
         GetTablesResponse {
             tables: TableId,
+        }
+        ResetSourceRequest {
+            source_id: SourceId,
         }
     }
     frontend_service {
@@ -493,6 +497,7 @@ for_all_wrapped_id_fields! (
         }
         ListTableFragmentsResponse.ActorInfo {
             id: ActorId,
+            partial_graph_id: PartialGraphId,
         }
         ListTableFragmentsResponse.FragmentInfo {
             id: FragmentId,
@@ -530,11 +535,14 @@ for_all_wrapped_id_fields! (
     }
     monitor_service {
         GetProfileStatsRequest {
+            executor_ids: ExecutorId,
             dispatcher_fragment_ids: FragmentId,
         }
         GetProfileStatsResponse {
             dispatch_fragment_output_row_count: FragmentId,
             dispatch_fragment_output_blocking_duration_ns: FragmentId,
+            stream_node_output_row_count: ExecutorId,
+            stream_node_output_blocking_duration_ns: ExecutorId,
         }
         StackTraceResponse {
             barrier_worker_state: WorkerId,
@@ -582,9 +590,6 @@ for_all_wrapped_id_fields! (
             actor_splits: ActorId,
             actor_dispatchers: ActorId,
         }
-        Barrier {
-            passed_actors: ActorId,
-        }
         CdcFilterNode {
             upstream_source_id: SourceId,
         }
@@ -594,6 +599,7 @@ for_all_wrapped_id_fields! (
         }
         Dispatcher {
             downstream_actor_id: ActorId,
+            dispatcher_id: FragmentId,
         }
         DmlNode {
             table_id: TableId,
@@ -652,6 +658,9 @@ for_all_wrapped_id_fields! (
             source_id: SourceId,
             associated_table_id: TableId,
         }
+        StreamNode {
+            operator_id: StreamNodeLocalOperatorId,
+        }
         StreamScanNode {
             table_id: TableId,
         }
@@ -664,7 +673,7 @@ for_all_wrapped_id_fields! (
             upstream_mv_table_id: TableId,
         }
         ThrottleMutation {
-            actor_throttle: ActorId,
+            fragment_throttle: FragmentId,
         }
         UpdateMutation {
             dropped_actors: ActorId,
@@ -675,6 +684,7 @@ for_all_wrapped_id_fields! (
         }
         UpdateMutation.DispatcherUpdate {
             actor_id: ActorId,
+            dispatcher_id: FragmentId,
             added_downstream_actor_id: ActorId,
             removed_downstream_actor_id: ActorId,
         }
@@ -697,7 +707,6 @@ for_all_wrapped_id_fields! (
     }
     stream_service {
         BarrierCompleteResponse {
-            database_id: DatabaseId,
             truncate_tables: TableId,
             refresh_finished_tables: TableId,
             table_watermarks: TableId,
@@ -705,6 +714,7 @@ for_all_wrapped_id_fields! (
             worker_id: WorkerId,
             list_finished_source_ids: SourceId,
             load_finished_source_ids: SourceId,
+            partial_graph_id: PartialGraphId,
         }
         BarrierCompleteResponse.CdcTableBackfillProgress {
             fragment_id: FragmentId,
@@ -728,9 +738,9 @@ for_all_wrapped_id_fields! (
             table_stats_map: TableId,
         }
         InjectBarrierRequest {
-            database_id: DatabaseId,
             table_ids_to_sync: TableId,
             actor_ids_to_collect: ActorId,
+            partial_graph_id: PartialGraphId,
         }
         InjectBarrierRequest.BuildActorInfo {
             fragment_upstreams: FragmentId,
@@ -741,19 +751,19 @@ for_all_wrapped_id_fields! (
             fragment_id: FragmentId,
         }
         StreamingControlStreamRequest.CreatePartialGraphRequest {
-            database_id: DatabaseId,
+            partial_graph_id: PartialGraphId,
         }
         StreamingControlStreamRequest.RemovePartialGraphRequest {
-            database_id: DatabaseId,
+            partial_graph_ids: PartialGraphId,
         }
-        StreamingControlStreamRequest.ResetDatabaseRequest {
-            database_id: DatabaseId,
+        StreamingControlStreamRequest.ResetPartialGraphsRequest {
+            partial_graph_ids: PartialGraphId,
         }
-        StreamingControlStreamResponse.ReportDatabaseFailureResponse {
-            database_id: DatabaseId,
+        StreamingControlStreamResponse.ReportPartialGraphFailureResponse {
+            partial_graph_id: PartialGraphId,
         }
-        StreamingControlStreamResponse.ResetDatabaseResponse {
-            database_id: DatabaseId,
+        StreamingControlStreamResponse.ResetPartialGraphResponse {
+            partial_graph_id: PartialGraphId,
         }
     }
     task_service {
@@ -761,7 +771,7 @@ for_all_wrapped_id_fields! (
             table_id: TableId,
         }
         GetStreamRequest.Get {
-            database_id: DatabaseId,
+            up_partial_graph_id: PartialGraphId,
             up_fragment_id: FragmentId,
             down_fragment_id: FragmentId,
             up_actor_id: ActorId,

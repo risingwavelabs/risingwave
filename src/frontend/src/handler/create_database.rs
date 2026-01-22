@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ pub async fn handle_create_database(
             .read_guard()
             .get_user_by_name(&owner)
             .map(|u| u.id)
-            .ok_or_else(|| CatalogError::NotFound("user", owner.clone()))?
+            .ok_or_else(|| CatalogError::not_found("user", &owner))?
     } else {
         session.user_id()
     };

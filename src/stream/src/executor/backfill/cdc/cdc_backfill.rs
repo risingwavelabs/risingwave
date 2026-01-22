@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -450,7 +450,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             }
                                             Mutation::Throttle(some) => {
                                                 if let Some(new_rate_limit) =
-                                                    some.get(&self.actor_ctx.id)
+                                                    some.get(&self.actor_ctx.fragment_id)
                                                     && *new_rate_limit != self.rate_limit_rps
                                                 {
                                                     self.rate_limit_rps = *new_rate_limit;

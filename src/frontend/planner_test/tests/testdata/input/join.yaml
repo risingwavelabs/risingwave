@@ -377,3 +377,14 @@
   expected_outputs:
     - stream_plan
     - stream_dist_plan
+- name: Repro stream join dist_key / stream_key mismatch (other_cond=false), issue 24434
+  sql: |
+    create table t1 (k int, v int);
+    create table t2 (k int);
+    select t1.v, count(*) as cnt
+    from t1
+    left join t2 on t1.k = t2.k and (true <> true)
+    group by t1.v;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::ops::Deref;
 
 use fixedbitset::FixedBitSet;
 use itertools::{EitherOrBoth, Itertools};
@@ -28,9 +29,9 @@ use super::generic::{
 };
 use super::utils::{Distill, childless_record};
 use super::{
-    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
-    PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamPlanRef, StreamProject, ToBatch,
-    ToStream, generic, try_enforce_locality_requirement,
+    BackfillType, BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
+    PlanBase, PlanTreeNodeBinary, PredicatePushdown, StreamHashJoin, StreamPlanRef, StreamProject,
+    ToBatch, ToStream, generic, try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CollectInputRef, Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, InputRef};
@@ -126,7 +127,10 @@ impl LogicalJoin {
 
     /// Get a reference to the logical join's on.
     pub fn on(&self) -> &Condition {
-        &self.core.on
+        self.core
+            .on
+            .as_condition_ref()
+            .expect("logical join should store predicate as Condition")
     }
 
     pub fn core(&self) -> &generic::Join<PlanRef> {
@@ -138,6 +142,8 @@ impl LogicalJoin {
         let input_refs = self
             .core
             .on
+            .as_condition_ref()
+            .expect("logical join should store predicate as Condition")
             .collect_input_refs(self.core.left.schema().len() + self.core.right.schema().len());
         let index_group = input_refs
             .ones()
@@ -181,7 +187,7 @@ impl LogicalJoin {
     /// Clone with new `on` condition
     pub fn clone_with_cond(&self, on: Condition) -> Self {
         Self::with_core(generic::Join {
-            on,
+            on: generic::JoinOn::Condition(on),
             ..self.core.clone()
         })
     }
@@ -440,11 +446,8 @@ impl LogicalJoin {
             .and(scan_predicate.rewrite_expr(&mut scan_predicate_rewriter));
 
         let new_join_on = new_eq_cond.and(new_other_cond);
-        let new_predicate = EqJoinPredicate::create(
-            left_schema_len,
-            new_scan.schema().len(),
-            new_join_on.clone(),
-        );
+        let new_predicate =
+            EqJoinPredicate::create(left_schema_len, new_scan.schema().len(), new_join_on);
 
         // We discovered that we cannot use a lookup join after pulling up the predicate
         // from one side and simplifying the condition. Let's use some other join instead.
@@ -471,10 +474,10 @@ impl LogicalJoin {
         let new_logical_scan: LogicalScan = new_scan.into();
 
         // Construct a new logical join, because we have change its RHS.
-        let new_logical_join = generic::Join::new(
+        let new_logical_join = generic::Join::new_with_eq_predicate(
             logical_join.left,
             new_logical_scan.to_batch()?,
-            new_join_on,
+            new_predicate,
             logical_join.join_type,
             new_join_output_indices,
         );
@@ -490,7 +493,6 @@ impl LogicalJoin {
 
         Ok(Some(BatchLookupJoin::new(
             new_logical_join,
-            new_predicate,
             table.clone(),
             new_scan_output_column_ids,
             lookup_prefix_len,
@@ -810,7 +812,7 @@ impl PredicatePushdown for LogicalJoin {
         let right_col_num = self.right().schema().len();
         let join_type = LogicalJoin::simplify_outer(&predicate, left_col_num, self.join_type());
 
-        let push_down_temporal_predicate = !self.should_be_temporal_join();
+        let push_down_temporal_predicate = self.temporal_join_on().is_none();
 
         let (left_from_filter, right_from_filter, on) = push_down_into_join(
             &mut predicate,
@@ -895,6 +897,17 @@ impl PredicatePushdown for LogicalJoin {
     }
 }
 
+#[derive(Clone, Copy)]
+struct TemporalJoinScan<'a>(&'a LogicalScan);
+
+impl<'a> Deref for TemporalJoinScan<'a> {
+    type Target = LogicalScan;
+
+    fn deref(&self) -> &Self::Target {
+        self.0
+    }
+}
+
 impl LogicalJoin {
     fn get_stream_input_for_hash_join(
         &self,
@@ -964,7 +977,8 @@ impl LogicalJoin {
         assert!(predicate.has_eq());
         let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
 
-        let core = self.core.clone_with_inputs(left, right);
+        let mut core = self.core.clone_with_inputs(left, right);
+        core.on = generic::JoinOn::EqPredicate(predicate);
 
         // Convert to Hash Join for equal joins
         // For inner joins, pull non-equal conditions to a filter operator on top of it by default.
@@ -974,7 +988,8 @@ impl LogicalJoin {
         // session variable `streaming_force_filter_inside_join` as it can save unnecessary
         // materialization of rows only to be filtered later.
 
-        let stream_hash_join = StreamHashJoin::new(core.clone(), predicate.clone())?;
+        let stream_hash_join = StreamHashJoin::new(core.clone())?;
+        let predicate = stream_hash_join.eq_join_predicate().clone();
 
         let force_filter_inside_join = self
             .base
@@ -999,8 +1014,8 @@ impl LogicalJoin {
                 self.left().schema().len(),
                 self.right().schema().len(),
             );
-            core.on = eq_cond.eq_cond();
-            let hash_join = StreamHashJoin::new(core, eq_cond)?.into();
+            core.on = generic::JoinOn::EqPredicate(eq_cond);
+            let hash_join = StreamHashJoin::new(core)?.into();
             let logical_filter = generic::Filter::new(predicate.non_eq_cond(), hash_join);
             let plan = StreamFilter::new(logical_filter).into();
             if self.output_indices() != &default_indices {
@@ -1020,28 +1035,51 @@ impl LogicalJoin {
         }
     }
 
-    fn should_be_temporal_join(&self) -> bool {
-        let right = self.right();
-        if let Some(logical_scan) = right.as_logical_scan() {
+    pub fn should_be_temporal_join(&self) -> bool {
+        self.temporal_join_on().is_some()
+    }
+
+    fn temporal_join_on(&self) -> Option<TemporalJoinScan<'_>> {
+        if let Some(logical_scan) = self.core.right.as_logical_scan() {
             matches!(logical_scan.as_of(), Some(AsOf::ProcessTime))
+                .then_some(TemporalJoinScan(logical_scan))
         } else {
-            false
+            None
         }
+    }
+
+    fn should_be_stream_temporal_join<'a>(
+        &'a self,
+        ctx: &ToStreamContext,
+    ) -> Result<Option<TemporalJoinScan<'a>>> {
+        Ok(if let Some(scan) = self.temporal_join_on() {
+            if let BackfillType::SnapshotBackfill = ctx.backfill_type() {
+                return Err(RwError::from(ErrorCode::NotSupported(
+                    "Temporal join with snapshot backfill not supported".into(),
+                    "Please use arrangement backfill".into(),
+                )));
+            }
+            if scan.cross_database() {
+                return Err(RwError::from(ErrorCode::NotSupported(
+                        "Temporal join requires the lookup table to be in the same database as the stream source table".into(),
+                        "Please ensure both tables are in the same database".into(),
+                    )));
+            }
+            Some(scan)
+        } else {
+            None
+        })
     }
 
     fn to_stream_temporal_join_with_index_selection(
         &self,
+        logical_scan: TemporalJoinScan<'_>,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<StreamPlanRef> {
-        // Index selection for temporal join.
-        let right = self.right();
-        // `should_be_temporal_join()` has already check right input for us.
-        let logical_scan: &LogicalScan = right.as_logical_scan().unwrap();
-
         // Use primary table.
         let mut result_plan: Result<StreamTemporalJoin> =
-            self.to_stream_temporal_join(predicate.clone(), ctx);
+            self.to_stream_temporal_join(logical_scan, predicate.clone(), ctx);
         // Return directly if this temporal join can match the pk of its right table.
         if let Ok(temporal_join) = &result_plan
             && temporal_join.eq_join_predicate().eq_indexes().len()
@@ -1062,8 +1100,13 @@ impl LogicalJoin {
                 if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
                     let index_scan: PlanRef = index_scan.into();
                     let that = self.clone_with_left_right(self.left(), index_scan.clone());
-                    if let Ok(temporal_join) = that.to_stream_temporal_join(predicate.clone(), ctx)
-                    {
+                    if let Ok(temporal_join) = that.to_stream_temporal_join(
+                        that.temporal_join_on().expect(
+                            "index scan created from temporal join scan must also be temporal join",
+                        ),
+                        predicate.clone(),
+                        ctx,
+                    ) {
                         match &result_plan {
                             Err(_) => result_plan = Ok(temporal_join),
                             Ok(prev_temporal_join) => {
@@ -1083,25 +1126,8 @@ impl LogicalJoin {
         result_plan.map(|x| x.into())
     }
 
-    fn check_temporal_rhs(right: &PlanRef) -> Result<&LogicalScan> {
-        let Some(logical_scan) = right.as_logical_scan() else {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires a table scan as its lookup table".into(),
-                "Please provide a table scan".into(),
-            )));
-        };
-
-        if !matches!(logical_scan.as_of(), Some(AsOf::ProcessTime)) {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires a table defined as temporal table".into(),
-                "Please use FOR SYSTEM_TIME AS OF PROCTIME() syntax".into(),
-            )));
-        }
-        Ok(logical_scan)
-    }
-
     fn temporal_join_scan_predicate_pull_up(
-        logical_scan: &LogicalScan,
+        logical_scan: TemporalJoinScan<'_>,
         predicate: EqJoinPredicate,
         output_indices: &[usize],
         left_schema_len: usize,
@@ -1157,13 +1183,6 @@ impl LogicalJoin {
             })
             .collect_vec();
 
-        // Use UpstreamOnly chain type
-        if new_scan.cross_database() {
-            return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires the lookup table to be in the same database as the stream source table".into(),
-                "Please ensure both tables are in the same database".into(),
-            )));
-        }
         let new_stream_table_scan =
             StreamTableScan::new_with_stream_scan_type(new_scan, StreamScanType::UpstreamOnly);
         Ok((
@@ -1176,16 +1195,13 @@ impl LogicalJoin {
 
     fn to_stream_temporal_join(
         &self,
+        logical_scan: TemporalJoinScan<'_>,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<StreamTemporalJoin> {
         use super::stream::prelude::*;
 
         assert!(predicate.has_eq());
-
-        let right = self.right();
-
-        let logical_scan = Self::check_temporal_rhs(&right)?;
 
         let table = logical_scan.table();
         let output_column_ids = logical_scan.output_column_ids();
@@ -1225,10 +1241,12 @@ impl LogicalJoin {
             }
         }
         if reorder_idx.len() < shortest_prefix_len {
-            // TODO: support index selection for temporal join and refine this error message.
             return Err(RwError::from(ErrorCode::NotSupported(
-                "Temporal join requires the lookup table's primary key contained exactly in the equivalence condition".into(),
-                "Please add the primary key of the lookup table to the join condition and remove any other conditions".into(),
+                "Temporal join requires the equivalence join condition includes the key columns that form the distribution key of the lookup table".into(),
+                concat!(
+                    "Use DESCRIBE <table_name> to view the table's key information.\n",
+                    "You can create an index on the lookup table to facilitate the temporal join if necessary."
+                ).into(),
             )));
         }
         let lookup_prefix_len = reorder_idx.len();
@@ -1283,11 +1301,14 @@ impl LogicalJoin {
 
         let new_predicate = new_predicate.retain_prefix_eq_key(lookup_prefix_len);
 
-        StreamTemporalJoin::new(new_logical_join, new_predicate, false)
+        let mut new_logical_join = new_logical_join;
+        new_logical_join.on = generic::JoinOn::EqPredicate(new_predicate);
+        StreamTemporalJoin::new(new_logical_join, false)
     }
 
     fn to_stream_nested_loop_temporal_join(
         &self,
+        logical_scan: TemporalJoinScan<'_>,
         predicate: EqJoinPredicate,
         ctx: &mut ToStreamContext,
     ) -> Result<StreamPlanRef> {
@@ -1314,9 +1335,6 @@ impl LogicalJoin {
             )));
         }
 
-        let right = self.right();
-        let logical_scan = Self::check_temporal_rhs(&right)?;
-
         let (new_stream_table_scan, new_predicate, new_join_on, new_join_output_indices) =
             Self::temporal_join_scan_predicate_pull_up(
                 logical_scan,
@@ -1336,7 +1354,9 @@ impl LogicalJoin {
             new_join_output_indices,
         );
 
-        Ok(StreamTemporalJoin::new(new_logical_join, new_predicate, true)?.into())
+        let mut new_logical_join = new_logical_join;
+        new_logical_join.on = generic::JoinOn::EqPredicate(new_predicate);
+        Ok(StreamTemporalJoin::new(new_logical_join, true)?.into())
     }
 
     fn to_stream_dynamic_filter(
@@ -1466,12 +1486,19 @@ impl LogicalJoin {
 
         let (left, right) = self.get_stream_input_for_hash_join(&predicate, ctx)?;
         let left_len = left.schema().len();
-        let core = self.core.clone_with_inputs(left, right);
+        let mut core = self.core.clone_with_inputs(left, right);
+        core.on = generic::JoinOn::EqPredicate(predicate);
 
-        let inequality_desc =
-            Self::get_inequality_desc_from_predicate(predicate.other_cond().clone(), left_len)?;
+        let inequality_desc = Self::get_inequality_desc_from_predicate(
+            core.on
+                .as_eq_predicate_ref()
+                .expect("core predicate must exist")
+                .other_cond()
+                .clone(),
+            left_len,
+        )?;
 
-        Ok(StreamAsOfJoin::new(core, predicate, inequality_desc)?.into())
+        Ok(StreamAsOfJoin::new(core, inequality_desc)?.into())
     }
 
     /// Convert the logical join to a Hash join.
@@ -1493,7 +1520,11 @@ impl LogicalJoin {
             })
             .transpose()?;
 
-        let batch_join = BatchHashJoin::new(logical_join, predicate, asof_desc);
+        let logical_join = generic::Join {
+            on: generic::JoinOn::EqPredicate(predicate),
+            ..logical_join
+        };
+        let batch_join = BatchHashJoin::new(logical_join, asof_desc);
         Ok(batch_join.into())
     }
 
@@ -1611,13 +1642,13 @@ impl ToStream for LogicalJoin {
                 .into());
             }
 
-            if self.should_be_temporal_join() {
-                self.to_stream_temporal_join_with_index_selection(predicate, ctx)
+            if let Some(scan) = self.should_be_stream_temporal_join(ctx)? {
+                self.to_stream_temporal_join_with_index_selection(scan, predicate, ctx)
             } else {
                 self.to_stream_hash_join(predicate, ctx)
             }
-        } else if self.should_be_temporal_join() {
-            self.to_stream_nested_loop_temporal_join(predicate, ctx)
+        } else if let Some(scan) = self.should_be_stream_temporal_join(ctx)? {
+            self.to_stream_nested_loop_temporal_join(scan, predicate, ctx)
         } else if let Some(dynamic_filter) =
             self.to_stream_dynamic_filter(self.on().clone(), ctx)?
         {

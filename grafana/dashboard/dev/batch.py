@@ -7,7 +7,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "Adhoc queries (Batch & Frontend)",
+            "[Batch] Adhoc queries (Batch & Frontend)",
             [
                 panels.subheader("Batch"),
                 panels.timeseries_row(

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,7 +48,7 @@ impl<const TYPE: IdCategoryType> From<u32> for GlobalId<TYPE> {
 ///
 /// This requires the local IDs exactly a permutation of the range `[0, len)`.
 #[derive(Clone, Copy, Debug)]
-pub(super) struct GlobalIdGen<ID: From<u32>> {
+pub(crate) struct GlobalIdGen<ID: From<u32>> {
     offset: u32,
     len: u32,
     _phantom: PhantomData<ID>,
@@ -60,7 +60,7 @@ pub(super) type GlobalFragmentIdGen = GlobalIdGen<GlobalFragmentId>;
 pub(super) type GlobalTableIdGen = GlobalIdGen<GlobalId<{ IdCategory::Table }>>;
 
 #[derive(Clone, Copy, Debug, Hash, Eq, PartialEq, PartialOrd, Ord)]
-pub(super) struct GlobalActorId(u32);
+pub(crate) struct GlobalActorId(u32);
 
 impl GlobalActorId {
     pub fn new(id: ActorId) -> Self {
@@ -90,7 +90,7 @@ impl<const TYPE: IdCategoryType> GlobalIdGen<GlobalId<TYPE>> {
     }
 }
 
-pub(super) type GlobalActorIdGen = GlobalIdGen<GlobalActorId>;
+pub(crate) type GlobalActorIdGen = GlobalIdGen<GlobalActorId>;
 
 impl GlobalIdGen<GlobalActorId> {
     pub fn new(counter: &AtomicU32, len: u64) -> Self {

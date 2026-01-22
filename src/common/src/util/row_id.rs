@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::cmp::Ordering;
 use std::collections::HashMap;
-use std::time::SystemTime;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use super::epoch::UNIX_RISINGWAVE_DATE_EPOCH;
 use crate::bitmap::Bitmap;
@@ -116,6 +116,16 @@ pub struct RowIdGenerator {
 }
 
 pub type RowId = i64;
+
+/// Extracts UNIX epoch milliseconds from a row id.
+pub fn row_id_to_unix_millis(row_id: RowId) -> Option<i64> {
+    let timestamp_ms = row_id >> TIMESTAMP_SHIFT_BITS;
+    let rw_epoch_unix_ms = UNIX_RISINGWAVE_DATE_EPOCH
+        .duration_since(UNIX_EPOCH)
+        .expect("risingwave epoch is after unix epoch")
+        .as_millis() as i64;
+    timestamp_ms.checked_add(rw_epoch_unix_ms)
+}
 
 /// The number of bits occupied by the vnode part of a row id.
 ///

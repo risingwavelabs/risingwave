@@ -1,0 +1,76 @@
+statement ok
+set enable_datafusion_engine = true;
+
+statement ok
+create secret my_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection my_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_connection_misc',
+    s3.access.key = secret my_secret,
+    s3.secret.key = secret my_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    catalog.type = 'storage',
+);
+
+statement ok
+set iceberg_engine_connection = 'public.my_conn';
+
+# ==================== DISTINCT Tests ====================
+
+statement ok
+CREATE TABLE t_distinct(
+    id INT,
+    name VARCHAR,
+    val INT,
+) WITH (commit_checkpoint_interval = 1) ENGINE = iceberg;
+
+statement ok
+INSERT INTO t_distinct VALUES
+(1, 'alice', 10),
+(2, 'bob', 20),
+(3, 'alice', 20),
+(4, 'charlie', 30),
+(5, 'bob', 20),
+(6, 'dave', null),
+(7, null, null),
+(8, null, 10);
+
+statement ok
+FLUSH;
+
+sleep 5s
+
+query ? rowsort
+SELECT DISTINCT name FROM t_distinct;
+----
+alice
+bob
+charlie
+dave
+NULL
+
+query ?? rowsort
+SELECT DISTINCT name, val FROM t_distinct;
+----
+alice 10
+alice 20
+bob 20
+charlie 30
+dave NULL
+NULL NULL
+NULL 10
+
+statement ok
+DROP TABLE t_distinct;
+
+statement ok
+DROP CONNECTION my_conn;
+
+statement ok
+DROP SECRET my_secret;

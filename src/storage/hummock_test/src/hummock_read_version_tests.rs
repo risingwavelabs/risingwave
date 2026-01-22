@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -56,6 +56,8 @@ async fn test_read_version_basic() {
         pinned_version,
         vnodes,
     );
+
+    read_version.init();
 
     {
         // single imm
@@ -304,6 +306,7 @@ async fn test_read_filter_basic() {
         pinned_version,
         vnodes.clone(),
     )));
+    read_version.write().init();
     read_version.write().update_vnode_bitmap(vnodes);
 
     {

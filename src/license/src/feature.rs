@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ pub enum FeatureNotAvailable {
     // TODO(license): refine error message to include tier name & better instructions
     #[error(
         "feature {feature:?} is not available based on your license\n\n\
-        Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command."
+        Hint: You may want to set a license key with `ALTER SYSTEM SET license_key = '...';` command. For more information, visit https://go.risingwave.com/premium."
     )]
     NotAvailable { feature: Feature },
 

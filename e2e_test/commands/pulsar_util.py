@@ -149,10 +149,18 @@ class PulsarCat:
             print(f"Failed to drop topic: {response.status_code} - {response.text}")
             sys.exit(1)
 
-    def produce(self, topic: str):
-        """Produce messages from stdin, each line with UTF-8 encoding"""
+    def produce(self, topic: str, key_delimiter: str = None):
+        """Produce messages from stdin, each line with UTF-8 encoding
+
+        Args:
+            topic: Topic name to produce to
+            key_delimiter: If specified, split each line by this delimiter (first occurrence only).
+                          The front part becomes the message key, the later part becomes the payload.
+        """
         topic = self._normalize_topic(topic)
         print(f"Producing to topic: {topic}")
+        if key_delimiter:
+            print(f"Key delimiter: '{key_delimiter}' (first occurrence splits key from payload)")
         print("Type messages (Ctrl+C to stop):")
 
         client = self.get_client()
@@ -163,9 +171,21 @@ class PulsarCat:
             for line in sys.stdin:
                 line = line.rstrip('\n\r')
                 if line:  # Only send non-empty lines
-                    producer.send(line.encode('utf-8'))
-                    line_count += 1
-                    print(f"Sent message {line_count}: {line}")
+                    if key_delimiter and key_delimiter in line:
+                        # Split only on first occurrence
+                        parts = line.split(key_delimiter, 1)
+                        message_key = parts[0]
+                        message_payload = parts[1] if len(parts) > 1 else ''
+                        producer.send(
+                            message_payload.encode('utf-8'),
+                            partition_key=message_key
+                        )
+                        line_count += 1
+                        print(f"Sent message {line_count}: key='{message_key}', payload='{message_payload}'")
+                    else:
+                        producer.send(line.encode('utf-8'))
+                        line_count += 1
+                        print(f"Sent message {line_count}: {line}")
         except KeyboardInterrupt:
             print(f"\nProduced {line_count} messages")
         finally:
@@ -253,6 +273,79 @@ class PulsarCat:
             if exit_on_end:
                 print(f"Total messages consumed: {message_count}")
 
+    def compact(self, topic: str):
+        """Compact a topic"""
+        topic = self._normalize_topic(topic)
+        print(f"Compacting topic: {topic}")
+
+        # Use admin API to compact topic
+        encoded_topic = topic.replace('://', '/')
+        url = f"{self.admin_url}/admin/v2/{encoded_topic}/compaction"
+        for method_name, method in (("PUT", requests.put), ("POST", requests.post)):
+            response = method(url)
+            if response.status_code in [200, 204]:
+                print(f"Topic {topic} compacted successfully via {method_name}")
+                return
+            if response.status_code not in [404, 405]:
+                print(f"Failed to compact topic with {method_name}: {response.status_code} - {response.text}")
+                sys.exit(1)
+
+        print(f"Failed to compact topic: {response.status_code} - {response.text}")
+        sys.exit(1)
+
+    def check_compaction_status(self, topic: str):
+        """Check compaction status for a topic"""
+        topic = self._normalize_topic(topic)
+        print(f"Checking compaction status for topic: {topic}")
+
+        # Use admin API to get compaction status
+        encoded_topic = topic.replace('://', '/')
+        url = f"{self.admin_url}/admin/v2/{encoded_topic}/compaction"
+
+        try:
+            response = requests.get(url)
+            if response.status_code == 200:
+                status = response.json()
+                print("\nCompaction Status:")
+                print(f"  Status: {status.get('status', 'N/A')}")
+
+                if 'lastCompactionRemovedEventCount' in status:
+                    print(f"  Last Compaction Removed Event Count: {status['lastCompactionRemovedEventCount']}")
+                if 'lastCompactionSucceedTimestamp' in status:
+                    print(f"  Last Compaction Succeed Timestamp: {status['lastCompactionSucceedTimestamp']}")
+                if 'lastCompactionFailedTimestamp' in status:
+                    print(f"  Last Compaction Failed Timestamp: {status['lastCompactionFailedTimestamp']}")
+                if 'lastCompactionDurationTimeInMills' in status:
+                    print(f"  Last Compaction Duration (ms): {status['lastCompactionDurationTimeInMills']}")
+
+                # Exit with code 0 if SUCCESS, 1 if RUNNING or ERROR
+                status_str = status.get('status', '').upper()
+                if status_str == 'SUCCESS':
+                    return 0
+                elif status_str == 'RUNNING':
+                    print("\nCompaction is still running...")
+                    sys.exit(1)
+                elif status_str in ['ERROR', 'FAILED']:
+                    print("\nCompaction failed!")
+                    sys.exit(1)
+                else:
+                    print(f"\nUnknown status: {status_str}")
+                    sys.exit(1)
+
+            elif response.status_code == 204:
+                print("Compaction has not been run on this topic yet")
+                sys.exit(1)
+            elif response.status_code == 404:
+                print(f"Topic {topic} not found")
+                sys.exit(1)
+            else:
+                print(f"Failed to get compaction status: {response.status_code} - {response.text}")
+                sys.exit(1)
+
+        except Exception as e:
+            print(f"Error checking compaction status: {e}")
+            sys.exit(1)
+
     def check_unacked(self, topic: str, subscription: str):
         """Check unacknowledged messages for a subscription"""
         topic = self._normalize_topic(topic)
@@ -320,6 +413,7 @@ def main():
     # Produce command
     produce_parser = subparsers.add_parser('produce', help='Produce messages from stdin')
     produce_parser.add_argument('--topic', '-t', required=True, help='Topic name')
+    produce_parser.add_argument('--key', '-k', default=None, help='Key split delimiter for the message')
 
     # Consume command
     consume_parser = subparsers.add_parser('consume', help='Consume messages from a topic')
@@ -329,6 +423,13 @@ def main():
                                help='Starting position (default: latest)')
     consume_parser.add_argument('--exit-on-end', action='store_true',
                                help='Exit when no more messages are available instead of waiting for new ones')
+
+    compact_parser = subparsers.add_parser('compact', help='Compact a topic')
+    compact_parser.add_argument('--topic', '-t', required=True, help='Topic name')
+
+    # Check compaction status command
+    compaction_status_parser = subparsers.add_parser('check-compaction-status', help='Check compaction status of a topic')
+    compaction_status_parser.add_argument('--topic', '-t', required=True, help='Topic name')
 
     # Unacked command
     unacked_parser = subparsers.add_parser('unacked', help='Check unacknowledged messages')
@@ -350,11 +451,15 @@ def main():
         elif args.command == 'drop-topic':
             pulsar_cat.drop_topic(args.topic, args.force)
         elif args.command == 'produce':
-            pulsar_cat.produce(args.topic)
+            pulsar_cat.produce(args.topic, args.key)
         elif args.command == 'consume':
             pulsar_cat.consume(args.topic, args.subscription, args.position, args.exit_on_end)
         elif args.command == 'unacked':
             pulsar_cat.check_unacked(args.topic, args.subscription)
+        elif args.command == 'compact':
+            pulsar_cat.compact(args.topic)
+        elif args.command == 'check-compaction-status':
+            pulsar_cat.check_compaction_status(args.topic)
     finally:
         pulsar_cat.close()
 

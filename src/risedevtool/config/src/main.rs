@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -79,6 +79,7 @@ pub enum Components {
     NoDefaultFeatures,
     Moat,
     DataFusion,
+    Adbc,
 }
 
 impl Components {
@@ -105,6 +106,7 @@ impl Components {
             Self::NoDefaultFeatures => "[Build] Disable default features",
             Self::Moat => "[Component] Enable Moat",
             Self::DataFusion => "[Build] Enable DataFusion",
+            Self::Adbc => "[Component] ADBC Snowflake Driver",
         }
         .into()
     }
@@ -227,6 +229,12 @@ Enable Moat as distributed hybrid cache service."
                 "
 Enable DataFusion as the optional query engine for Iceberg tables."
             }
+            Self::Adbc => {
+                "
+Enable ADBC (Arrow Database Connectivity) Snowflake driver support.
+Required if you want to use ADBC Snowflake source.
+This will download the ADBC Snowflake driver shared library (.so/.dylib)."
+            }
         }
         .into()
     }
@@ -254,6 +262,7 @@ Enable DataFusion as the optional query engine for Iceberg tables."
             "DISABLE_DEFAULT_FEATURES" => Some(Self::NoDefaultFeatures),
             "ENABLE_MOAT" => Some(Self::Moat),
             "ENABLE_DATAFUSION" => Some(Self::DataFusion),
+            "ENABLE_ADBC" => Some(Self::Adbc),
             _ => None,
         }
     }
@@ -281,6 +290,7 @@ Enable DataFusion as the optional query engine for Iceberg tables."
             Self::NoDefaultFeatures => "DISABLE_DEFAULT_FEATURES",
             Self::Moat => "ENABLE_MOAT",
             Self::DataFusion => "ENABLE_DATAFUSION",
+            Self::Adbc => "ENABLE_ADBC",
         }
         .into()
     }

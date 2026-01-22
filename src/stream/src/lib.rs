@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 #![allow(clippy::derive_partial_eq_without_eq)]
+#![recursion_limit = "256"]
 #![feature(iterator_try_collect)]
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
@@ -86,11 +87,11 @@ mod consistency {
 
     /// Check if strict consistency is required.
     pub(crate) fn enable_strict_consistency() -> bool {
-        let res = crate::CONFIG.try_with(|config| config.unsafe_enable_strict_consistency);
+        let res = crate::CONFIG.try_with(|config| !config.unsafe_disable_strict_consistency);
         if res.is_err() && cfg!(not(test)) {
             tracing::warn!("streaming CONFIG is not set, which is probably a bug");
         }
-        res.unwrap_or_else(|_| default::streaming::unsafe_enable_strict_consistency())
+        res.unwrap_or_else(|_| !default::streaming::unsafe_disable_strict_consistency())
     }
 
     /// Log an error message for breaking consistency. Must only be called in non-strict mode.

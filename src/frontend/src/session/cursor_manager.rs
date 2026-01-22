@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
 use crate::handler::HandlerArgs;
 use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
-use crate::handler::query::{BatchQueryPlanResult, gen_batch_plan_fragmenter};
+use crate::handler::query::{RwBatchQueryPlanResult, gen_batch_plan_fragmenter};
 use crate::handler::util::{
     DataChunkToRowSetAdapter, StaticSessionData, convert_logstore_u64_to_unix_millis,
     pg_value_format, to_pg_field,
@@ -717,7 +717,10 @@ impl SubscriptionCursor {
         Ok((new_epochs.get(0).cloned(), new_epochs.get(1).cloned()))
     }
 
-    pub fn gen_batch_plan_result(&self, handler_args: HandlerArgs) -> Result<BatchQueryPlanResult> {
+    pub fn gen_batch_plan_result(
+        &self,
+        handler_args: HandlerArgs,
+    ) -> Result<RwBatchQueryPlanResult> {
         match self.state {
             // Only used to return generated plans, so rw_timestamp are meaningless
             State::InitLogStoreQuery { .. } => Self::init_batch_plan_for_subscription_cursor(
@@ -759,7 +762,7 @@ impl SubscriptionCursor {
         dependent_table_id: TableId,
         handler_args: HandlerArgs,
         seek_pk_row: Option<Row>,
-    ) -> Result<BatchQueryPlanResult> {
+    ) -> Result<RwBatchQueryPlanResult> {
         let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
         let context = OptimizerContext::from_handler_args(handler_args);
@@ -864,7 +867,7 @@ impl SubscriptionCursor {
         epoch_range: Option<(u64, u64)>,
         version_id: HummockVersionId,
         seek_pk_rows: Option<Row>,
-    ) -> Result<BatchQueryPlanResult> {
+    ) -> Result<RwBatchQueryPlanResult> {
         // pk + all column without hidden
         let output_col_idx = table_catalog
             .columns
@@ -998,7 +1001,7 @@ impl SubscriptionCursor {
                 QueryMode::Distributed,
             ),
         };
-        Ok(BatchQueryPlanResult {
+        Ok(RwBatchQueryPlanResult {
             plan: batch_log_seq_scan,
             query_mode,
             schema,
@@ -1199,7 +1202,7 @@ impl CursorManager {
         &self,
         cursor_name: &str,
         handler_args: HandlerArgs,
-    ) -> Result<BatchQueryPlanResult> {
+    ) -> Result<RwBatchQueryPlanResult> {
         match self.cursor_map.lock().await.get(cursor_name).ok_or_else(|| {
             ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name))
         })? {

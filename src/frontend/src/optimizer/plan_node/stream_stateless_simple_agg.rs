@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,12 +18,13 @@ use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
 use super::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef,
-    StreamPlanRef,
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamPlanRef as PlanRef, StreamPlanRef,
+    TryToStreamPb,
 };
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{MonotonicityMap, RequiredDist, WatermarkColumns};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Streaming stateless simple agg.
@@ -85,23 +86,28 @@ impl PlanTreeNodeUnary<Stream> for StreamStatelessSimpleAgg {
 }
 impl_plan_tree_node_for_unary! { Stream, StreamStatelessSimpleAgg }
 
-impl StreamNode for StreamStatelessSimpleAgg {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+impl TryToStreamPb for StreamStatelessSimpleAgg {
+    fn try_to_stream_prost_body(
+        &self,
+        _state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbNodeBody> {
         use risingwave_pb::stream_plan::*;
-        PbNodeBody::StatelessSimpleAgg(Box::new(SimpleAggNode {
-            agg_calls: self
-                .agg_calls()
-                .iter()
-                .map(PlanAggCall::to_protobuf)
-                .collect(),
+        let append_only = self.input().append_only();
+        let agg_calls = self
+            .agg_calls()
+            .iter()
+            .map(|call| call.to_protobuf_checked_pure(self.input().stream_kind().is_retract()))
+            .collect::<crate::error::Result<Vec<_>>>()?;
+        Ok(PbNodeBody::StatelessSimpleAgg(Box::new(SimpleAggNode {
+            agg_calls,
             row_count_index: u32::MAX, // this is not used
             agg_call_states: vec![],
             intermediate_state_table: None,
-            is_append_only: self.input().append_only(),
+            is_append_only: append_only,
             distinct_dedup_tables: Default::default(),
             version: AggNodeVersion::Issue13465 as _,
             must_output_per_barrier: false, // this is not used
-        }))
+        })))
     }
 }
 

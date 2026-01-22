@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,13 @@ use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::iter::once;
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
+use risingwave_common::log::LogSuppressor;
 use risingwave_pb::hummock::{
     CompactionConfig, CompatibilityVersion, PbLevelType, StateTableInfo, StateTableInfoDelta,
 };
@@ -772,10 +773,15 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             }
             let contains = change_log_delta.contains_key(table_id);
             if !contains {
-                warn!(
-                        ?table_id,
-                        "table change log dropped due to no further change log at newly committed epoch",
+                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                    LazyLock::new(|| LogSuppressor::per_second(1));
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                    warn!(
+                        suppressed_count,
+                        %table_id,
+                        "table change log dropped due to no further change log at newly committed epoch"
                     );
+                }
             }
             contains
         });
