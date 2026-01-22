@@ -585,6 +585,15 @@ impl CatalogController {
                     ObjectModel(connection, obj, None).into(),
                 ));
             }
+            ObjectType::Function => {
+                let function = Function::find_by_id(object_id.as_function_id())
+                    .one(&txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("function", object_id))?;
+                objects.push(PbObjectInfo::Function(
+                    ObjectModel(function, obj, None).into(),
+                ));
+            }
             _ => unreachable!("not supported object type: {:?}", object_type),
         };
 
