@@ -511,9 +511,20 @@ fn mark_cdc_chunk_inner(
 
 /// Builds a new stream chunk with `output_indices`.
 pub(crate) fn mapping_chunk(chunk: StreamChunk, output_indices: &[usize]) -> StreamChunk {
+    // Only eliminate noop updates when the number of columns is reduced.
+    // This handles the case where a column that's not in the output is updated,
+    // causing a U-, U+ pair that's identical after projection.
+    let should_eliminate_noop = output_indices.len() < chunk.columns().len();
+
     let (ops, columns, visibility) = chunk.into_inner();
     let mapped_columns = output_indices.iter().map(|&i| columns[i].clone()).collect();
-    StreamChunk::with_visibility(ops, mapped_columns, visibility)
+    let chunk = StreamChunk::with_visibility(ops, mapped_columns, visibility);
+
+    if should_eliminate_noop {
+        chunk.eliminate_adjacent_noop_update()
+    } else {
+        chunk
+    }
 }
 
 fn mapping_watermark(watermark: Watermark, upstream_indices: &[usize]) -> Option<Watermark> {

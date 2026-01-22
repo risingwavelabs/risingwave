@@ -298,6 +298,11 @@ pub(super) async fn align_input<const YIELD_RIGHT_CHUNKS: bool>(left: Executor, 
 }
 
 pub(super) fn apply_indices_map(chunk: StreamChunk, indices: &[usize]) -> StreamChunk {
+    // Only eliminate noop updates when the number of columns is reduced.
+    // This handles the case where a column that's not in the output is updated,
+    // causing a U-, U+ pair that's identical after projection.
+    let should_eliminate_noop = indices.len() < chunk.columns().len();
+
     let (data_chunk, ops) = chunk.into_parts();
     let (columns, vis) = data_chunk.into_parts();
     let output_columns = indices
@@ -305,7 +310,13 @@ pub(super) fn apply_indices_map(chunk: StreamChunk, indices: &[usize]) -> Stream
         .cloned()
         .map(|idx| columns[idx].clone())
         .collect();
-    StreamChunk::with_visibility(ops, output_columns, vis)
+    let chunk = StreamChunk::with_visibility(ops, output_columns, vis);
+
+    if should_eliminate_noop {
+        chunk.eliminate_adjacent_noop_update()
+    } else {
+        chunk
+    }
 }
 
 pub(super) mod phase1 {
