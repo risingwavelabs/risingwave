@@ -2955,9 +2955,9 @@ dependencies = [
 
 [[package]]
 name = "crepe"
-version = "0.1.8"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a572c5a5165c71c6a34cd5391521faf590f0e216031574375149fd9666ec5cad"
+checksum = "0d6bb2d4233a2b6b6e72b1cfbf5190dd329a37325d6be25c23536d5cc9b0b0df"
 dependencies = [
  "petgraph 0.6.5",
  "proc-macro-error 1.0.4",
