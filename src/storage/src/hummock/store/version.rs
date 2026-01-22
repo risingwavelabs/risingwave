@@ -188,7 +188,7 @@ impl StagingVersion {
             .chain(self.uploading_imms.iter())
             .filter(move |imm| {
                 // retain imm which is overlapped with (min_epoch_exclusive, max_epoch_inclusive]
-                imm.min_epoch() <= max_epoch_inclusive
+                imm.epoch() <= max_epoch_inclusive
                     && imm.table_id == table_id
                     && range_overlap(
                         &(left, right),
@@ -436,10 +436,10 @@ impl HummockReadVersion {
                     if self.is_replicated {
                         self.staging
                             .uploading_imms
-                            .retain(|imm| imm.min_epoch() > committed_epoch);
+                            .retain(|imm| imm.epoch() > committed_epoch);
                         self.staging
                             .pending_imms
-                            .retain(|(imm, _)| imm.min_epoch() > committed_epoch);
+                            .retain(|(imm, _)| imm.epoch() > committed_epoch);
                     } else {
                         self.staging
                             .pending_imms
@@ -448,10 +448,10 @@ impl HummockReadVersion {
                             .chain(self.staging.uploading_imms.iter())
                             .for_each(|imm| {
                                 assert!(
-                                    imm.min_epoch() > committed_epoch,
+                                    imm.epoch() > committed_epoch,
                                     "imm of table {} min_epoch {} should be greater than committed_epoch {}",
                                     imm.table_id,
-                                    imm.min_epoch(),
+                                    imm.epoch(),
                                     committed_epoch
                                 )
                             });
@@ -633,7 +633,7 @@ impl HummockVersionReader {
         // 1. read staging data
         for imm in &imms {
             // skip imm that only holding out-of-date data
-            if imm.max_epoch() < min_epoch {
+            if imm.epoch() < min_epoch {
                 continue;
             }
 

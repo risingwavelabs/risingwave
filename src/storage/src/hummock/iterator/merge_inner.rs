@@ -16,16 +16,11 @@ use std::collections::binary_heap::PeekMut;
 use std::collections::{BinaryHeap, LinkedList};
 use std::ops::{Deref, DerefMut};
 
-use futures::FutureExt;
 use risingwave_hummock_sdk::key::FullKey;
 
-use super::Forward;
 use crate::hummock::HummockResult;
 use crate::hummock::iterator::{
     DirectionEnum, HummockIterator, HummockIteratorDirection, ValueMeta,
-};
-use crate::hummock::shared_buffer::shared_buffer_batch::{
-    SharedBufferBatchIterator, SharedBufferVersionedEntryRef,
 };
 use crate::hummock::value::HummockValue;
 use crate::monitor::StoreLocalStatistic;
@@ -97,17 +92,6 @@ impl<I: HummockIterator> MergeIterator<I> {
             unused_iters: iterators.into_iter().map(|iter| Node { iter }).collect(),
             heap: BinaryHeap::new(),
         }
-    }
-}
-
-impl MergeIterator<SharedBufferBatchIterator<Forward>> {
-    /// Used in `merge_imms_in_memory` to merge immutable memtables.
-    pub(crate) fn current_key_entry(&self) -> SharedBufferVersionedEntryRef<'_> {
-        self.heap
-            .peek()
-            .expect("no inner iter for imm merge")
-            .iter
-            .current_key_entry()
     }
 }
 
@@ -197,31 +181,6 @@ impl<T: Ord> Drop for PeekMutGuard<'_, T> {
             let top = PeekMut::pop(peek);
             self.unused.push_back(top);
         }
-    }
-}
-
-impl MergeIterator<SharedBufferBatchIterator<Forward>> {
-    pub(crate) fn advance_peek_to_next_key(&mut self) {
-        let mut node =
-            PeekMutGuard::peek_mut(&mut self.heap, &mut self.unused_iters).expect("no inner iter");
-
-        node.iter.advance_to_next_key();
-
-        if !node.iter.is_valid() {
-            // Put back to `unused_iters`
-            let node = node.pop();
-            self.unused_iters.push_back(node);
-        } else {
-            // This will update the heap top.
-            node.used();
-        }
-    }
-
-    pub(crate) fn rewind_no_await(&mut self) {
-        self.rewind()
-            .now_or_never()
-            .expect("should not pending")
-            .expect("should not err")
     }
 }
 
