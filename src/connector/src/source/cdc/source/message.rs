@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::types::{DatumRef, ScalarRefImpl, Timestamptz};
-use risingwave_pb::connector_service::{CdcMessage, cdc_message};
+use risingwave_pb::connector_service::{CdcMessage, SourceType, cdc_message};
 
 use crate::source::SourceMeta;
 use crate::source::base::SourceMessage;
@@ -41,7 +41,22 @@ impl From<cdc_message::CdcMessageType> for CdcMessageType {
 
 #[derive(Debug, Clone)]
 pub struct DebeziumCdcMeta {
-    db_name_prefix_len: usize,
+    /// The CDC source type of this message.
+    ///
+    /// This is required to disambiguate the parsing logic for `full_table_name` when it only
+    /// contains one dot (e.g. `db.table` in MySQL vs `schema.table` in Postgres/SQL Server).
+    pub source_type: SourceType,
+
+    /// The end index (exclusive) of the database name in `full_table_name`.
+    ///
+    /// For `db.schema.table` or `db.table`, this is the index of the first `.`.
+    db_name_end: usize,
+
+    /// The start index of the routing table identifier in `full_table_name`.
+    ///
+    /// - For Postgres/SQL Server Debezium topics: `db.schema.table` → points to `schema.table`
+    /// - For MySQL Debezium topics: `db.table` → `0` (keep `db.table` as the routing key)
+    table_name_start: usize,
 
     pub full_table_name: String,
     // extracted from `payload.source.ts_ms`, the time that the change event was made in the database
@@ -59,17 +74,27 @@ impl DebeziumCdcMeta {
 
     pub fn extract_database_name(&self) -> DatumRef<'_> {
         Some(ScalarRefImpl::Utf8(
-            &self.full_table_name.as_str()[0..self.db_name_prefix_len],
+            &self.full_table_name.as_str()[0..self.db_name_end],
         ))
     }
 
     pub fn extract_table_name(&self) -> DatumRef<'_> {
         Some(ScalarRefImpl::Utf8(
-            &self.full_table_name.as_str()[self.db_name_prefix_len..],
+            &self.full_table_name.as_str()[self.table_name_start..],
         ))
     }
 
-    /// Calculate the prefix length to skip when extracting table name from `full_table_name`.
+    /// Extract the *object* table name (the last part) from `full_table_name`.
+    ///
+    /// - `db.schema.table` → `table`
+    /// - `db.table` → `table`
+    pub fn extract_table_name_only(&self) -> DatumRef<'_> {
+        let s = self.full_table_name.as_str();
+        let table = s.rsplit_once('.').map(|(_, t)| t).unwrap_or(s);
+        Some(ScalarRefImpl::Utf8(table))
+    }
+
+    /// Derive indices for slicing `full_table_name`.
     ///
     /// # Background
     ///
@@ -95,27 +120,41 @@ impl DebeziumCdcMeta {
     /// - **MySQL** has no schema concept, so the "table name" IS `database.table`
     /// - **Postgres/SQL Server** have schemas, and the database is specified in the source,
     ///   so the "table name" is just `schema.table`
-    ///
-    /// # Returns
-    ///
-    /// The number of characters to skip from the start of `full_table_name` when calling
-    /// `extract_table_name()`. This value is used to strip the database prefix for
-    /// Postgres/SQL Server while keeping the full name for MySQL.
-    fn extract_db_name_prefix_len_from_full_table_name(full_table_name: &str) -> usize {
-        if let Some(first_dot) = full_table_name.find('.') {
-            // Check if there's a second dot after the first one
-            if full_table_name[first_dot + 1..].find('.').is_some() {
-                // Found 2 dots (3 parts): Postgres/SQL Server format "database.schema.table"
-                // Return position after first dot to skip "database." part
-                first_dot + 1
-            } else {
-                // Found 1 dot (2 parts): MySQL format "database.table"
-                // Return 0 to keep the entire string (no prefix to skip)
-                0
-            }
-        } else {
+    fn derive_name_indices_from_full_table_name(
+        full_table_name: &str,
+        source_type: SourceType,
+    ) -> (usize, usize) {
+        let Some(first_dot) = full_table_name.find('.') else {
             // No dot found (should not happen in practice for valid CDC messages)
-            0
+            return (0, 0);
+        };
+
+        let has_second_dot = full_table_name[first_dot + 1..].find('.').is_some();
+        match source_type {
+            // MySQL/MongoDB routing key keeps the full identifier (`db.table` / `db.collection`).
+            SourceType::Mysql | SourceType::Mongodb => (first_dot, 0),
+
+            // Postgres/Citus/SQL Server routing key is `schema.table` if database is present.
+            // If `full_table_name` only contains one dot (e.g. `schema.table`), we can still route
+            // correctly, but we can't derive the database name from it.
+            SourceType::Postgres | SourceType::Citus | SourceType::SqlServer => {
+                if has_second_dot {
+                    (first_dot, first_dot + 1)
+                } else {
+                    (0, 0)
+                }
+            }
+
+            // Fall back to the old heuristic:
+            // - 2 dots: `db.schema.table` → strip db for routing
+            // - 1 dot: treat as MySQL-style `db.table`
+            SourceType::Unspecified => {
+                if has_second_dot {
+                    (first_dot, first_dot + 1)
+                } else {
+                    (first_dot, 0)
+                }
+            }
         }
     }
 
@@ -123,11 +162,14 @@ impl DebeziumCdcMeta {
         full_table_name: String,
         source_ts_ms: i64,
         msg_type: cdc_message::CdcMessageType,
+        source_type: SourceType,
     ) -> Self {
-        let db_name_prefix_len =
-            Self::extract_db_name_prefix_len_from_full_table_name(&full_table_name);
+        let (db_name_end, table_name_start) =
+            Self::derive_name_indices_from_full_table_name(&full_table_name, source_type);
         Self {
-            db_name_prefix_len,
+            source_type,
+            db_name_end,
+            table_name_start,
             full_table_name,
             source_ts_ms,
             msg_type: msg_type.into(),
@@ -138,6 +180,7 @@ impl DebeziumCdcMeta {
 impl From<CdcMessage> for SourceMessage {
     fn from(message: CdcMessage) -> Self {
         let msg_type = message.get_msg_type().expect("invalid message type");
+        let source_type = message.get_source_type().unwrap_or(SourceType::Unspecified);
         SourceMessage {
             key: if message.key.is_empty() {
                 None // only data message has key
@@ -155,6 +198,7 @@ impl From<CdcMessage> for SourceMessage {
                 message.full_table_name,
                 message.source_ts_ms,
                 msg_type,
+                source_type,
             )),
         }
     }
