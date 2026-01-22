@@ -6,7 +6,10 @@ set -euo pipefail
 SKIP_RELEASE=${SKIP_RELEASE:-0}
 REPO_ROOT=${PWD}
 ARCH="$(uname -m)"
-CARGO_PROFILE=${CARGO_PROFILE:-production}
+
+# By default, we use `thin-production` for binary release.
+# This includes only symbol tables but no debug info, aiming for a small binary size.
+CARGO_PROFILE=${CARGO_PROFILE:-thin-production}
 
 echo "--- Check env"
 if [ "${BUILDKITE_SOURCE}" != "schedule" ] && [ "${BUILDKITE_SOURCE}" != "webhook" ] && [[ -z "${BINARY_NAME+x}" ]]; then
