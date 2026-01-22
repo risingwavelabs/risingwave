@@ -245,6 +245,7 @@ impl CreatingStreamingJobStatus {
     pub(super) fn on_new_upstream_epoch(
         &mut self,
         barrier_info: &BarrierInfo,
+        mutation: Option<Mutation>, // mutation to be set for the first barrier to inject
     ) -> Vec<(BarrierInfo, Option<Mutation>)> {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -254,7 +255,7 @@ impl CreatingStreamingJobStatus {
                 create_mview_tracker,
                 ..
             } => {
-                let mutation = {
+                let mutation = mutation.or_else(|| {
                     let pending_backfill_nodes = create_mview_tracker
                         .take_pending_backfill_nodes()
                         .collect_vec();
@@ -267,7 +268,7 @@ impl CreatingStreamingJobStatus {
                             },
                         ))
                     }
-                };
+                });
                 pending_upstream_barriers.push(barrier_info.clone());
                 vec![(
                     CreatingStreamingJobStatus::new_fake_barrier(

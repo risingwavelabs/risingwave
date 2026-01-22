@@ -21,10 +21,10 @@ use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
-use risingwave_pb::stream_plan::barrier_mutation::PbMutation;
+use risingwave_pb::stream_plan::barrier_mutation::{Mutation, PbMutation};
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{
-    PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation,
+    PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation, ThrottleMutation,
 };
 use tracing::warn;
 
@@ -34,6 +34,7 @@ use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightStreamingJobInfo, SubscriberType,
 };
+use crate::barrier::notifier::Notifier;
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::utils::NodeToCollect;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
@@ -135,6 +136,7 @@ impl DatabaseCheckpointControl {
     pub(super) fn apply_command(
         &mut self,
         mut command: Option<Command>,
+        notifiers: &mut Vec<Notifier>,
         barrier_info: &BarrierInfo,
         control_stream_manager: &mut ControlStreamManager,
         hummock_version_stats: &HummockVersionStats,
@@ -525,7 +527,31 @@ impl DatabaseCheckpointControl {
 
         for (job_id, creating_job) in &mut self.creating_streaming_job_controls {
             if !finished_snapshot_backfill_jobs.contains(job_id) {
-                creating_job.on_new_upstream_barrier(control_stream_manager, barrier_info)?;
+                let throttle_mutation = if let Some(Command::Throttle { jobs, config }) = &command
+                    && jobs.contains(job_id)
+                {
+                    assert_eq!(
+                        jobs.len(),
+                        1,
+                        "should not alter rate limit of snapshot backfill job with other jobs"
+                    );
+                    Some((
+                        Mutation::Throttle(ThrottleMutation {
+                            fragment_throttle: config
+                                .iter()
+                                .map(|(fragment_id, config)| (*fragment_id, *config))
+                                .collect(),
+                        }),
+                        take(notifiers),
+                    ))
+                } else {
+                    None
+                };
+                creating_job.on_new_upstream_barrier(
+                    control_stream_manager,
+                    barrier_info,
+                    throttle_mutation,
+                )?;
             }
         }
 

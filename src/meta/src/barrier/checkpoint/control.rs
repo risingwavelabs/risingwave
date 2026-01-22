@@ -1061,6 +1061,24 @@ impl DatabaseCheckpointControl {
             }
         }
 
+        if let Some(Command::Throttle { jobs, .. }) = &command
+            && jobs.len() > 1
+            && let Some(creating_job_id) = jobs
+                .iter()
+                .find(|job| self.creating_streaming_job_controls.contains_key(job))
+        {
+            warn!(
+                job_id = %creating_job_id,
+                "ignore multi-job throttle command on creating snapshot backfill streaming job"
+            );
+            for notifier in notifiers {
+                notifier
+                    .notify_start_failed(anyhow!("cannot alter rate limit for snapshot backfill streaming job with other jobs, \
+                                the original rate limit will be kept recovery.").into());
+            }
+            return Ok(());
+        };
+
         if let Some(Command::RescheduleFragment { .. }) = &command
             && !self.creating_streaming_job_controls.is_empty()
         {
@@ -1122,6 +1140,7 @@ impl DatabaseCheckpointControl {
             command,
         } = match self.apply_command(
             command,
+            &mut notifiers,
             &barrier_info,
             control_stream_manager,
             hummock_version_stats,
