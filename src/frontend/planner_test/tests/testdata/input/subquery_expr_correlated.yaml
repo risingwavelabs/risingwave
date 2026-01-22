@@ -700,3 +700,14 @@
   expected_outputs:
     - batch_plan
     - stream_plan
+- name: issue-23624-array-unnest-array_agg-to-array_transform
+  sql: |
+    create table t(id int, arr int[]);
+    select
+      id,
+      (select array_agg(x + 1) from unnest(arr) as u(x)) as arr2
+    from t;
+  expected_outputs:
+    - logical_plan
+    - optimized_logical_plan_for_stream
+    - optimized_logical_plan_for_batch
