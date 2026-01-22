@@ -624,15 +624,21 @@ pub trait FromArrow {
         // Struct projection for file source (Parquet): allow Arrow struct to be a superset of the
         // expected struct fields. We align fields by name and ignore extra fields.
         //
-        // Note: this path uses the expected `field` (derived from RW schema) to guide conversion,
-        // so the resulting RW struct will have exactly the expected fields and order.
+        // Only use projection when Arrow struct differs from expected (superset, reordered, or
+        // different field names). If they match exactly, fall through to the normal path to
+        // avoid unnecessary overhead and potential issues with UDF/other paths.
         if let (
             arrow_schema::DataType::Struct(expected_fields),
-            arrow_schema::DataType::Struct(_),
+            arrow_schema::DataType::Struct(actual_fields),
         ) = (field.data_type(), array.data_type())
         {
-            let struct_array: &arrow_array::StructArray = array.as_any().downcast_ref().unwrap();
-            return self.from_struct_array_projected(expected_fields, struct_array);
+            let dominated = Self::struct_fields_dominated(expected_fields, actual_fields);
+            if dominated {
+                let struct_array: &arrow_array::StructArray =
+                    array.as_any().downcast_ref().unwrap();
+                return self.from_struct_array_projected(expected_fields, struct_array);
+            }
+            // else: fields match exactly, fall through to normal Struct(_) path below
         }
         match array.data_type() {
             Boolean => self.from_bool_array(array.as_any().downcast_ref().unwrap()),
@@ -919,6 +925,33 @@ pub trait FromArrow {
                 .try_collect()?,
             (0..array.len()).map(|i| array.is_valid(i)).collect(),
         )))
+    }
+
+    /// Returns `true` if all expected fields are present in `actual_fields`, and `actual_fields`
+    /// has more fields or has them in a different order.
+    ///
+    /// This is used to decide whether to use `from_struct_array_projected` (projection needed)
+    /// or fall back to the normal `from_struct_array` path (exact match).
+    fn struct_fields_dominated(
+        expected_fields: &arrow_schema::Fields,
+        actual_fields: &arrow_schema::Fields,
+    ) -> bool {
+        // Fast path: if lengths are equal and names match in order, no projection needed
+        if expected_fields.len() == actual_fields.len() {
+            let all_match = expected_fields
+                .iter()
+                .zip_eq_fast(actual_fields.iter())
+                .all(|(e, a)| e.name() == a.name());
+            if all_match {
+                return false; // exact match, use normal path
+            }
+        }
+        // Check that all expected fields exist in actual (by name)
+        let actual_names: std::collections::HashSet<&str> =
+            actual_fields.iter().map(|f| f.name().as_str()).collect();
+        expected_fields
+            .iter()
+            .all(|e| actual_names.contains(e.name().as_str()))
     }
 
     /// Converts Arrow `StructArray` to RisingWave `StructArray` according to the expected fields.
