@@ -136,7 +136,7 @@ enum WriteFuture<S: LocalStateStore> {
 enum WriteFutureEvent {
     UpstreamMessageReceived(Message),
     ChunkFlushed(FlushedChunkInfo),
-    EndofStream,
+    EndOfStream,
 }
 
 impl<S: LocalStateStore> WriteFuture<S> {
