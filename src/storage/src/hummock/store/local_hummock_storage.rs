@@ -569,7 +569,6 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
             prev_epoch
         );
 
-        // only update the PkPrefix watermark for read
         if let Some((direction, watermarks, watermark_type)) = &mut opts.table_watermarks {
             let mut read_version = self.read_version.write();
             read_version.filter_regress_watermarks(watermarks);
