@@ -70,7 +70,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f
 ], optional = true }
 csv = "1.4"
 deltalake = { workspace = true, optional = true }
-duration-str = "0.17.0"
+duration-str = "0.18.0"
 easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
