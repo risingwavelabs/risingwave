@@ -144,8 +144,13 @@ if [[ -n "${BUILDKITE_TAG}" ]]; then
     gh release upload --clobber "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz
 
     echo "--- Release upload risingwave debug info"
-    tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz risingwave.dwp
-    gh release upload --clobber "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz
+    # Some cargo profiles may not generate split debug info (e.g. no `risingwave.dwp`).
+    if [[ -f risingwave.dwp ]]; then
+      tar -czvf risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz risingwave.dwp
+      gh release upload --clobber "${BUILDKITE_TAG}" risingwave-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.dwp.tar.gz
+    else
+      echo "No risingwave.dwp found; skipping debug info upload."
+    fi
 
     echo "--- Release upload risectl asset"
     tar -czvf risectl-"${BUILDKITE_TAG}"-"${ARCH}"-unknown-linux.tar.gz risectl
