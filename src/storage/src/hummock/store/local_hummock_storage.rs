@@ -28,7 +28,6 @@ use risingwave_hummock_sdk::key::{
     FullKey, TableKey, TableKeyRange, UserKey, is_empty_key_range, vnode_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_watermark::WatermarkSerdeType;
 use tracing::{Instrument, warn};
 
 use super::version::VersionUpdate;
@@ -571,9 +570,7 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
         );
 
         // only update the PkPrefix watermark for read
-        if let Some((direction, watermarks, WatermarkSerdeType::PkPrefix)) =
-            &mut opts.table_watermarks
-        {
+        if let Some((direction, watermarks, watermark_type)) = &mut opts.table_watermarks {
             let mut read_version = self.read_version.write();
             read_version.filter_regress_watermarks(watermarks);
             if !watermarks.is_empty() {
@@ -581,7 +578,7 @@ impl StateStoreWriteEpochControl for LocalHummockStorage {
                     direction: *direction,
                     epoch: prev_epoch,
                     vnode_watermarks: watermarks.clone(),
-                    watermark_type: WatermarkSerdeType::PkPrefix,
+                    watermark_type: *watermark_type,
                 });
             }
         }

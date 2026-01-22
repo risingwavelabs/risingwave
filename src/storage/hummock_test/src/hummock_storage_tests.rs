@@ -33,7 +33,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
 use risingwave_hummock_sdk::table_stats::TableStats;
 use risingwave_hummock_sdk::table_watermark::{
-    PkPrefixTableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+    TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo};
 use risingwave_meta::hummock::test_utils::get_compaction_group_id_by_table_id;
@@ -2554,13 +2554,14 @@ async fn test_table_watermark() {
             .get(&TEST_TABLE_ID)
             .unwrap()
             .committed_epoch;
-        let table_watermarks = PkPrefixTableWatermarksIndex::new_committed(
+        let table_watermarks = TableWatermarksIndex::new_committed(
             version
                 .table_watermarks
                 .get(&TEST_TABLE_ID)
                 .unwrap()
                 .clone(),
             epoch,
+            WatermarkSerdeType::PkPrefix,
         );
         assert_eq!(WatermarkDirection::Ascending, table_watermarks.direction());
         assert_eq!(
