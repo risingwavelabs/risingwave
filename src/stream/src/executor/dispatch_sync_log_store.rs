@@ -53,6 +53,9 @@ use crate::executor::sync_kv_log_store::{
 use crate::executor::{FlushedChunkInfo, StreamConsumer, SyncedKvLogStoreMetrics};
 use crate::task::NewOutputRequest;
 
+/// Configuration for creating a `SyncLogStoreDispatchExecutor`, including table info,
+/// serialization, backing state store, and knobs controlling log store behavior such as
+/// buffer size, pause duration between polls, alignment mode, chunk sizing, and metrics.
 pub struct SyncLogStoreDispatchConfig<S: StateStore> {
     pub table_id: TableId,
     pub serde: LogStoreRowSerde,
@@ -64,6 +67,11 @@ pub struct SyncLogStoreDispatchConfig<S: StateStore> {
     pub metrics: SyncedKvLogStoreMetrics,
 }
 
+/// Executor that pairs a synced KV log store with a dispatcher so the log store can
+/// advance and write independently of downstream backpressure.
+///
+/// This keeps upstream executors being polled even when downstream is slow or blocked, decoupling
+/// log store progress from downstream polling.
 pub struct SyncLogStoreDispatchExecutor<S: StateStore> {
     pub(super) input: Executor,
     pub(super) inner: DispatchExecutorInner,
