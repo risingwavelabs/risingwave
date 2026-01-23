@@ -613,7 +613,7 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                     SinkError::Redshift(anyhow!(
                         "Periodic task for sink id {} panicked: {}",
                         self.sink_id,
-                        e.as_report()
+                        e.to_report_string()
                     ))
                 })?;
             }
