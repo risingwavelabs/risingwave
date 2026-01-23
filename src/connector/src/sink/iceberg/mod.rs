@@ -3275,7 +3275,7 @@ mod test {
         assert_eq!(iceberg_config.catalog_type(), "rest");
     }
 
-    /// Test parsing custom FileIO implementation configuration.
+    /// Test parsing custom `FileIO` implementation configuration.
     #[test]
     fn test_parse_custom_io_impl_config() {
         let values: BTreeMap<String, String> = [
@@ -3301,7 +3301,7 @@ mod test {
         // Verify catalog type
         assert_eq!(iceberg_config.catalog_type(), "rest");
 
-        // Verify custom FileIO implementation
+        // Verify custom `FileIO` implementation
         assert_eq!(
             iceberg_config.common.catalog_io_impl.as_deref(),
             Some("org.apache.iceberg.gcp.gcs.GCSFileIO")

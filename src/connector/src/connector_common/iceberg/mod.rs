@@ -191,7 +191,7 @@ pub struct IcebergCommon {
     pub gcp_auth_scopes: Option<String>,
 
     /// Custom FileIO implementation class for the Iceberg catalog.
-    /// Allows specifying a custom FileIO implementation instead of the default.
+    /// Allows specifying a custom `FileIO` implementation instead of the default.
     /// Examples:
     /// - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
     /// - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
