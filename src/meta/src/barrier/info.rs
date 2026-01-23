@@ -40,6 +40,7 @@ use tracing::{info, warn};
 
 use crate::MetaResult;
 use crate::barrier::cdc_progress::{CdcProgress, CdcTableBackfillTracker};
+use crate::barrier::command::PostCollectCommand;
 use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
@@ -555,11 +556,11 @@ impl InflightDatabaseInfo {
 
     pub(super) fn apply_collected_command(
         &mut self,
-        command: Option<&Command>,
+        command: &PostCollectCommand,
         resps: &[BarrierCompleteResponse],
         version_stats: &HummockVersionStats,
     ) {
-        if let Some(Command::CreateStreamingJob { info, job_type, .. }) = command {
+        if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } = command {
             match job_type {
                 CreateStreamingJobType::Normal | CreateStreamingJobType::SinkIntoTable(_) => {
                     let job_id = info.streaming_job.id();
@@ -581,7 +582,7 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        if let Some(Command::RescheduleFragment { reschedules, .. }) = command {
+        if let PostCollectCommand::RescheduleFragment { reschedules, .. } = command {
             // During reschedule we expect fragments to be rebuilt with new actors and no vnode bitmap update.
             debug_assert!(
                 reschedules
@@ -611,11 +612,17 @@ impl InflightDatabaseInfo {
                 );
                 continue;
             };
-            let CreateStreamingJobStatus::Creating { tracker, .. } =
-                &mut self.jobs.get_mut(job_id).expect("should exist").status
-            else {
-                warn!("update the progress of an created streaming job: {progress:?}");
-                continue;
+            let tracker = match &mut self.jobs.get_mut(job_id).expect("should exist").status {
+                CreateStreamingJobStatus::Init => {
+                    continue;
+                }
+                CreateStreamingJobStatus::Creating { tracker, .. } => tracker,
+                CreateStreamingJobStatus::Created => {
+                    if !progress.done {
+                        warn!("update the progress of an created streaming job: {progress:?}");
+                    }
+                    continue;
+                }
             };
             tracker.apply_progress(progress, version_stats);
         }
@@ -635,7 +642,7 @@ impl InflightDatabaseInfo {
                 .expect("should exist")
                 .cdc_table_backfill_tracker
             else {
-                warn!("update the progress of an created streaming job: {progress:?}");
+                warn!("update the cdc progress of an created streaming job: {progress:?}");
                 continue;
             };
             tracker.update_split_progress(progress);

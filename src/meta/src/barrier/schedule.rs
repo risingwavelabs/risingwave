@@ -854,9 +854,9 @@ mod tests {
             unimplemented!()
         }
 
-        async fn post_collect_command<'a>(
-            &'a self,
-            _command: &'a crate::barrier::command::CommandContext,
+        async fn post_collect_command(
+            &self,
+            _command: crate::barrier::command::PostCollectCommand,
         ) -> MetaResult<()> {
             unimplemented!()
         }

@@ -708,6 +708,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_DATABASE,
+                    None,
                 )
                 .await
             }
@@ -790,6 +791,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_SCHEMA,
+                    None,
                 )
                 .await
             }
@@ -819,6 +821,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_TABLE,
+                    None,
                 )
                 .await
             }
@@ -1021,6 +1024,7 @@ pub async fn handle(
                         name,
                         new_owner_name,
                         statement_type,
+                        None,
                     )
                     .await
                 }
@@ -1114,6 +1118,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_SINK,
+                    None,
                 )
                 .await
             }
@@ -1207,6 +1212,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_SUBSCRIPTION,
+                    None,
                 )
                 .await
             }
@@ -1253,6 +1259,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_SOURCE,
+                    None,
                 )
                 .await
             }
@@ -1342,6 +1349,16 @@ pub async fn handle(
                 )
                 .await
             }
+            AlterFunctionOperation::ChangeOwner { new_owner_name } => {
+                alter_owner::handle_alter_owner(
+                    handler_args,
+                    name,
+                    new_owner_name,
+                    StatementType::ALTER_FUNCTION,
+                    args,
+                )
+                .await
+            }
         },
         Statement::AlterConnection { name, operation } => match operation {
             AlterConnectionOperation::SetSchema { new_schema_name } => {
@@ -1360,6 +1377,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_CONNECTION,
+                    None,
                 )
                 .await
             }
