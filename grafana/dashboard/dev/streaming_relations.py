@@ -1,10 +1,6 @@
 from ..common import *
 from . import section
-from .streaming_common import (
-    _actor_busy_rate_expr,
-    relabel_materialized_view_id_as_id,
-    topk_percent_expr,
-)
+from .streaming_common import _actor_busy_rate_expr
 
 def _relation_busy_rate_expr_by_mv(rate_interval: str):
     """Return per-relation busy rate (by materialized_view_id), based on busiest actor."""
@@ -19,10 +15,14 @@ def _relation_busy_rate_expr(rate_interval: str):
     """Return per-relation busy rate with relation metadata labels attached."""
     relation_busy_rate_expr = _relation_busy_rate_expr_by_mv(rate_interval)
     relation_busy_rate_with_metadata_expr = (
-        f"{relabel_materialized_view_id_as_id(relation_busy_rate_expr)}"
+        f"label_replace(({relation_busy_rate_expr}), 'id', '$1', 'materialized_view_id', '(.+)')"
         f"* on (id) group_left (name, type) {metric('relation_info')}"
     )
     return relation_busy_rate_with_metadata_expr
+
+def _relation_metric_with_id(expr: str) -> str:
+    """Attach `id` label from materialized_view_id for relation-level tables."""
+    return f"label_replace(({expr}), 'id', '$1', 'materialized_view_id', '(.+)')"
 
 def _relation_metric_with_metadata(expr: str) -> str:
     """Join relation_info to add name/type labels after peak computation."""
@@ -31,10 +31,10 @@ def _relation_metric_with_metadata(expr: str) -> str:
 def _relation_busy_peak_topk_expr(rate_interval: str) -> str:
     """Compute top-k peak busy rate for relations over the dashboard range."""
     per_mv_busy_expr = _relation_busy_rate_expr_by_mv(rate_interval)
-    per_mv_busy_with_id_expr = relabel_materialized_view_id_as_id(per_mv_busy_expr)
+    per_mv_busy_with_id_expr = _relation_metric_with_id(per_mv_busy_expr)
     with_metadata_expr = _relation_metric_with_metadata(per_mv_busy_with_id_expr)
     peak_expr = f"max_over_time(({with_metadata_expr})[$__range:$__interval])"
-    return topk_percent_expr(peak_expr)
+    return f"topk(10, (100 * ({peak_expr})))"
 
 def _relation_cpu_peak_topk_expr(
     poll_duration_rate_expr: str, actor_count_expr: str
@@ -45,7 +45,10 @@ def _relation_cpu_peak_topk_expr(
     )
     per_mv_rate_expr = _sum_fragment_metric_by_mv(per_fragment_rate_expr)
     per_mv_rate_expr = f"({per_mv_rate_expr}) / 1000000000"
-    per_mv_rate_with_id_expr = relabel_materialized_view_id_as_id(per_mv_rate_expr)
+    per_mv_rate_with_id_expr = (
+        f"label_replace(({per_mv_rate_expr}), "
+        f"'id', '$1', 'materialized_view_id', '(.+)')"
+    )
     with_metadata_expr = (
         f"({per_mv_rate_with_id_expr}) * on (id) group_left (name, type)"
         f" {metric('relation_info')}"
@@ -53,7 +56,7 @@ def _relation_cpu_peak_topk_expr(
     peak_expr = (
         f"max_over_time(({with_metadata_expr})[$__range:$__interval])"
     )
-    return topk_percent_expr(peak_expr)
+    return f"topk(10, (100 * ({peak_expr})))"
 
 def _relation_busy_rate_target(panels: Panels, rate_interval: str):
     return panels.target(
