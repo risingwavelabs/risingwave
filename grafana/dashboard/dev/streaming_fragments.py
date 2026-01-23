@@ -7,6 +7,7 @@ from .streaming_common import (
 )
 
 <<<<<<< HEAD
+<<<<<<< HEAD
 def _fragment_topk_percent_expr(expr: str) -> str:
     """Wrap an expression as top-k percent for fragment tables."""
     return f"topk(10, ({expr}) * 100)"
@@ -34,6 +35,12 @@ def _fragment_peak_rate_with_id_at_step(expr: str, normalize_ns: bool = False) -
     return relabel_fragment_id_as_id(
         f"max_over_time(({normalized_expr})[$__range:$__interval])"
 >>>>>>> 0f7b4d26c0 (Update streaming overview queries)
+=======
+def _fragment_peak_rate_with_id_at_step(expr: str) -> str:
+    """Compute the peak rate over the dashboard range and attach `id` from fragment_id."""
+    return relabel_fragment_id_as_id(
+        f"max_over_time(({expr})[$__range:$__interval])"
+>>>>>>> 5e36d875eb (Normalize fragment tokio expressions)
     )
 
 @section
