@@ -294,6 +294,7 @@ pub enum AlterSourceOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterFunctionOperation {
     SetSchema { new_schema_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -669,6 +670,9 @@ impl fmt::Display for AlterFunctionOperation {
         match self {
             AlterFunctionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {new_schema_name}")
+            }
+            AlterFunctionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
             }
         }
     }
