@@ -1169,9 +1169,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-dynamodb"
-version = "1.98.0"
+version = "1.100.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4b4d9e1a4b49730e7c26f148826e1e592b2cec337bc3fedd2e57d58e494b8808"
+checksum = "15204f660c916ca74c17dc8dad054b513343618807e779d9d41fdc3635d3343c"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1191,9 +1191,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-glue"
-version = "1.126.0"
+version = "1.132.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd9c10a11584c0b619c9e478143072c4028c39017f98534e206156a7e94188be"
+checksum = "35638d8e6ef97adb7f3154ffc618bbe1d631a503b6d8328b94af77b7615fbeb2"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
@@ -1213,9 +1213,9 @@ dependencies = [
 
 [[package]]
 name = "aws-sdk-kinesis"
-version = "1.92.0"
+version = "1.96.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "040a3c40672df2ae1de8e38b3303d1754596bab0c3f4655a6d99234b9fdd6bbc"
+checksum = "48519bb3567e44d4ec1a83c14655b1c813b0347a793a5bba9ccf51484d399110"
 dependencies = [
  "aws-credential-types",
  "aws-runtime",
