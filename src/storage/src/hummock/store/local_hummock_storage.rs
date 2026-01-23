@@ -658,32 +658,6 @@ impl LocalHummockStorage {
             let (size, old_value_size) =
                 SharedBufferBatch::measure_batch_size(&sorted_items, old_values.as_deref());
 
-            self.write_limiter.wait_permission(self.table_id).await;
-            let limiter = self.memory_limiter.as_ref();
-            let tracker = match limiter.try_require_memory(size as u64) {
-                Some(tracker) => tracker,
-                _ => {
-                    warn!(
-                        "blocked at requiring memory: {}, current {}",
-                        size,
-                        limiter.get_memory_usage()
-                    );
-                    self.event_sender
-                        .send(HummockEvent::BufferMayFlush)
-                        .expect("should be able to send");
-                    let tracker = limiter
-                        .require_memory(size as u64)
-                        .instrument_await("hummock_require_memory".verbose())
-                        .await;
-                    warn!(
-                        "successfully requiring memory: {}, current {}",
-                        size,
-                        limiter.get_memory_usage()
-                    );
-                    tracker
-                }
-            };
-
             let old_values = old_values.map(|old_values| {
                 SharedBufferBatchOldValues::new(
                     old_values,
@@ -701,26 +675,56 @@ impl LocalHummockStorage {
                 size,
                 table_id,
                 self.table_memory_metrics.clone(),
-                Some(tracker),
             );
             self.spill_offset += 1;
-            let imm_size = imm.size();
-            let mut read_version = self.read_version.write();
-            read_version.add_imm(imm);
 
-            // insert imm to uploader
-            if !self.is_replicated
-                && (self.upload_on_flush
-                    || read_version.pending_imm_size() >= self.mem_table_spill_threshold)
-            {
-                let imms = read_version.start_upload_pending_imms();
-                self.event_sender
-                    .send(HummockEvent::ImmToUploader { instance_id, imms })
-                    .map_err(|_| {
-                        HummockError::other("failed to send imm to uploader. maybe shutting down")
-                    })?;
+            if self.is_replicated {
+                self.read_version.write().add_replicated_imm(imm);
+            } else {
+                self.write_limiter.wait_permission(self.table_id).await;
+                let limiter = &self.memory_limiter;
+                let (tracker, fast_required_memory) = match limiter.try_require_memory(size as u64)
+                {
+                    Some(tracker) => (tracker, true),
+                    None => {
+                        warn!(
+                            "blocked at requiring memory: {}, current {}",
+                            size,
+                            limiter.get_memory_usage()
+                        );
+                        self.event_sender
+                            .send(HummockEvent::BufferMayFlush)
+                            .expect("should be able to send");
+                        let tracker = limiter
+                            .require_memory(size as u64)
+                            .instrument_await("hummock_require_memory".verbose())
+                            .await;
+                        warn!(
+                            "successfully requiring memory: {}, current {}",
+                            size,
+                            limiter.get_memory_usage()
+                        );
+                        (tracker, false)
+                    }
+                };
+                let mut read_version = self.read_version.write();
+                read_version.add_pending_imm(imm, tracker);
+                if self.upload_on_flush
+                    || read_version.pending_imm_size() >= self.mem_table_spill_threshold
+                    || !fast_required_memory
+                {
+                    let imms = read_version.start_upload_pending_imms();
+                    self.event_sender
+                        .send(HummockEvent::ImmToUploader { instance_id, imms })
+                        .map_err(|_| {
+                            HummockError::other(
+                                "failed to send imm to uploader. maybe shutting down",
+                            )
+                        })?;
+                }
             }
-            imm_size
+
+            size
         } else {
             0
         };

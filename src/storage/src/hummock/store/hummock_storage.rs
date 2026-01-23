@@ -949,10 +949,6 @@ impl HummockStorage {
         }
     }
 
-    pub fn get_shared_buffer_size(&self) -> usize {
-        self.buffer_tracker.get_buffer_size()
-    }
-
     /// Creates a [`HummockStorage`] with default stats. Should only be used by tests.
     pub async fn for_test(
         options: Arc<StorageOpts>,
