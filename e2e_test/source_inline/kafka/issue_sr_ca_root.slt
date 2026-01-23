@@ -1,0 +1,17 @@
+system ok
+bash e2e_test/source_inline/kafka/generate_cert.sh
+
+system ok
+mkdir -p .risingwave/log
+
+system ok
+python3 e2e_test/source_inline/kafka/https_server_require_ca_root.py 9012 > .risingwave/log/py-https.log 2>&1 < /dev/null &
+
+system ok retry 3 backoff 2s
+curl --fail-with-body 'https://localhost:9012/subjects/dummy_topic-value/versions/latest'
+
+system ok
+pkill -f https_server_require_ca_root
+
+system ok
+rm -r secrets/
