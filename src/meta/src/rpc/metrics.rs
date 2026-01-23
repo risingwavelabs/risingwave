@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
@@ -30,17 +30,22 @@ use risingwave_common::metrics::{
     LabelGuardedUintGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::util::stream_graph_visitor::{
+    visit_stream_node_source_backfill, visit_stream_node_stream_scan,
+};
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
+use risingwave_common::{catalog::FragmentTypeFlag};
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
 use risingwave_meta_model::WorkerId;
 use risingwave_object_store::object::object_metrics::{
     GLOBAL_OBJECT_STORE_METRICS, ObjectStoreMetrics,
 };
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::meta::FragmentDistribution;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -52,6 +57,15 @@ use crate::controller::utils::PartialFragmentStateTables;
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
 use crate::rpc::ElectionClientRef;
+
+struct BackfillFragmentInfo {
+    job_id: u32,
+    fragment_id: u32,
+    backfill_state_table_id: u32,
+    backfill_target_relation_id: u32,
+    backfill_type: &'static str,
+    backfill_epoch: u64,
+}
 
 #[derive(Clone)]
 pub struct MetaMetrics {
@@ -201,6 +215,10 @@ pub struct MetaMetrics {
     pub sink_info: IntGaugeVec,
     /// A dummy gauge metrics with its label to be relation info
     pub relation_info: IntGaugeVec,
+    /// A dummy gauge metrics with its label to be backfill fragment info
+    pub backfill_fragment_info: IntGaugeVec,
+    /// A dummy gauge metrics with its label to be backfill relation info
+    pub backfill_relation_info: IntGaugeVec,
 
     // ********************************** System Params ************************************
     /// A dummy gauge metric with labels carrying system parameter info.
@@ -706,6 +724,36 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let backfill_fragment_info = register_int_gauge_vec_with_registry!(
+            "backfill_fragment_info",
+            "Information of backfill fragments",
+            &[
+                "job_id",
+                "fragment_id",
+                "backfill_state_table_id",
+                "backfill_target_relation_id",
+                "backfill_type",
+                "backfill_epoch",
+            ],
+            registry
+        )
+        .unwrap();
+
+        let backfill_relation_info = register_int_gauge_vec_with_registry!(
+            "backfill_relation_info",
+            "Information of backfill target relations",
+            &[
+                "backfill_target_relation_id",
+                "database",
+                "schema",
+                "name",
+                "resource_group",
+                "type",
+            ],
+            registry
+        )
+        .unwrap();
+
         let l0_compact_level_count = register_histogram_vec_with_registry!(
             "storage_l0_compact_level_count",
             "level_count of l0 compact task",
@@ -941,6 +989,8 @@ impl MetaMetrics {
             table_info,
             sink_info,
             relation_info,
+            backfill_fragment_info,
+            backfill_relation_info,
             system_param_info,
             l0_compact_level_count,
             compact_task_size,
@@ -1246,6 +1296,178 @@ pub async fn refresh_relation_info_metrics(
     }
 }
 
+fn extract_backfill_fragment_info(
+    distribution: &FragmentDistribution,
+) -> Option<BackfillFragmentInfo> {
+    let backfill_type = if distribution.fragment_type_mask & FragmentTypeFlag::SourceScan as u32 != 0
+    {
+        "SOURCE"
+    } else if distribution.fragment_type_mask
+        & (FragmentTypeFlag::SnapshotBackfillStreamScan as u32
+            | FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan as u32)
+        != 0
+    {
+        "SNAPSHOT_BACKFILL"
+    } else if distribution.fragment_type_mask & FragmentTypeFlag::StreamScan as u32 != 0 {
+        "ARRANGEMENT_OR_NO_SHUFFLE"
+    } else {
+        return None;
+    };
+
+    let stream_node = distribution.node.as_ref()?;
+    let mut info = None;
+    match backfill_type {
+        "SOURCE" => {
+            visit_stream_node_source_backfill(stream_node, |node| {
+                info = Some(BackfillFragmentInfo {
+                    job_id: distribution.table_id,
+                    fragment_id: distribution.fragment_id,
+                    backfill_state_table_id: node
+                        .state_table
+                        .as_ref()
+                        .map(|table| table.id)
+                        .unwrap_or_default(),
+                    backfill_target_relation_id: node.upstream_source_id,
+                    backfill_type,
+                    backfill_epoch: 0,
+                });
+            });
+        }
+        "SNAPSHOT_BACKFILL" | "ARRANGEMENT_OR_NO_SHUFFLE" => {
+            visit_stream_node_stream_scan(stream_node, |node| {
+                info = Some(BackfillFragmentInfo {
+                    job_id: distribution.table_id,
+                    fragment_id: distribution.fragment_id,
+                    backfill_state_table_id: node
+                        .state_table
+                        .as_ref()
+                        .map(|table| table.id)
+                        .unwrap_or_default(),
+                    backfill_target_relation_id: node.table_id,
+                    backfill_type,
+                    backfill_epoch: node.snapshot_backfill_epoch.unwrap_or_default(),
+                });
+            });
+        }
+        _ => {}
+    }
+
+    info
+}
+
+pub async fn refresh_backfill_info_metrics(
+    catalog_controller: &CatalogControllerRef,
+    meta_metrics: Arc<MetaMetrics>,
+) {
+    let fragment_descs = match catalog_controller.list_fragment_descs(true).await {
+        Ok(fragment_descs) => fragment_descs,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to list creating fragment descs");
+            return;
+        }
+    };
+
+    let backfill_infos: Vec<_> = fragment_descs
+        .iter()
+        .filter_map(|(distribution, _)| extract_backfill_fragment_info(distribution))
+        .collect();
+
+    meta_metrics.backfill_fragment_info.reset();
+    for info in &backfill_infos {
+        meta_metrics
+            .backfill_fragment_info
+            .with_label_values(&[
+                &info.job_id.to_string(),
+                &info.fragment_id.to_string(),
+                &info.backfill_state_table_id.to_string(),
+                &info.backfill_target_relation_id.to_string(),
+                info.backfill_type,
+                &info.backfill_epoch.to_string(),
+            ])
+            .set(1);
+    }
+
+    let backfill_target_relation_ids: HashSet<u32> = backfill_infos
+        .iter()
+        .map(|info| info.backfill_target_relation_id)
+        .collect();
+
+    meta_metrics.backfill_relation_info.reset();
+    if backfill_target_relation_ids.is_empty() {
+        return;
+    }
+
+    let table_objects = match catalog_controller.list_table_objects().await {
+        Ok(table_objects) => table_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get table objects");
+            return;
+        }
+    };
+    let source_objects = match catalog_controller.list_source_objects().await {
+        Ok(source_objects) => source_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get source objects");
+            return;
+        }
+    };
+    let sink_objects = match catalog_controller.list_sink_objects().await {
+        Ok(sink_objects) => sink_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get sink objects");
+            return;
+        }
+    };
+
+    for (id, db, schema, name, resource_group) in table_objects {
+        if backfill_target_relation_ids.contains(&id.as_raw_id()) {
+            meta_metrics
+                .backfill_relation_info
+                .with_label_values(&[
+                    &id.to_string(),
+                    &db,
+                    &schema,
+                    &name,
+                    &resource_group,
+                    &"table".to_owned(),
+                ])
+                .set(1);
+        }
+    }
+
+    for (id, db, schema, name, resource_group) in source_objects {
+        if backfill_target_relation_ids.contains(&id.as_raw_id()) {
+            meta_metrics
+                .backfill_relation_info
+                .with_label_values(&[
+                    &id.to_string(),
+                    &db,
+                    &schema,
+                    &name,
+                    &resource_group,
+                    &"source".to_owned(),
+                ])
+                .set(1);
+        }
+    }
+
+    for (id, db, schema, name, resource_group) in sink_objects {
+        if backfill_target_relation_ids.contains(&id.as_raw_id()) {
+            meta_metrics
+                .backfill_relation_info
+                .with_label_values(&[
+                    &id.to_string(),
+                    &db,
+                    &schema,
+                    &name,
+                    &resource_group,
+                    &"sink".to_owned(),
+                ])
+                .set(1);
+        }
+    }
+}
+
 pub fn start_info_monitor(
     metadata_manager: MetadataManager,
     hummock_manager: HummockManagerRef,
@@ -1280,6 +1502,12 @@ pub fn start_info_monitor(
             .await;
 
             refresh_relation_info_metrics(
+                &metadata_manager.catalog_controller,
+                meta_metrics.clone(),
+            )
+            .await;
+
+            refresh_backfill_info_metrics(
                 &metadata_manager.catalog_controller,
                 meta_metrics.clone(),
             )
