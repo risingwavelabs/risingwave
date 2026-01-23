@@ -1407,6 +1407,7 @@ pub async fn handle(
                     name,
                     new_owner_name,
                     StatementType::ALTER_SECRET,
+                    None,
                 )
                 .await
             }

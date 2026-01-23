@@ -599,7 +599,7 @@ impl CatalogController {
                     .one(&txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("secret", object_id))?;
-                objects.push(PbObjectInfo::Secret(ObjectModel(secret, obj).into()));
+                objects.push(PbObjectInfo::Secret(ObjectModel(secret, obj, None).into()));
             }
             _ => unreachable!("not supported object type: {:?}", object_type),
         };

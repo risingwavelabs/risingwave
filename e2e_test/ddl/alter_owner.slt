@@ -279,7 +279,7 @@ statement ok
 DROP FUNCTION add;
 
 statement ok
-drop secret secret_1;
+DROP SECRET secret_1;
 
 statement ok
 DROP USER user1;
