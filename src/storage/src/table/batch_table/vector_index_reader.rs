@@ -19,7 +19,7 @@ use risingwave_common::array::{
     Array, ArrayBuilder, ArrayImpl, DataChunk, ListArrayBuilder, ListValue, StructArrayBuilder,
     StructValue,
 };
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::row::RowDeserializer;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_common::util::value_encoding::BasicDeserializer;
@@ -129,6 +129,7 @@ impl<S: StateStore> VectorIndexReader<S> {
                     epoch,
                     NewReadSnapshotOptions {
                         table_id: self.table_id,
+                        table_option: TableOption::default(),
                     },
                 )
                 .await?,

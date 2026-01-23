@@ -342,7 +342,6 @@ struct StateTableRowStore<LS: LocalStateStore, SD: ValueRowSerde> {
     all_rows: Option<HashMap<VirtualNode, BTreeMap<Bytes, OwnedRow>>>,
 
     table_id: TableId,
-    table_option: TableOption,
     row_serde: Arc<SD>,
     // should be only used for debugging in panic message of handle_mem_table_error
     pk_serde: OrderedRowSerde,
@@ -372,7 +371,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             // Get min key via forward iteration
             let memcomparable_range_with_vnode = prefixed_range_with_vnode::<Bytes>(.., vnode);
             let read_options = ReadOptions {
-                retention_seconds: self.table_option.retention_seconds,
                 cache_policy: CachePolicy::Fill(Hint::Low),
                 ..Default::default()
             };
@@ -422,7 +420,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
             let start_time = Instant::now();
             *rows = try_join_all(vnode_bitmap.iter_vnodes().map(|vnode| {
                 let state_store = &self.state_store;
-                let retention_seconds = self.table_option.retention_seconds;
                 let row_serde = &self.row_serde;
                 async move {
                     let mut rows = BTreeMap::new();
@@ -437,7 +434,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
                                     prefix_hint: None,
                                     prefetch_options: Default::default(),
                                     cache_policy: Default::default(),
-                                    retention_seconds,
                                 },
                             )
                             .await?,
@@ -957,7 +953,6 @@ where
             table_id,
             row_store: StateTableRowStore {
                 all_rows: preload_all_rows.then(HashMap::new),
-                table_option,
                 state_store: local_state_store,
                 row_serde,
                 pk_serde: pk_serde.clone(),
@@ -1151,7 +1146,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
@@ -1192,7 +1186,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
 
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
@@ -1743,7 +1736,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         }
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             prefetch_options,
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };
@@ -1803,7 +1795,6 @@ impl<LS: LocalStateStore, SD: ValueRowSerde> StateTableRowStore<LS, SD> {
         }
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             prefetch_options,
             cache_policy: CachePolicy::Fill(Hint::Normal),
         };

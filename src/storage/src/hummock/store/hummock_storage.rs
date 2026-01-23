@@ -21,7 +21,7 @@ use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::VectorRef;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::dispatch_distance_measurement;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_common_service::{NotificationClient, ObserverManager};
@@ -280,6 +280,7 @@ impl HummockStorageReadSnapshot {
                 key,
                 self.epoch.get_epoch(),
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_version_tuple,
                 on_key_value_fn,
@@ -300,6 +301,7 @@ impl HummockStorageReadSnapshot {
                 key_range,
                 self.epoch.get_epoch(),
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_version_tuple,
             )
@@ -319,6 +321,7 @@ impl HummockStorageReadSnapshot {
                 key_range,
                 self.epoch.get_epoch(),
                 self.table_id,
+                self.table_option,
                 read_options,
                 read_version_tuple,
                 None,
@@ -367,6 +370,7 @@ impl HummockStorageReadSnapshot {
             }
             HummockReadEpoch::NoWait(epoch) => {
                 self.build_read_version_tuple_from_all(epoch, self.table_id, key_range)
+                    .await
             }
         }
     }
@@ -424,7 +428,7 @@ impl HummockStorageReadSnapshot {
         ))
     }
 
-    fn build_read_version_tuple_from_all(
+    async fn build_read_version_tuple_from_all(
         &self,
         epoch: u64,
         table_id: TableId,
@@ -437,11 +441,11 @@ impl HummockStorageReadSnapshot {
         let ret = if let Some(info) = info
             && epoch <= info.committed_epoch
         {
-            if epoch < info.committed_epoch {
-                return Err(
-                    HummockError::expired_epoch(table_id, info.committed_epoch, epoch).into(),
-                );
-            }
+            let pinned_version = if epoch < info.committed_epoch {
+                pinned_version
+            } else {
+                self.get_epoch_hummock_version(epoch, table_id).await?
+            };
             // read committed_version directly without build snapshot
             get_committed_read_version_tuple(pinned_version, table_id, key_range, epoch)
         } else {
@@ -630,6 +634,7 @@ impl HummockStorage {
 pub struct HummockStorageReadSnapshot {
     epoch: HummockReadEpoch,
     table_id: TableId,
+    table_option: TableOption,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
     hummock_version_reader: HummockVersionReader,
     read_version_mapping: ReadOnlyReadVersionMapping,
@@ -884,6 +889,7 @@ impl StateStore for HummockStorage {
         Ok(HummockStorageReadSnapshot {
             epoch,
             table_id: options.table_id,
+            table_option: options.table_option,
             recent_versions: self.recent_versions.clone(),
             hummock_version_reader: self.hummock_version_reader.clone(),
             read_version_mapping: self.read_version_mapping.clone(),
