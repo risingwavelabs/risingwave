@@ -8,14 +8,10 @@ from .streaming_common import (
     topk_percent_expr,
 )
 
-def _fragment_peak_rate_with_id_at_step(expr: str, normalize_ns: bool = False) -> str:
-    """Compute the peak rate over the dashboard range and attach `id` from fragment_id.
-
-    Set normalize_ns=True when the input expression is in nanoseconds.
-    """
-    normalized_expr = f"({expr}) / 1000000000" if normalize_ns else expr
+def _fragment_peak_rate_with_id_at_step(expr: str) -> str:
+    """Compute the peak rate over the dashboard range and attach `id` from fragment_id."""
     return relabel_fragment_id_as_id(
-        f"max_over_time(({normalized_expr})[$__range:$__interval])"
+        f"max_over_time(({expr})[$__range:$__interval])"
     )
 
 @section
