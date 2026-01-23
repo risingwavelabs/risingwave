@@ -382,6 +382,10 @@ inherits = "release"
 incremental = false
 lto = "thin"
 
+[profile.thin-production]
+inherits = "production"
+debug = 0 # no debug info, only symbols
+
 [profile.ci-release]
 inherits = "release"
 incremental = false
