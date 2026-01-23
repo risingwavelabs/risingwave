@@ -43,7 +43,9 @@ pub async fn cpu_profile(
 ) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
 
-    let workers = meta_client.get_cluster_info().await?.worker_nodes;
+    // `GetClusterInfo` (ScaleService) only returns compute nodes; use `ListAllNodes` to include
+    // frontend/compactor/meta when profiling.
+    let workers = meta_client.list_worker_nodes(None).await?;
     let target_types = selected_worker_types(&worker_types);
     let target_nodes = workers
         .into_iter()
@@ -112,7 +114,9 @@ pub async fn heap_profile(
     let dir = dir.unwrap_or_default();
     let meta_client = context.meta_client().await?;
 
-    let workers = meta_client.get_cluster_info().await?.worker_nodes;
+    // `GetClusterInfo` (ScaleService) only returns compute nodes; use `ListAllNodes` to include
+    // frontend/compactor/meta when profiling.
+    let workers = meta_client.list_worker_nodes(None).await?;
     let target_types = selected_worker_types(&worker_types);
     let target_nodes = workers
         .into_iter()
