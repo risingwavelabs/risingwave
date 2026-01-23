@@ -189,6 +189,15 @@ pub struct IcebergCommon {
     /// Default: <https://www.googleapis.com/auth/cloud-platform>
     #[serde(rename = "gcp.auth.scopes")]
     pub gcp_auth_scopes: Option<String>,
+
+    /// Custom FileIO implementation class for the Iceberg catalog.
+    /// Allows specifying a custom FileIO implementation instead of the default.
+    /// Examples:
+    /// - `org.apache.iceberg.aws.s3.S3FileIO` for Amazon S3 (default)
+    /// - `org.apache.iceberg.gcp.gcs.GCSFileIO` for Google Cloud Storage
+    /// - `org.apache.iceberg.azure.adlsv2.ADLSFileIO` for Azure Data Lake Storage Gen2
+    #[serde(rename = "catalog.io_impl")]
+    pub catalog_io_impl: Option<String>,
 }
 
 // Matches iceberg::io::object_cache default size (32MB).
@@ -464,13 +473,14 @@ impl IcebergCommon {
             }
             java_catalog_configs.extend(java_catalog_props.clone());
 
-            // Currently we only support s3, so let's set it to s3
-            java_catalog_configs.insert(
-                "io-impl".to_owned(),
-                "org.apache.iceberg.aws.s3.S3FileIO".to_owned(),
-            );
+            // Set io-impl: use custom io-impl if provided, otherwise default to S3FileIO
+            let io_impl = self
+                .catalog_io_impl
+                .clone()
+                .unwrap_or_else(|| "org.apache.iceberg.aws.s3.S3FileIO".to_owned());
+            java_catalog_configs.insert("io-impl".to_owned(), io_impl);
 
-            // suppress log of S3FileIO like: Unclosed S3FileIO instance created by...
+            // suppress log of FileIO like: Unclosed FileIO instance created by...
             java_catalog_configs.insert("init-creation-stacktrace".to_owned(), "false".to_owned());
 
             if let Some(region) = &self.s3_region {

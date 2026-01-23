@@ -2927,6 +2927,7 @@ mod test {
                 catalog_security: None,
                 gcp_credentials_path: None,
                 gcp_auth_scopes: None,
+                catalog_io_impl: None,
             },
             table: IcebergTableIdentifier {
                 database_name: Some("demo_db".to_owned()),
@@ -3272,6 +3273,45 @@ mod test {
 
         // Verify catalog type
         assert_eq!(iceberg_config.catalog_type(), "rest");
+    }
+
+    /// Test parsing custom FileIO implementation configuration.
+    #[test]
+    fn test_parse_custom_io_impl_config() {
+        let values: BTreeMap<String, String> = [
+            ("connector", "iceberg"),
+            ("type", "append-only"),
+            ("force_append_only", "true"),
+            ("catalog.name", "gcs-catalog"),
+            ("catalog.type", "rest"),
+            ("catalog.uri", "https://example.com/iceberg/rest"),
+            ("warehouse.path", "gs://my-bucket/warehouse"),
+            ("catalog.security", "google"),
+            ("catalog.io_impl", "org.apache.iceberg.gcp.gcs.GCSFileIO"),
+            ("gcp.credentials.path", "/path/to/service-account.json"),
+            ("database.name", "test_db"),
+            ("table.name", "test_table"),
+        ]
+        .into_iter()
+        .map(|(k, v)| (k.to_owned(), v.to_owned()))
+        .collect();
+
+        let iceberg_config = IcebergConfig::from_btreemap(values).unwrap();
+
+        // Verify catalog type
+        assert_eq!(iceberg_config.catalog_type(), "rest");
+
+        // Verify custom FileIO implementation
+        assert_eq!(
+            iceberg_config.common.catalog_io_impl.as_deref(),
+            Some("org.apache.iceberg.gcp.gcs.GCSFileIO")
+        );
+
+        // Verify Google security is set
+        assert_eq!(
+            iceberg_config.common.catalog_security.as_deref(),
+            Some("google")
+        );
     }
 
     #[test]
