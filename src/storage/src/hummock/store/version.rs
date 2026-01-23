@@ -24,7 +24,7 @@ use itertools::Itertools;
 use parking_lot::RwLock;
 use risingwave_common::array::VectorRef;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{
@@ -602,13 +602,14 @@ impl HummockVersionReader {
         table_key: TableKey<Bytes>,
         epoch: u64,
         table_id: TableId,
+        table_option: TableOption,
         read_options: ReadOptions,
         read_version_tuple: ReadVersionTuple,
         on_key_value_fn: impl crate::store::KeyValueFn<'a, O>,
     ) -> StorageResult<Option<O>> {
         let (imms, uncommitted_ssts, committed_version) = read_version_tuple;
 
-        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+        let min_epoch = gen_min_epoch(epoch, table_option.retention_seconds);
         let mut stats_guard = GetLocalMetricsGuard::new(self.state_store_metrics.clone(), table_id);
         let local_stats = &mut stats_guard.local_stats;
         local_stats.found_key = true;
@@ -807,6 +808,7 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         table_id: TableId,
+        table_option: TableOption,
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
     ) -> StorageResult<HummockStorageIterator> {
@@ -814,6 +816,7 @@ impl HummockVersionReader {
             table_key_range,
             epoch,
             table_id,
+            table_option,
             read_options,
             read_version_tuple,
             None,
@@ -826,6 +829,7 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         table_id: TableId,
+        table_option: TableOption,
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
         memtable_iter: Option<MemTableHummockIterator<'b>>,
@@ -838,7 +842,7 @@ impl HummockVersionReader {
         let mut factory = ForwardIteratorFactory::default();
         let mut local_stats = StoreLocalStatistic::default();
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
-        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+        let min_epoch = gen_min_epoch(epoch, table_option.retention_seconds);
         self.iter_inner(
             table_key_range,
             epoch,
@@ -874,6 +878,7 @@ impl HummockVersionReader {
         table_key_range: TableKeyRange,
         epoch: u64,
         table_id: TableId,
+        table_option: TableOption,
         read_options: ReadOptions,
         read_version_tuple: (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion),
         memtable_iter: Option<MemTableHummockRevIterator<'b>>,
@@ -886,7 +891,7 @@ impl HummockVersionReader {
         let mut factory = BackwardIteratorFactory::default();
         let mut local_stats = StoreLocalStatistic::default();
         let (imms, uncommitted_ssts, committed) = read_version_tuple;
-        let min_epoch = gen_min_epoch(epoch, read_options.retention_seconds.as_ref());
+        let min_epoch = gen_min_epoch(epoch, table_option.retention_seconds);
         self.iter_inner(
             table_key_range,
             epoch,
