@@ -1860,35 +1860,23 @@ where
         let stream = self
             .iter_with_prefix(pk_prefix, sub_range, prefetch_options)
             .await?;
-
         let Some(clean_watermark_index) = self.clean_watermark_index else {
             return Ok(stream.boxed());
         };
-
         let Some((watermark_serde, watermark_type)) = &self.watermark_serde else {
             return Err(StreamExecutorError::from(anyhow!(
                 "Missing watermark serde"
             )));
         };
-
         // Fast path. TableWatermarksIndex::rewrite_range_with_table_watermark has already filtered the rows.
         if matches!(watermark_type, WatermarkSerdeType::PkPrefix) {
             return Ok(stream.boxed());
         }
-
-        // Get watermark from state store
         let watermark_bytes = self.row_store.state_store.get_table_watermark(vnode);
-
-        // If no watermark or no watermark_serde, return all rows without filtering
         let Some(watermark_bytes) = watermark_bytes else {
             return Ok(stream.boxed());
         };
-
-        // Deserialize watermark bytes to get the watermark value
-        let watermark_row = watermark_serde.deserialize(&watermark_bytes).map_err(|e| {
-            StreamExecutorError::from(format!("Failed to deserialize watermark: {}", e))
-        })?;
-
+        let watermark_row = watermark_serde.deserialize(&watermark_bytes)?;
         if watermark_row.len() != 1 {
             return Err(StreamExecutorError::from(format!(
                 "Watermark row should have exactly 1 column, got {}",
@@ -1902,13 +1890,11 @@ where
                 "Watermark cannot be NULL"
             )));
         }
-        // Get watermark direction from the order type
         let order_type = watermark_serde.get_order_types().get(0).ok_or_else(|| {
             StreamExecutorError::from(anyhow!(
                 "Watermark serde should have at least one order type"
             ))
         })?;
-
         let direction = if order_type.is_ascending() {
             WatermarkDirection::Ascending
         } else {
