@@ -156,6 +156,8 @@ pub struct MetaOpts {
     pub enable_committed_sst_sanity_check: bool,
     /// Schedule compaction for all compaction groups with this interval.
     pub periodic_compaction_interval_sec: u64,
+    /// Schedule table change log compaction for all compaction groups with this interval.
+    pub periodic_table_change_log_compaction_interval_sec: u64,
     /// Interval of reporting the number of nodes in the cluster.
     pub node_num_monitor_interval_sec: u64,
     /// Whether to protect the drop table operation with incoming sink.
@@ -233,6 +235,11 @@ pub struct MetaOpts {
 
     /// l0 multi level picker whether to check the overlap accuracy between sub levels
     pub enable_check_task_level_overlap: bool,
+    pub table_change_log_dirty_ratio: f32,
+    pub table_change_log_min_compaction_size_dirty_part: u64,
+    pub table_change_log_max_compaction_size_dirty_part: u64,
+    pub table_change_log_max_compaction_sst_count_dirty_part: u64,
+    pub table_change_log_max_compaction_size_clean_part: u64,
     pub enable_dropped_column_reclaim: bool,
 
     /// Whether to split the compaction group when the size of the group exceeds the threshold.
@@ -386,6 +393,12 @@ impl MetaOpts {
             enable_legacy_table_migration: true,
             refresh_scheduler_interval_sec: 60,
             pause_on_next_bootstrap_offline: false,
+            table_change_log_dirty_ratio: 0.5,
+            table_change_log_min_compaction_size_dirty_part: 128 * 1024 * 1024,
+            table_change_log_max_compaction_size_dirty_part: 10 * 1024 * 1024 * 1024,
+            table_change_log_max_compaction_sst_count_dirty_part: 1000,
+            table_change_log_max_compaction_size_clean_part: 10 * 1024 * 1024 * 1024,
+            periodic_table_change_log_compaction_interval_sec: 0,
         }
     }
 }

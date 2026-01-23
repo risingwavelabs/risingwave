@@ -115,6 +115,10 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::periodic_compaction_interval_sec")]
     pub periodic_compaction_interval_sec: u64,
 
+    /// Schedule table change log compaction for all compaction groups with this interval.
+    #[serde(default = "default::meta::periodic_table_change_log_compaction_interval_sec")]
+    pub periodic_table_change_log_compaction_interval_sec: u64,
+
     /// Interval of invoking a vacuum job, to remove stale metadata from meta store and objects
     /// from object store.
     #[serde(default = "default::meta::vacuum_interval_sec")]
@@ -417,6 +421,22 @@ pub struct MetaDeveloperConfig {
     pub enable_trivial_move: bool,
     #[serde(default = "default::developer::enable_check_task_level_overlap")]
     pub enable_check_task_level_overlap: bool,
+
+    #[serde(default = "default::developer::table_change_log_dirty_ratio")]
+    pub table_change_log_dirty_ratio: f32,
+
+    #[serde(default = "default::developer::table_change_log_min_compaction_size_dirty_part")]
+    pub table_change_log_min_compaction_size_dirty_part: u64,
+
+    #[serde(default = "default::developer::table_change_log_max_compaction_size_dirty_part")]
+    pub table_change_log_max_compaction_size_dirty_part: u64,
+
+    #[serde(default = "default::developer::table_change_log_max_compaction_sst_count_dirty_part")]
+    pub table_change_log_max_compaction_sst_count_dirty_part: u64,
+
+    #[serde(default = "default::developer::table_change_log_max_compaction_size_clean_part")]
+    pub table_change_log_max_compaction_size_clean_part: u64,
+
     #[serde(default = "default::developer::max_trivial_move_task_count_per_loop")]
     pub max_trivial_move_task_count_per_loop: usize,
 
@@ -567,6 +587,11 @@ pub mod default {
 
         pub fn periodic_compaction_interval_sec() -> u64 {
             60
+        }
+
+        pub fn periodic_table_change_log_compaction_interval_sec() -> u64 {
+            // Disable table change log compaction by default.
+            0
         }
 
         pub fn vacuum_interval_sec() -> u64 {

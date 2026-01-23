@@ -17,14 +17,18 @@ use std::mem::size_of;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::compact_task::{PbTaskStatus, PbTaskType, TaskStatus, TaskType};
+use risingwave_pb::hummock::compact_task::{
+    PbTableChangeLogCompactionInput, PbTableChangeLogCompactionOutput, PbTaskStatus, PbTaskType,
+    TaskStatus, TaskType,
+};
 use risingwave_pb::hummock::subscribe_compaction_event_request::PbReportTask;
 use risingwave_pb::hummock::{
-    LevelType, PbCompactTask, PbKeyRange, PbTableOption, PbTableSchema, PbTableStats,
-    PbValidationTask,
+    LevelType, PbCompactTask, PbEpochNewChangeLog, PbKeyRange, PbSstableInfo, PbTableOption,
+    PbTableSchema, PbTableStats, PbValidationTask,
 };
 
 use crate::HummockSstableObjectId;
+use crate::change_log::EpochNewChangeLog;
 use crate::compaction_group::StateTableId;
 use crate::key_range::KeyRange;
 use crate::level::InputLevel;
@@ -80,9 +84,16 @@ pub struct CompactTask {
     pub max_sub_compaction: u32,
 
     pub max_kv_count_for_xor16: Option<u64>,
+
+    pub table_change_log_input: Option<TableChangeLogCompactionInput>,
+    pub table_change_log_output: Option<TableChangeLogCompactionOutput>,
 }
 
 impl CompactTask {
+    pub fn is_table_change_log_task(&self) -> bool {
+        self.task_type == TaskType::TableChangeLog
+    }
+
     pub fn estimated_encode_len(&self) -> usize {
         self.input_ssts
             .iter()
@@ -338,6 +349,12 @@ impl From<PbCompactTask> for CompactTask {
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
+            table_change_log_input: pb_compact_task
+                .table_change_log_input
+                .map(TableChangeLogCompactionInput::from),
+            table_change_log_output: pb_compact_task
+                .table_change_log_output
+                .map(TableChangeLogCompactionOutput::from),
         }
     }
 }
@@ -403,6 +420,14 @@ impl From<&PbCompactTask> for CompactTask {
             max_sub_compaction: pb_compact_task.max_sub_compaction,
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: pb_compact_task.max_kv_count_for_xor16,
+            table_change_log_input: pb_compact_task
+                .table_change_log_input
+                .as_ref()
+                .map(TableChangeLogCompactionInput::from),
+            table_change_log_output: pb_compact_task
+                .table_change_log_output
+                .as_ref()
+                .map(TableChangeLogCompactionOutput::from),
         }
     }
 }
@@ -458,6 +483,12 @@ impl From<CompactTask> for PbCompactTask {
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
+            table_change_log_input: compact_task
+                .table_change_log_input
+                .map(PbTableChangeLogCompactionInput::from),
+            table_change_log_output: compact_task
+                .table_change_log_output
+                .map(PbTableChangeLogCompactionOutput::from),
         }
     }
 }
@@ -513,6 +544,14 @@ impl From<&CompactTask> for PbCompactTask {
             max_sub_compaction: compact_task.max_sub_compaction,
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.max_kv_count_for_xor16,
+            table_change_log_input: compact_task
+                .table_change_log_input
+                .as_ref()
+                .map(PbTableChangeLogCompactionInput::from),
+            table_change_log_output: compact_task
+                .table_change_log_output
+                .as_ref()
+                .map(PbTableChangeLogCompactionOutput::from),
         }
     }
 }
@@ -575,6 +614,7 @@ pub struct ReportTask {
     pub task_status: TaskStatus,
     pub sorted_output_ssts: Vec<SstableInfo>,
     pub object_timestamps: HashMap<HummockSstableObjectId, u64>,
+    pub table_change_log_output: Option<TableChangeLogCompactionOutput>,
 }
 
 impl From<PbReportTask> for ReportTask {
@@ -593,6 +633,9 @@ impl From<PbReportTask> for ReportTask {
                 .into_iter()
                 .map(|(object_id, timestamp)| (object_id.into(), timestamp))
                 .collect(),
+            table_change_log_output: value
+                .table_change_log_output
+                .map(TableChangeLogCompactionOutput::from),
         }
     }
 }
@@ -612,6 +655,159 @@ impl From<ReportTask> for PbReportTask {
                 .object_timestamps
                 .into_iter()
                 .map(|(object_id, timestamp)| (object_id.inner(), timestamp))
+                .collect(),
+            table_change_log_output: value
+                .table_change_log_output
+                .map(PbTableChangeLogCompactionOutput::from),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableChangeLogCompactionInput {
+    // Ordered by checkpoint epoch in ascending order.
+    pub clean_part: Vec<EpochNewChangeLog>,
+    // Ordered by checkpoint epoch in ascending order.
+    pub dirty_part: Vec<EpochNewChangeLog>,
+}
+
+impl From<&PbTableChangeLogCompactionInput> for TableChangeLogCompactionInput {
+    fn from(value: &PbTableChangeLogCompactionInput) -> Self {
+        Self {
+            clean_part: value
+                .clean_part
+                .iter()
+                .map(EpochNewChangeLog::from)
+                .collect(),
+            dirty_part: value
+                .dirty_part
+                .iter()
+                .map(EpochNewChangeLog::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<PbTableChangeLogCompactionInput> for TableChangeLogCompactionInput {
+    fn from(value: PbTableChangeLogCompactionInput) -> Self {
+        Self {
+            clean_part: value
+                .clean_part
+                .into_iter()
+                .map(EpochNewChangeLog::from)
+                .collect(),
+            dirty_part: value
+                .dirty_part
+                .into_iter()
+                .map(EpochNewChangeLog::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<&TableChangeLogCompactionInput> for PbTableChangeLogCompactionInput {
+    fn from(value: &TableChangeLogCompactionInput) -> Self {
+        Self {
+            clean_part: value
+                .clean_part
+                .iter()
+                .map(PbEpochNewChangeLog::from)
+                .collect(),
+            dirty_part: value
+                .dirty_part
+                .iter()
+                .map(PbEpochNewChangeLog::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<TableChangeLogCompactionInput> for PbTableChangeLogCompactionInput {
+    fn from(value: TableChangeLogCompactionInput) -> Self {
+        Self {
+            clean_part: value
+                .clean_part
+                .into_iter()
+                .map(PbEpochNewChangeLog::from)
+                .collect(),
+            dirty_part: value
+                .dirty_part
+                .into_iter()
+                .map(PbEpochNewChangeLog::from)
+                .collect(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TableChangeLogCompactionOutput {
+    pub sorted_old_values_ssts: Vec<SstableInfo>,
+    pub sorted_new_values_ssts: Vec<SstableInfo>,
+}
+
+impl From<&PbTableChangeLogCompactionOutput> for TableChangeLogCompactionOutput {
+    fn from(value: &PbTableChangeLogCompactionOutput) -> Self {
+        Self {
+            sorted_old_values_ssts: value
+                .sorted_old_values_ssts
+                .iter()
+                .map(SstableInfo::from)
+                .collect(),
+            sorted_new_values_ssts: value
+                .sorted_new_values_ssts
+                .iter()
+                .map(SstableInfo::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<PbTableChangeLogCompactionOutput> for TableChangeLogCompactionOutput {
+    fn from(value: PbTableChangeLogCompactionOutput) -> Self {
+        Self {
+            sorted_old_values_ssts: value
+                .sorted_old_values_ssts
+                .into_iter()
+                .map(SstableInfo::from)
+                .collect(),
+            sorted_new_values_ssts: value
+                .sorted_new_values_ssts
+                .into_iter()
+                .map(SstableInfo::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<&TableChangeLogCompactionOutput> for PbTableChangeLogCompactionOutput {
+    fn from(value: &TableChangeLogCompactionOutput) -> Self {
+        Self {
+            sorted_old_values_ssts: value
+                .sorted_old_values_ssts
+                .iter()
+                .map(PbSstableInfo::from)
+                .collect(),
+            sorted_new_values_ssts: value
+                .sorted_new_values_ssts
+                .iter()
+                .map(PbSstableInfo::from)
+                .collect(),
+        }
+    }
+}
+
+impl From<TableChangeLogCompactionOutput> for PbTableChangeLogCompactionOutput {
+    fn from(value: TableChangeLogCompactionOutput) -> Self {
+        Self {
+            sorted_old_values_ssts: value
+                .sorted_old_values_ssts
+                .into_iter()
+                .map(PbSstableInfo::from)
+                .collect(),
+            sorted_new_values_ssts: value
+                .sorted_new_values_ssts
+                .into_iter()
+                .map(PbSstableInfo::from)
                 .collect(),
         }
     }

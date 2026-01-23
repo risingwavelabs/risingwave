@@ -37,6 +37,14 @@ pub enum StaticCompactionGroupId {
     MaterializedView = 3,
     /// Larger than any `StaticCompactionGroupId`.
     End = 4,
+    /// Table change log compaction group.
+    TableChangeLog = (u64::MAX - 1) as isize,
+}
+
+impl StaticCompactionGroupId {
+    pub fn is_table_change_log(compaction_group_id: CompactionGroupId) -> bool {
+        compaction_group_id == StaticCompactionGroupId::TableChangeLog as CompactionGroupId
+    }
 }
 
 impl From<StaticCompactionGroupId> for CompactionGroupId {

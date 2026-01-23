@@ -24,7 +24,7 @@ use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
-use risingwave_hummock_sdk::compact_task::CompactTask;
+use risingwave_hummock_sdk::compact_task::{CompactTask, TableChangeLogCompactionOutput};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
@@ -346,6 +346,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                         sorted_output_ssts,
                         table_stats_change,
                         object_timestamps,
+                        table_change_log_output,
                     }) = item.event.unwrap()
                     && let Err(e) = hummock_manager_compact
                         .report_compact_task(
@@ -360,6 +361,7 @@ impl HummockMetaClient for MockHummockMetaClient {
                                 .into_iter()
                                 .map(|(id, ts)| (id.into(), ts))
                                 .collect(),
+                            table_change_log_output.map(TableChangeLogCompactionOutput::from),
                         )
                         .await
                 {

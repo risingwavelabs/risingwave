@@ -602,6 +602,8 @@ impl HummockEventHandler {
                                 &version_delta.state_table_info_delta,
                                 &changed_table_info,
                             );
+
+                            // TODO: Apply compacted table change log if the reader needs it.
                         }
 
                         let local_hummock_version_delta =

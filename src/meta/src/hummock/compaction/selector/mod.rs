@@ -21,6 +21,7 @@ mod emergency_selector;
 pub(crate) mod level_selector;
 mod manual_selector;
 mod space_reclaim_selector;
+mod table_change_log_compaction_selector;
 mod tombstone_compaction_selector;
 mod ttl_selector;
 mod vnode_watermark_selector;
@@ -33,11 +34,13 @@ pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
 pub use manual_selector::{ManualCompactionOption, ManualCompactionSelector};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::HummockCompactionTaskId;
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_pb::hummock::compact_task;
 pub use space_reclaim_selector::SpaceReclaimCompactionSelector;
+pub use table_change_log_compaction_selector::TableChangeLogCompactionSelector;
 pub use tombstone_compaction_selector::TombstoneCompactionSelector;
 pub use ttl_selector::TtlCompactionSelector;
 pub use vnode_watermark_selector::VnodeWatermarkCompactionSelector;
@@ -47,6 +50,7 @@ use super::{
     CompactionDeveloperConfig, LevelCompactionPicker, TierCompactionPicker, create_compaction_task,
 };
 use crate::hummock::compaction::CompactionTask;
+use crate::hummock::compaction::table_change_log::TableChangeLogCompactionTaskTracker;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 use crate::rpc::metrics::MetaMetrics;
@@ -61,6 +65,9 @@ pub struct CompactionSelectorContext<'a> {
     pub developer_config: Arc<CompactionDeveloperConfig>,
     pub table_watermarks: &'a HashMap<TableId, Arc<TableWatermarks>>,
     pub state_table_info: &'a HummockVersionStateTableInfo,
+    pub table_change_log: &'a HashMap<TableId, TableChangeLog>,
+    pub compacted_table_change_logs: &'a HashMap<TableId, TableChangeLog>,
+    pub table_change_log_compaction_task_tracker: &'a TableChangeLogCompactionTaskTracker,
 }
 
 pub trait CompactionSelector: Sync + Send {

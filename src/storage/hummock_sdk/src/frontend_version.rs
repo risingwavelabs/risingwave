@@ -94,6 +94,7 @@ impl FrontendHummockVersion {
                 .collect(),
             state_table_info: self.state_table_info.info().clone(),
             vector_indexes: Default::default(),
+            compacted_table_change_logs: Default::default(),
         }
     }
 
@@ -141,6 +142,7 @@ impl FrontendHummockVersion {
             &delta.state_table_info_delta,
             &changed_table_info,
         );
+        // TODO: Apply compacted table change log if the reader needs it.
     }
 }
 
@@ -224,6 +226,7 @@ impl FrontendHummockVersionDelta {
                 .map(|(table_id, delta)| (*table_id, *delta))
                 .collect(),
             vector_index_delta: Default::default(),
+            change_log_compaction_delta: Default::default(),
         }
     }
 

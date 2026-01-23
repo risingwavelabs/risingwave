@@ -16,7 +16,9 @@
 
 pub mod compaction_config;
 mod overlap_strategy;
+pub mod table_change_log;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_pb::hummock::compact_task::{self};
@@ -40,6 +42,7 @@ use super::GroupStateValidator;
 use crate::MetaOpts;
 use crate::hummock::compaction::overlap_strategy::{OverlapStrategy, RangeOverlapStrategy};
 use crate::hummock::compaction::picker::CompactionInput;
+use crate::hummock::compaction::table_change_log::TableChangeLogCompactionTaskTracker;
 use crate::hummock::level_handler::LevelHandler;
 use crate::hummock::model::CompactionGroup;
 
@@ -105,6 +108,9 @@ impl CompactStatus {
         developer_config: Arc<CompactionDeveloperConfig>,
         table_watermarks: &HashMap<TableId, Arc<TableWatermarks>>,
         state_table_info: &HummockVersionStateTableInfo,
+        table_change_log: &HashMap<TableId, TableChangeLog>,
+        compacted_table_change_logs: &HashMap<TableId, TableChangeLog>,
+        table_change_log_compaction_task_tracker: &TableChangeLogCompactionTaskTracker,
     ) -> Option<CompactionTask> {
         let selector_context = CompactionSelectorContext {
             group,
@@ -116,6 +122,9 @@ impl CompactStatus {
             developer_config: developer_config.clone(),
             table_watermarks,
             state_table_info,
+            table_change_log,
+            compacted_table_change_logs,
+            table_change_log_compaction_task_tracker,
         };
         // When we compact the files, we must make the result of compaction meet the following
         // conditions, for any user key, the epoch of it in the file existing in the lower
@@ -141,6 +150,9 @@ impl CompactStatus {
                         developer_config,
                         table_watermarks,
                         state_table_info,
+                        table_change_log,
+                        compacted_table_change_logs,
+                        table_change_log_compaction_task_tracker,
                     };
                     return EmergencySelector::default().pick_compaction(task_id, selector_context);
                 }
@@ -207,6 +219,16 @@ pub struct CompactionDeveloperConfig {
 
     /// l0 multi level picker whether to check the overlap accuracy between sub levels
     pub enable_check_task_level_overlap: bool,
+
+    pub table_change_log_dirty_ratio: f32,
+
+    pub table_change_log_min_compaction_size_dirty_part: u64,
+
+    pub table_change_log_max_compaction_size_dirty_part: u64,
+
+    pub table_change_log_max_compaction_sst_count_dirty_part: u64,
+
+    pub table_change_log_max_compaction_size_clean_part: u64,
 }
 
 impl CompactionDeveloperConfig {
@@ -214,6 +236,15 @@ impl CompactionDeveloperConfig {
         Self {
             enable_trivial_move: opts.enable_trivial_move,
             enable_check_task_level_overlap: opts.enable_check_task_level_overlap,
+            table_change_log_dirty_ratio: opts.table_change_log_dirty_ratio,
+            table_change_log_min_compaction_size_dirty_part: opts
+                .table_change_log_min_compaction_size_dirty_part,
+            table_change_log_max_compaction_size_dirty_part: opts
+                .table_change_log_max_compaction_size_dirty_part,
+            table_change_log_max_compaction_sst_count_dirty_part: opts
+                .table_change_log_max_compaction_sst_count_dirty_part,
+            table_change_log_max_compaction_size_clean_part: opts
+                .table_change_log_max_compaction_size_clean_part,
         }
     }
 }
@@ -223,6 +254,11 @@ impl Default for CompactionDeveloperConfig {
         Self {
             enable_trivial_move: true,
             enable_check_task_level_overlap: true,
+            table_change_log_dirty_ratio: 0.5,
+            table_change_log_min_compaction_size_dirty_part: 128 * 1024 * 1024,
+            table_change_log_max_compaction_size_dirty_part: 10 * 1024 * 1024 * 1024,
+            table_change_log_max_compaction_sst_count_dirty_part: 1000,
+            table_change_log_max_compaction_size_clean_part: 10 * 1024 * 1024 * 1024,
         }
     }
 }

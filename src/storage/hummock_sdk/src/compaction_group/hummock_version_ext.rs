@@ -31,7 +31,7 @@ use tracing::warn;
 
 use super::group_split::split_sst_with_table_ids;
 use super::{StateTableId, group_split};
-use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
+use crate::change_log::{ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLogCommon};
 use crate::compact_task::is_compaction_task_expired;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
@@ -729,6 +729,12 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             &changed_table_info,
         );
 
+        Self::apply_compacted_change_log_delta(
+            &self.table_change_log,
+            &mut self.compacted_table_change_logs,
+            &version_delta.change_log_compaction_delta,
+        );
+
         // apply to vector index
         apply_vector_index_delta(
             &mut self.vector_indexes,
@@ -790,6 +796,30 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
         for (table_id, change_log_delta) in change_log_delta {
             if let Some(change_log) = table_change_log.get_mut(table_id) {
                 change_log.truncate(change_log_delta.truncate_epoch);
+            }
+        }
+    }
+
+    pub fn apply_compacted_change_log_delta<T: Clone>(
+        raw_table_change_logs: &HashMap<TableId, TableChangeLogCommon<T>>,
+        compacted_table_change_logs: &mut HashMap<TableId, TableChangeLogCommon<T>>,
+        change_log_compaction_deltas: &HashMap<TableId, ChangeLogDeltaCommon<T>>,
+    ) {
+        for (table_id, delta) in change_log_compaction_deltas {
+            let Some(compacted) = compacted_table_change_logs.get_mut(table_id) else {
+                continue;
+            };
+            compacted.apply_compacted_log(delta.new_log.clone());
+        }
+        compacted_table_change_logs
+            .retain(|table_id, _| raw_table_change_logs.contains_key(table_id));
+        for (table_id, raw) in raw_table_change_logs {
+            let compacted_log_truncate_epoch =
+                raw.iter().next().map(EpochNewChangeLogCommon::first_epoch);
+            if let Some(compacted) = compacted_table_change_logs.get_mut(table_id)
+                && let Some(compacted_log_truncate_epoch) = compacted_log_truncate_epoch
+            {
+                compacted.truncate_compacted_log(compacted_log_truncate_epoch);
             }
         }
     }

@@ -216,6 +216,7 @@ mod test {
         generate_table_with_ids_and_epochs,
     };
     use crate::hummock::compaction::selector::{CompactionSelector, TtlCompactionSelector};
+    use crate::hummock::compaction::table_change_log::TableChangeLogCompactionTaskTracker;
     use crate::hummock::compaction::{CompactionDeveloperConfig, LocalSelectorStatistic};
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::compaction_selector_context;
@@ -395,6 +396,9 @@ mod test {
                         Arc::new(CompactionDeveloperConfig::default()),
                         &Default::default(),
                         &HummockVersionStateTableInfo::empty(),
+                        &HashMap::default(),
+                        &HashMap::default(),
+                        &TableChangeLogCompactionTaskTracker::default(),
                     ),
                 )
                 .unwrap();
@@ -450,6 +454,9 @@ mod test {
                         Arc::new(CompactionDeveloperConfig::default()),
                         &Default::default(),
                         &HummockVersionStateTableInfo::empty(),
+                        &HashMap::default(),
+                        &HashMap::default(),
+                        &TableChangeLogCompactionTaskTracker::default(),
                     ),
                 )
                 .unwrap();
@@ -488,6 +495,9 @@ mod test {
                         Arc::new(CompactionDeveloperConfig::default()),
                         &Default::default(),
                         &HummockVersionStateTableInfo::empty(),
+                        &HashMap::default(),
+                        &HashMap::default(),
+                        &TableChangeLogCompactionTaskTracker::default(),
                     ),
                 )
                 .unwrap();
@@ -549,6 +559,9 @@ mod test {
                         Arc::new(CompactionDeveloperConfig::default()),
                         &Default::default(),
                         &HummockVersionStateTableInfo::empty(),
+                        &HashMap::default(),
+                        &HashMap::default(),
+                        &TableChangeLogCompactionTaskTracker::default(),
                     ),
                 )
                 .unwrap();
@@ -595,6 +608,9 @@ mod test {
                     Arc::new(CompactionDeveloperConfig::default()),
                     &Default::default(),
                     &HummockVersionStateTableInfo::empty(),
+                    &HashMap::default(),
+                    &HashMap::default(),
+                    &TableChangeLogCompactionTaskTracker::default(),
                 ),
             );
 
@@ -662,6 +678,9 @@ mod test {
                             Arc::new(CompactionDeveloperConfig::default()),
                             &Default::default(),
                             &HummockVersionStateTableInfo::empty(),
+                            &HashMap::default(),
+                            &HashMap::default(),
+                            &TableChangeLogCompactionTaskTracker::default(),
                         ),
                     )
                     .unwrap();
@@ -759,6 +778,9 @@ mod test {
                             Arc::new(CompactionDeveloperConfig::default()),
                             &Default::default(),
                             &HummockVersionStateTableInfo::empty(),
+                            &HashMap::default(),
+                            &HashMap::default(),
+                            &TableChangeLogCompactionTaskTracker::default(),
                         ),
                     )
                     .unwrap();

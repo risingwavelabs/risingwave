@@ -310,6 +310,7 @@ message HummockVersion {
   map<uint32, TableChangeLog> table_change_logs = 6;
   map<uint32, StateTableInfo> state_table_info = 7;
   map<uint32, VectorIndex> vector_indexes = 8;
+  map<uint32, TableChangeLog> compacted_table_change_logs = 9;
 }
 
 message HummockVersionDelta {
@@ -336,6 +337,7 @@ message HummockVersionDelta {
   map<uint32, ChangeLogDelta> change_log_delta = 10;
   map<uint32, StateTableInfoDelta> state_table_info_delta = 11;
   map<uint32, VectorIndexDelta> vector_index_delta = 12;
+  map<uint32, ChangeLogDelta> change_log_compaction_delta = 13;
 }
 
 message HummockVersionDeltas {
@@ -473,6 +475,7 @@ message CompactTask {
     TOMBSTONE = 6;
     EMERGENCY = 7;
     VNODE_WATERMARK = 8;
+    TABLE_CHANGE_LOG = 9;
   }
 
   // Identifies whether the task is space_reclaim, if the compact_task_type increases, it will be refactored to enum
@@ -496,6 +499,16 @@ message CompactTask {
   // The maximum key-value count threshold for using Xor16 filter.
   // When the number of keys exceeds this threshold, a BlockedXor16 filter will be used.
   optional uint64 max_kv_count_for_xor16 = 28;
+  message TableChangeLogCompactionInput {
+    repeated EpochNewChangeLog clean_part = 1;
+    repeated EpochNewChangeLog dirty_part = 2;
+  }
+  message TableChangeLogCompactionOutput {
+    repeated SstableInfo sorted_old_values_ssts = 9;
+    repeated SstableInfo sorted_new_values_ssts = 10;
+  }
+  TableChangeLogCompactionInput table_change_log_input= 29;
+  TableChangeLogCompactionOutput table_change_log_output = 30;
 }
 
 message LevelHandler {
@@ -590,6 +603,7 @@ message SubscribeCompactionEventRequest {
     CompactTask.TaskStatus task_status = 5;
     repeated SstableInfo sorted_output_ssts = 6;
     map<uint64, uint64> object_timestamps = 7;
+    CompactTask.TableChangeLogCompactionOutput table_change_log_output = 8;
   }
 
   // HeartBeat provides the progress status of all tasks on the Compactor.

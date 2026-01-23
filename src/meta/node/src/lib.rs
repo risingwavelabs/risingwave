@@ -458,6 +458,9 @@ pub fn start(
                 periodic_scheduling_compaction_group_merge_interval_sec: config
                     .meta
                     .periodic_scheduling_compaction_group_merge_interval_sec,
+                periodic_table_change_log_compaction_interval_sec: config
+                    .meta
+                    .periodic_table_change_log_compaction_interval_sec,
                 compaction_group_merge_dimension_threshold: config
                     .meta
                     .compaction_group_merge_dimension_threshold,
@@ -496,6 +499,23 @@ pub fn start(
                     .meta
                     .developer
                     .enable_check_task_level_overlap,
+                table_change_log_dirty_ratio: config.meta.developer.table_change_log_dirty_ratio,
+                table_change_log_min_compaction_size_dirty_part: config
+                    .meta
+                    .developer
+                    .table_change_log_min_compaction_size_dirty_part,
+                table_change_log_max_compaction_size_dirty_part: config
+                    .meta
+                    .developer
+                    .table_change_log_max_compaction_size_dirty_part,
+                table_change_log_max_compaction_sst_count_dirty_part: config
+                    .meta
+                    .developer
+                    .table_change_log_max_compaction_sst_count_dirty_part,
+                table_change_log_max_compaction_size_clean_part: config
+                    .meta
+                    .developer
+                    .table_change_log_max_compaction_size_clean_part,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
                 split_group_size_ratio: config.meta.split_group_size_ratio,
                 refresh_scheduler_interval_sec: config

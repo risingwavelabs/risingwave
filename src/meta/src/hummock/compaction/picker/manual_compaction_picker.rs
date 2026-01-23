@@ -322,6 +322,7 @@ pub mod tests {
     use std::collections::{BTreeSet, HashMap};
 
     use bytes::Bytes;
+    use risingwave_hummock_sdk::change_log::TableChangeLog;
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
     use risingwave_pb::hummock::compact_task;
@@ -334,6 +335,7 @@ pub mod tests {
         generate_l0_overlapping_sublevels, generate_level, generate_table,
     };
     use crate::hummock::compaction::selector::{CompactionSelector, ManualCompactionSelector};
+    use crate::hummock::compaction::table_change_log::TableChangeLogCompactionTaskTracker;
     use crate::hummock::compaction::{CompactionDeveloperConfig, LocalSelectorStatistic};
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::{compaction_selector_context, iterator_test_key_of_epoch};
@@ -1219,6 +1221,9 @@ pub mod tests {
                         Arc::new(CompactionDeveloperConfig::default()),
                         &Default::default(),
                         &HummockVersionStateTableInfo::empty(),
+                        &HashMap::default(),
+                        &HashMap::default(),
+                        &TableChangeLogCompactionTaskTracker::default(),
                     ),
                 )
                 .unwrap();
@@ -1261,6 +1266,9 @@ pub mod tests {
                         Arc::new(CompactionDeveloperConfig::default()),
                         &Default::default(),
                         &HummockVersionStateTableInfo::empty(),
+                        &HashMap::default(),
+                        &HashMap::default(),
+                        &TableChangeLogCompactionTaskTracker::default(),
                     ),
                 )
                 .unwrap();
@@ -1339,6 +1347,9 @@ pub mod tests {
                         Arc::new(CompactionDeveloperConfig::default()),
                         &Default::default(),
                         &HummockVersionStateTableInfo::empty(),
+                        &HashMap::default(),
+                        &HashMap::default(),
+                        &TableChangeLogCompactionTaskTracker::default(),
                     ),
                 )
                 .unwrap();
@@ -1383,6 +1394,9 @@ pub mod tests {
                         Arc::new(CompactionDeveloperConfig::default()),
                         &Default::default(),
                         &HummockVersionStateTableInfo::empty(),
+                        &HashMap::default(),
+                        &HashMap::default(),
+                        &TableChangeLogCompactionTaskTracker::default(),
                     ),
                 )
                 .unwrap();

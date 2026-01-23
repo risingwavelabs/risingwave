@@ -25,6 +25,7 @@ mod trivial_move_compaction_picker;
 mod ttl_reclaim_compaction_picker;
 
 mod compaction_task_validator;
+mod table_change_log_compaction_picker;
 mod vnode_watermark_picker;
 
 pub use base_level_compaction_picker::LevelCompactionPicker;
@@ -34,8 +35,11 @@ pub use intra_compaction_picker::IntraCompactionPicker;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
 pub use non_overlap_sub_level_picker::NonOverlapSubLevelPicker;
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::level::{InputLevel, Levels};
+use risingwave_meta_model::TableId;
 pub use space_reclaim_compaction_picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};
+pub use table_change_log_compaction_picker::TableChangeLogCompactionPicker;
 pub use tier_compaction_picker::TierCompactionPicker;
 pub use tombstone_reclaim_compaction_picker::{
     TombstoneReclaimCompactionPicker, TombstoneReclaimPickerState,
@@ -63,6 +67,9 @@ pub struct CompactionInput {
     pub target_input_size: u64,
     pub total_file_count: u64,
     pub vnode_partition_count: u32,
+    pub input_table_change_logs_clean_part: Vec<EpochNewChangeLog>,
+    pub input_table_change_logs_dirty_part: Vec<EpochNewChangeLog>,
+    pub input_table_change_logs_table_ids: Vec<TableId>,
 }
 
 impl CompactionInput {
