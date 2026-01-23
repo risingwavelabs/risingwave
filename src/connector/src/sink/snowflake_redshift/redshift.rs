@@ -554,7 +554,7 @@ impl RedshiftSinkCommitter {
                 _ = shutdown_receiver.recv() => break,
                 _ = merge_timer.tick(), if merge_into_sql.is_some() => {
                     if let Some(sql) = &merge_into_sql && let Err(e) = client.execute_sql_sync(sql.clone()).await {
-                        tracing::warn!("Failed to execute periodic query for table {}: {}", config.table, e);
+                        tracing::warn!("Failed to execute periodic query for table {}: {}", config.table, e.as_report());
                     }
                 },
                 _ = copy_timer.tick(), if need_copy_into => {
@@ -613,7 +613,7 @@ impl SinglePhaseCommitCoordinator for RedshiftSinkCommitter {
                     SinkError::Redshift(anyhow!(
                         "Periodic task for sink id {} panicked: {}",
                         self.sink_id,
-                        e
+                        e.as_report()
                     ))
                 })?;
             }
