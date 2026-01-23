@@ -2050,7 +2050,7 @@ fn end_range_to_memcomparable<R: Row>(
         },
         Included(r) => {
             let serialized = serialize_pk_prefix(r);
-
+            // TODO: may use Included(serialized)?
             end_bound_of_prefix(&serialized)
         }
         Excluded(r) => {
