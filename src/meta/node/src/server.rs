@@ -125,6 +125,7 @@ pub async fn rpc_serve(
     meta_store_backend: MetaStoreBackend,
     max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
+    server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
@@ -164,6 +165,7 @@ pub async fn rpc_serve(
         address_info,
         max_cluster_heartbeat_interval,
         lease_interval_secs,
+        server_config,
         opts,
         init_system_params,
         init_session_config,
@@ -182,6 +184,7 @@ pub async fn rpc_serve_with_store(
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
+    server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
@@ -249,6 +252,7 @@ pub async fn rpc_serve_with_store(
         opts,
         init_system_params,
         init_session_config,
+        server_config,
         election_client,
         shutdown,
     )
@@ -311,6 +315,7 @@ pub async fn start_service_as_election_leader(
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
+    server_config: risingwave_common::config::ServerConfig,
     election_client: ElectionClientRef,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
@@ -426,6 +431,9 @@ pub async fn start_service_as_election_leader(
             hummock_manager: hummock_manager.clone(),
             monitor_clients: MonitorClientPool::new(1, RpcClientConfig::default()),
             diagnose_command,
+            profile_service: risingwave_common_service::ProfileServiceImpl::new(
+                server_config.clone(),
+            ),
             trace_state,
         };
         let task = tokio::spawn(dashboard_service.serve());
@@ -620,10 +628,11 @@ pub async fn start_service_as_election_leader(
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
     let hosted_iceberg_catalog_srv = HostedIcebergCatalogServiceImpl::new(env.clone());
-    let monitor_srv = MonitorServiceImpl {
-        metadata_manager: metadata_manager.clone(),
-        await_tree_reg: env.await_tree_reg().clone(),
-    };
+    let monitor_srv = MonitorServiceImpl::new(
+        metadata_manager.clone(),
+        env.await_tree_reg().clone(),
+        server_config,
+    );
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
