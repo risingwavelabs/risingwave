@@ -52,7 +52,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         &batches,
         |b, batches| {
             b.to_async(FuturesExecutor).iter(|| async {
-                let imm = merge_imms_in_memory(TableId::default(), batches.clone(), None).await;
+                let imm = merge_imms_in_memory(TableId::default(), batches.clone()).await;
                 assert_eq!(imm.key_count(), 10000 * 100);
                 assert_eq!(imm.value_count(), 10000 * 100);
             })
@@ -72,7 +72,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         &later_batches,
         |b, batches| {
             b.to_async(FuturesExecutor).iter(|| async {
-                let imm = merge_imms_in_memory(TableId::default(), batches.clone(), None).await;
+                let imm = merge_imms_in_memory(TableId::default(), batches.clone()).await;
                 assert_eq!(imm.key_count(), 2000 * 100);
                 assert_eq!(imm.value_count(), 2000 * 100 * 5);
             })

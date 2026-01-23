@@ -13,3 +13,6 @@
 // limitations under the License.
 
 pub mod shared_buffer_batch;
+#[cfg(test)]
+pub(crate) const TEST_TABLE_ID: risingwave_common::catalog::TableId =
+    risingwave_common::catalog::TableId::new(233);
