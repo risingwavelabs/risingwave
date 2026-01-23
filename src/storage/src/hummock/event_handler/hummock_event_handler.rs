@@ -58,81 +58,61 @@ use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
 
 #[derive(Clone)]
-pub struct BufferTracker {
+pub(crate) struct BufferTracker {
     flush_threshold: usize,
     min_batch_flush_size: usize,
-    global_buffer: Arc<MemoryLimiter>,
-    global_upload_task_size: UintGauge,
+    global_uploading_memory_limiter: Arc<MemoryLimiter>,
+    uploader_imm_size: UintGauge,
+    uploader_uploading_task_size: UintGauge,
 }
 
 impl BufferTracker {
-    pub fn from_storage_opts(config: &StorageOpts, global_upload_task_size: UintGauge) -> Self {
+    pub fn from_storage_opts(config: &StorageOpts, metrics: &HummockStateStoreMetrics) -> Self {
         let capacity = config.shared_buffer_capacity_mb * (1 << 20);
         let flush_threshold = (capacity as f32 * config.shared_buffer_flush_ratio) as usize;
-        let shared_buffer_min_batch_flush_size =
-            config.shared_buffer_min_batch_flush_size_mb * (1 << 20);
+        let min_batch_flush_size = config.shared_buffer_min_batch_flush_size_mb * (1 << 20);
         assert!(
             flush_threshold < capacity,
             "flush_threshold {} should be less or equal to capacity {}",
             flush_threshold,
             capacity
         );
-        Self::new(
-            capacity,
+        Self {
             flush_threshold,
-            global_upload_task_size,
-            shared_buffer_min_batch_flush_size,
-        )
+            min_batch_flush_size,
+            global_uploading_memory_limiter: Arc::new(MemoryLimiter::new(capacity as u64)),
+            uploader_imm_size: metrics.uploader_imm_size.clone(),
+            uploader_uploading_task_size: metrics.uploader_uploading_task_size.clone(),
+        }
     }
 
     #[cfg(test)]
     fn for_test_with_config(flush_threshold: usize, min_batch_flush_size: usize) -> Self {
-        Self::new(
-            usize::MAX,
-            flush_threshold,
-            UintGauge::new("test", "test").unwrap(),
-            min_batch_flush_size,
-        )
-    }
-
-    fn new(
-        capacity: usize,
-        flush_threshold: usize,
-        global_upload_task_size: UintGauge,
-        min_batch_flush_size: usize,
-    ) -> Self {
-        assert!(capacity >= flush_threshold);
         Self {
             flush_threshold,
-            global_buffer: Arc::new(MemoryLimiter::new(capacity as u64)),
-            global_upload_task_size,
             min_batch_flush_size,
+            ..Self::for_test()
         }
     }
 
+    #[cfg(test)]
     pub fn for_test() -> Self {
-        Self::from_storage_opts(
-            &StorageOpts::default(),
-            UintGauge::new("test", "test").unwrap(),
-        )
-    }
-
-    pub fn get_buffer_size(&self) -> usize {
-        self.global_buffer.get_memory_usage() as usize
+        Self::from_storage_opts(&StorageOpts::default(), &HummockStateStoreMetrics::unused())
     }
 
     pub fn get_memory_limiter(&self) -> &Arc<MemoryLimiter> {
-        &self.global_buffer
+        &self.global_uploading_memory_limiter
     }
 
     pub fn global_upload_task_size(&self) -> &UintGauge {
-        &self.global_upload_task_size
+        &self.uploader_uploading_task_size
     }
 
     /// Return true when the buffer size minus current upload task size is still greater than the
     /// flush threshold.
     pub fn need_flush(&self) -> bool {
-        self.get_buffer_size() > self.flush_threshold + self.global_upload_task_size.get() as usize
+        self.uploader_imm_size.get()
+            > self.flush_threshold as u64 + self.uploader_uploading_task_size.get()
     }
 
     pub fn need_more_flush(&self, curr_batch_flush_size: usize) -> bool {
@@ -192,7 +172,7 @@ struct HummockEventHandlerMetrics {
     event_handler_on_recv_version_update: Histogram,
 }
 
-pub struct HummockEventHandler {
+pub(crate) struct HummockEventHandler {
     hummock_event_tx: HummockEventSender,
     hummock_event_rx: HummockEventReceiver,
     version_update_rx: UnboundedReceiver<HummockVersionUpdate>,
@@ -246,10 +226,8 @@ impl HummockEventHandler {
                 .max_cached_recent_versions_number,
             state_store_metrics.clone(),
         );
-        let buffer_tracker = BufferTracker::from_storage_opts(
-            &compactor_context.storage_opts,
-            state_store_metrics.uploader_uploading_task_size.clone(),
-        );
+        let buffer_tracker =
+            BufferTracker::from_storage_opts(&compactor_context.storage_opts, &state_store_metrics);
         Self::new_inner(
             version_update_rx,
             compactor_context.sstable_store.clone(),
@@ -692,7 +670,7 @@ impl HummockEventHandler {
                     self.local_read_version_mapping.contains_key(&instance_id),
                     "add imm from non-existing read version instance: instance_id: {}, table_id {:?}",
                     instance_id,
-                    imms.first().map(|imm| imm.table_id),
+                    imms.first().map(|(imm, _)| imm.table_id),
                 );
                 self.uploader.add_imms(instance_id, imms);
                 self.uploader.may_flush();
@@ -873,470 +851,5 @@ impl SyncedData {
                 vector_index_adds,
             }
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::{HashMap, HashSet};
-    use std::future::poll_fn;
-    use std::sync::Arc;
-    use std::task::Poll;
-
-    use futures::FutureExt;
-    use parking_lot::Mutex;
-    use risingwave_common::bitmap::Bitmap;
-    use risingwave_common::catalog::TableId;
-    use risingwave_common::hash::VirtualNode;
-    use risingwave_common::util::epoch::{EpochExt, test_epoch};
-    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
-    use risingwave_hummock_sdk::version::HummockVersion;
-    use risingwave_pb::hummock::{PbHummockVersion, StateTableInfo};
-    use tokio::spawn;
-    use tokio::sync::mpsc::unbounded_channel;
-    use tokio::sync::oneshot;
-
-    use crate::hummock::HummockError;
-    use crate::hummock::event_handler::hummock_event_handler::BufferTracker;
-    use crate::hummock::event_handler::refiller::{CacheRefillConfig, CacheRefiller};
-    use crate::hummock::event_handler::uploader::UploadTaskOutput;
-    use crate::hummock::event_handler::uploader::test_utils::{
-        TEST_TABLE_ID, gen_imm, gen_imm_inner, prepare_uploader_order_test_spawn_task_fn,
-    };
-    use crate::hummock::event_handler::{
-        HummockEvent, HummockEventHandler, HummockReadVersionRef, LocalInstanceGuard,
-    };
-    use crate::hummock::iterator::test_utils::mock_sstable_store;
-    use crate::hummock::local_version::pinned_version::PinnedVersion;
-    use crate::hummock::local_version::recent_versions::RecentVersions;
-    use crate::hummock::test_utils::default_opts_for_test;
-    use crate::mem_table::ImmutableMemtable;
-    use crate::monitor::HummockStateStoreMetrics;
-    use crate::store::SealCurrentEpochOptions;
-
-    #[tokio::test]
-    async fn test_old_epoch_sync_fail() {
-        let epoch0 = test_epoch(233);
-
-        let initial_version = PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: 1,
-                state_table_info: HashMap::from_iter([(
-                    TEST_TABLE_ID,
-                    StateTableInfo {
-                        committed_epoch: epoch0,
-                        compaction_group_id: StaticCompactionGroupId::StateDefault as _,
-                    },
-                )]),
-                ..Default::default()
-            }),
-            unbounded_channel().0,
-        );
-
-        let (_version_update_tx, version_update_rx) = unbounded_channel();
-
-        let epoch1 = epoch0.next_epoch();
-        let epoch2 = epoch1.next_epoch();
-        let (tx, rx) = oneshot::channel();
-        let rx = Arc::new(Mutex::new(Some(rx)));
-
-        let storage_opt = default_opts_for_test();
-        let metrics = Arc::new(HummockStateStoreMetrics::unused());
-
-        let event_handler = HummockEventHandler::new_inner(
-            version_update_rx,
-            mock_sstable_store().await,
-            metrics.clone(),
-            CacheRefillConfig::from_storage_opts(&storage_opt),
-            RecentVersions::new(initial_version.clone(), 10, metrics.clone()),
-            BufferTracker::from_storage_opts(
-                &storage_opt,
-                metrics.uploader_uploading_task_size.clone(),
-            ),
-            Arc::new(move |_, info| {
-                assert_eq!(info.epochs.len(), 1);
-                let epoch = info.epochs[0];
-                match epoch {
-                    epoch if epoch == epoch1 => {
-                        let rx = rx.lock().take().unwrap();
-                        spawn(async move {
-                            rx.await.unwrap();
-                            Err(HummockError::other("fail"))
-                        })
-                    }
-                    epoch if epoch == epoch2 => spawn(async move {
-                        Ok(UploadTaskOutput {
-                            new_value_ssts: vec![],
-                            old_value_ssts: vec![],
-                            wait_poll_timer: None,
-                        })
-                    }),
-                    _ => unreachable!(),
-                }
-            }),
-            CacheRefiller::default_spawn_refill_task(),
-        );
-
-        let event_tx = event_handler.event_sender();
-
-        let send_event = |event| event_tx.send(event).unwrap();
-
-        let join_handle = spawn(event_handler.start_hummock_event_handler_worker());
-
-        let (read_version, guard) = {
-            let (tx, rx) = oneshot::channel();
-            send_event(HummockEvent::RegisterReadVersion {
-                table_id: TEST_TABLE_ID,
-                new_read_version_sender: tx,
-                is_replicated: false,
-                vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-            });
-            rx.await.unwrap()
-        };
-
-        send_event(HummockEvent::StartEpoch {
-            epoch: epoch1,
-            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
-        });
-
-        read_version.write().init();
-
-        send_event(HummockEvent::InitEpoch {
-            instance_id: guard.instance_id,
-            init_epoch: epoch1,
-        });
-
-        let imm1 = gen_imm(epoch1).await;
-        read_version.write().add_imm(imm1.clone());
-
-        send_event(HummockEvent::ImmToUploader {
-            instance_id: guard.instance_id,
-            imms: read_version.write().start_upload_pending_imms(),
-        });
-
-        send_event(HummockEvent::StartEpoch {
-            epoch: epoch2,
-            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
-        });
-
-        send_event(HummockEvent::LocalSealEpoch {
-            instance_id: guard.instance_id,
-            next_epoch: epoch2,
-            opts: SealCurrentEpochOptions::for_test(),
-        });
-
-        {
-            let imm2 = gen_imm(epoch2).await;
-            let mut read_version = read_version.write();
-            read_version.add_imm(imm2);
-
-            send_event(HummockEvent::ImmToUploader {
-                instance_id: guard.instance_id,
-                imms: read_version.start_upload_pending_imms(),
-            });
-        }
-
-        let epoch3 = epoch2.next_epoch();
-        send_event(HummockEvent::StartEpoch {
-            epoch: epoch3,
-            table_ids: HashSet::from_iter([TEST_TABLE_ID]),
-        });
-        send_event(HummockEvent::LocalSealEpoch {
-            instance_id: guard.instance_id,
-            next_epoch: epoch3,
-            opts: SealCurrentEpochOptions::for_test(),
-        });
-
-        let (tx1, mut rx1) = oneshot::channel();
-        send_event(HummockEvent::SyncEpoch {
-            sync_result_sender: tx1,
-            sync_table_epochs: vec![(epoch1, HashSet::from_iter([TEST_TABLE_ID]))],
-        });
-        assert!(poll_fn(|cx| Poll::Ready(rx1.poll_unpin(cx).is_pending())).await);
-        let (tx2, mut rx2) = oneshot::channel();
-        send_event(HummockEvent::SyncEpoch {
-            sync_result_sender: tx2,
-            sync_table_epochs: vec![(epoch2, HashSet::from_iter([TEST_TABLE_ID]))],
-        });
-        assert!(poll_fn(|cx| Poll::Ready(rx2.poll_unpin(cx).is_pending())).await);
-
-        tx.send(()).unwrap();
-        rx1.await.unwrap().unwrap_err();
-        rx2.await.unwrap().unwrap_err();
-
-        send_event(HummockEvent::Shutdown);
-        join_handle.await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn test_clear_tables() {
-        let table_id1 = TableId::new(1);
-        let table_id2 = TableId::new(2);
-        let epoch0 = test_epoch(233);
-
-        let initial_version = PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: 1,
-                state_table_info: HashMap::from_iter([
-                    (
-                        table_id1,
-                        StateTableInfo {
-                            committed_epoch: epoch0,
-                            compaction_group_id: StaticCompactionGroupId::StateDefault as _,
-                        },
-                    ),
-                    (
-                        table_id2,
-                        StateTableInfo {
-                            committed_epoch: epoch0,
-                            compaction_group_id: StaticCompactionGroupId::StateDefault as _,
-                        },
-                    ),
-                ]),
-                ..Default::default()
-            }),
-            unbounded_channel().0,
-        );
-
-        let (_version_update_tx, version_update_rx) = unbounded_channel();
-
-        let epoch1 = epoch0.next_epoch();
-        let epoch2 = epoch1.next_epoch();
-        let epoch3 = epoch2.next_epoch();
-
-        let imm_size = gen_imm_inner(TEST_TABLE_ID, epoch1, 0, None).await.size();
-
-        // The buffer can hold at most 1 imm. When a new imm is added, the previous one will be spilled, and the newly added one will be retained.
-        let buffer_tracker = BufferTracker::for_test_with_config(imm_size * 2 - 1, 1);
-        let memory_limiter = buffer_tracker.get_memory_limiter().clone();
-
-        let gen_imm = |table_id, epoch, spill_offset| {
-            let imm = gen_imm_inner(table_id, epoch, spill_offset, Some(&*memory_limiter))
-                .now_or_never()
-                .unwrap();
-            assert_eq!(imm.size(), imm_size);
-            imm
-        };
-        let imm1_1 = gen_imm(table_id1, epoch1, 0);
-        let imm1_2_1 = gen_imm(table_id1, epoch2, 0);
-
-        let storage_opt = default_opts_for_test();
-        let metrics = Arc::new(HummockStateStoreMetrics::unused());
-
-        let (spawn_task, new_task_notifier) = prepare_uploader_order_test_spawn_task_fn(false);
-
-        let event_handler = HummockEventHandler::new_inner(
-            version_update_rx,
-            mock_sstable_store().await,
-            metrics.clone(),
-            CacheRefillConfig::from_storage_opts(&storage_opt),
-            RecentVersions::new(initial_version.clone(), 10, metrics.clone()),
-            buffer_tracker,
-            spawn_task,
-            CacheRefiller::default_spawn_refill_task(),
-        );
-
-        let event_tx = event_handler.event_sender();
-
-        let send_event = |event| event_tx.send(event).unwrap();
-        let flush_event = || async {
-            let (tx, rx) = oneshot::channel();
-            send_event(HummockEvent::FlushEvent(tx));
-            rx.await.unwrap();
-        };
-        let start_epoch = |table_id, epoch| {
-            send_event(HummockEvent::StartEpoch {
-                epoch,
-                table_ids: HashSet::from_iter([table_id]),
-            })
-        };
-        let init_epoch = |instance: &LocalInstanceGuard, init_epoch| {
-            send_event(HummockEvent::InitEpoch {
-                instance_id: instance.instance_id,
-                init_epoch,
-            })
-        };
-        let write_imm = |read_version: &HummockReadVersionRef,
-                         instance: &LocalInstanceGuard,
-                         imm: &ImmutableMemtable| {
-            let mut read_version = read_version.write();
-            read_version.add_imm(imm.clone());
-
-            send_event(HummockEvent::ImmToUploader {
-                instance_id: instance.instance_id,
-                imms: read_version.start_upload_pending_imms(),
-            });
-        };
-        let seal_epoch = |instance: &LocalInstanceGuard, next_epoch| {
-            send_event(HummockEvent::LocalSealEpoch {
-                instance_id: instance.instance_id,
-                next_epoch,
-                opts: SealCurrentEpochOptions::for_test(),
-            })
-        };
-        let sync_epoch = |table_id, new_sync_epoch| {
-            let (tx, rx) = oneshot::channel();
-            send_event(HummockEvent::SyncEpoch {
-                sync_result_sender: tx,
-                sync_table_epochs: vec![(new_sync_epoch, HashSet::from_iter([table_id]))],
-            });
-            rx
-        };
-
-        let join_handle = spawn(event_handler.start_hummock_event_handler_worker());
-
-        let (read_version1, guard1) = {
-            let (tx, rx) = oneshot::channel();
-            send_event(HummockEvent::RegisterReadVersion {
-                table_id: table_id1,
-                new_read_version_sender: tx,
-                is_replicated: false,
-                vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-            });
-            rx.await.unwrap()
-        };
-
-        let (read_version2, guard2) = {
-            let (tx, rx) = oneshot::channel();
-            send_event(HummockEvent::RegisterReadVersion {
-                table_id: table_id2,
-                new_read_version_sender: tx,
-                is_replicated: false,
-                vnodes: Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-            });
-            rx.await.unwrap()
-        };
-
-        // prepare data of table1
-        let (task1_1_finish_tx, task1_1_rx) = {
-            start_epoch(table_id1, epoch1);
-
-            read_version1.write().init();
-            init_epoch(&guard1, epoch1);
-
-            write_imm(&read_version1, &guard1, &imm1_1);
-
-            start_epoch(table_id1, epoch2);
-
-            seal_epoch(&guard1, epoch2);
-
-            let (wait_task_start, task_finish_tx) = new_task_notifier(HashMap::from_iter([(
-                guard1.instance_id,
-                vec![imm1_1.batch_id()],
-            )]));
-
-            let mut rx = sync_epoch(table_id1, epoch1);
-            wait_task_start.await;
-            assert!(poll_fn(|cx| Poll::Ready(rx.poll_unpin(cx).is_pending())).await);
-
-            write_imm(&read_version1, &guard1, &imm1_2_1);
-            flush_event().await;
-
-            (task_finish_tx, rx)
-        };
-        // by now, the state in uploader of table_id1
-        // unsync:  epoch2 -> [imm1_2]
-        // syncing: epoch1 -> [imm1_1]
-
-        let (task1_2_finish_tx, _finish_txs) = {
-            let mut finish_txs = vec![];
-            let imm2_1_1 = gen_imm(table_id2, epoch1, 0);
-            start_epoch(table_id2, epoch1);
-            read_version2.write().init();
-            init_epoch(&guard2, epoch1);
-            let (wait_task_start, task1_2_finish_tx) = new_task_notifier(HashMap::from_iter([(
-                guard1.instance_id,
-                vec![imm1_2_1.batch_id()],
-            )]));
-            write_imm(&read_version2, &guard2, &imm2_1_1);
-            wait_task_start.await;
-
-            let imm2_1_2 = gen_imm(table_id2, epoch1, 1);
-            let (wait_task_start, finish_tx) = new_task_notifier(HashMap::from_iter([(
-                guard2.instance_id,
-                vec![imm2_1_2.batch_id(), imm2_1_1.batch_id()],
-            )]));
-            finish_txs.push(finish_tx);
-            write_imm(&read_version2, &guard2, &imm2_1_2);
-            wait_task_start.await;
-
-            let imm2_1_3 = gen_imm(table_id2, epoch1, 2);
-            write_imm(&read_version2, &guard2, &imm2_1_3);
-            start_epoch(table_id2, epoch2);
-            seal_epoch(&guard2, epoch2);
-            let (wait_task_start, finish_tx) = new_task_notifier(HashMap::from_iter([(
-                guard2.instance_id,
-                vec![imm2_1_3.batch_id()],
-            )]));
-            finish_txs.push(finish_tx);
-            let _sync_rx = sync_epoch(table_id2, epoch1);
-            wait_task_start.await;
-
-            let imm2_2_1 = gen_imm(table_id2, epoch2, 0);
-            write_imm(&read_version2, &guard2, &imm2_2_1);
-            flush_event().await;
-            let imm2_2_2 = gen_imm(table_id2, epoch2, 1);
-            write_imm(&read_version2, &guard2, &imm2_2_2);
-            let (wait_task_start, finish_tx) = new_task_notifier(HashMap::from_iter([(
-                guard2.instance_id,
-                vec![imm2_2_2.batch_id(), imm2_2_1.batch_id()],
-            )]));
-            finish_txs.push(finish_tx);
-            wait_task_start.await;
-
-            let imm2_2_3 = gen_imm(table_id2, epoch2, 2);
-            write_imm(&read_version2, &guard2, &imm2_2_3);
-
-            // by now, the state in uploader of table_id2
-            // syncing: epoch1 -> spill: [imm2_1_2, imm2_1_1], sync: [imm2_1_3]
-            // unsync: epoch2 -> spilling: [imm2_2_2, imm2_2_1], imm: [imm2_2_3]
-            // the state in uploader of table_id1
-            // unsync:  epoch2 -> spilling [imm1_2]
-            // syncing: epoch1 -> [imm1_1]
-
-            drop(guard2);
-            let (clear_tx, clear_rx) = oneshot::channel();
-            send_event(HummockEvent::Clear(
-                clear_tx,
-                Some(HashSet::from_iter([table_id2])),
-            ));
-            clear_rx.await.unwrap();
-            (task1_2_finish_tx, finish_txs)
-        };
-
-        let imm1_2_2 = gen_imm(table_id1, epoch2, 1);
-        write_imm(&read_version1, &guard1, &imm1_2_2);
-        start_epoch(table_id1, epoch3);
-        seal_epoch(&guard1, epoch3);
-
-        let (tx2, mut sync_rx2) = oneshot::channel();
-        let (wait_task_start, task1_2_2_finish_tx) = new_task_notifier(HashMap::from_iter([(
-            guard1.instance_id,
-            vec![imm1_2_2.batch_id()],
-        )]));
-        send_event(HummockEvent::SyncEpoch {
-            sync_result_sender: tx2,
-            sync_table_epochs: vec![(epoch2, HashSet::from_iter([table_id1]))],
-        });
-        wait_task_start.await;
-        assert!(poll_fn(|cx| Poll::Ready(sync_rx2.poll_unpin(cx).is_pending())).await);
-
-        task1_1_finish_tx.send(()).unwrap();
-        let sync_data1 = task1_1_rx.await.unwrap().unwrap();
-        sync_data1
-            .uploaded_ssts
-            .iter()
-            .all(|sst| sst.epochs() == &vec![epoch1]);
-        task1_2_finish_tx.send(()).unwrap();
-        assert!(poll_fn(|cx| Poll::Ready(sync_rx2.poll_unpin(cx).is_pending())).await);
-        task1_2_2_finish_tx.send(()).unwrap();
-        let sync_data2 = sync_rx2.await.unwrap().unwrap();
-        sync_data2
-            .uploaded_ssts
-            .iter()
-            .all(|sst| sst.epochs() == &vec![epoch2]);
-
-        send_event(HummockEvent::Shutdown);
-        join_handle.await.unwrap();
     }
 }
