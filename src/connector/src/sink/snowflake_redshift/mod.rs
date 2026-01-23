@@ -21,7 +21,6 @@ use opendal::Operator;
 use risingwave_common::array::{ArrayImpl, DataChunk, Op, PrimitiveArray, StreamChunk, Utf8Array};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_pb::id::ExecutorId;
 use serde_json::{Map, Value};
 use thiserror_ext::AsReport;
 use uuid::Uuid;

@@ -29,7 +29,6 @@ use serde_json::Value;
 use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use url::form_urlencoded;
-use risingwave_pb::id::ExecutorId;
 use uuid::Uuid;
 use with_options::WithOptions;
 
