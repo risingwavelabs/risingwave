@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ impl OwnedRow {
                     DataType::Int64 => x.parse::<i64>().unwrap().into(),
                     DataType::Float32 => x.parse::<f32>().unwrap().into(),
                     DataType::Float64 => x.parse::<f64>().unwrap().into(),
-                    DataType::Varchar => x.to_string().into(),
+                    DataType::Varchar => x.to_owned().into(),
                     DataType::Boolean => x.parse::<bool>().unwrap().into(),
                     DataType::Date => x.parse::<Date>().unwrap().into(),
                     DataType::Time => x.parse::<Time>().unwrap().into(),
@@ -111,7 +111,7 @@ impl Row for OwnedRow {
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.0.get_unchecked(index).to_datum_ref()
+        unsafe { self.0.get_unchecked(index).to_datum_ref() }
     }
 
     #[inline]
@@ -162,12 +162,21 @@ impl<D: AsRef<[DataType]>> RowDeserializer<D> {
         RowDeserializer { data_types }
     }
 
-    /// Deserialize the row from value encoding bytes.
-    pub fn deserialize(&self, mut data: impl bytes::Buf) -> value_encoding::Result<OwnedRow> {
-        let mut values = Vec::with_capacity(self.data_types().len());
+    pub fn deserialize_to(
+        &self,
+        mut data: impl bytes::Buf,
+        values: &mut Vec<Datum>,
+    ) -> value_encoding::Result<()> {
         for typ in self.data_types() {
             values.push(deserialize_datum(&mut data, typ)?);
         }
+        Ok(())
+    }
+
+    /// Deserialize the row from value encoding bytes.
+    pub fn deserialize(&self, data: impl bytes::Buf) -> value_encoding::Result<OwnedRow> {
+        let mut values = Vec::with_capacity(self.data_types().len());
+        self.deserialize_to(data, &mut values)?;
         Ok(OwnedRow(values.into()))
     }
 

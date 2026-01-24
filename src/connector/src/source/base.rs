@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,21 +17,23 @@ use std::sync::Arc;
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use aws_sdk_s3::types::Object;
 use bytes::Bytes;
 use enum_as_inner::EnumAsInner;
+use futures::future::try_join_all;
 use futures::stream::BoxStream;
-use futures::Stream;
+use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::TableId;
+use risingwave_common::id::{ActorId, FragmentId, SourceId};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{JsonbVal, Scalar};
 use risingwave_pb::catalog::{PbSource, PbStreamSourceInfo};
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::source::ConnectorSplit;
+use rw_futures_util::select_all;
 use serde::de::DeserializeOwned;
+use serde_json::json;
 use tokio::sync::mpsc;
 
 use super::cdc::DebeziumCdcMeta;
@@ -40,24 +42,61 @@ use super::google_pubsub::GooglePubsubMeta;
 use super::kafka::KafkaMeta;
 use super::kinesis::KinesisMeta;
 use super::monitor::SourceMetrics;
+use super::nats::source::NatsMeta;
 use super::nexmark::source::message::NexmarkMeta;
-use super::{AZBLOB_CONNECTOR, GCS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR};
+use super::pulsar::source::PulsarMeta;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult as Result;
-use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::parser::ParserConfig;
-use crate::source::filesystem::FsPageItem;
-use crate::source::monitor::EnumeratorMetrics;
+use crate::parser::schema_change::SchemaChangeEnvelope;
 use crate::source::SplitImpl::{CitusCdc, MongodbCdc, MysqlCdc, PostgresCdc, SqlServerCdc};
+use crate::source::batch::BatchSourceSplitImpl;
+use crate::source::monitor::EnumeratorMetrics;
 use crate::with_options::WithOptions;
 use crate::{
-    dispatch_source_prop, dispatch_split_impl, for_all_sources, impl_connector_properties,
-    impl_split, match_source_name_str, WithOptionsSecResolved,
+    WithOptionsSecResolved, WithPropertiesExt, dispatch_source_prop, dispatch_split_impl,
+    for_all_connections, for_all_sources, impl_connection, impl_connector_properties, impl_split,
+    match_source_name_str,
 };
 
 const SPLIT_TYPE_FIELD: &str = "split_type";
 const SPLIT_INFO_FIELD: &str = "split_info";
 pub const UPSTREAM_SOURCE_KEY: &str = "connector";
 
+pub const WEBHOOK_CONNECTOR: &str = "webhook";
+
+/// Callback wrapper for reporting CDC auto schema change fail events
+/// Parameters: (`table_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
+#[derive(Clone)]
+pub struct CdcAutoSchemaChangeFailCallback(
+    Arc<dyn Fn(SourceId, String, String, String, String) + Send + Sync>,
+);
+
+impl CdcAutoSchemaChangeFailCallback {
+    pub fn new<F>(f: F) -> Self
+    where
+        F: Fn(SourceId, String, String, String, String) + Send + Sync + 'static,
+    {
+        Self(Arc::new(f))
+    }
+
+    pub fn call(
+        &self,
+        source_id: SourceId,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) {
+        self.0(source_id, table_name, cdc_table_id, upstream_ddl, fail_info);
+    }
+}
+
+impl std::fmt::Debug for CdcAutoSchemaChangeFailCallback {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str("CdcAutoSchemaChangeFailCallback")
+    }
+}
 pub trait TryFromBTreeMap: Sized + UnknownFields {
     /// Used to initialize the source properties from the raw untyped `WITH` options.
     fn try_from_btreemap(
@@ -69,7 +108,9 @@ pub trait TryFromBTreeMap: Sized + UnknownFields {
 /// Represents `WITH` options for sources.
 ///
 /// Each instance should add a `#[derive(with_options::WithOptions)]` marker.
-pub trait SourceProperties: TryFromBTreeMap + Clone + WithOptions {
+pub trait SourceProperties:
+    TryFromBTreeMap + Clone + WithOptions + std::fmt::Debug + EnforceSecret
+{
     const SOURCE_NAME: &'static str;
     type Split: SplitMetaData
         + TryFrom<SplitImpl, Error = crate::error::ConnectorError>
@@ -108,46 +149,156 @@ impl<P: DeserializeOwned + UnknownFields> TryFromBTreeMap for P {
     }
 }
 
-pub async fn create_split_reader<P: SourceProperties + std::fmt::Debug>(
+#[derive(Default)]
+pub struct CreateSplitReaderOpt {
+    pub support_multiple_splits: bool,
+    pub seek_to_latest: bool,
+}
+
+#[derive(Default)]
+pub struct CreateSplitReaderResult {
+    pub latest_splits: Option<Vec<SplitImpl>>,
+    pub backfill_info: HashMap<SplitId, BackfillInfo>,
+}
+
+pub async fn create_split_readers<P: SourceProperties>(
     prop: P,
     splits: Vec<SplitImpl>,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
     columns: Option<Vec<Column>>,
-) -> Result<P::SplitReader> {
+    opt: CreateSplitReaderOpt,
+) -> Result<(BoxSourceChunkStream, CreateSplitReaderResult)> {
     let splits = splits.into_iter().map(P::Split::try_from).try_collect()?;
-    P::SplitReader::new(prop, splits, parser_config, source_ctx, columns).await
+    let mut res = CreateSplitReaderResult {
+        backfill_info: HashMap::new(),
+        latest_splits: None,
+    };
+    if opt.support_multiple_splits {
+        let mut reader = P::SplitReader::new(
+            prop.clone(),
+            splits,
+            parser_config.clone(),
+            source_ctx.clone(),
+            columns.clone(),
+        )
+        .await?;
+        if opt.seek_to_latest {
+            res.latest_splits = Some(reader.seek_to_latest().await?);
+        }
+        res.backfill_info = reader.backfill_info();
+        Ok((reader.into_stream().boxed(), res))
+    } else {
+        let mut readers = try_join_all(splits.into_iter().map(|split| {
+            // TODO: is this reader split across multiple threads...? Realistically, we want
+            // source_ctx to live in a single actor.
+            P::SplitReader::new(
+                prop.clone(),
+                vec![split],
+                parser_config.clone(),
+                source_ctx.clone(),
+                columns.clone(),
+            )
+        }))
+        .await?;
+        if opt.seek_to_latest {
+            let mut latest_splits = vec![];
+            for reader in &mut readers {
+                latest_splits.extend(reader.seek_to_latest().await?);
+            }
+            res.latest_splits = Some(latest_splits);
+        }
+        res.backfill_info = readers.iter().flat_map(|r| r.backfill_info()).collect();
+        Ok((
+            select_all(readers.into_iter().map(|r| r.into_stream())).boxed(),
+            res,
+        ))
+    }
 }
 
 /// [`SplitEnumerator`] fetches the split metadata from the external source service.
 /// NOTE: It runs in the meta server, so probably it should be moved to the `meta` crate.
 #[async_trait]
-pub trait SplitEnumerator: Sized {
+pub trait SplitEnumerator: Sized + Send {
     type Split: SplitMetaData + Send;
     type Properties;
 
     async fn new(properties: Self::Properties, context: SourceEnumeratorContextRef)
-        -> Result<Self>;
+    -> Result<Self>;
     async fn list_splits(&mut self) -> Result<Vec<Self::Split>>;
+    /// Do some cleanup work when a fragment is dropped, e.g., drop Kafka consumer group.
+    async fn on_drop_fragments(&mut self, _fragment_ids: Vec<FragmentId>) -> Result<()> {
+        Ok(())
+    }
+    /// Do some cleanup work when a backfill fragment is finished, e.g., drop Kafka consumer group.
+    async fn on_finish_backfill(&mut self, _fragment_ids: Vec<FragmentId>) -> Result<()> {
+        Ok(())
+    }
+    /// Called after `worker.tick()` execution to perform periodic operations,
+    /// such as monitoring upstream PostgreSQL `confirmed_flush_lsn`, etc.
+    /// This can be extended to support more periodic operations in the future.
+    async fn on_tick(&mut self) -> Result<()> {
+        Ok(())
+    }
 }
 
 pub type SourceContextRef = Arc<SourceContext>;
 pub type SourceEnumeratorContextRef = Arc<SourceEnumeratorContext>;
 
+/// Dyn-compatible [`SplitEnumerator`].
+#[async_trait]
+pub trait AnySplitEnumerator: Send {
+    async fn list_splits(&mut self) -> Result<Vec<SplitImpl>>;
+    async fn on_drop_fragments(&mut self, fragment_ids: Vec<FragmentId>) -> Result<()>;
+    async fn on_finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> Result<()>;
+    async fn on_tick(&mut self) -> Result<()>;
+}
+
+#[async_trait]
+impl<T: SplitEnumerator<Split: Into<SplitImpl>> + 'static> AnySplitEnumerator for T {
+    async fn list_splits(&mut self) -> Result<Vec<SplitImpl>> {
+        SplitEnumerator::list_splits(self)
+            .await
+            .map(|s| s.into_iter().map(|s| s.into()).collect())
+    }
+
+    async fn on_drop_fragments(&mut self, fragment_ids: Vec<FragmentId>) -> Result<()> {
+        SplitEnumerator::on_drop_fragments(self, fragment_ids).await
+    }
+
+    async fn on_finish_backfill(&mut self, fragment_ids: Vec<FragmentId>) -> Result<()> {
+        SplitEnumerator::on_finish_backfill(self, fragment_ids).await
+    }
+
+    async fn on_tick(&mut self) -> Result<()> {
+        SplitEnumerator::on_tick(self).await
+    }
+}
+
 /// The max size of a chunk yielded by source stream.
 pub const MAX_CHUNK_SIZE: usize = 1024;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub struct SourceCtrlOpts {
     /// The max size of a chunk yielded by source stream.
     pub chunk_size: usize,
-    /// Rate limit of source
-    pub rate_limit: Option<u32>,
+    /// Whether to allow splitting a transaction into multiple chunks to meet the `max_chunk_size`.
+    pub split_txn: bool,
 }
 
 // The options in `SourceCtrlOpts` are so important that we don't want to impl `Default` for it,
 // so that we can prevent any unintentional use of the default value.
 impl !Default for SourceCtrlOpts {}
+
+impl SourceCtrlOpts {
+    #[cfg(test)]
+    pub fn for_test() -> Self {
+        SourceCtrlOpts {
+            chunk_size: 256,
+            split_txn: false,
+        }
+    }
+}
 
 #[derive(Debug)]
 pub struct SourceEnumeratorContext {
@@ -160,7 +311,9 @@ impl SourceEnumeratorContext {
     /// where the real context doesn't matter.
     pub fn dummy() -> SourceEnumeratorContext {
         SourceEnumeratorContext {
-            info: SourceEnumeratorInfo { source_id: 0 },
+            info: SourceEnumeratorInfo {
+                source_id: 0.into(),
+            },
             metrics: Arc::new(EnumeratorMetrics::default()),
         }
     }
@@ -168,14 +321,14 @@ impl SourceEnumeratorContext {
 
 #[derive(Clone, Debug)]
 pub struct SourceEnumeratorInfo {
-    pub source_id: u32,
+    pub source_id: SourceId,
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct SourceContext {
-    pub actor_id: u32,
-    pub source_id: TableId,
-    pub fragment_id: u32,
+    pub actor_id: ActorId,
+    pub source_id: SourceId,
+    pub fragment_id: FragmentId,
     pub source_name: String,
     pub metrics: Arc<SourceMetrics>,
     pub source_ctrl_opts: SourceCtrlOpts,
@@ -183,13 +336,15 @@ pub struct SourceContext {
     // source parser put schema change event into this channel
     pub schema_change_tx:
         Option<mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>>,
+    // callback function to report CDC auto schema change fail events
+    pub on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
 }
 
 impl SourceContext {
     pub fn new(
-        actor_id: u32,
-        source_id: TableId,
-        fragment_id: u32,
+        actor_id: ActorId,
+        source_id: SourceId,
+        fragment_id: FragmentId,
         source_name: String,
         metrics: Arc<SourceMetrics>,
         source_ctrl_opts: SourceCtrlOpts,
@@ -197,6 +352,32 @@ impl SourceContext {
         schema_change_channel: Option<
             mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
         >,
+    ) -> Self {
+        Self::new_with_auto_schema_change_callback(
+            actor_id,
+            source_id,
+            fragment_id,
+            source_name,
+            metrics,
+            source_ctrl_opts,
+            connector_props,
+            schema_change_channel,
+            None,
+        )
+    }
+
+    pub fn new_with_auto_schema_change_callback(
+        actor_id: ActorId,
+        source_id: SourceId,
+        fragment_id: FragmentId,
+        source_name: String,
+        metrics: Arc<SourceMetrics>,
+        source_ctrl_opts: SourceCtrlOpts,
+        connector_props: ConnectorProperties,
+        schema_change_channel: Option<
+            mpsc::Sender<(SchemaChangeEnvelope, tokio::sync::oneshot::Sender<()>)>,
+        >,
+        on_cdc_auto_schema_change_failure: Option<CdcAutoSchemaChangeFailCallback>,
     ) -> Self {
         Self {
             actor_id,
@@ -207,6 +388,7 @@ impl SourceContext {
             source_ctrl_opts,
             connector_props,
             schema_change_tx: schema_change_channel,
+            on_cdc_auto_schema_change_failure,
         }
     }
 
@@ -214,18 +396,41 @@ impl SourceContext {
     /// where the real context doesn't matter.
     pub fn dummy() -> Self {
         Self::new(
-            0,
-            TableId::new(0),
-            0,
-            "dummy".to_string(),
+            0.into(),
+            SourceId::new(0),
+            0.into(),
+            "dummy".to_owned(),
             Arc::new(SourceMetrics::default()),
             SourceCtrlOpts {
                 chunk_size: MAX_CHUNK_SIZE,
-                rate_limit: None,
+                split_txn: false,
             },
             ConnectorProperties::default(),
             None,
         )
+    }
+
+    /// Report CDC auto schema change fail event
+    /// Parameters: (`source_id`, `table_name`, `cdc_table_id`, `upstream_ddl`, `fail_info`)
+    pub fn on_cdc_auto_schema_change_failure(
+        &self,
+        source_id: SourceId,
+        table_name: String,
+        cdc_table_id: String,
+        upstream_ddl: String,
+        fail_info: String,
+    ) {
+        if let Some(ref cdc_auto_schema_change_fail_callback) =
+            self.on_cdc_auto_schema_change_failure
+        {
+            cdc_auto_schema_change_fail_callback.call(
+                source_id,
+                table_name,
+                cdc_table_id,
+                upstream_ddl,
+                fail_info,
+            );
+        }
     }
 }
 
@@ -338,20 +543,32 @@ pub fn extract_source_struct(info: &PbStreamSourceInfo) -> Result<SourceStruct> 
     Ok(SourceStruct::new(format, encode))
 }
 
-/// Stream of [`SourceMessage`].
-pub type BoxSourceStream = BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+/// Stream of [`SourceMessage`]. Messages flow through the stream in the unit of a batch.
+pub type BoxSourceMessageStream =
+    BoxStream<'static, crate::error::ConnectorResult<Vec<SourceMessage>>>;
+/// Stream of [`StreamChunk`]s parsed from the messages from the external source.
+pub type BoxSourceChunkStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
+/// `StreamChunk` with the latest split state.
+/// The state is constructed in `StreamReaderBuilder::into_retry_stream`
+pub type StreamChunkWithState = (StreamChunk, HashMap<SplitId, SplitImpl>);
+/// See [`StreamChunkWithState`].
+pub type BoxSourceChunkWithStateStream =
+    BoxStream<'static, crate::error::ConnectorResult<StreamChunkWithState>>;
+
+/// Stream of [`Option<StreamChunk>`]s parsed from the messages from the external source.
+pub type BoxStreamingFileSourceChunkStream =
+    BoxStream<'static, crate::error::ConnectorResult<Option<StreamChunk>>>;
 
 // Manually expand the trait alias to improve IDE experience.
-pub trait ChunkSourceStream:
+pub trait SourceChunkStream:
     Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
 {
 }
-impl<T> ChunkSourceStream for T where
+impl<T> SourceChunkStream for T where
     T: Stream<Item = crate::error::ConnectorResult<StreamChunk>> + Send + 'static
 {
 }
 
-pub type BoxChunkSourceStream = BoxStream<'static, crate::error::ConnectorResult<StreamChunk>>;
 pub type BoxTryStream<M> = BoxStream<'static, crate::error::ConnectorResult<M>>;
 
 /// [`SplitReader`] is a new abstraction of the external connector read interface which is
@@ -370,10 +587,14 @@ pub trait SplitReader: Sized + Send {
         columns: Option<Vec<Column>>,
     ) -> crate::error::ConnectorResult<Self>;
 
-    fn into_stream(self) -> BoxChunkSourceStream;
+    fn into_stream(self) -> BoxSourceChunkStream;
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
         HashMap::new()
+    }
+
+    async fn seek_to_latest(&mut self) -> Result<Vec<SplitImpl>> {
+        Err(anyhow!("seek_to_latest is not supported for this connector").into())
     }
 }
 
@@ -409,20 +630,6 @@ impl Default for ConnectorProperties {
 }
 
 impl ConnectorProperties {
-    pub fn is_new_fs_connector_hash_map(with_properties: &HashMap<String, String>) -> bool {
-        with_properties
-            .get(UPSTREAM_SOURCE_KEY)
-            .map(|s| {
-                s.eq_ignore_ascii_case(OPENDAL_S3_CONNECTOR)
-                    || s.eq_ignore_ascii_case(POSIX_FS_CONNECTOR)
-                    || s.eq_ignore_ascii_case(GCS_CONNECTOR)
-                    || s.eq_ignore_ascii_case(AZBLOB_CONNECTOR)
-            })
-            .unwrap_or(false)
-    }
-}
-
-impl ConnectorProperties {
     /// Creates typed source properties from the raw `WITH` properties.
     ///
     /// It checks the `connector` field, and them dispatches to the corresponding type's `try_from_btreemap` method.
@@ -438,9 +645,10 @@ impl ConnectorProperties {
             LocalSecretManager::global().fill_secrets(options, secret_refs)?;
         let connector = options_with_secret
             .remove(UPSTREAM_SOURCE_KEY)
-            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?;
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?
+            .to_lowercase();
         match_source_name_str!(
-            connector.to_lowercase().as_str(),
+            connector.as_str(),
             PropType,
             PropType::try_from_btreemap(options_with_secret, deny_unknown_fields)
                 .map(ConnectorProperties::from),
@@ -448,19 +656,44 @@ impl ConnectorProperties {
         )
     }
 
-    pub fn enable_split_scale_in(&self) -> bool {
+    pub fn enforce_secret_source(
+        with_properties: &impl WithPropertiesExt,
+    ) -> crate::error::ConnectorResult<()> {
+        let connector = with_properties
+            .get_connector()
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?
+            .to_lowercase();
+        let key_iter = with_properties.key_iter();
+        match_source_name_str!(
+            connector.as_str(),
+            PropType,
+            PropType::enforce_secret(key_iter),
+            |other| bail!("connector '{}' is not supported", other)
+        )
+    }
+
+    pub fn enable_drop_split(&self) -> bool {
         // enable split scale in just for Kinesis
-        matches!(self, ConnectorProperties::Kinesis(_))
+        matches!(
+            self,
+            ConnectorProperties::Kinesis(_) | ConnectorProperties::Nats(_)
+        )
+    }
+
+    /// For most connectors, this should be false. When enabled, RisingWave should not track any progress.
+    pub fn enable_adaptive_splits(&self) -> bool {
+        matches!(self, ConnectorProperties::Nats(_))
     }
 
     /// Load additional info from `PbSource`. Currently only used by CDC.
     pub fn init_from_pb_source(&mut self, source: &PbSource) {
-        dispatch_source_prop!(self, prop, prop.init_from_pb_source(source))
+        dispatch_source_prop!(self, |prop| prop.init_from_pb_source(source))
     }
 
     /// Load additional info from `ExternalTableDesc`. Currently only used by CDC.
     pub fn init_from_pb_cdc_table_desc(&mut self, cdc_table_desc: &ExternalTableDesc) {
-        dispatch_source_prop!(self, prop, prop.init_from_pb_cdc_table_desc(cdc_table_desc))
+        dispatch_source_prop!(self, |prop| prop
+            .init_from_pb_cdc_table_desc(cdc_table_desc))
     }
 
     pub fn support_multiple_splits(&self) -> bool {
@@ -469,15 +702,52 @@ impl ConnectorProperties {
             || matches!(self, ConnectorProperties::Gcs(_))
             || matches!(self, ConnectorProperties::Azblob(_))
     }
+
+    pub async fn create_split_enumerator(
+        self,
+        context: crate::source::base::SourceEnumeratorContextRef,
+    ) -> crate::error::ConnectorResult<Box<dyn AnySplitEnumerator>> {
+        let enumerator: Box<dyn AnySplitEnumerator> = dispatch_source_prop!(self, |prop| Box::new(
+            <PropType as SourceProperties>::SplitEnumerator::new(*prop, context).await?
+        ));
+        Ok(enumerator)
+    }
+
+    pub async fn create_split_reader(
+        self,
+        splits: Vec<SplitImpl>,
+        parser_config: ParserConfig,
+        source_ctx: SourceContextRef,
+        columns: Option<Vec<Column>>,
+        mut opt: crate::source::CreateSplitReaderOpt,
+    ) -> Result<(BoxSourceChunkStream, crate::source::CreateSplitReaderResult)> {
+        opt.support_multiple_splits = self.support_multiple_splits();
+        tracing::debug!(
+            ?splits,
+            support_multiple_splits = opt.support_multiple_splits,
+            "spawning connector split reader",
+        );
+
+        dispatch_source_prop!(self, |prop| create_split_readers(
+            *prop,
+            splits,
+            parser_config,
+            source_ctx,
+            columns,
+            opt
+        )
+        .await)
+    }
 }
 
 for_all_sources!(impl_split);
+for_all_connections!(impl_connection);
 
 impl From<&SplitImpl> for ConnectorSplit {
     fn from(split: &SplitImpl) -> Self {
-        dispatch_split_impl!(split, inner, SourcePropType, {
+        dispatch_split_impl!(split, |inner| {
             ConnectorSplit {
-                split_type: String::from(SourcePropType::SOURCE_NAME),
+                split_type: String::from(PropType::SOURCE_NAME),
                 encoded_split: inner.encode_to_bytes().to_vec(),
             }
         })
@@ -488,8 +758,9 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
     type Error = crate::error::ConnectorError;
 
     fn try_from(split: &ConnectorSplit) -> std::result::Result<Self, Self::Error> {
+        let split_type = split.split_type.to_lowercase();
         match_source_name_str!(
-            split.split_type.to_lowercase().as_str(),
+            split_type.as_str(),
             PropType,
             {
                 <PropType as SourceProperties>::Split::restore_from_bytes(
@@ -504,8 +775,9 @@ impl TryFrom<&ConnectorSplit> for SplitImpl {
 
 impl SplitImpl {
     fn restore_from_json_inner(split_type: &str, value: JsonbVal) -> Result<Self> {
+        let split_type = split_type.to_lowercase();
         match_source_name_str!(
-            split_type.to_lowercase().as_str(),
+            split_type.as_str(),
             PropType,
             <PropType as SourceProperties>::Split::restore_from_json(value).map(Into::into),
             |other| bail!("connector '{}' is not supported", other)
@@ -530,11 +802,20 @@ impl SplitImpl {
             _ => unreachable!("get_cdc_split_offset() is only for cdc split"),
         }
     }
+
+    pub fn into_batch_split(self) -> Option<BatchSourceSplitImpl> {
+        match self {
+            SplitImpl::BatchPosixFs(batch_posix_fs_split) => {
+                Some(BatchSourceSplitImpl::BatchPosixFs(batch_posix_fs_split))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl SplitMetaData for SplitImpl {
     fn id(&self) -> SplitId {
-        dispatch_split_impl!(self, inner, IgnoreType, inner.id())
+        dispatch_split_impl!(self, |inner| inner.id())
     }
 
     fn encode_to_json(&self) -> JsonbVal {
@@ -551,41 +832,32 @@ impl SplitMetaData for SplitImpl {
             .unwrap()
             .as_str()
             .unwrap()
-            .to_string();
+            .to_owned();
         let inner_value = json_obj.remove(SPLIT_INFO_FIELD).unwrap();
         Self::restore_from_json_inner(&split_type, inner_value.into())
     }
 
     fn update_offset(&mut self, last_seen_offset: String) -> Result<()> {
-        dispatch_split_impl!(
-            self,
-            inner,
-            IgnoreType,
-            inner.update_offset(last_seen_offset)
-        )
+        dispatch_split_impl!(self, |inner| inner.update_offset(last_seen_offset))
     }
 }
 
 impl SplitImpl {
     pub fn get_type(&self) -> String {
-        dispatch_split_impl!(self, _ignored, PropType, {
-            PropType::SOURCE_NAME.to_string()
-        })
+        dispatch_split_impl!(self, |_inner| PropType::SOURCE_NAME.to_owned())
     }
 
     pub fn update_in_place(&mut self, last_seen_offset: String) -> Result<()> {
-        dispatch_split_impl!(self, inner, IgnoreType, {
-            inner.update_offset(last_seen_offset)?
-        });
+        dispatch_split_impl!(self, |inner| inner.update_offset(last_seen_offset)?);
         Ok(())
     }
 
     pub fn encode_to_json_inner(&self) -> JsonbVal {
-        dispatch_split_impl!(self, inner, IgnoreType, inner.encode_to_json())
+        dispatch_split_impl!(self, |inner| inner.encode_to_json())
     }
 }
 
-pub type DataType = risingwave_common::types::DataType;
+use risingwave_common::types::DataType;
 
 #[derive(Clone, Debug)]
 pub struct Column {
@@ -615,10 +887,15 @@ impl SourceMessage {
         Self {
             key: None,
             payload: None,
-            offset: "".to_string(),
+            offset: "".to_owned(),
             split_id: "".into(),
             meta: SourceMeta::Empty,
         }
+    }
+
+    /// Check whether the source message is a CDC heartbeat message.
+    pub fn is_cdc_heartbeat(&self) -> bool {
+        self.key.is_none() && self.payload.is_none()
     }
 }
 
@@ -626,10 +903,12 @@ impl SourceMessage {
 pub enum SourceMeta {
     Kafka(KafkaMeta),
     Kinesis(KinesisMeta),
+    Pulsar(PulsarMeta),
     Nexmark(NexmarkMeta),
     GooglePubsub(GooglePubsubMeta),
     Datagen(DatagenMeta),
     DebeziumCdc(DebeziumCdcMeta),
+    Nats(NatsMeta),
     // For the source that doesn't have meta data.
     Empty,
 }
@@ -669,17 +948,6 @@ pub trait SplitMetaData: Sized {
 /// [`None`] and the created source stream will be a pending stream.
 pub type ConnectorState = Option<Vec<SplitImpl>>;
 
-#[derive(Debug, Clone, Default)]
-pub struct FsFilterCtrlCtx;
-pub type FsFilterCtrlCtxRef = Arc<FsFilterCtrlCtx>;
-
-#[async_trait]
-pub trait FsListInner: Sized {
-    // fixme: better to implement as an Iterator, but the last page still have some contents
-    async fn get_next_page<T: for<'a> From<&'a Object>>(&mut self) -> Result<(Vec<T>, bool)>;
-    fn filter_policy(&self, ctx: &FsFilterCtrlCtx, page_num: usize, item: &FsPageItem) -> bool;
-}
-
 #[cfg(test)]
 mod tests {
     use maplit::*;
@@ -691,7 +959,7 @@ mod tests {
 
     #[test]
     fn test_split_impl_get_fn() -> Result<()> {
-        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_string());
+        let split = KafkaSplit::new(0, Some(0), Some(0), "demo".to_owned());
         let split_impl = SplitImpl::Kafka(split.clone());
         let get_value = split_impl.into_kafka().unwrap();
         println!("{:?}", get_value);
@@ -704,7 +972,7 @@ mod tests {
     #[test]
     fn test_cdc_split_state() -> Result<()> {
         let offset_str = "{\"sourcePartition\":{\"server\":\"RW_CDC_mydb.products\"},\"sourceOffset\":{\"transaction_id\":null,\"ts_sec\":1670407377,\"file\":\"binlog.000001\",\"pos\":98587,\"row\":2,\"server_id\":1,\"event\":2}}";
-        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_string()), None);
+        let split = DebeziumCdcSplit::<Mysql>::new(1001, Some(offset_str.to_owned()), None);
         let split_impl = SplitImpl::MysqlCdc(split);
         let encoded_split = split_impl.encode_to_bytes();
         let restored_split_impl = SplitImpl::restore_from_bytes(encoded_split.as_ref())?;
@@ -765,8 +1033,8 @@ mod tests {
                 .unwrap();
         if let ConnectorProperties::Kafka(k) = props {
             let btreemap = btreemap! {
-                "b-1:9092".to_string() => "dns-1".to_string(),
-                "b-2:9092".to_string() => "dns-2".to_string(),
+                "b-1:9092".to_owned() => "dns-1".to_owned(),
+                "b-2:9092".to_owned() => "dns-2".to_owned(),
             };
             assert_eq!(k.privatelink_common.broker_rewrite_map, Some(btreemap));
         } else {

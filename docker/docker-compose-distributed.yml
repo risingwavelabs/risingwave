@@ -1,6 +1,6 @@
 ---
 x-image: &image
-  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.0.1}
+  image: ${RW_IMAGE:-risingwavelabs/risingwave:v2.7.1}
 services:
   compactor-0:
     <<: *image
@@ -19,7 +19,7 @@ services:
     expose:
       - "6660"
       - "1260"
-    ports: [ ]
+    ports: []
     depends_on:
       - meta-node-0
       # - minio-0
@@ -61,7 +61,7 @@ services:
     expose:
       - "5688"
       - "1222"
-    ports: [ ]
+    ports: []
     depends_on:
       - meta-node-0
       # - minio-0
@@ -135,7 +135,7 @@ services:
     healthcheck:
       test:
         - CMD-SHELL
-        - bash -c 'printf \"GET / HTTP/1.1\n\n\" > /dev/tcp/127.0.0.1/4566; exit $$?;'
+        - bash -c '> /dev/tcp/127.0.0.1/4566; exit $$?;'
       interval: 1s
       timeout: 5s
       retries: 5
@@ -148,12 +148,12 @@ services:
           memory: 1G
   grafana-0:
     image: "grafana/grafana-oss:latest"
-    command: [ ]
+    command: []
     expose:
       - "3001"
     ports:
       - "3001:3001"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "grafana-0:/var/lib/grafana"
       - "./grafana.ini:/etc/grafana/grafana.ini"
@@ -241,7 +241,7 @@ services:
     ports:
       - "9301:9301"
       - "9400:9400"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "minio-0:/data"
     entrypoint: "
@@ -284,7 +284,7 @@ services:
       - "9500"
     ports:
       - "9500:9500"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "prometheus-0:/prometheus"
       - "./prometheus.yaml:/etc/prometheus/prometheus.yml"
@@ -326,7 +326,7 @@ services:
       - "9092:9092"
       - "9644:9644"
       - "8081:8081"
-    depends_on: [ ]
+    depends_on: []
     volumes:
       - "message_queue:/var/lib/redpanda/data"
     environment: {}

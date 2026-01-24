@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,10 @@ use std::vec::IntoIter;
 use futures::stream::FusedStream;
 use futures::{StreamExt, TryStreamExt};
 use postgres_types::FromSql;
-use tokio::io::{AsyncRead, AsyncWrite};
 
 use crate::error::{PsqlError, PsqlResult};
 use crate::pg_message::{BeCommandCompleteMessage, BeMessage};
-use crate::pg_protocol::Conn;
+use crate::pg_protocol::{PgByteStream, PgStream};
 use crate::pg_response::{PgResponse, ValuesStream};
 use crate::types::{Format, Row};
 
@@ -45,18 +44,18 @@ where
     }
 
     /// Return indicate whether the result is consumed completely.
-    pub async fn consume<S: AsyncWrite + AsyncRead + Unpin>(
+    pub async fn consume<S: PgByteStream>(
         &mut self,
         row_limit: usize,
-        msg_stream: &mut Conn<S>,
+        msg_stream: &mut PgStream<S>,
     ) -> PsqlResult<bool> {
         for notice in self.result.notices() {
-            msg_stream.write_no_flush(&BeMessage::NoticeResponse(notice))?;
+            msg_stream.write_no_flush(BeMessage::NoticeResponse(notice))?;
         }
 
         let status = self.result.status();
         if let Some(ref application_name) = status.application_name {
-            msg_stream.write_no_flush(&BeMessage::ParameterStatus(
+            msg_stream.write_no_flush(BeMessage::ParameterStatus(
                 crate::pg_message::BeParameterStatusMessage::ApplicationName(application_name),
             ))?;
         }
@@ -65,12 +64,35 @@ where
             // Run the callback before sending the response.
             self.result.run_callback().await?;
 
-            msg_stream.write_no_flush(&BeMessage::EmptyQueryResponse)?;
+            msg_stream.write_no_flush(BeMessage::EmptyQueryResponse)?;
             return Ok(true);
         }
 
         let mut query_end = false;
-        if self.result.is_query() {
+        if self.result.is_copy_query_to_stdout() {
+            msg_stream.write_no_flush(BeMessage::CopyOutResponse(self.result.row_desc().len()))?;
+
+            let mut count = 0;
+            while let Some(row_set) = self.result.values_stream().next().await {
+                let row_set = row_set.map_err(PsqlError::SimpleQueryError)?;
+                for row in row_set {
+                    msg_stream.write_no_flush(BeMessage::CopyData(&row))?;
+                    count += 1;
+                }
+            }
+
+            msg_stream.write_no_flush(BeMessage::CopyDone)?;
+
+            // Run the callback before sending the `CommandComplete` message.
+            self.result.run_callback().await?;
+
+            msg_stream.write_no_flush(BeMessage::CommandComplete(BeCommandCompleteMessage {
+                stmt_type: self.result.stmt_type(),
+                rows_cnt: count,
+            }))?;
+
+            query_end = true;
+        } else if self.result.is_query() {
             let mut query_row_count = 0;
 
             // fetch row data
@@ -79,24 +101,25 @@ where
             while row_limit == 0 || query_row_count < row_limit {
                 if self.row_cache.len() > 0 {
                     for row in self.row_cache.by_ref() {
-                        msg_stream.write_no_flush(&BeMessage::DataRow(&row))?;
+                        msg_stream.write_no_flush(BeMessage::DataRow(&row))?;
                         query_row_count += 1;
                         if row_limit > 0 && query_row_count >= row_limit {
                             break;
                         }
                     }
                 } else {
-                    self.row_cache = if let Some(rows) = self
+                    self.row_cache = match self
                         .result
                         .values_stream()
                         .try_next()
                         .await
                         .map_err(PsqlError::ExtendedExecuteError)?
                     {
-                        rows.into_iter()
-                    } else {
-                        query_end = true;
-                        break;
+                        Some(rows) => rows.into_iter(),
+                        _ => {
+                            query_end = true;
+                            break;
+                        }
                     };
                 }
             }
@@ -110,21 +133,21 @@ where
                 // Run the callback before sending the `CommandComplete` message.
                 self.result.run_callback().await?;
 
-                msg_stream.write_no_flush(&BeMessage::CommandComplete(
+                msg_stream.write_no_flush(BeMessage::CommandComplete(
                     BeCommandCompleteMessage {
                         stmt_type: self.result.stmt_type(),
                         rows_cnt: query_row_count as i32,
                     },
                 ))?;
             } else {
-                msg_stream.write_no_flush(&BeMessage::PortalSuspended)?;
+                msg_stream.write_no_flush(BeMessage::PortalSuspended)?;
             }
         } else if self.result.stmt_type().is_dml() && !self.result.stmt_type().is_returning() {
             let first_row_set = self.result.values_stream().next().await;
             let first_row_set = match first_row_set {
                 None => {
                     return Err(PsqlError::Uncategorized(
-                        anyhow::anyhow!("no affected rows in output").into(),
+                        "no affected rows in output".into(),
                     ));
                 }
                 Some(row) => row.map_err(PsqlError::SimpleQueryError)?,
@@ -150,7 +173,7 @@ where
             // Run the callback before sending the `CommandComplete` message.
             self.result.run_callback().await?;
 
-            msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+            msg_stream.write_no_flush(BeMessage::CommandComplete(BeCommandCompleteMessage {
                 stmt_type: self.result.stmt_type(),
                 rows_cnt: affected_rows_cnt,
             }))?;
@@ -160,7 +183,7 @@ where
             // Run the callback before sending the `CommandComplete` message.
             self.result.run_callback().await?;
 
-            msg_stream.write_no_flush(&BeMessage::CommandComplete(BeCommandCompleteMessage {
+            msg_stream.write_no_flush(BeMessage::CommandComplete(BeCommandCompleteMessage {
                 stmt_type: self.result.stmt_type(),
                 rows_cnt: self
                     .result

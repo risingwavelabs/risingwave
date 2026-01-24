@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use itertools::Either;
-use jsonbb::Builder;
 use risingwave_common::row::Row;
-use risingwave_common::types::{JsonbVal, ScalarRefImpl};
+use risingwave_common::types::ScalarRefImpl;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 use super::{ToJsonb, ToTextDisplay};
 
@@ -39,21 +38,20 @@ use super::{ToJsonb, ToTextDisplay};
 /// [1, 2, 4, 5]
 /// ```
 #[function("jsonb_build_array(variadic anyarray) -> jsonb")]
-fn jsonb_build_array(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
-    let mut builder = Builder::<Vec<u8>>::new();
-    builder.begin_array();
+fn jsonb_build_array(args: impl Row, ctx: &Context, writer: &mut jsonbb::Builder) -> Result<()> {
+    writer.begin_array();
     if ctx.variadic {
         for (value, ty) in args.iter().zip_eq_debug(&ctx.arg_types) {
-            value.add_to(ty, &mut builder)?;
+            value.add_to(ty, writer)?;
         }
     } else {
-        let ty = ctx.arg_types[0].as_list();
+        let ty = ctx.arg_types[0].as_list_elem();
         for value in args.iter() {
-            value.add_to(ty, &mut builder)?;
+            value.add_to(ty, writer)?;
         }
     }
-    builder.end_array();
-    Ok(builder.finish().into())
+    writer.end_array();
+    Ok(())
 }
 
 /// Builds a JSON object out of a variadic argument list.
@@ -74,18 +72,20 @@ fn jsonb_build_array(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
 /// {"2": "bar", "foo": "1"}
 /// ```
 #[function("jsonb_build_object(variadic anyarray) -> jsonb")]
-fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
+fn jsonb_build_object(args: impl Row, ctx: &Context, writer: &mut jsonbb::Builder) -> Result<()> {
     if args.len() % 2 == 1 {
         return Err(ExprError::InvalidParam {
             name: "args",
             reason: "argument list must have even number of elements".into(),
         });
     }
-    let mut builder = Builder::<Vec<u8>>::new();
-    builder.begin_object();
+    writer.begin_object();
     let arg_types = match ctx.variadic {
         true => Either::Left(ctx.arg_types.iter()),
-        false => Either::Right(itertools::repeat_n(ctx.arg_types[0].as_list(), args.len())),
+        false => Either::Right(itertools::repeat_n(
+            ctx.arg_types[0].as_list_elem(),
+            args.len(),
+        )),
     };
     for (i, [(key, _), (value, value_type)]) in args
         .iter()
@@ -98,20 +98,20 @@ fn jsonb_build_object(args: impl Row, ctx: &Context) -> Result<JsonbVal> {
                 return Err(ExprError::InvalidParam {
                     name: "args",
                     reason: "key value must be scalar, not array, composite, or json".into(),
-                })
+                });
             }
             // special treatment for bool, `false` & `true` rather than `f` & `t`.
-            Some(ScalarRefImpl::Bool(b)) => builder.display(b),
-            Some(s) => builder.display(ToTextDisplay(s)),
+            Some(ScalarRefImpl::Bool(b)) => writer.display(b),
+            Some(s) => writer.display(ToTextDisplay(s)),
             None => {
                 return Err(ExprError::InvalidParam {
                     name: "args",
                     reason: format!("argument {}: key must not be null", i * 2 + 1).into(),
-                })
+                });
             }
         }
-        value.add_to(value_type, &mut builder)?;
+        value.add_to(value_type, writer)?;
     }
-    builder.end_object();
-    Ok(builder.finish().into())
+    writer.end_object();
+    Ok(())
 }

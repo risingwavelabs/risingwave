@@ -1,5 +1,4 @@
-use std::collections::HashSet;
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,27 +11,27 @@ use std::collections::HashSet;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::collections::HashSet;
 use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::CacheContext;
+use foyer::Hint;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::util::epoch::{test_epoch, EpochExt};
-use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
+use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_hummock_sdk::key::prefixed_range_with_vnode;
 use risingwave_meta::hummock::MockHummockMetaClient;
 use risingwave_rpc_client::HummockMetaClient;
+use risingwave_storage::StateStore;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
 use risingwave_storage::storage_value::StorageValue;
-use risingwave_storage::store::{
-    LocalStateStore, NewLocalOptions, PrefetchOptions, ReadOptions, SealCurrentEpochOptions,
-    StateStoreRead, TryWaitEpochOptions, WriteOptions,
-};
-use risingwave_storage::StateStore;
+use risingwave_storage::store::*;
 
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
-use crate::test_utils::{gen_key_from_bytes, with_hummock_storage_v2, TestIngestBatch};
+use crate::test_utils::{TestIngestBatch, gen_key_from_bytes, with_hummock_storage};
 
 macro_rules! assert_count_range_scan {
     (
@@ -59,47 +58,13 @@ macro_rules! assert_count_range_scan {
                 $epoch,
                 ReadOptions {
                     prefetch_options: PrefetchOptions::prefetch_for_large_range_scan(),
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     read_committed: $read_committed,
                     ..Default::default()
                 },
             )
             .await
             .unwrap();
-        let mut count = 0;
-        loop {
-            match it.try_next().await.unwrap() {
-                Some(_) => count += 1,
-                None => break,
-            }
-        }
-        assert_eq!(count, $expect_count);
-    }};
-}
-
-#[allow(unused_macros)]
-macro_rules! assert_count_backward_range_scan {
-    ($storage:expr, $range:expr, $expect_count:expr, $epoch:expr) => {{
-        use std::ops::RangeBounds;
-        let range = $range;
-        let bounds: (Bound<Vec<u8>>, Bound<Vec<u8>>) = (
-            range.start_bound().map(|x: &Bytes| x.to_vec()),
-            range.end_bound().map(|x: &Bytes| x.to_vec()),
-        );
-        let it = $storage
-            .backward_iter(
-                bounds,
-                ReadOptions {
-                    ignore_range_tombstone: false,
-                    epoch: $epoch,
-                    table_id: Default::default(),
-                    retention_seconds: None,
-                    read_version_from_backup: false,
-                },
-            )
-            .await
-            .unwrap();
-        futures::pin_mut!(it);
         let mut count = 0;
         loop {
             match it.try_next().await.unwrap() {
@@ -125,22 +90,16 @@ async fn test_snapshot_inner(
     hummock_storage.start_epoch(epoch1, HashSet::from_iter([Default::default()]));
     local.init_for_test(epoch1).await.unwrap();
     local
-        .ingest_batch(
-            vec![
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
-                    StorageValue::new_put("test"),
-                ),
-            ],
-            WriteOptions {
-                epoch: epoch1,
-                table_id: Default::default(),
-            },
-        )
+        .ingest_batch(vec![
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                StorageValue::new_put("test"),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                StorageValue::new_put("test"),
+            ),
+        ])
         .await
         .unwrap();
     let epoch2 = epoch1.next_epoch();
@@ -153,7 +112,7 @@ async fn test_snapshot_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch1, res, false)
+                .commit_epoch(epoch1, res)
                 .await
                 .unwrap();
             hummock_storage
@@ -168,26 +127,20 @@ async fn test_snapshot_inner(
     assert_count_range_scan!(hummock_storage, VirtualNode::ZERO, .., 2, epoch1, false);
 
     local
-        .ingest_batch(
-            vec![
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
-                    StorageValue::new_delete(),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
-                    StorageValue::new_put("test"),
-                ),
-            ],
-            WriteOptions {
-                epoch: epoch2,
-                table_id: Default::default(),
-            },
-        )
+        .ingest_batch(vec![
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                StorageValue::new_delete(),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                StorageValue::new_put("test"),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                StorageValue::new_put("test"),
+            ),
+        ])
         .await
         .unwrap();
     let epoch3 = epoch2.next_epoch();
@@ -200,7 +153,7 @@ async fn test_snapshot_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch2, res, false)
+                .commit_epoch(epoch2, res)
                 .await
                 .unwrap();
             hummock_storage
@@ -223,26 +176,20 @@ async fn test_snapshot_inner(
     );
 
     local
-        .ingest_batch(
-            vec![
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
-                    StorageValue::new_delete(),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
-                    StorageValue::new_delete(),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
-                    StorageValue::new_delete(),
-                ),
-            ],
-            WriteOptions {
-                epoch: epoch3,
-                table_id: Default::default(),
-            },
-        )
+        .ingest_batch(vec![
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                StorageValue::new_delete(),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                StorageValue::new_delete(),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                StorageValue::new_delete(),
+            ),
+        ])
         .await
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
@@ -253,7 +200,7 @@ async fn test_snapshot_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch3, res, false)
+                .commit_epoch(epoch3, res)
                 .await
                 .unwrap();
             hummock_storage
@@ -305,30 +252,24 @@ async fn test_snapshot_range_scan_inner(
     local.init_for_test(epoch).await.unwrap();
 
     local
-        .ingest_batch(
-            vec![
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
-                    StorageValue::new_put("test"),
-                ),
-                (
-                    gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
-                    StorageValue::new_put("test"),
-                ),
-            ],
-            WriteOptions {
-                epoch,
-                table_id: Default::default(),
-            },
-        )
+        .ingest_batch(vec![
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("1")),
+                StorageValue::new_put("test"),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("2")),
+                StorageValue::new_put("test"),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("3")),
+                StorageValue::new_put("test"),
+            ),
+            (
+                gen_key_from_bytes(VirtualNode::ZERO, &Bytes::from("4")),
+                StorageValue::new_put("test"),
+            ),
+        ])
         .await
         .unwrap();
     local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
@@ -339,7 +280,7 @@ async fn test_snapshot_range_scan_inner(
             .unwrap();
         if enable_commit {
             mock_hummock_meta_client
-                .commit_epoch(epoch, res, false)
+                .commit_epoch(epoch, res)
                 .await
                 .unwrap();
             hummock_storage
@@ -402,36 +343,36 @@ async fn test_snapshot_range_scan_inner(
 
 #[tokio::test]
 async fn test_snapshot_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_inner(storage, meta_client, false, false).await;
 }
 
 #[tokio::test]
 async fn test_snapshot_with_sync_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_inner(storage, meta_client, true, false).await;
 }
 
 #[tokio::test]
 async fn test_snapshot_with_commit_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_inner(storage, meta_client, true, true).await;
 }
 
 #[tokio::test]
 async fn test_snapshot_range_scan_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, false, false).await;
 }
 
 #[tokio::test]
 async fn test_snapshot_range_scan_with_sync_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, true, false).await;
 }
 
 #[tokio::test]
 async fn test_snapshot_range_scan_with_commit_v2() {
-    let (storage, meta_client) = with_hummock_storage_v2(Default::default()).await;
+    let (storage, meta_client) = with_hummock_storage(Default::default()).await;
     test_snapshot_range_scan_inner(storage, meta_client, true, true).await;
 }

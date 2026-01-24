@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,8 +52,8 @@ impl From<&ArrayAggState> for Datum {
 mod tests {
     use risingwave_common::array::{ListValue, StreamChunk};
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_expr::aggregate::{build_append_only, AggCall};
     use risingwave_expr::Result;
+    use risingwave_expr::aggregate::{AggCall, build_append_only};
 
     #[tokio::test]
     async fn test_array_agg_basic() -> Result<()> {

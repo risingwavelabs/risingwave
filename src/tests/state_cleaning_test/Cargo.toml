@@ -7,25 +7,18 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 anyhow = "1"
 clap = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-prometheus = { version = "0.13" }
-regex = "1"
+regex = { workspace = true }
 risingwave_rt = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_with = "3"
 tokio = { version = "0.2", package = "madsim-tokio" }
 tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
-toml = "0.8"
+toml = "0.9"
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]

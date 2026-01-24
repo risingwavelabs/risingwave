@@ -17,26 +17,48 @@ use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
 
-/// A license key with the paid tier that only works in tests.
+/// A license key with the `All` tier that only works in tests.
 ///
 /// The content is a JWT token with the following payload:
 /// ```text
 /// License {
-///     sub: "rw-test",
+///     sub: "rw-test-all",
 ///     iss: Test,
-///     tier: Paid,
-///     cpu_core_limit: None,
-///     exp: 9999999999,
+///     tier: All,
+///     rwu_limit: None,
+///     exp: 10000627200,
 /// }
 /// ```
-pub(crate) const TEST_PAID_LICENSE_KEY_CONTENT: &str =
- "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
-  eyJzdWIiOiJydy10ZXN0IiwidGllciI6InBhaWQiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
-  c6Gmb6xh3dBDYX_4cOnHUbwRXJbUCM7W3mrJA77nLC5FkoOLpGstzvQ7qfnPVBu412MFtKRDvh-Lk8JwG7pVa0WLw16DeHTtVHxZukMTZ1Q_ciZ1xKeUx_pwUldkVzv6c9j99gNqPSyTjzOXTdKlidBRLer2zP0v3Lf-ZxnMG0tEcIbTinTb3BNCtAQ8bwBSRP-X48cVTWafjaZxv_zGiJT28uV3bR6jwrorjVB4VGvqhsJi6Fd074XOmUlnOleoAtyzKvjmGC5_FvnL0ztIe_I0z_pyCMfWpyJ_J4C7rCP1aVWUImyoowLmVDA-IKjclzOW5Fvi0wjXsc6OckOc_A";
+pub(crate) const TEST_ALL_LICENSE_KEY_CONTENT: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+  eyJzdWIiOiJydy10ZXN0LWFsbCIsImlzcyI6InRlc3QucmlzaW5nd2F2ZS5jb20iLCJleHAiOjEwMDAwNjI3MjAwLCJpYXQiOjE3NTE4Njg5ODEsInRpZXIiOiJhbGwifQ.\
+  la3qLwax0MtUZ_sYNPd0tCmWsfJUfUU_GUbt1RBFltAioPgF9fVWblknbrqw6TRS4KJuBY5GJc0K26ghCfwcSooduhrTy9rRmRMkQ7R9fSokQJ3nxU0DiaxK-1Ts2s5NTI7ZX_yEE4DlgUwVV1eKbJ8ihkcaNCExeZ9-BtNuJvJ7-IXm56L-TXTJR4TVsGirS3qHBoK7Nw8OKK8O8OyRAC9ul2SdWz905Ap-5f4hAiWW8fMOkxXpG1f8-UTU5AZo3Lt3YmxLvO1WXtnPro0EJnlI2ylJjgOg37SNbThCG7EQHlrBwP2vHbayH3LNpPWoSFLG2o0e5OQUmgZm8iMkXw";
+
+/// A license key with the `All` tier and 4 RWU limit that works in production.
+///
+/// This allows users to evaluate all features on a small scale. When the total CPU core in
+/// the cluster exceeds 4 or the total memory exceeds 16 GiB, features won't be available.
+///
+/// The content is a JWT token with the following payload:
+/// ```text
+/// License {
+///     sub: "rw-default-all-4-core",
+///     iss: Prod,
+///     tier: All,
+///     rwu_limit: 4,
+///     exp: 10000627200,
+/// }
+/// ```
+pub(crate) const PROD_ALL_4_CORE_LICENSE_KEY_CONTENT: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+  eyJzdWIiOiJydy1kZWZhdWx0LWFsbC00LWNvcmUiLCJpc3MiOiJwcm9kLnJpc2luZ3dhdmUuY29tIiwiZXhwIjoxMDAwMDYyNzIwMCwiaWF0IjoxNzUxODY5MTY1LCJ0aWVyIjoiYWxsIiwiY3B1X2NvcmVfbGltaXQiOjR9.\
+  d4ilh2X4xnOpGP4mtIOAbkGTHRTxkqt7ZKhGpXoWxGbmYNy3RKTbHUhPZyYLZXRDW_X__LFZdxNWsh61d_A4pL_Fxq7mGdTESuWvSvyHrV34yt14MUF3ZLGyl6KaPg8X-oGc91uwJ__AO-npR0WHd8EziueZ_2lvieeTZiZWW73iRZF-DmV88wzcFuGwcZDlsc1Aajn18P9a79TEVVyeCXhj_UcLxjMIkF-3J_rO2a9aV3xMDyF1J6MHrNzRCL4fZqTeBhs4UXWI82-vwIHJaMZD2_jzgZxFkITzDaSJeoKP1cJroVq-EDUMx5MZd_80upFcdPppJCYl0UausnOJ1w";
 
 /// A newtype wrapping `String` or `&str` for the license key.
 ///
-/// - The default value is set to [`TEST_PAID_LICENSE_KEY_CONTENT`] in debug mode, and empty otherwise.
+/// - The default value is set to
+///   * [`TEST_ALL_LICENSE_KEY_CONTENT`] in debug mode, to allow all features in tests.
+///   * [`PROD_ALL_4_CORE_LICENSE_KEY_CONTENT`] in release mode, to allow evaluation of all features
+///     on a small scale.
+///
 /// - The content will be redacted when printed or serialized.
 #[derive(Clone, Copy, Deserialize)]
 #[serde(transparent)]
@@ -49,9 +71,9 @@ impl<T: From<&'static str>> Default for LicenseKey<T> {
     fn default() -> Self {
         Self(
             if cfg!(debug_assertions) {
-                TEST_PAID_LICENSE_KEY_CONTENT
+                TEST_ALL_LICENSE_KEY_CONTENT
             } else {
-                ""
+                PROD_ALL_4_CORE_LICENSE_KEY_CONTENT
             }
             .into(),
         )

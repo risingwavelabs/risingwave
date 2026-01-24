@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,16 +18,17 @@ use risingwave_common::types::DataType;
 use risingwave_common::types::DataType::Boolean;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{
     CorrelatedId, CorrelatedInputRef, Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall,
     InputRef,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNodeBinary};
+use crate::optimizer::plan_node::{
+    LogicalApply, LogicalFilter, LogicalJoin, PlanTreeNode, PlanTreeNodeBinary,
+};
 use crate::optimizer::plan_visitor::{ExprCorrelatedIdFinder, PlanCorrelatedIdFinder};
 use crate::optimizer::rule::apply_offset_rewriter::ApplyCorrelatedIndicesConverter;
-use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition};
 
 /// Transpose `LogicalApply` and `LogicalJoin`.
@@ -84,7 +85,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///              Domain   T2
 /// ```
 pub struct ApplyJoinTransposeRule {}
-impl Rule for ApplyJoinTransposeRule {
+impl Rule<Logical> for ApplyJoinTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (
@@ -122,10 +123,14 @@ impl Rule for ApplyJoinTransposeRule {
             return None;
         }
 
-        assert!(
-            join.output_indices_are_trivial(),
-            "ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule"
-        );
+        // ApplyJoinTransposeRule requires the join containing no output indices, so make sure ProjectJoinSeparateRule is always applied before this rule.
+        // As this rule will be applied until we reach the fixed point, if the join has output indices, apply ProjectJoinSeparateRule first and return is safety.
+        if !join.output_indices_are_trivial() {
+            let new_apply_right = crate::optimizer::rule::ProjectJoinSeparateRule::create()
+                .apply(join.clone().into())
+                .unwrap();
+            return Some(apply.clone_with_inputs(&[apply_left, new_apply_right]));
+        }
 
         let (push_left, push_right) = match join.join_type() {
             // `LeftSemi`, `LeftAnti`, `LeftOuter` can only push to left side if it's right side has

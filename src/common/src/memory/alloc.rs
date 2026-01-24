@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,8 +49,10 @@ unsafe impl<A: Allocator> Allocator for MonitoredAlloc<A> {
     }
 
     unsafe fn deallocate(&self, ptr: NonNull<u8>, layout: Layout) {
-        self.alloc.deallocate(ptr, layout);
-        self.ctx.add(-(layout.size() as i64));
+        unsafe {
+            self.alloc.deallocate(ptr, layout);
+            self.ctx.add(-(layout.size() as i64));
+        }
     }
 }
 

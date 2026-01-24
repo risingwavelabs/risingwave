@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ use super::{
     SourceStreamChunkRowWriter, SpecificParserConfig,
 };
 use crate::error::ConnectorResult;
-use crate::parser::unified::kv_event::KvEvent;
 use crate::parser::ParserFormat;
+use crate::parser::unified::kv_event::KvEvent;
 use crate::source::{SourceColumnDesc, SourceContext, SourceContextRef};
 
 #[derive(Debug)]
@@ -90,24 +90,31 @@ impl UpsertParser {
         payload: Option<Vec<u8>>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
+        let meta = writer.source_meta();
         let mut row_op: KvEvent<AccessImpl<'_>, AccessImpl<'_>> = KvEvent::default();
         if let Some(data) = key {
-            row_op.with_key(self.key_builder.generate_accessor(data).await?);
+            row_op.with_key(self.key_builder.generate_accessor(data, meta).await?);
         }
         // Empty payload of kafka is Some(vec![])
         let change_event_op;
         if let Some(data) = payload
             && !data.is_empty()
         {
-            row_op.with_value(self.payload_builder.generate_accessor(data).await?);
+            row_op.with_value(self.payload_builder.generate_accessor(data, meta).await?);
             change_event_op = ChangeEventOperation::Upsert;
         } else {
             change_event_op = ChangeEventOperation::Delete;
         }
-        let f = |column: &SourceColumnDesc| row_op.access_field(column);
+
         match change_event_op {
-            ChangeEventOperation::Upsert => writer.do_insert(f)?,
-            ChangeEventOperation::Delete => writer.do_delete(f)?,
+            ChangeEventOperation::Upsert => {
+                let f = |column: &SourceColumnDesc| row_op.access_field::<false>(column);
+                writer.do_insert(f)?
+            }
+            ChangeEventOperation::Delete => {
+                let f = |column: &SourceColumnDesc| row_op.access_field::<true>(column);
+                writer.do_delete(f)?
+            }
         }
         Ok(())
     }

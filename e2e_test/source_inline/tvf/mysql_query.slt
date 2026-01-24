@@ -1,0 +1,219 @@
+control substitution on
+
+system ok
+mysql -e "DROP DATABASE IF EXISTS tvf; CREATE DATABASE tvf;"
+
+system ok
+mysql -e "
+USE tvf;
+set global sql_mode='';
+CREATE TABLE test (
+    id bigint primary key,
+    v0 bit,
+    v1 bool,
+    v2 tinyint(1),
+    v3 tinyint(2),
+    v4 smallint,
+    v5 mediumint,
+    v6 integer,
+    v7 bigint,
+    v8 float,
+    v9 double,
+    v10 numeric(4, 2),
+    v11 decimal(4, 2),
+    v12 char(255),
+    v13 varchar(255),
+    v14 bit(10),
+    v15 tinyblob,
+    v16 blob,
+    v17 mediumblob,
+    v18 longblob,
+    v19 date,
+    v20 time,
+    v21 timestamp,
+    v22 json,
+    v23 int,
+    v24 bit(1),
+    v25 year,
+    v26 enum('a', 'b', 'c'),
+    v27 varbinary(10),
+    v28 text,
+    v29 tinytext,
+    v30 mediumtext,
+    v31 longtext,
+    v32 datetime,
+    v33 binary(4)
+);
+INSERT INTO test SELECT
+  1 as id,
+  true as v0,
+  true as v1,
+  2 as v2,
+  3 as v3,
+  4 as v4,
+  5 as v5,
+  6 as v6,
+  7 as v7,
+  1.08 as v8,
+  1.09 as v9,
+  1.10 as v10,
+  1.11 as v11,
+  'char' as v12,
+  'varchar' as v13,
+  b'1010' as v14,
+  x'16' as v15,
+  x'17' as v16,
+  x'18' as v17,
+  x'19' as v18,
+  '2021-01-01' as v19,
+  '12:34:56' as v20,
+  '2021-01-01 12:34:56' as v21,
+  JSON_OBJECT('key1', 1, 'key2', 'abc') as v22,
+  null as v23,
+  true as v24,
+  2023 as v25,
+  'b' as v26,
+  x'3132333435' as v27,
+  'text' as v28,
+  'tinytext' as v29,
+  'mediumtext' as v30,
+  'longtext' as v31,
+  '2021-01-01 12:34:56' as v32,
+  x'01020304' as v33;
+"
+
+statement ok
+create source mysql_cdc_source with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '$RISEDEV_MYSQL_USER',
+  password = '$MYSQL_PWD',
+  database.name = 'tvf',
+);
+
+query
+select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
+----
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 \x01020304
+
+query
+select * from mysql_query('mysql_cdc_source', 'select * from test;');
+----
+1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 \x01020304
+
+
+system ok
+mysql -e "
+USE tvf;
+set global sql_mode='';
+INSERT INTO test SELECT
+  2 as id,
+  true as v0,
+  true as v1,
+  2 as v2,
+  3 as v3,
+  4 as v4,
+  5 as v5,
+  6 as v6,
+  7 as v7,
+  1.08 as v8,
+  1.09 as v9,
+  1.10 as v10,
+  1.11 as v11,
+  'char' as v12,
+  'varchar' as v13,
+  b'1010' as v14,
+  x'16' as v15,
+  x'17' as v16,
+  x'18' as v17,
+  x'19' as v18,
+  '2021-01-01' as v19,
+  '12:34:56' as v20,
+  '0000-00-00' as v21,
+  JSON_OBJECT('key1', 1, 'key2', 'abc') as v22,
+  null as v23,
+  false as v24,
+  2022 as v25,
+  'c' as v26,
+  x'6162636465' as v27,
+  'text2' as v28,
+  'tinytext2' as v29,
+  'mediumtext2' as v30,
+  'longtext2' as v31,
+  '2021-01-01 12:34:56' as v32,
+  x'05060708' as v33;
+"
+
+statement error db error: ERROR: Failed to run the query
+Caused by these errors (recent errors listed first):
+ 1: External system error
+ 2: column: v21, index: 22, rust_type: chrono::NaiveDateTime
+ 3: failed to deserialize MySQL value into rust value
+ 4: Couldn't convert the value `Bytes("0000-00-..")` to a desired type
+select * from mysql_query('$MYSQL_HOST', '$MYSQL_TCP_PORT', '$RISEDEV_MYSQL_USER', '$MYSQL_PWD', 'tvf', 'select * from test;');
+
+statement ok
+drop table if exists test;
+
+statement ok
+create table test (
+    id bigint primary key,
+    v0 bool,
+    v1 bool,
+    v2 smallint,
+    v3 smallint,
+    v4 smallint,
+    v5 int,
+    v6 int,
+    v7 bigint,
+    v8 float,
+    v9 double,
+    v10 decimal,
+    v11 decimal,
+    v12 varchar,
+    v13 varchar,
+    v14 bytea,
+    v15 bytea,
+    v16 bytea,
+    v17 bytea,
+    v18 bytea,
+    v19 date,
+    v20 time,
+    v21 timestamptz,
+    v22 jsonb,
+    v23 int,
+    v24 bool,
+    v25 int,
+    v26 varchar,
+    v27 bytea,
+    v28 varchar,
+    v29 varchar,
+    v30 varchar,
+    v31 varchar,
+    v32 timestamp,
+    v33 bytea
+)
+with (
+ connector = 'mysql-cdc',
+ hostname = '$MYSQL_HOST',
+ port = '$MYSQL_TCP_PORT',
+ username = '$RISEDEV_MYSQL_USER',
+ password = '$MYSQL_PWD',
+ database.name = 'tvf',
+ table.name = 'test',
+);
+
+
+query I retry 6 backoff 1s
+select * from test order by id;
+----
+1 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 text tinytext mediumtext longtext 2021-01-01 12:34:56 \x01020304
+2 t t 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x0a00 \x16 \x17 \x18 \x19 2021-01-01 12:34:56 NULL {"key1": 1, "key2": "abc"} NULL f 2022 c \x6162636465 text2 tinytext2 mediumtext2 longtext2 2021-01-01 12:34:56 \x05060708
+
+system ok
+mysql -e "
+USE tvf;
+DROP DATABASE tvf;
+"
+
+statement ok
+drop source mysql_cdc_source;

@@ -23,7 +23,7 @@ use risingwave_common::row::Row;
 use risingwave_common::types::*;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{AggCall, AggStateDyn, AggregateFunction, AggregateState};
-use risingwave_expr::{build_aggregate, Result};
+use risingwave_expr::{Result, build_aggregate};
 
 /// TODO(kwannoel): for single phase agg, we can actually support `UDDSketch`.
 /// For two phase agg, we still use `DDSketch`.

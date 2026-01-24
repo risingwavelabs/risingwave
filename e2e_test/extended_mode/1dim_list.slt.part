@@ -1,0 +1,57 @@
+# Test binary format of 1-dimension lists (arrays)
+
+query T
+select ARRAY['foo', 'bar', null];
+----
+{foo,bar,NULL}
+
+query T
+select ARRAY[1,2+3,4*5+1];
+----
+{1,5,21}
+
+query T
+select ARRAY[null];
+----
+{NULL}
+
+statement error
+select ARRAY[];
+
+query T
+select ARRAY[]::int[];
+----
+{}
+
+statement ok
+create table t (v1 int);
+
+statement ok
+insert into t values (1), (2), (3);
+
+query T rowsort
+select ARRAY[1, v1*2] from t;
+----
+{1,2}
+{1,4}
+{1,6}
+
+query T
+select min(ARRAY[1, v1*2]) from t;
+----
+{1,2}
+
+query T
+select max(ARRAY[1, v1*2]) from t;
+----
+{1,6}
+
+query T
+select array[false, false] from t;
+----
+{f,f}
+{f,f}
+{f,f}
+
+statement ok
+drop table t;

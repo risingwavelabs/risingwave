@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::collections::HashMap;
-use std::fmt::{self, Display, Formatter};
 
+use risingwave_pb::id::WorkerId;
 use risingwave_pb::meta::actor_count_per_parallelism::PbWorkerActorCount;
 use risingwave_pb::meta::cluster_limit::PbLimit;
 use risingwave_pb::meta::{PbActorCountPerParallelism, PbClusterLimit};
@@ -67,7 +67,7 @@ impl From<PbWorkerActorCount> for WorkerActorCount {
 }
 
 pub struct ActorCountPerParallelism {
-    pub worker_id_to_actor_count: HashMap<u32, WorkerActorCount>,
+    pub worker_id_to_actor_count: HashMap<WorkerId, WorkerActorCount>,
     pub hard_limit: usize,
     pub soft_limit: usize,
 }
@@ -115,20 +115,5 @@ impl ActorCountPerParallelism {
 
     pub fn exceed_limit(&self) -> bool {
         self.exceed_soft_limit() || self.exceed_hard_limit()
-    }
-}
-
-impl Display for ActorCountPerParallelism {
-    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
-        let worker_id_to_actor_count_str: Vec<_> = self
-            .worker_id_to_actor_count
-            .iter()
-            .map(|(k, v)| format!("{} -> {:?}", k, v))
-            .collect();
-        write!(
-            f,
-            "ActorCountPerParallelism {{ critical limit: {:?}, recommended limit: {:?}. worker_id_to_actor_count: {:?} }}",
-            self.hard_limit, self.soft_limit, worker_id_to_actor_count_str
-        )
     }
 }

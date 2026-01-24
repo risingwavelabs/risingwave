@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,13 +18,12 @@ use std::mem;
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::types::DataType;
-use risingwave_expr::aggregate::{agg_types, AggType, PbAggKind};
+use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types};
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::expr::{CollectInputRef, ExprType, FunctionCall, InputRef, Literal};
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{LogicalAgg, LogicalExpand, LogicalProject, PlanAggCall};
-use crate::optimizer::PlanRef;
 use crate::utils::{ColIndexMapping, Condition, IndexSet};
 
 /// Transform distinct aggregates to `LogicalAgg` -> `LogicalAgg` -> `Expand` -> `Input`.
@@ -32,7 +31,7 @@ pub struct DistinctAggRule {
     for_stream: bool,
 }
 
-impl Rule for DistinctAggRule {
+impl Rule<Logical> for DistinctAggRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg: &LogicalAgg = plan.as_logical_agg()?;
         let (mut agg_calls, mut agg_group_keys, grouping_sets, input, enable_two_phase) =

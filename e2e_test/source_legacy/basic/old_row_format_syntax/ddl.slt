@@ -119,7 +119,7 @@ create source s (
 query T
 show sources
 ----
-s
+public.s
 
 query T
 show tables
@@ -142,44 +142,15 @@ create table s (
 query T
 show sources
 ----
-s
+public.s
 
 query T
 show tables
 ----
-s
+public.s
 
 statement ok
 drop table s
-
-# Test create source with connection
-statement ok
-CREATE CONNECTION mock WITH (type = 'privatelink', provider = 'mock');
-
-# Reference to non-existant connection
-statement error
-create source s (
-  column1 varchar
-) with (
-  connector = 'kafka',
-  topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'nonexist',
-) ROW FORMAT JSON;
-
-statement ok
-CREATE TABLE mytable (
-  column1 varchar
-) with (
-  connector = 'kafka',
-  topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'mock'
-) ROW FORMAT JSON;
-
-statement ok
-DROP TABLE mytable;
-
 
 # `DEBEZIUM_MONGO_JSON` requires the source table have `_id` and `payload` columns.
 statement error
@@ -190,7 +161,6 @@ create source s (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'nonexist',
 ) ROW FORMAT DEBEZIUM_MONGO_JSON;
 
 # `DEBEZIUM_MONGO_JSON` requires the `_id` column is primary key.
@@ -202,7 +172,6 @@ create source s (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'nonexist',
 ) ROW FORMAT DEBEZIUM_MONGO_JSON;
 
 # `DEBEZIUM_MONGO_JSON` requires the `payload` column is jsonb type.
@@ -214,7 +183,6 @@ create source s (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'nonexist',
 ) ROW FORMAT DEBEZIUM_MONGO_JSON;
 
 statement ok
@@ -224,15 +192,7 @@ create source s (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'mock',
 ) ROW FORMAT JSON;
-
-# Drop a connection in use
-statement error
-drop connection mock;
 
 statement ok
 drop source s;
-
-statement ok
-drop connection mock;

@@ -6,13 +6,12 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
+[features]
+dhat-heap = ["dhat"]
+test = []
+all-sources = ["source-adbc_snowflake"]
+source-adbc_snowflake = ["risingwave_connector/source-adbc_snowflake"]
 
 [dependencies]
 anyhow = "1"
@@ -24,6 +23,7 @@ await-tree = { workspace = true }
 bytes = "1"
 cfg-if = "1"
 delta_btree_map = { path = "../utils/delta_btree_map" }
+dhat = { version = "0.3", optional = true }
 educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
@@ -31,27 +31,25 @@ fail = "0.5"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
-governor = { version = "0.6", default-features = false, features = [
-  "std",
-  "dashmap",
-  "jitter",
-] }
+glob = "0.3"
 hytra = "0.1.2"
+iceberg = { workspace = true }
+indexmap = "2"
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-local_stats_alloc = { path = "../utils/local_stats_alloc" }
-lru = { workspace = true }
 maplit = "1.0.2"
 memcomparable = "0.2"
+moka = { version = "0.12.0", features = ["sync"] }
 multimap = "0.10"
 parking_lot = { workspace = true }
+paste = "1"
 pin-project = "1"
-prehash = "1"
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true }
 rand = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
+risingwave_common_rate_limit = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
@@ -60,13 +58,12 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 rw_futures_util = { workspace = true }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true }
 serde_json = "1"
-smallvec = "1"
+smallvec = { workspace = true }
 static_assertions = "1"
-strum = "0.26"
-strum_macros = "0.26"
-thiserror = "1"
+strum_macros = "0.27"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
   "rt",
@@ -77,11 +74,12 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
   "signal",
   "fs",
 ] }
-tokio-metrics = "0.3.0"
+tokio-metrics = "0.4.0"
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
 tracing = "0.1"
+url = "2"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -90,12 +88,15 @@ workspace-hack = { path = "../workspace-hack" }
 assert_matches = "1"
 criterion = { workspace = true, features = ["async_tokio", "async"] }
 expect-test = "1"
+pretty_assertions = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_hummock_test = { path = "../storage/hummock_test", features = [
   "test",
 ] }
+risingwave_stream = { workspace = true, features = ["test"] }
 serde_yaml = "0.9"
+tracing-subscriber = "0.3.20"
 tracing-test = "0.2"
 
 [[bench]]
@@ -104,6 +105,14 @@ harness = false
 
 [[bench]]
 name = "bench_state_table"
+harness = false
+
+[[bench]]
+name = "stream_hash_join_rt"
+harness = false
+
+[[bench]]
+name = "stream_hash_join_mem"
 harness = false
 
 [lints]

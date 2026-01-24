@@ -4,11 +4,12 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-source ci/scripts/pr.env.sh
 
 echo "--- Download artifacts"
-download-and-decompress-artifact risingwave_simulation .
-chmod +x ./risingwave_simulation
+mkdir -p target/debug
+download-and-decompress-artifact risingwave_simulation target/debug/
+chmod +x ./target/debug/risingwave_simulation
+export RW_SIM=target/debug/risingwave_simulation
 
 echo "--- Extract data for Kafka"
 pushd ./e2e_test/source_legacy/basic/scripts/
@@ -30,25 +31,25 @@ export LOGDIR=.risingwave/log
 mkdir -p $LOGDIR
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, ddl"
-seq "$TEST_NUM" | parallel './risingwave_simulation ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/ddl-{}.log && rm $LOGDIR/ddl-{}.log'
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} $RW_SIM ./e2e_test/ddl/\*\*/\*.slt 2> $LOGDIR/ddl-{}.log && rm $LOGDIR/ddl-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, streaming"
-seq "$TEST_NUM" | parallel './risingwave_simulation ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/streaming-{}.log && rm $LOGDIR/streaming-{}.log'
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} $RW_SIM ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/streaming-{}.log && rm $LOGDIR/streaming-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, batch"
-seq "$TEST_NUM" | parallel './risingwave_simulation ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/batch-{}.log && rm $LOGDIR/batch-{}.log'
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} $RW_SIM ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/batch-{}.log && rm $LOGDIR/batch-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, kafka source"
-seq "$TEST_NUM" | parallel './risingwave_simulation --kafka-datadir=./e2e_test/source_legacy/basic/scripts/test_data ./e2e_test/source_legacy/basic/kafka\*.slt 2> $LOGDIR/source-{}.log && rm $LOGDIR/source-{}.log'
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} $RW_SIM --kafka-datadir=./e2e_test/source_legacy/basic/scripts/test_data ./e2e_test/source_legacy/basic/kafka\*.slt 2> $LOGDIR/source-{}.log && rm $LOGDIR/source-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, streaming"
-seq "$TEST_NUM" | parallel './risingwave_simulation -j 16 ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/parallel-streaming-{}.log && rm $LOGDIR/parallel-streaming-{}.log'
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} $RW_SIM -j 16 ./e2e_test/streaming/\*\*/\*.slt 2> $LOGDIR/parallel-streaming-{}.log && rm $LOGDIR/parallel-streaming-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, parallel, batch"
-seq "$TEST_NUM" | parallel './risingwave_simulation -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-{}.log && rm $LOGDIR/parallel-batch-{}.log'
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} $RW_SIM -j 16 ./e2e_test/batch/\*\*/\*.slt 2> $LOGDIR/parallel-batch-{}.log && rm $LOGDIR/parallel-batch-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, fuzzing (pre-generated-queries)"
-timeout 10m seq 64 | parallel RUST_MIN_STACK=4194304 './risingwave_simulation  --run-sqlsmith-queries ./src/tests/sqlsmith/tests/sqlsmith-query-snapshots/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
+timeout 20m seq 64 | parallel RUST_MIN_STACK=4194304 'MADSIM_TEST_SEED={} $RW_SIM  --run-sqlsmith-queries ./src/tests/sqlsmith/tests/sqlsmith-query-snapshots/{} 2> $LOGDIR/fuzzing-{}.log && rm $LOGDIR/fuzzing-{}.log'
 
 echo "--- deterministic simulation e2e, ci-3cn-2fe, e2e extended mode test"
-seq "$TEST_NUM" | parallel 'RUST_LOG=info ./risingwave_simulation -e 2> $LOGDIR/extended-{}.log && rm $LOGDIR/extended-{}.log'
+seq "$TEST_NUM" | parallel 'MADSIM_TEST_SEED={} RUST_LOG=info $RW_SIM -e 2> $LOGDIR/extended-{}.log && rm $LOGDIR/extended-{}.log'

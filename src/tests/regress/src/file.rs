@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,11 @@
 // limitations under the License.
 
 use std::ffi::OsStr;
-use std::fs::{create_dir_all, read_dir, File};
+use std::fs::{File, create_dir_all, read_dir};
 use std::io::{BufRead, BufReader, BufWriter, Write};
 use std::path::{Path, PathBuf};
 
-use anyhow::{bail, Context};
+use anyhow::{Context, bail};
 use tracing::info;
 
 use crate::Opts;

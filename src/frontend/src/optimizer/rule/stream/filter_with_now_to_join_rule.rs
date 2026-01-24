@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,14 +19,13 @@ use crate::expr::{ExprRewriter, FunctionCall, InputRef};
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalFilter, LogicalJoin, LogicalNow};
 use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants};
-use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
+use crate::optimizer::rule::prelude::{PlanRef, *};
 use crate::utils::Condition;
 
 /// Convert `LogicalFilter` with now in predicate to left-semi `LogicalJoin`
 /// Only applies to stream.
 pub struct FilterWithNowToJoinRule {}
-impl Rule for FilterWithNowToJoinRule {
+impl Rule<Logical> for FilterWithNowToJoinRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let filter: &LogicalFilter = plan.as_logical_filter()?;
 

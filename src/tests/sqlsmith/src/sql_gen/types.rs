@@ -1,10 +1,10 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,8 +20,8 @@ use std::sync::LazyLock;
 use itertools::Itertools;
 use risingwave_common::types::{DataType, DataTypeName};
 use risingwave_expr::aggregate::PbAggKind;
-use risingwave_expr::sig::{FuncSign, FUNCTION_REGISTRY};
-use risingwave_frontend::expr::{cast_sigs, CastContext, CastSig as RwCastSig, ExprType};
+use risingwave_expr::sig::{FUNCTION_REGISTRY, FuncSign};
+use risingwave_frontend::expr::{CastContext, CastSig as RwCastSig, ExprType, cast_sigs};
 use risingwave_sqlparser::ast::{BinaryOperator, DataType as AstDataType, StructField};
 
 pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
@@ -52,7 +52,10 @@ pub(super) fn data_type_to_ast_data_type(data_type: &DataType) -> AstDataType {
                 })
                 .collect(),
         ),
-        DataType::List(ref typ) => AstDataType::Array(Box::new(data_type_to_ast_data_type(typ))),
+        DataType::List(list) => {
+            AstDataType::Array(Box::new(data_type_to_ast_data_type(list.elem())))
+        }
+        DataType::Vector(n) => AstDataType::Vector(*n as _),
         DataType::Map(_) => todo!(),
     }
 }
@@ -117,6 +120,10 @@ static FUNC_BAN_LIST: LazyLock<HashSet<ExprType>> = LazyLock::new(|| {
         ExprType::Sqrt,
         // ENABLE: https://github.com/risingwavelabs/risingwave/issues/16293
         ExprType::Pow,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7328
+        ExprType::Position,
+        // ENABLE: https://github.com/risingwavelabs/risingwave/issues/7328
+        ExprType::Strpos,
     ]
     .into_iter()
     .collect()
@@ -179,6 +186,7 @@ pub(crate) static AGG_FUNC_TABLE: LazyLock<HashMap<DataType, Vec<&'static FuncSi
                     && ![
                         PbAggKind::InternalLastSeenValue, // Use internally
                         PbAggKind::Sum0, // Used internally
+                        PbAggKind::ApproxCountDistinct,
                         PbAggKind::BitAnd,
                         PbAggKind::BitOr,
                         PbAggKind::BoolAnd,

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::{test_epoch, EpochPair};
+use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
 use risingwave_stream::common::table::state_table::StateTable;
@@ -23,7 +23,7 @@ use risingwave_stream::common::table::test_utils::gen_pbtable;
 
 #[tokio::test]
 async fn test_mem_table_spill_in_streaming() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -65,7 +65,7 @@ async fn test_mem_table_spill_in_streaming() {
             .await;
 
     let epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
@@ -153,7 +153,7 @@ async fn test_mem_table_spill_in_streaming() {
 
 #[tokio::test]
 async fn test_mem_table_spill_in_streaming_multiple_times() {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+    const TEST_TABLE_ID: TableId = TableId::new(233);
     let test_env = prepare_hummock_test_env().await;
 
     let column_descs = vec![
@@ -195,7 +195,7 @@ async fn test_mem_table_spill_in_streaming_multiple_times() {
             .await;
 
     let epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
 
     state_table.insert(OwnedRow::new(vec![
         Some(1_i32.into()),

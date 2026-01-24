@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,20 +13,19 @@
 // limitations under the License.
 
 use itertools::Itertools;
+use risingwave_pb::batch_plan::ExpandNode;
 use risingwave_pb::batch_plan::expand_node::Subset;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
-use risingwave_pb::batch_plan::ExpandNode;
 
 use super::batch::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{generic, ExprRewritable};
+use super::{BatchPlanRef as PlanRef, ExprRewritable, generic};
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     PlanBase, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch, ToLocalBatch,
 };
 use crate::optimizer::property::{Distribution, Order};
-use crate::optimizer::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct BatchExpand {
@@ -54,7 +53,7 @@ impl BatchExpand {
 
 impl_distill_by_unit!(BatchExpand, core, "BatchExpand");
 
-impl PlanTreeNodeUnary for BatchExpand {
+impl PlanTreeNodeUnary<Batch> for BatchExpand {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -66,7 +65,7 @@ impl PlanTreeNodeUnary for BatchExpand {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchExpand }
+impl_plan_tree_node_for_unary! { Batch, BatchExpand }
 
 impl ToDistributedBatch for BatchExpand {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -99,6 +98,6 @@ impl ToLocalBatch for BatchExpand {
     }
 }
 
-impl ExprRewritable for BatchExpand {}
+impl ExprRewritable<Batch> for BatchExpand {}
 
 impl ExprVisitable for BatchExpand {}

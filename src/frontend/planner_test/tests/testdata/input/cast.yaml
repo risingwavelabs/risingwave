@@ -64,3 +64,20 @@
     select count(*) FILTER(WHERE 'y') from t;
   expected_outputs:
   - batch_plan
+- name: composite type cast error message (array)
+  sql: |
+    select '[]'::int[]::bytea[];
+  expected_outputs:
+  - binder_error
+- name: composite type cast error message (struct)
+  sql: |
+    create table t (v struct<a struct<b int>, c bool>);
+    select v::struct<d struct<e bytea>, f bool> from t;
+  expected_outputs:
+  - binder_error
+- name: composite type cast error message (map)
+  sql: |
+    create table t (v map(int, int));
+    select v::map(int, bytea) from t;
+  expected_outputs:
+  - binder_error

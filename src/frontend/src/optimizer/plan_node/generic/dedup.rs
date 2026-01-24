@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ use pretty_xmlish::{Pretty, Str, XmlNode};
 use risingwave_common::catalog::{FieldDisplay, Schema};
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
+use crate::OptimizerContextRef;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
-use crate::OptimizerContextRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Dedup<PlanRef> {
@@ -28,6 +28,23 @@ pub struct Dedup<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Dedup<PlanRef> {
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> Dedup<OtherPlanRef> {
+        Dedup {
+            input,
+            dedup_cols: self.dedup_cols.clone(),
+        }
+    }
+
+    pub fn new(input: PlanRef, dedup_cols: Vec<usize>) -> Self {
+        debug_assert!(
+            dedup_cols.iter().all(|&idx| idx < input.schema().len()),
+            "Invalid dedup keys {:?} input schema size = {}",
+            &dedup_cols,
+            input.schema().len()
+        );
+        Dedup { input, dedup_cols }
+    }
+
     fn dedup_cols_pretty<'a>(&self) -> Pretty<'a> {
         Pretty::Array(
             self.dedup_cols

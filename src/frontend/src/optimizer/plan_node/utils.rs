@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,25 +14,42 @@
 
 use std::collections::HashMap;
 use std::default::Default;
+use std::ops::Bound;
 use std::vec;
 
 use anyhow::anyhow;
+use chrono::{MappedLocalTime, TimeZone};
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, Str, StrAssocArr, XmlNode};
 use risingwave_common::catalog::{
-    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Field, FieldDisplay, Schema,
-    StreamJobStatus, OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ColumnDesc, ConflictBehavior, CreateType, Engine, Field, FieldDisplay, Schema,
+    StreamJobStatus,
 };
 use risingwave_common::constants::log_store::v2::{
     KV_LOG_STORE_PREDEFINED_COLUMNS, PK_ORDERING, VNODE_COLUMN_INDEX,
 };
+use risingwave_common::hash::VnodeCount;
+use risingwave_common::license::Feature;
+use risingwave_common::types::{DataType, Interval, ScalarImpl, Timestamptz};
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::scan_range::{ScanRange, is_full_range};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
+use risingwave_expr::aggregate::PbAggKind;
+use risingwave_expr::bail;
+use risingwave_sqlparser::ast::AsOf;
 
+use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
+use super::{BatchPlanRef, StreamPlanRef, pretty_config};
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::{ColumnId, TableCatalog, TableId};
-use crate::optimizer::property::{Cardinality, Order, RequiredDist};
+use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
+use crate::error::{ErrorCode, Result};
+use crate::expr::InputRef;
 use crate::optimizer::StreamScanType;
+use crate::optimizer::plan_node::generic::Agg;
+use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
+use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
 use crate::utils::{Condition, IndexSet};
 
 #[derive(Default)]
@@ -77,7 +94,7 @@ impl TableCatalogBuilder {
         let base_idx = self.columns.len();
         columns.iter().enumerate().for_each(|(i, col)| {
             assert!(!self.column_names.contains_key(col.name()));
-            self.column_names.insert(col.name().to_string(), 0);
+            self.column_names.insert(col.name().to_owned(), 0);
 
             // Reset the column id for the columns.
             let mut new_col = col.clone();
@@ -137,11 +154,27 @@ impl TableCatalogBuilder {
             Some(w) => w,
             None => FixedBitSet::with_capacity(self.columns.len()),
         };
+
+        // If `dist_key_in_pk` is set, check if it matches with `distribution_key`.
+        // Note that we cannot derive in the opposite direction, because there can be a column
+        // appearing multiple times in the PK.
+        if let Some(dist_key_in_pk) = &self.dist_key_in_pk {
+            let derived_dist_key = dist_key_in_pk
+                .iter()
+                .map(|idx| self.pk[*idx].column_index)
+                .collect_vec();
+            assert_eq!(
+                derived_dist_key, distribution_key,
+                "dist_key mismatch with dist_key_in_pk"
+            );
+        }
+
         TableCatalog {
             id: TableId::placeholder(),
+            schema_id: 0.into(),
+            database_id: 0.into(),
             associated_source_id: None,
             name: String::new(),
-            dependent_relations: vec![],
             columns: self.columns.clone(),
             pk: self.pk,
             stream_key: vec![],
@@ -151,7 +184,7 @@ impl TableCatalogBuilder {
             table_type: TableType::Internal,
             append_only: false,
             owner: risingwave_common::catalog::DEFAULT_SUPER_USER_ID,
-            fragment_id: OBJECT_ID_PLACEHOLDER,
+            fragment_id: FragmentId::placeholder(),
             dml_fragment_id: None,
             vnode_col_index: self.vnode_col_idx,
             row_id_index: None,
@@ -160,7 +193,7 @@ impl TableCatalogBuilder {
                 .unwrap_or_else(|| (0..self.columns.len()).collect_vec()),
             definition: "".into(),
             conflict_behavior: ConflictBehavior::NoCheck,
-            version_column_index: None,
+            version_column_indices: vec![],
             read_prefix_len_hint,
             version: None, // the internal table is not versioned and can't be schema changed
             watermark_columns,
@@ -168,18 +201,24 @@ impl TableCatalogBuilder {
             cardinality: Cardinality::unknown(), // TODO(card): cardinality of internal table
             created_at_epoch: None,
             initialized_at_epoch: None,
-            cleaned_by_watermark: false,
             // NOTE(kwannoel): This may not match the create type of the materialized table.
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
             stream_job_status: StreamJobStatus::Creating,
             description: None,
-            incoming_sinks: vec![],
             initialized_at_cluster_version: None,
             created_at_cluster_version: None,
             retention_seconds: None,
             cdc_table_id: None,
-            vnode_count: None, // will be filled in by the meta service later
+            vnode_count: VnodeCount::Placeholder, // will be filled in by the meta service later
+            webhook_info: None,
+            job_id: None,
+            engine: Engine::Hummock,
+            clean_watermark_index_in_pk: None, // TODO: fill this field
+            clean_watermark_indices: vec![],   // TODO: fill this field
+            refreshable: false,                // Internal tables are not refreshable
+            vector_index_info: None,
+            cdc_table_type: None,
         }
     }
 
@@ -230,24 +269,25 @@ pub(crate) fn column_names_pretty<'a>(schema: &Schema) -> Pretty<'a> {
 }
 
 pub(crate) fn watermark_pretty<'a>(
-    watermark_columns: &FixedBitSet,
+    watermark_columns: &WatermarkColumns,
     schema: &Schema,
 ) -> Option<Pretty<'a>> {
-    iter_fields_pretty(watermark_columns.ones(), schema)
-}
-
-pub(crate) fn iter_fields_pretty<'a>(
-    columns: impl Iterator<Item = usize>,
-    schema: &Schema,
-) -> Option<Pretty<'a>> {
-    let arr = columns
-        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
-        .map(|d| Pretty::display(&d))
-        .collect::<Vec<_>>();
-    if arr.is_empty() {
+    if watermark_columns.is_empty() {
         None
     } else {
-        Some(Pretty::Array(arr))
+        let groups = watermark_columns.grouped();
+        let pretty_groups = groups
+            .values()
+            .map(|cols| {
+                Pretty::Array(
+                    cols.indices()
+                        .map(|idx| FieldDisplay(schema.fields.get(idx).unwrap()))
+                        .map(|d| Pretty::display(&d))
+                        .collect::<Vec<_>>(),
+                )
+            })
+            .collect();
+        Some(Pretty::Array(pretty_groups))
     }
 }
 
@@ -259,8 +299,8 @@ pub struct IndicesDisplay<'a> {
 
 impl<'a> IndicesDisplay<'a> {
     /// Returns `None` means all
-    pub fn from_join<'b, PlanRef: GenericPlanRef>(
-        join: &'a generic::Join<PlanRef>,
+    pub fn from_join<'b>(
+        join: &'a generic::Join<impl GenericPlanRef>,
         input_schema: &'a Schema,
     ) -> Pretty<'b> {
         let col_num = join.internal_column_num();
@@ -285,8 +325,8 @@ impl<'a> IndicesDisplay<'a> {
     }
 }
 
-pub(crate) fn sum_affected_row(dml: PlanRef) -> Result<PlanRef> {
-    let dml = RequiredDist::single().enforce_if_not_satisfies(dml, &Order::any())?;
+pub(crate) fn sum_affected_row(dml: BatchPlanRef) -> Result<BatchPlanRef> {
+    let dml = RequiredDist::single().batch_enforce_if_not_satisfies(dml, &Order::any())?;
     // Accumulate the affected rows.
     let sum_agg = PlanAggCall {
         agg_type: PbAggKind::Sum.into(),
@@ -322,24 +362,62 @@ macro_rules! plan_node_name {
     };
 }
 pub(crate) use plan_node_name;
-use risingwave_common::license::Feature;
-use risingwave_common::types::{DataType, Interval};
-use risingwave_expr::aggregate::PbAggKind;
-use risingwave_pb::plan_common::as_of::AsOfType;
-use risingwave_pb::plan_common::{as_of, PbAsOf};
-use risingwave_sqlparser::ast::AsOf;
-
-use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
-use super::pretty_config;
-use crate::error::{ErrorCode, Result};
-use crate::expr::InputRef;
-use crate::optimizer::plan_node::generic::Agg;
-use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
-use crate::PlanRef;
+use risingwave_pb::common::{PbBatchQueryEpoch, batch_query_epoch};
 
 pub fn infer_kv_log_store_table_catalog_inner(
-    input: &PlanRef,
+    input: &StreamPlanRef,
     columns: &[ColumnCatalog],
+) -> TableCatalog {
+    let mut table_catalog_builder = TableCatalogBuilder::default();
+
+    let mut value_indices =
+        Vec::with_capacity(KV_LOG_STORE_PREDEFINED_COLUMNS.len() + input.schema().fields().len());
+
+    for (name, data_type) in KV_LOG_STORE_PREDEFINED_COLUMNS {
+        let indice = table_catalog_builder.add_column(&Field::with_name(data_type, name));
+        value_indices.push(indice);
+    }
+
+    table_catalog_builder.set_vnode_col_idx(VNODE_COLUMN_INDEX);
+
+    for (i, ordering) in PK_ORDERING.iter().enumerate() {
+        table_catalog_builder.add_order_column(i, *ordering);
+    }
+
+    let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
+
+    if columns.len() != input.schema().fields().len()
+        || columns
+            .iter()
+            .zip_eq_fast(input.schema().fields())
+            .any(|(c, f)| *c.data_type() != f.data_type())
+    {
+        tracing::warn!(
+            "sink schema different with upstream schema: sink columns: {:?}, input schema: {:?}.",
+            columns,
+            input.schema()
+        );
+    }
+    for field in input.schema().fields() {
+        let indice = table_catalog_builder.add_column(field);
+        value_indices.push(indice);
+    }
+    table_catalog_builder.set_value_indices(value_indices);
+
+    // Modify distribution key indices based on the pre-defined columns.
+    let dist_key = input
+        .distribution()
+        .dist_column_indices()
+        .iter()
+        .map(|idx| idx + KV_LOG_STORE_PREDEFINED_COLUMNS.len())
+        .collect_vec();
+
+    table_catalog_builder.build(dist_key, read_prefix_len_hint)
+}
+
+pub fn infer_synced_kv_log_store_table_catalog_inner(
+    input: &StreamPlanRef,
+    columns: &[Field],
 ) -> TableCatalog {
     let mut table_catalog_builder = TableCatalogBuilder::default();
 
@@ -359,7 +437,14 @@ pub fn infer_kv_log_store_table_catalog_inner(
 
     let read_prefix_len_hint = table_catalog_builder.get_current_pk_len();
 
-    let payload_indices = table_catalog_builder.extend_columns(columns);
+    let payload_indices = {
+        let mut payload_indices = Vec::with_capacity(columns.len());
+        for column in columns {
+            let payload_index = table_catalog_builder.add_column(column);
+            payload_indices.push(payload_index);
+        }
+        payload_indices
+    };
 
     value_indices.extend(payload_indices);
     table_catalog_builder.set_value_indices(value_indices);
@@ -379,67 +464,235 @@ pub fn infer_kv_log_store_table_catalog_inner(
 /// since that plan node maps to `backfill` executor, which supports recovery.
 /// Some other leaf nodes like `StreamValues` do not support recovery, and they
 /// cannot use background ddl.
-pub(crate) fn plan_can_use_backgronud_ddl(plan: &PlanRef) -> bool {
+pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
     if plan.inputs().is_empty() {
-        if plan.as_stream_source_scan().is_some() {
+        if plan.as_stream_source_scan().is_some()
+            || plan.as_stream_now().is_some()
+            || plan.as_stream_source().is_some()
+        {
             true
         } else if let Some(scan) = plan.as_stream_table_scan() {
             scan.stream_scan_type() == StreamScanType::Backfill
                 || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
+                || scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill
+                || scan.stream_scan_type() == StreamScanType::SnapshotBackfill
         } else {
             false
         }
     } else {
         assert!(!plan.inputs().is_empty());
-        plan.inputs().iter().all(plan_can_use_backgronud_ddl)
+        plan.inputs().iter().all(plan_can_use_background_ddl)
     }
 }
 
-pub fn to_pb_time_travel_as_of(a: &Option<AsOf>) -> Result<Option<PbAsOf>> {
-    let Some(ref a) = a else {
+pub fn unix_timestamp_sec_to_epoch(ts: i64) -> risingwave_common::util::epoch::Epoch {
+    let ts = ts.checked_add(1).unwrap();
+    risingwave_common::util::epoch::Epoch::from_unix_millis_or_earliest(
+        u64::try_from(ts).unwrap_or(0).checked_mul(1000).unwrap(),
+    )
+}
+
+pub fn to_batch_query_epoch(a: &Option<AsOf>) -> Result<Option<PbBatchQueryEpoch>> {
+    let Some(a) = a else {
         return Ok(None);
     };
-    Feature::TimeTravel
-        .check_available()
-        .map_err(|e| anyhow::anyhow!(e))?;
-    let as_of_type = match a {
+    Feature::TimeTravel.check_available()?;
+    let timestamp = match a {
         AsOf::ProcessTime => {
             return Err(ErrorCode::NotSupported(
-                "do not support as of proctime".to_string(),
-                "please use as of timestamp".to_string(),
+                "do not support as of proctime".to_owned(),
+                "please use as of timestamp".to_owned(),
             )
             .into());
         }
-        AsOf::TimestampNum(ts) => AsOfType::Timestamp(as_of::Timestamp { timestamp: *ts }),
+        AsOf::TimestampNum(ts) => *ts,
         AsOf::TimestampString(ts) => {
             let date_time = speedate::DateTime::parse_str_rfc3339(ts)
                 .map_err(|_e| anyhow!("fail to parse timestamp"))?;
-            AsOfType::Timestamp(as_of::Timestamp {
-                timestamp: date_time.timestamp_tz(),
-            })
+            if date_time.time.tz_offset.is_none() {
+                // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
+                risingwave_expr::expr_context::TIME_ZONE::try_with(|set_time_zone| {
+                    let tz =
+                        Timestamptz::lookup_time_zone(set_time_zone).map_err(|e| anyhow!(e))?;
+                    match tz.with_ymd_and_hms(
+                        date_time.date.year.into(),
+                        date_time.date.month.into(),
+                        date_time.date.day.into(),
+                        date_time.time.hour.into(),
+                        date_time.time.minute.into(),
+                        date_time.time.second.into(),
+                    ) {
+                        MappedLocalTime::Single(d) => Ok(d.timestamp()),
+                        MappedLocalTime::Ambiguous(_, _) | MappedLocalTime::None => {
+                            Err(anyhow!(format!(
+                                "failed to parse the timestamp {ts} with the specified time zone {tz}"
+                            )))
+                        }
+                    }
+                })??
+            } else {
+                date_time.timestamp_tz()
+            }
         }
         AsOf::VersionNum(_) | AsOf::VersionString(_) => {
             return Err(ErrorCode::NotSupported(
-                "do not support as of version".to_string(),
-                "please use as of timestamp".to_string(),
+                "do not support as of version".to_owned(),
+                "please use as of timestamp".to_owned(),
             )
             .into());
         }
         AsOf::ProcessTimeWithInterval((value, leading_field)) => {
             let interval = Interval::parse_with_fields(
                 value,
-                Some(crate::Binder::bind_date_time_field(leading_field.clone())),
+                Some(crate::Binder::bind_date_time_field(*leading_field)),
             )
             .map_err(|_| anyhow!("fail to parse interval"))?;
             let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;
-            let timestamp = chrono::Utc::now()
+            chrono::Utc::now()
                 .timestamp()
                 .checked_sub(interval_sec)
-                .ok_or_else(|| anyhow!("invalid timestamp"))?;
-            AsOfType::Timestamp(as_of::Timestamp { timestamp })
+                .ok_or_else(|| anyhow!("invalid timestamp"))?
         }
     };
-    Ok(Some(PbAsOf {
-        as_of_type: Some(as_of_type),
+    Ok(Some(PbBatchQueryEpoch {
+        epoch: Some(batch_query_epoch::PbEpoch::TimeTravel(
+            unix_timestamp_sec_to_epoch(timestamp).0,
+        )),
     }))
+}
+
+pub fn to_iceberg_time_travel_as_of(
+    a: &Option<AsOf>,
+    timezone: &String,
+) -> Result<Option<IcebergTimeTravelInfo>> {
+    Ok(match a {
+        Some(AsOf::VersionNum(v)) => Some(IcebergTimeTravelInfo::Version(*v)),
+        Some(AsOf::TimestampNum(ts)) => Some(IcebergTimeTravelInfo::TimestampMs(ts * 1000)),
+        Some(AsOf::VersionString(_)) => {
+            bail!("Unsupported version string in iceberg time travel")
+        }
+        Some(AsOf::TimestampString(ts)) => {
+            let date_time = speedate::DateTime::parse_str_rfc3339(ts)
+                .map_err(|_e| anyhow!("fail to parse timestamp"))?;
+            let timestamp = if date_time.time.tz_offset.is_none() {
+                // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
+                let tz = Timestamptz::lookup_time_zone(timezone).map_err(|e| anyhow!(e))?;
+                match tz.with_ymd_and_hms(
+                    date_time.date.year.into(),
+                    date_time.date.month.into(),
+                    date_time.date.day.into(),
+                    date_time.time.hour.into(),
+                    date_time.time.minute.into(),
+                    date_time.time.second.into(),
+                ) {
+                    MappedLocalTime::Single(d) => Ok(d.timestamp()),
+                    MappedLocalTime::Ambiguous(_, _) | MappedLocalTime::None => {
+                        Err(anyhow!(format!(
+                            "failed to parse the timestamp {ts} with the specified time zone {tz}"
+                        )))
+                    }
+                }?
+            } else {
+                date_time.timestamp_tz()
+            };
+
+            Some(IcebergTimeTravelInfo::TimestampMs(
+                timestamp * 1000 + date_time.time.microsecond as i64 / 1000,
+            ))
+        }
+        Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+            unreachable!()
+        }
+        None => None,
+    })
+}
+
+pub fn scan_ranges_as_strs(order_names: Vec<String>, scan_ranges: &Vec<ScanRange>) -> Vec<String> {
+    let mut range_strs = vec![];
+
+    let explain_max_range = 20;
+    for scan_range in scan_ranges.iter().take(explain_max_range) {
+        #[expect(clippy::disallowed_methods)]
+        let mut range_str = scan_range
+            .eq_conds
+            .iter()
+            .zip(order_names.iter())
+            .map(|(v, name)| match v {
+                Some(v) => format!("{} = {:?}", name, v),
+                None => format!("{} IS NULL", name),
+            })
+            .collect_vec();
+
+        let len = scan_range.eq_conds.len();
+        if !is_full_range(&scan_range.range) {
+            let bound_range_str = match (&scan_range.range.0, &scan_range.range.1) {
+                (Bound::Unbounded, Bound::Unbounded) => unreachable!(),
+                (Bound::Unbounded, ub) => ub_to_string(&order_names[len..], ub),
+                (lb, Bound::Unbounded) => lb_to_string(&order_names[len..], lb),
+                (lb, ub) => format!(
+                    "{} AND {}",
+                    lb_to_string(&order_names[len..], lb),
+                    ub_to_string(&order_names[len..], ub)
+                ),
+            };
+            range_str.push(bound_range_str);
+        }
+        range_strs.push(range_str.join(" AND "));
+    }
+    if scan_ranges.len() > explain_max_range {
+        range_strs.push("...".to_owned());
+    }
+    range_strs
+}
+
+pub fn ub_to_string(order_names: &[String], ub: &Bound<Vec<Option<ScalarImpl>>>) -> String {
+    match ub {
+        Bound::Included(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} <= {}", name, value)
+        }
+        Bound::Excluded(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} < {}", name, value)
+        }
+        Bound::Unbounded => unreachable!(),
+    }
+}
+
+pub fn lb_to_string(order_names: &[String], lb: &Bound<Vec<Option<ScalarImpl>>>) -> String {
+    match lb {
+        Bound::Included(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} >= {}", name, value)
+        }
+        Bound::Excluded(v) => {
+            let (name, value) = row_to_string(order_names, v);
+            format!("{} > {}", name, value)
+        }
+        Bound::Unbounded => unreachable!(),
+    }
+}
+
+pub fn row_to_string(
+    order_names: &[String],
+    struct_values: &Vec<Option<ScalarImpl>>,
+) -> (String, String) {
+    let mut names = vec![];
+    let mut values = vec![];
+    #[expect(clippy::disallowed_methods)]
+    for (name, value) in order_names.iter().zip(struct_values.iter()) {
+        names.push(name);
+        match value {
+            Some(v) => values.push(format!("{:?}", v)),
+            None => values.push("null".to_owned()),
+        }
+    }
+    if names.len() == 1 {
+        (names[0].clone(), values[0].clone())
+    } else {
+        (
+            format!("({})", names.iter().join(", ")),
+            format!("({})", values.iter().join(", ")),
+        )
+    }
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
 use risingwave_common::row::{OwnedRow, Row};
@@ -47,7 +47,7 @@ impl Case {
         needed_ids: Option<Vec<ColumnId>>,
     ) -> Self {
         Self {
-            name: name.to_string(),
+            name: name.to_owned(),
             schema: schema.clone(),
             column_ids: column_ids.clone(),
             rows,
@@ -132,10 +132,10 @@ fn memcmp_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> anyhow::Result<Vec<Vec<Datum
             let mut needed = vec![None; c.needed_ids.len()];
             for (i, c) in c.needed_ids.iter().enumerate() {
                 let ri = *needed_to_row.get(c).unwrap();
-                if ri != 65536 {
-                    if let Some(v) = &row[ri] {
-                        needed[i] = Some(v.clone());
-                    }
+                if ri != 65536
+                    && let Some(v) = &row[ri]
+                {
+                    needed[i] = Some(v.clone());
                 }
             }
             res.push(needed);
@@ -181,10 +181,10 @@ fn basic_decode(c: &Case, bytes: &Vec<Vec<u8>>) -> anyhow::Result<Vec<Vec<Datum>
             let mut needed = vec![None; c.needed_ids.len()];
             for (i, c) in c.needed_ids.iter().enumerate() {
                 let ri = *needed_to_row.get(c).unwrap();
-                if ri != 65536 {
-                    if let Some(v) = &row[ri] {
-                        needed[i] = Some(v.clone());
-                    }
+                if ri != 65536
+                    && let Some(v) = &row[ri]
+                {
+                    needed[i] = Some(v.clone());
                 }
             }
             res.push(needed);

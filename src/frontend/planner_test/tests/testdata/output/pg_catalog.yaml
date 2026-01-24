@@ -3,22 +3,22 @@
     select * from pg_catalog.pg_type
   logical_plan: |-
     LogicalProject { exprs: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typarray, pg_type.typinput, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typdelim, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
-    └─LogicalSysScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typarray, pg_type.typinput, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typdelim, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
-  batch_plan: 'BatchScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typarray, pg_type.typinput, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typdelim, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive], distribution: Single }'
+    └─LogicalSysScan { table: pg_type, output_columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typarray, pg_type.typinput, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typdelim, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive] }
+  batch_plan: 'BatchSysScan { table: pg_type, columns: [pg_type.oid, pg_type.typname, pg_type.typelem, pg_type.typarray, pg_type.typinput, pg_type.typnotnull, pg_type.typbasetype, pg_type.typtypmod, pg_type.typcollation, pg_type.typlen, pg_type.typnamespace, pg_type.typtype, pg_type.typdelim, pg_type.typrelid, pg_type.typdefault, pg_type.typcategory, pg_type.typreceive], distribution: Single }'
 - sql: |
     select * from pg_catalog.pg_namespace
   logical_plan: |-
     LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
     └─LogicalShare { id: 2 }
       └─LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
-        └─LogicalSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
-  batch_plan: 'BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl], distribution: Single }'
+        └─LogicalSysScan { table: rw_schemas, output_columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+  batch_plan: 'BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl], distribution: Single }'
 - sql: |
     select * from pg_catalog.pg_cast
   logical_plan: |-
     LogicalProject { exprs: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext] }
-    └─LogicalSysScan { table: pg_cast, columns: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext] }
-  batch_plan: 'BatchScan { table: pg_cast, columns: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext], distribution: Single }'
+    └─LogicalSysScan { table: pg_cast, output_columns: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext] }
+  batch_plan: 'BatchSysScan { table: pg_cast, columns: [pg_cast.oid, pg_cast.castsource, pg_cast.casttarget, pg_cast.castcontext], distribution: Single }'
 - sql: |
     select pg_catalog.pg_get_userbyid(1)
   logical_plan: |-

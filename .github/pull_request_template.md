@@ -1,4 +1,6 @@
-I hereby agree to the terms of the [RisingWave Labs, Inc. Contributor License Agreement](https://gist.github.com/TennyZhuang/f00be7f16996ea48effb049aa7be4d66#file-rw_cla).
+I hereby agree to the terms of the [RisingWave Labs, Inc. Contributor License Agreement](https://raw.githubusercontent.com/risingwavelabs/risingwave/17af8a747593ebdbfa826691daf75bdab7d14fa0/.github/contributor-license-agreement.txt).
+
+
 
 ## What's changed and what's your intention?
 
@@ -18,30 +20,27 @@ Please explain **IN DETAIL** what the changes are in this PR and why they are ne
 
 ## Checklist
 
-- [ ] I have written necessary rustdoc comments
-- [ ] I have added necessary unit tests and integration tests
-- [ ] I have added test labels as necessary. See [details](https://github.com/risingwavelabs/risingwave/blob/main/docs/developer-guide.md#ci-labels-guide).
-- [ ] I have added fuzzing tests or opened an issue to track them. (Optional, recommended for new SQL features #7934).
-- [ ] My PR contains breaking changes. (If it deprecates some features, please create a tracking issue to remove them in the future).
-- [ ] All checks passed in `./risedev check` (or alias, `./risedev c`)
-- [ ] My PR changes performance-critical code. (Please run macro/micro-benchmarks and show the results.)
-<!-- To manually trigger a benchmark, please check out [Notion](https://www.notion.so/risingwave-labs/Manually-trigger-nexmark-performance-dashboard-test-b784f1eae1cf48889b2645d020b6b7d3). -->
-- [ ] My PR contains critical fixes that are necessary to be merged into the latest release. (Please check out the [details](https://github.com/risingwavelabs/risingwave/blob/main/CONTRIBUTING.md))
+- [ ] I have written necessary rustdoc comments.
+- [ ] <!-- OPTIONAL --> I have added necessary unit tests and integration tests.
+- [ ] <!-- OPTIONAL --> I have added test labels as necessary. <!-- See https://github.com/risingwavelabs/risingwave/blob/main/docs/developer-guide.md#ci-labels-guide) -->
+- [ ] <!-- OPTIONAL --> I have added fuzzing tests or opened an issue to track them. <!-- Recommended for new SQL features, see #7934 -->
+- [ ] <!-- OPTIONAL --> My PR contains breaking changes. <!-- If it deprecates some features, please create a tracking issue to remove them in the future -->
+- [ ] <!-- OPTIONAL --> My PR changes performance-critical code, so I will run (micro) benchmarks and present the results. <!-- To manually trigger a benchmark, please check out [Notion](https://www.notion.so/risingwave-labs/Manually-trigger-nexmark-performance-dashboard-test-b784f1eae1cf48889b2645d020b6b7d3). -->
+- [ ] <!-- OPTIONAL --> I have checked the [Release Timeline](https://github.com/risingwavelabs/rw-commits-history/blob/main/release_timeline.md) and [Currently Supported Versions](https://docs.risingwave.com/changelog/release-support-policy#support-end-dates-for-recent-releases) to determine which release branches I need to cherry-pick this PR into. <!-- Please check out the [details](https://github.com/risingwavelabs/risingwave/blob/main/CONTRIBUTING.md) -->
+
 
 ## Documentation
 
-- [ ] My PR needs documentation updates. (Please use the **Release note** section below to summarize the impact on users)
+- [ ] <!-- OPTIONAL --> My PR needs documentation updates. <!-- Please use the **Release note** section below to summarize the impact on users -->
 
-## Release note
-
-If this PR includes changes that directly affect users or other significant modifications relevant to the community, kindly draft a release note to provide a concise summary of these changes. Please prioritize highlighting the impact these changes will have on users.
-
+<details>
+<summary><b>Release note</b></summary>
 
 <!--
-Please create a release note for your changes.
+If this PR includes changes that directly affect users or other significant modifications relevant to the community, kindly draft a release note to provide a concise summary of these changes.
 
-Discuss technical details in the "What's changed" section, and
-focus on the impact on users in the release note.
+Please prioritize highlighting the impact these changes will have on users.
+Discuss technical details in the "What's changed" section, and focus on the impact on users in the release note.
 
 You should also mention the environment or conditions where the impact may occur.
 -->

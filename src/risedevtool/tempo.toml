@@ -11,7 +11,11 @@ TEMPO_DOWNLOAD_TAR_GZ = "https://github.com/grafana/tempo/releases/download/v${T
 private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_COMPUTE_TRACING" ] }
+condition = { env_set = [
+    "ENABLE_COMPUTE_TRACING",
+], files_not_exist = [
+    "${PREFIX_BIN}/tempo",
+] }
 description = "Download and extract Tempo"
 script = '''
 #!/usr/bin/env bash

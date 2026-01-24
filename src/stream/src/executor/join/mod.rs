@@ -22,6 +22,16 @@ pub mod hash_join;
 pub mod join_row_set;
 pub mod row;
 
+pub(crate) type JoinOpPrimitive = bool;
+
+#[allow(non_snake_case, non_upper_case_globals)]
+pub(crate) mod JoinOp {
+    use super::JoinOpPrimitive;
+
+    pub const Insert: JoinOpPrimitive = true;
+    pub const Delete: JoinOpPrimitive = false;
+}
+
 /// The `JoinType` and `SideType` are to mimic a enum, because currently
 /// enum is not supported in const generic.
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.

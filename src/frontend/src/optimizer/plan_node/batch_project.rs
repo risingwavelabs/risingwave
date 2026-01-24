@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,19 +13,20 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::ProjectNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::expr::ExprNode;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch, generic,
 };
 use crate::error::Result;
 use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::utils::ColIndexMappingRewriteExt;
 
 /// `BatchProject` implements [`super::LogicalProject`] to evaluate specified expressions on input
@@ -49,7 +50,7 @@ impl BatchProject {
         BatchProject { base, core }
     }
 
-    pub fn as_logical(&self) -> &generic::Project<PlanRef> {
+    pub fn core(&self) -> &generic::Project<PlanRef> {
         &self.core
     }
 
@@ -64,7 +65,7 @@ impl Distill for BatchProject {
     }
 }
 
-impl PlanTreeNodeUnary for BatchProject {
+impl PlanTreeNodeUnary<Batch> for BatchProject {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -76,7 +77,7 @@ impl PlanTreeNodeUnary for BatchProject {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchProject }
+impl_plan_tree_node_for_unary! { Batch, BatchProject }
 
 impl ToDistributedBatch for BatchProject {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -104,7 +105,7 @@ impl ToLocalBatch for BatchProject {
     }
 }
 
-impl ExprRewritable for BatchProject {
+impl ExprRewritable<Batch> for BatchProject {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

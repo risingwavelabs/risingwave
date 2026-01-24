@@ -12,10 +12,13 @@ in_flight_barrier_nums = 10
 
 [streaming.developer]
 stream_exchange_concurrent_barriers = 10
+stream_refresh_scheduler_interval_sec = 1
 
 [storage]
+share_buffers_sync_parallelism = 4
 imm_merge_threshold = 2
 max_cached_recent_versions_number = 200
+shorten_block_meta_key_threshold = 4096
 
 [storage.object_store.retry]
 streaming_upload_attempt_timeout_ms = 10000
@@ -27,3 +30,8 @@ read_retry_attempts = 6
 barrier_interval_ms = 250
 checkpoint_frequency = 5
 max_concurrent_creating_streaming_jobs = 0
+
+[udf]
+enable_embedded_python_udf = true
+enable_embedded_javascript_udf = true
+enable_embedded_wasm_udf = true

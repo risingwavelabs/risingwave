@@ -1,0 +1,95 @@
+statement ok
+create function int_42() returns int language javascript as $$
+export async function int_42() {
+    return 42;
+}
+$$ WITH (async = true);
+
+query I
+select int_42();
+----
+42
+
+statement ok
+drop function int_42;
+
+statement ok
+create function fetch_todo(id int) returns varchar language javascript as $$
+export async function fetch_todo(id) {
+    const response = await fetch('https://dummyjson.com/todos/' + id);
+    const data = await response.json();
+    return data.todo;
+}
+$$ WITH (async = true);
+
+query I retry 3 backoff 5s
+select fetch_todo(1);
+----
+Do something nice for someone you care about
+
+statement ok
+drop function fetch_todo;
+
+statement ok
+create function echo_batch_async(s varchar) returns varchar language javascript as $$
+export async function echo_batch_async(vals) {
+    return vals.map(v => v + "!");
+}
+$$ WITH (async = true, batch = true);
+
+query T
+select echo_batch_async(x) from (values ('hello'), (null), ('world')) as t(x);
+----
+hello!
+null!
+world!
+
+statement ok
+drop function echo_batch_async;
+
+statement ok
+create function async_series(n int) returns table (x int) language javascript as $$
+export async function* async_series(n) {
+    for(let i = 0; i < n; i++) {
+        yield i;
+    }
+}
+$$ WITH (async = true);
+
+query I
+select async_series(5);
+----
+0
+1
+2
+3
+4
+
+statement ok
+drop function async_series;
+
+statement ok
+create function async_key_values(kv varchar) returns table (key varchar, value varchar) language javascript as $$
+export async function* async_key_values(kv) {
+    if (!kv) {
+        return;
+    }
+    const pairs = kv.split(',');
+    for (const pair of pairs) {
+        if (pair.includes('=')) {
+            const [key, value] = pair.split('=', 2);
+            yield {key, value};
+        }
+    }
+}
+$$ WITH (async = true);
+
+query TT
+select * from async_key_values('a=1,b=2,c=3');
+----
+a 1
+b 2
+c 3
+
+statement ok
+drop function async_key_values;

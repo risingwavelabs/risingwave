@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,21 +16,23 @@ use std::iter::Peekable;
 
 use itertools::Itertools;
 use risingwave_common::types::{DataType, ScalarImpl};
-use risingwave_pb::expr::expr_node::{PbType, RexNode};
+use risingwave_expr::expr::LogReport;
 use risingwave_pb::expr::ExprNode;
+use risingwave_pb::expr::expr_node::{PbType, RexNode};
 
+use super::NonStrictExpression;
 use super::expr_some_all::SomeAllExpression;
 use super::expr_udf::UserDefinedFunction;
 use super::strict::Strict;
+use super::wrapper::EvalErrorReport;
 use super::wrapper::checked::Checked;
 use super::wrapper::non_strict::NonStrict;
-use super::wrapper::EvalErrorReport;
-use super::NonStrictExpression;
 use crate::expr::{
     BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
 };
+use crate::expr_context::strict_mode;
 use crate::sig::FUNCTION_REGISTRY;
-use crate::{bail, Result};
+use crate::{Result, bail};
 
 /// Build an expression from protobuf.
 pub fn build_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
@@ -46,6 +48,21 @@ pub fn build_non_strict_from_prost(
     ExprBuilder::new_non_strict(error_report)
         .build(prost)
         .map(NonStrictExpression)
+}
+
+/// Build a strict or non-strict expression according to expr context.
+///
+/// When strict mode is off, the expression will not fail but leave a null value as result.
+///
+/// Unlike [`build_non_strict_from_prost`], the returning value here can be either non-strict or
+/// strict. Thus, the caller is supposed to handle potential errors under strict mode.
+pub fn build_batch_expr_from_prost(prost: &ExprNode) -> Result<BoxedExpression> {
+    if strict_mode()? {
+        build_from_prost(prost)
+    } else {
+        // TODO(eric): report errors to users via psql notice
+        Ok(ExprBuilder::new_non_strict(LogReport).build(prost)?.boxed())
+    }
 }
 
 /// Build an expression from protobuf with possibly some wrappers attached to each node.
@@ -290,10 +307,19 @@ impl<Iter: Iterator<Item = Token>> Parser<Iter> {
 
     fn parse_type(&mut self) -> DataType {
         match self.tokens.next().expect("Unexpected end of input") {
-            Token::Literal(name) => name
-                .replace('_', " ")
-                .parse::<DataType>()
-                .expect_str("type", &name),
+            Token::Literal(name) => {
+                let mut processed_name = name.replace('_', " ");
+
+                // Special logic to support Map type in `build_from_pretty`.
+                // Please refer to `src/expr/impl/src/scalar/map_filter.rs`.
+                if processed_name.starts_with("map") {
+                    processed_name = processed_name.replace('<', "(").replace('>', ")");
+                }
+
+                processed_name
+                    .parse::<DataType>()
+                    .expect_str("type", &processed_name)
+            }
             t => panic!("Expected a Literal, got {t:?}"),
         }
     }

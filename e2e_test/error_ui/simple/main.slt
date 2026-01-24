@@ -29,7 +29,7 @@ alter system set not_exist_key to value;
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/meta.SystemParamsService/SetSystemParam`) failed: Internal error
   2: SystemParams error: unrecognized system parameter "not_exist_key"
 
 

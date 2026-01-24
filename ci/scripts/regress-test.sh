@@ -39,7 +39,7 @@ locale-gen C
 dpkg-reconfigure --frontend=noninteractive locales
 # All the above is required because otherwise psql would throw some warning
 # that goes into the output file and thus diverges from the expected output file.
-export PGPASSWORD='postgres';
+export PGPASSWORD='post\tgres';
 
 # Load extensions. This shall only be done once per database, so not part of test runner.
 psql -h db -p 5432 -d postgres -U postgres \

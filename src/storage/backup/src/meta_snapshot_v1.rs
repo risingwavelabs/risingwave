@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -29,8 +29,7 @@ use risingwave_pb::user::UserInfo;
 use crate::error::{BackupError, BackupResult};
 use crate::meta_snapshot::{MetaSnapshot, Metadata};
 
-/// TODO: remove `ClusterMetadata` and even the trait, after applying model v2.
-
+// TODO: remove `ClusterMetadata` and even the trait, after applying model v2.
 pub type MetaSnapshotV1 = MetaSnapshot<ClusterMetadata>;
 
 impl Display for ClusterMetadata {
@@ -98,6 +97,14 @@ impl Metadata for ClusterMetadata {
 
     fn hummock_version(self) -> HummockVersion {
         self.hummock_version
+    }
+
+    fn storage_url(&self) -> BackupResult<String> {
+        unreachable!("");
+    }
+
+    fn storage_directory(&self) -> BackupResult<String> {
+        unreachable!("");
     }
 }
 
@@ -285,7 +292,7 @@ mod tests {
         raw.hummock_version.id = HummockVersionId::new(1);
         raw.version_stats.hummock_version_id = 10;
         raw.version_stats.table_stats.insert(
-            200,
+            200.into(),
             TableStats {
                 total_key_count: 1000,
                 ..Default::default()

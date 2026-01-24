@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use risingwave_common::bail;
@@ -21,31 +22,54 @@ use risingwave_pb::catalog::PbStreamSourceInfo;
 use risingwave_pb::plan_common::PbColumnCatalog;
 
 #[expect(deprecated)]
-use super::fs_reader::FsSourceReader;
+use super::fs_reader::LegacyFsSourceReader;
 use super::reader::SourceReader;
 use crate::error::ConnectorResult;
-use crate::parser::additional_columns::source_add_partition_offset_cols;
+use crate::parser::additional_columns::{
+    derive_pulsar_message_id_data_column, source_add_partition_offset_cols,
+};
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::monitor::SourceMetrics;
 use crate::source::{SourceColumnDesc, SourceColumnType, UPSTREAM_SOURCE_KEY};
-use crate::WithOptionsSecResolved;
+use crate::{WithOptionsSecResolved, WithPropertiesExt};
 
 pub const DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE: usize = 16;
 
 /// `SourceDesc` describes a stream source.
 #[derive(Debug, Clone)]
 pub struct SourceDesc {
+    pub source_info: PbStreamSourceInfo,
     pub source: SourceReader,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
+}
+
+impl SourceDesc {
+    pub fn update_reader(
+        &mut self,
+        props_plaintext: HashMap<String, String>,
+    ) -> ConnectorResult<()> {
+        let props_wrapper =
+            WithOptionsSecResolved::without_secrets(props_plaintext.into_iter().collect());
+        let parser_config = SpecificParserConfig::new(&self.source_info, &props_wrapper)?;
+
+        let reader = SourceReader::new(
+            props_wrapper,
+            self.columns.clone(),
+            self.source.connector_message_buffer_size,
+            parser_config,
+        )?;
+        self.source = reader;
+        Ok(())
+    }
 }
 
 /// `FsSourceDesc` describes a stream source.
 #[deprecated = "will be replaced by new fs source (list + fetch)"]
 #[expect(deprecated)]
 #[derive(Debug)]
-pub struct FsSourceDesc {
-    pub source: FsSourceReader,
+pub struct LegacyFsSourceDesc {
+    pub source: LegacyFsSourceReader,
     pub columns: Vec<SourceColumnDesc>,
     pub metrics: Arc<SourceMetrics>,
 }
@@ -90,8 +114,20 @@ impl SourceDescBuilder {
             .get(UPSTREAM_SOURCE_KEY)
             .map(|s| s.to_lowercase())
             .unwrap();
-        let (columns_exist, additional_columns) =
-            source_add_partition_offset_cols(&self.columns, &connector_name);
+        let (columns_exist, additional_columns) = {
+            let (mut columns_exist, mut additional_columns) =
+                source_add_partition_offset_cols(&self.columns, &connector_name, false);
+
+            // add `message_id_data` column for pulsar source, which is used for ack message
+            if self.with_properties.is_pulsar_connector() {
+                derive_pulsar_message_id_data_column(
+                    &connector_name,
+                    &mut columns_exist,
+                    &mut additional_columns,
+                );
+            }
+            (columns_exist, additional_columns)
+        };
 
         let mut columns: Vec<_> = self
             .columns
@@ -99,9 +135,13 @@ impl SourceDescBuilder {
             .map(|c| SourceColumnDesc::from(&c.column_desc))
             .collect();
 
-        for (existed, c) in columns_exist.iter().zip_eq_fast(&additional_columns) {
-            if !existed {
-                columns.push(SourceColumnDesc::hidden_addition_col_from_column_desc(c));
+        // currently iceberg uses other columns. See `extract_iceberg_columns`
+        // TODO: unify logic.
+        if connector_name != "iceberg" {
+            for (existed, c) in columns_exist.iter().zip_eq_fast(&additional_columns) {
+                if !existed {
+                    columns.push(SourceColumnDesc::hidden_addition_col_from_column_desc(c));
+                }
             }
         }
 
@@ -117,19 +157,20 @@ impl SourceDescBuilder {
     pub fn build(self) -> ConnectorResult<SourceDesc> {
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let psrser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
+        let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         let source = SourceReader::new(
             self.with_properties,
             columns.clone(),
             self.connector_message_buffer_size,
-            psrser_config,
+            parser_config,
         )?;
 
         Ok(SourceDesc {
             source,
             columns,
             metrics: self.metrics,
+            source_info: self.source_info,
         })
     }
 
@@ -139,7 +180,7 @@ impl SourceDescBuilder {
 
     #[deprecated = "will be replaced by new fs source (list + fetch)"]
     #[expect(deprecated)]
-    pub fn build_fs_source_desc(&self) -> ConnectorResult<FsSourceDesc> {
+    pub fn build_fs_source_desc(&self) -> ConnectorResult<LegacyFsSourceDesc> {
         let parser_config = SpecificParserConfig::new(&self.source_info, &self.with_properties)?;
 
         match (
@@ -161,14 +202,21 @@ impl SourceDescBuilder {
 
         let columns = self.column_catalogs_to_source_column_descs();
 
-        let source =
-            FsSourceReader::new(self.with_properties.clone(), columns.clone(), parser_config)?;
+        let source = LegacyFsSourceReader::new(
+            self.with_properties.clone(),
+            columns.clone(),
+            parser_config,
+        )?;
 
-        Ok(FsSourceDesc {
+        Ok(LegacyFsSourceDesc {
             source,
             columns,
             metrics: self.metrics.clone(),
         })
+    }
+
+    pub fn with_properties(&self) -> WithOptionsSecResolved {
+        self.with_properties.clone()
     }
 }
 
@@ -178,7 +226,7 @@ pub mod test_utils {
     use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Schema};
     use risingwave_pb::catalog::StreamSourceInfo;
 
-    use super::{SourceDescBuilder, DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE};
+    use super::{DEFAULT_CONNECTOR_MESSAGE_BUFFER_SIZE, SourceDescBuilder};
 
     pub fn create_source_desc_builder(
         schema: &Schema,
@@ -199,8 +247,7 @@ pub mod test_utils {
                 ))
             })
             .collect();
-        let options_with_secret =
-            crate::WithOptionsSecResolved::without_secrets(with_properties.clone());
+        let options_with_secret = crate::WithOptionsSecResolved::without_secrets(with_properties);
         SourceDescBuilder {
             columns,
             metrics: Default::default(),

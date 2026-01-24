@@ -1,10 +1,10 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -62,11 +62,7 @@ impl SomeAllExpression {
                         None => any_none = true,
                     }
                 }
-                if any_none {
-                    None
-                } else {
-                    Some(false)
-                }
+                if any_none { None } else { Some(false) }
             }
             Type::All => {
                 let mut all_true = true;
@@ -78,11 +74,7 @@ impl SomeAllExpression {
                         all_true = false;
                     }
                 }
-                if all_true {
-                    Some(true)
-                } else {
-                    None
-                }
+                if all_true { Some(true) } else { None }
             }
             _ => unreachable!(),
         }
@@ -101,13 +93,11 @@ impl Expression for SomeAllExpression {
         let mut num_array = Vec::with_capacity(data_chunk.capacity());
 
         let arr_right_inner = arr_right.as_list();
-        let DataType::List(datatype) = arr_right_inner.data_type() else {
-            unreachable!()
-        };
+        let elem_type = arr_right_inner.data_type().into_list_elem();
         let capacity = arr_right_inner.flatten().len();
 
         let mut unfolded_arr_left_builder = arr_left.create_builder(capacity);
-        let mut unfolded_arr_right_builder = datatype.create_array_builder(capacity);
+        let mut unfolded_arr_right_builder = elem_type.create_array_builder(capacity);
 
         let mut unfolded_left_right =
             |left: Option<ScalarRefImpl<'_>>,
@@ -128,7 +118,7 @@ impl Expression for SomeAllExpression {
                 }
             };
 
-        if data_chunk.is_compacted() {
+        if data_chunk.is_vis_compacted() {
             for (left, right) in arr_left.iter().zip_eq_fast(arr_right.iter()) {
                 unfolded_left_right(left, right, &mut num_array);
             }
@@ -227,9 +217,10 @@ impl Build for SomeAllExpression {
         let left_expr = build_child(&inner_children[0])?;
         let right_expr = build_child(&inner_children[1])?;
 
-        let DataType::List(right_expr_return_type) = right_expr.return_type() else {
+        let DataType::List(right_list_type) = right_expr.return_type() else {
             bail!("Expect Array Type");
         };
+        let right_expr_return_type = right_list_type.into_elem();
 
         let eval_func = {
             let left_expr_input_ref = ExprNode {

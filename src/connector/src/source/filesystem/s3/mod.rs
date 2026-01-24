@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,21 +11,22 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 pub mod enumerator;
-use std::collections::HashMap;
-
-pub use enumerator::S3SplitEnumerator;
-
-use crate::source::filesystem::file_common::CompressionFormat;
-mod source;
+use phf::{Set, phf_set};
+use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
-pub use source::S3FileReader;
 
-use crate::connector_common::AwsAuthProps;
-use crate::source::filesystem::FsSplit;
-use crate::source::{SourceProperties, UnknownFields};
+use crate::connector_common::DISABLE_DEFAULT_CREDENTIAL;
+use crate::deserialize_optional_bool_from_string;
+use crate::enforce_secret::EnforceSecret;
+use crate::source::SourceProperties;
+use crate::source::util::dummy::{
+    DummyProperties, DummySourceReader, DummySplit, DummySplitEnumerator,
+};
 
-pub const S3_CONNECTOR: &str = "s3";
+/// Refer to [`crate::source::OPENDAL_S3_CONNECTOR`].
+pub const LEGACY_S3_CONNECTOR: &str = "s3";
 
 /// These are supported by both `s3` and `s3_v2` (opendal) sources.
 #[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
@@ -40,56 +41,46 @@ pub struct S3PropertiesCommon {
     pub access: Option<String>,
     #[serde(rename = "s3.credentials.secret", default)]
     pub secret: Option<String>,
+    #[serde(default, deserialize_with = "deserialize_optional_bool_from_string")]
+    pub enable_config_load: Option<bool>,
     #[serde(rename = "s3.endpoint_url")]
     pub endpoint_url: Option<String>,
-    #[serde(rename = "compression_format", default = "Default::default")]
-    pub compression_format: CompressionFormat,
 }
 
-#[derive(Clone, Debug, Deserialize, PartialEq, with_options::WithOptions)]
-pub struct S3Properties {
-    #[serde(flatten)]
-    pub common: S3PropertiesCommon,
-
-    #[serde(flatten)]
-    pub unknown_fields: HashMap<String, String>,
-}
-
-impl From<S3PropertiesCommon> for S3Properties {
-    fn from(common: S3PropertiesCommon) -> Self {
-        Self {
-            common,
-            unknown_fields: HashMap::new(),
+impl S3PropertiesCommon {
+    pub fn enable_config_load(&self) -> bool {
+        // If the env var is set to true, we disable the default config load. (Cloud environment)
+        if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+            return false;
         }
+        self.enable_config_load.unwrap_or(false)
     }
 }
 
-impl SourceProperties for S3Properties {
-    type Split = FsSplit;
-    type SplitEnumerator = S3SplitEnumerator;
-    type SplitReader = S3FileReader;
-
-    const SOURCE_NAME: &'static str = S3_CONNECTOR;
+impl EnforceSecret for S3PropertiesCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "s3.credentials.access",
+        "s3.credentials.secret",
+    };
 }
 
-impl UnknownFields for S3Properties {
-    fn unknown_fields(&self) -> HashMap<String, String> {
-        self.unknown_fields.clone()
-    }
-}
+#[derive(Debug, Clone, PartialEq)]
+pub struct LegacyS3;
 
-impl From<&S3Properties> for AwsAuthProps {
-    fn from(props: &S3Properties) -> Self {
-        let props = &props.common;
-        Self {
-            region: Some(props.region_name.clone()),
-            endpoint: props.endpoint_url.clone(),
-            access_key: props.access.clone(),
-            secret_key: props.secret.clone(),
-            session_token: Default::default(),
-            arn: Default::default(),
-            external_id: Default::default(),
-            profile: Default::default(),
-        }
-    }
+/// Note: legacy s3 source is fully deprecated since v2.4.0.
+/// The properties and enumerator are kept, so that meta can start normally.
+pub type LegacyS3Properties = DummyProperties<LegacyS3>;
+
+/// Note: legacy s3 source is fully deprecated since v2.4.0.
+/// The properties and enumerator are kept, so that meta can start normally.
+pub type LegacyS3SplitEnumerator = DummySplitEnumerator<LegacyS3>;
+
+pub type LegacyFsSplit = DummySplit<LegacyS3>;
+
+impl SourceProperties for LegacyS3Properties {
+    type Split = LegacyFsSplit;
+    type SplitEnumerator = LegacyS3SplitEnumerator;
+    type SplitReader = DummySourceReader<LegacyS3>;
+
+    const SOURCE_NAME: &'static str = LEGACY_S3_CONNECTOR;
 }

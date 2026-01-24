@@ -17,23 +17,28 @@ use std::fs::File;
 use std::io::Write;
 use std::path::PathBuf;
 
-use anyhow::{anyhow, Context};
+use anyhow::Context;
 use parking_lot::RwLock;
+use parking_lot::lock_api::RwLockReadGuard;
 use prost::Message;
 use risingwave_pb::catalog::PbSecret;
-use risingwave_pb::secret::secret_ref::RefAsType;
+use risingwave_pb::id::WorkerId;
 use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::secret::secret_ref::RefAsType;
 use thiserror_ext::AsReport;
+use tokio::runtime::Handle;
+use tokio::task;
 
-use super::error::{SecretError, SecretResult};
 use super::SecretId;
+use super::error::{SecretError, SecretResult};
+use super::vault_client::{HashiCorpVaultClient, HashiCorpVaultConfig};
 
 static INSTANCE: std::sync::OnceLock<LocalSecretManager> = std::sync::OnceLock::new();
 
 #[derive(Debug)]
 pub struct LocalSecretManager {
     secrets: RwLock<HashMap<SecretId, Vec<u8>>>,
-    /// The local directory used to write secrets into file, so that it can be passed into some libararies
+    /// The local directory used to write secrets into file, so that it can be passed into some libraries
     secret_file_dir: PathBuf,
 }
 
@@ -41,7 +46,7 @@ impl LocalSecretManager {
     /// Initialize the secret manager with the given temp file path, cluster id, and encryption key.
     /// # Panics
     /// Panics if fail to create the secret file directory.
-    pub fn init(temp_file_dir: String, cluster_id: String, worker_id: u32) {
+    pub fn init(temp_file_dir: String, cluster_id: String, worker_id: WorkerId) {
         // use `get_or_init` to handle concurrent initialization in single node mode.
         INSTANCE.get_or_init(|| {
             let secret_file_dir = PathBuf::from(temp_file_dir)
@@ -67,14 +72,30 @@ impl LocalSecretManager {
     pub fn global() -> &'static LocalSecretManager {
         // Initialize the secret manager for unit tests.
         #[cfg(debug_assertions)]
-        LocalSecretManager::init("./tmp".to_string(), "test_cluster".to_string(), 0);
+        LocalSecretManager::init("./tmp".to_owned(), "test_cluster".to_owned(), 0.into());
 
         INSTANCE.get().unwrap()
     }
 
     pub fn add_secret(&self, secret_id: SecretId, secret: Vec<u8>) {
         let mut secret_guard = self.secrets.write();
-        secret_guard.insert(secret_id, secret);
+        if secret_guard.insert(secret_id, secret).is_some() {
+            tracing::error!(
+                secret_id = %secret_id,
+                "adding a secret but it already exists, overwriting it"
+            );
+        };
+    }
+
+    pub fn update_secret(&self, secret_id: SecretId, secret: Vec<u8>) {
+        let mut secret_guard = self.secrets.write();
+        if secret_guard.insert(secret_id, secret).is_none() {
+            tracing::error!(
+                secret_id = %secret_id,
+                "updating a secret but it does not exist, adding it"
+            );
+        }
+        self.remove_secret_file_if_exist(&secret_id);
     }
 
     pub fn init_secrets(&self, secrets: Vec<PbSecret>) {
@@ -118,28 +139,40 @@ impl LocalSecretManager {
     ) -> SecretResult<BTreeMap<String, String>> {
         let secret_guard = self.secrets.read();
         for (option_key, secret_ref) in secret_refs {
-            let secret_id = secret_ref.secret_id;
-            let pb_secret_bytes = secret_guard
-                .get(&secret_id)
-                .ok_or(SecretError::ItemNotFound(secret_id))?;
-            let secret_value_bytes = Self::get_secret_value(pb_secret_bytes)?;
-            match secret_ref.ref_as() {
-                RefAsType::Text => {
-                    // We converted the secret string from sql to bytes using `as_bytes` in frontend.
-                    // So use `from_utf8` here to convert it back to string.
-                    options.insert(option_key, String::from_utf8(secret_value_bytes.clone())?);
-                }
-                RefAsType::File => {
-                    let path_str =
-                        self.get_or_init_secret_file(secret_id, secret_value_bytes.clone())?;
-                    options.insert(option_key, path_str);
-                }
-                RefAsType::Unspecified => {
-                    return Err(SecretError::UnspecifiedRefType(secret_id));
-                }
-            }
+            let path_str = self.fill_secret_inner(secret_ref, &secret_guard)?;
+            options.insert(option_key, path_str);
         }
         Ok(options)
+    }
+
+    pub fn fill_secret(&self, secret_ref: PbSecretRef) -> SecretResult<String> {
+        let secret_guard: RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<SecretId, Vec<u8>>> =
+            self.secrets.read();
+        self.fill_secret_inner(secret_ref, &secret_guard)
+    }
+
+    fn fill_secret_inner(
+        &self,
+        secret_ref: PbSecretRef,
+        secret_guard: &RwLockReadGuard<'_, parking_lot::RawRwLock, HashMap<SecretId, Vec<u8>>>,
+    ) -> SecretResult<String> {
+        let secret_id = secret_ref.secret_id;
+        let pb_secret_bytes = secret_guard
+            .get(&secret_id)
+            .ok_or(SecretError::ItemNotFound(secret_id))?;
+        let secret_value_bytes = Self::get_secret_value(pb_secret_bytes)?;
+        match secret_ref.ref_as() {
+            RefAsType::Text => {
+                // We converted the secret string from sql to bytes using `as_bytes` in frontend.
+                // So use `from_utf8` here to convert it back to string.
+                Ok(String::from_utf8(secret_value_bytes)?)
+            }
+            RefAsType::File => {
+                let path_str = self.get_or_init_secret_file(secret_id, secret_value_bytes)?;
+                Ok(path_str)
+            }
+            RefAsType::Unspecified => Err(SecretError::UnspecifiedRefType(secret_id)),
+        }
     }
 
     /// Get the secret file for the given secret id and return the path string. If the file does not exist, create it.
@@ -173,15 +206,28 @@ impl LocalSecretManager {
         }
     }
 
+    #[cfg_or_panic::cfg_or_panic(not(madsim))]
     fn get_secret_value(pb_secret_bytes: &[u8]) -> SecretResult<Vec<u8>> {
-        let pb_secret = risingwave_pb::secret::Secret::decode(pb_secret_bytes)
-            .context("failed to decode secret")?;
-        let secret_value = match pb_secret.get_secret_backend().unwrap() {
-            risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value.clone(),
-            risingwave_pb::secret::secret::SecretBackend::HashicorpVault(_) => {
-                return Err(anyhow!("hashicorp_vault backend is not implemented yet").into())
+        let secret_value = match Self::get_pb_secret_backend(pb_secret_bytes)? {
+            risingwave_pb::secret::secret::SecretBackend::Meta(backend) => backend.value,
+            risingwave_pb::secret::secret::SecretBackend::HashicorpVault(vault_backend) => {
+                let config = HashiCorpVaultConfig::from_protobuf(&vault_backend)?;
+                let client = HashiCorpVaultClient::new(config)?;
+
+                task::block_in_place(move || {
+                    Handle::current().block_on(async move { client.get_secret().await })
+                })?
             }
         };
         Ok(secret_value)
+    }
+
+    /// Get the secret backend from the given decrypted secret bytes.
+    pub fn get_pb_secret_backend(
+        pb_secret_bytes: &[u8],
+    ) -> SecretResult<risingwave_pb::secret::secret::SecretBackend> {
+        let pb_secret = risingwave_pb::secret::Secret::decode(pb_secret_bytes)
+            .context("failed to decode secret")?;
+        Ok(pb_secret.get_secret_backend().unwrap().clone())
     }
 }

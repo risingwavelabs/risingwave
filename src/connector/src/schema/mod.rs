@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ mod loader;
 pub mod protobuf;
 pub mod schema_registry;
 
-pub use loader::SchemaLoader;
+pub use loader::{ConfluentSchemaLoader, SchemaLoader, SchemaVersion};
 
 const MESSAGE_NAME_KEY: &str = "message";
 const KEY_MESSAGE_NAME_KEY: &str = "key.message";
@@ -36,12 +36,26 @@ pub struct InvalidOptionError {
     // source: Option<risingwave_common::error::BoxedError>,
 }
 
+#[derive(Debug, thiserror::Error, thiserror_ext::Macro)]
+#[error("Malformed response: {message}")]
+pub struct MalformedResponseError {
+    pub message: String,
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum SchemaFetchError {
     #[error(transparent)]
     InvalidOption(#[from] InvalidOptionError),
     #[error(transparent)]
+    License(#[from] risingwave_common::license::FeatureNotAvailable),
+    #[error(transparent)]
     Request(#[from] schema_registry::ConcurrentRequestError),
+    #[error(transparent)]
+    AwsGlue(#[from] Box<aws_sdk_glue::operation::get_schema_version::GetSchemaVersionError>),
+    #[error(transparent)]
+    MalformedResponse(#[from] MalformedResponseError),
+    #[error("schema version id invalid: {0}")]
+    InvalidUuid(#[from] uuid::Error),
     #[error("schema compilation error: {0}")]
     SchemaCompile(
         #[source]

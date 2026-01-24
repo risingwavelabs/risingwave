@@ -6,7 +6,7 @@
     LogicalProject { exprs: [t.v1] }
     └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalProject { exprs: [t.v1, t.v2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: merge and then eliminate
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -14,7 +14,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1, t.v2] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: 'LogicalScan { table: t, columns: [t.v1, t.v2] }'
 - sql: |
     create table t (v1 bigint, v2 double precision);
@@ -31,7 +31,7 @@
     LogicalProject { exprs: [t.v1] }
     └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
       └─LogicalProject { exprs: [t.v2, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: consecutive projects are merged
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -39,7 +39,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1, 2:Int32] }
     └─LogicalProject { exprs: [t.v1, t.v2, 1:Int32] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.v1, 2:Int32] }
     └─LogicalScan { table: t, columns: [t.v1] }
@@ -49,7 +49,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1, t.v2] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: 'LogicalScan { table: t, columns: [t.v1, t.v2] }'
 - name: joins
   sql: |
@@ -59,8 +59,8 @@
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
     └─LogicalJoin { type: Inner, on: true, output: all }
       ├─LogicalProject { exprs: [t.v1, t.v2] }
-      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: table alias
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -69,8 +69,8 @@
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
     └─LogicalJoin { type: Inner, on: (t.v1 = t.v1), output: all }
       ├─LogicalProject { exprs: [t.v1, t.v2] }
-      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: alias less columns than available
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -79,8 +79,8 @@
     LogicalProject { exprs: [t.v1, t.v2, t.v1, t.v2] }
     └─LogicalJoin { type: Inner, on: (t.v1 = t.v1), output: all }
       ├─LogicalProject { exprs: [t.v1, t.v2] }
-      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      │ └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: alias more columns than available
   sql: |
     create table t (v1 bigint, v2 double precision);
@@ -168,27 +168,19 @@
           ├─LogicalProject { exprs: [sum(distinct 1:Int32)] }
           │ └─LogicalAgg { aggs: [sum(distinct 1:Int32)] }
           │   └─LogicalProject { exprs: [1:Int32] }
-          │     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
-          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id] }
+          │     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
+          └─LogicalScan { table: t2, columns: [t2.x, t2.y, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count(1:Int32)] }
     └─LogicalProject { exprs: [1:Int32] }
       └─LogicalJoin { type: Inner, on: true, output: all }
-        ├─LogicalAgg { aggs: [] }
-        │ └─LogicalAgg { group_key: [1:Int32], aggs: [] }
-        │   └─LogicalProject { exprs: [1:Int32] }
-        │     └─LogicalScan { table: t1, columns: [] }
+        ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         └─LogicalScan { table: t2, columns: [] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [count(1:Int32)] }
     └─BatchProject { exprs: [1:Int32] }
       └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-        ├─BatchSimpleAgg { aggs: [] }
-        │ └─BatchExchange { order: [], dist: Single }
-        │   └─BatchHashAgg { group_key: [1:Int32], aggs: [] }
-        │     └─BatchExchange { order: [], dist: HashShard(1:Int32) }
-        │       └─BatchProject { exprs: [1:Int32] }
-        │         └─BatchScan { table: t1, columns: [], distribution: SomeShard }
+        ├─BatchValues { rows: [[]] }
         └─BatchExchange { order: [], dist: Single }
           └─BatchScan { table: t2, columns: [], distribution: SomeShard }
 - sql: |
@@ -200,15 +192,11 @@
       └─LogicalProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |-
-    LogicalJoin { type: LeftOuter, on: true, output: all }
-    ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-    └─LogicalProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
-      └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
+    LogicalProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
+    └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   batch_plan: |-
-    BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-    ├─BatchValues { rows: [[]] }
-    └─BatchProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
-      └─BatchValues { rows: [[]] }
+    BatchProject { exprs: [PgGetUserbyid(1:Int32) as $expr1] }
+    └─BatchValues { rows: [[]] }
 - sql: |
     SELECT n.nspname as "Schema",
     c.relname as "Name",
@@ -223,68 +211,24 @@
     AND pg_catalog.pg_table_is_visible(c.oid)
     ORDER BY 1,2;
   logical_plan: |-
-    LogicalProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr3, PgGetUserbyid(rw_tables.owner) as $expr4] }
-    └─LogicalFilter { predicate: In($expr1, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
-      └─LogicalJoin { type: LeftOuter, on: (rw_schemas.id = rw_tables.schema_id), output: all }
-        ├─LogicalShare { id: 18 }
-        │ └─LogicalProject { exprs: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, 'p':Varchar, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, 0:Int32, 0:Int32, Array as $expr2, false:Boolean, null:Varchar] }
-        │   └─LogicalShare { id: 16 }
-        │     └─LogicalUnion { all: true }
-        │       ├─LogicalUnion { all: true }
-        │       │ ├─LogicalUnion { all: true }
-        │       │ │ ├─LogicalUnion { all: true }
-        │       │ │ │ ├─LogicalUnion { all: true }
-        │       │ │ │ │ ├─LogicalUnion { all: true }
-        │       │ │ │ │ │ ├─LogicalUnion { all: true }
-        │       │ │ │ │ │ │ ├─LogicalProject { exprs: [rw_tables.id, rw_tables.name, 'table':Varchar, rw_tables.schema_id, rw_tables.owner, rw_tables.definition, rw_tables.acl] }
-        │       │ │ │ │ │ │ │ └─LogicalSysScan { table: rw_tables, columns: [rw_tables.id, rw_tables.name, rw_tables.schema_id, rw_tables.owner, rw_tables.definition, rw_tables.append_only, rw_tables.acl, rw_tables.initialized_at, rw_tables.created_at, rw_tables.initialized_at_cluster_version, rw_tables.created_at_cluster_version] }
-        │       │ │ │ │ │ │ └─LogicalProject { exprs: [rw_system_tables.id, rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner, rw_system_tables.definition, rw_system_tables.acl] }
-        │       │ │ │ │ │ │   └─LogicalSysScan { table: rw_system_tables, columns: [rw_system_tables.id, rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner, rw_system_tables.definition, rw_system_tables.acl] }
-        │       │ │ │ │ │ └─LogicalProject { exprs: [rw_sources.id, rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner, rw_sources.definition, rw_sources.acl] }
-        │       │ │ │ │ │   └─LogicalSysScan { table: rw_sources, columns: [rw_sources.id, rw_sources.name, rw_sources.schema_id, rw_sources.owner, rw_sources.connector, rw_sources.columns, rw_sources.format, rw_sources.row_encode, rw_sources.append_only, rw_sources.associated_table_id, rw_sources.connection_id, rw_sources.definition, rw_sources.acl, rw_sources.initialized_at, rw_sources.created_at, rw_sources.initialized_at_cluster_version, rw_sources.created_at_cluster_version] }
-        │       │ │ │ │ └─LogicalProject { exprs: [rw_indexes.id, rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner, rw_indexes.definition, rw_indexes.acl] }
-        │       │ │ │ │   └─LogicalSysScan { table: rw_indexes, columns: [rw_indexes.id, rw_indexes.name, rw_indexes.primary_table_id, rw_indexes.key_columns, rw_indexes.include_columns, rw_indexes.schema_id, rw_indexes.owner, rw_indexes.definition, rw_indexes.acl, rw_indexes.initialized_at, rw_indexes.created_at, rw_indexes.initialized_at_cluster_version, rw_indexes.created_at_cluster_version] }
-        │       │ │ │ └─LogicalProject { exprs: [rw_sinks.id, rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner, rw_sinks.definition, rw_sinks.acl] }
-        │       │ │ │   └─LogicalSysScan { table: rw_sinks, columns: [rw_sinks.id, rw_sinks.name, rw_sinks.schema_id, rw_sinks.owner, rw_sinks.connector, rw_sinks.sink_type, rw_sinks.connection_id, rw_sinks.definition, rw_sinks.acl, rw_sinks.initialized_at, rw_sinks.created_at, rw_sinks.initialized_at_cluster_version, rw_sinks.created_at_cluster_version] }
-        │       │ │ └─LogicalProject { exprs: [rw_subscriptions.id, rw_subscriptions.name, 'subscription':Varchar, rw_subscriptions.schema_id, rw_subscriptions.owner, rw_subscriptions.definition, rw_subscriptions.acl] }
-        │       │ │   └─LogicalSysScan { table: rw_subscriptions, columns: [rw_subscriptions.id, rw_subscriptions.name, rw_subscriptions.schema_id, rw_subscriptions.owner, rw_subscriptions.definition, rw_subscriptions.acl, rw_subscriptions.initialized_at, rw_subscriptions.created_at, rw_subscriptions.initialized_at_cluster_version, rw_subscriptions.created_at_cluster_version] }
-        │       │ └─LogicalProject { exprs: [rw_materialized_views.id, rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id, rw_materialized_views.owner, rw_materialized_views.definition, rw_materialized_views.acl] }
-        │       │   └─LogicalSysScan { table: rw_materialized_views, columns: [rw_materialized_views.id, rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner, rw_materialized_views.definition, rw_materialized_views.append_only, rw_materialized_views.acl, rw_materialized_views.initialized_at, rw_materialized_views.created_at, rw_materialized_views.initialized_at_cluster_version, rw_materialized_views.created_at_cluster_version] }
-        │       └─LogicalProject { exprs: [rw_views.id, rw_views.name, 'view':Varchar, rw_views.schema_id, rw_views.owner, rw_views.definition, rw_views.acl] }
-        │         └─LogicalSysScan { table: rw_views, columns: [rw_views.id, rw_views.name, rw_views.schema_id, rw_views.owner, rw_views.definition, rw_views.acl] }
-        └─LogicalShare { id: 20 }
+    LogicalProject { exprs: [rw_schemas.name, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr1, PgGetUserbyid(pg_class.relowner) as $expr2] }
+    └─LogicalFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) AND PgTableIsVisible(pg_class.oid) }
+      └─LogicalJoin { type: LeftOuter, on: (rw_schemas.id = pg_class.relnamespace), output: all }
+        ├─LogicalSysScan { table: pg_class, output_columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relpersistence, pg_class.relkind, pg_class.relpages, pg_class.relam, pg_class.reltablespace, pg_class.reloptions, pg_class.relispartition, pg_class.relpartbound] }
+        └─LogicalShare { id: 2 }
           └─LogicalProject { exprs: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
-            └─LogicalSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
+            └─LogicalSysScan { table: rw_schemas, output_columns: [rw_schemas.id, rw_schemas.name, rw_schemas.owner, rw_schemas.acl] }
   batch_plan: |-
-    BatchExchange { order: [rw_schemas.name ASC, rw_tables.name ASC], dist: Single }
-    └─BatchProject { exprs: [rw_schemas.name, rw_tables.name, Case(($expr1 = 'r':Varchar), 'table':Varchar, ($expr1 = 'v':Varchar), 'view':Varchar, ($expr1 = 'm':Varchar), 'materialized view':Varchar, ($expr1 = 'i':Varchar), 'index':Varchar, ($expr1 = 'S':Varchar), 'sequence':Varchar, ($expr1 = 's':Varchar), 'special':Varchar, ($expr1 = 't':Varchar), 'TOAST table':Varchar, ($expr1 = 'f':Varchar), 'foreign table':Varchar, ($expr1 = 'p':Varchar), 'partitioned table':Varchar, ($expr1 = 'I':Varchar), 'partitioned index':Varchar) as $expr2, PgGetUserbyid(rw_tables.owner) as $expr3] }
-      └─BatchProject { exprs: [rw_tables.name, rw_tables.owner, Case(('table':Varchar = 'table':Varchar), 'r':Varchar, ('table':Varchar = 'system table':Varchar), 'r':Varchar, ('table':Varchar = 'index':Varchar), 'i':Varchar, ('table':Varchar = 'view':Varchar), 'v':Varchar, ('table':Varchar = 'materialized view':Varchar), 'm':Varchar) as $expr1, rw_schemas.name] }
-        └─BatchSort { order: [rw_schemas.name ASC, rw_tables.name ASC] }
-          └─BatchHashJoin { type: Inner, predicate: rw_tables.schema_id = rw_schemas.id, output: all }
-            ├─BatchExchange { order: [], dist: HashShard(rw_tables.schema_id) }
-            │ └─BatchUnion { all: true }
-            │   ├─BatchProject { exprs: [rw_tables.name, 'table':Varchar, rw_tables.schema_id, rw_tables.owner] }
-            │   │ └─BatchScan { table: rw_tables, columns: [rw_tables.name, rw_tables.schema_id, rw_tables.owner], distribution: Single }
-            │   ├─BatchProject { exprs: [rw_system_tables.name, 'system table':Varchar, rw_system_tables.schema_id, rw_system_tables.owner] }
-            │   │ └─BatchScan { table: rw_system_tables, columns: [rw_system_tables.name, rw_system_tables.schema_id, rw_system_tables.owner], distribution: Single }
-            │   ├─BatchProject { exprs: [rw_sources.name, 'source':Varchar, rw_sources.schema_id, rw_sources.owner] }
-            │   │ └─BatchFilter { predicate: null:Boolean }
-            │   │   └─BatchScan { table: rw_sources, columns: [rw_sources.name, rw_sources.schema_id, rw_sources.owner], distribution: Single }
-            │   ├─BatchProject { exprs: [rw_indexes.name, 'index':Varchar, rw_indexes.schema_id, rw_indexes.owner] }
-            │   │ └─BatchValues { rows: [] }
-            │   ├─BatchProject { exprs: [rw_sinks.name, 'sink':Varchar, rw_sinks.schema_id, rw_sinks.owner] }
-            │   │ └─BatchFilter { predicate: null:Boolean }
-            │   │   └─BatchScan { table: rw_sinks, columns: [rw_sinks.name, rw_sinks.schema_id, rw_sinks.owner], distribution: Single }
-            │   ├─BatchProject { exprs: [rw_subscriptions.name, 'subscription':Varchar, rw_subscriptions.schema_id, rw_subscriptions.owner] }
-            │   │ └─BatchFilter { predicate: null:Boolean }
-            │   │   └─BatchScan { table: rw_subscriptions, columns: [rw_subscriptions.name, rw_subscriptions.schema_id, rw_subscriptions.owner], distribution: Single }
-            │   ├─BatchProject { exprs: [rw_materialized_views.name, 'materialized view':Varchar, rw_materialized_views.schema_id, rw_materialized_views.owner] }
-            │   │ └─BatchScan { table: rw_materialized_views, columns: [rw_materialized_views.name, rw_materialized_views.schema_id, rw_materialized_views.owner], distribution: Single }
-            │   └─BatchProject { exprs: [rw_views.name, 'view':Varchar, rw_views.schema_id, rw_views.owner] }
-            │     └─BatchScan { table: rw_views, columns: [rw_views.name, rw_views.schema_id, rw_views.owner], distribution: Single }
-            └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
-              └─BatchFilter { predicate: (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
-                └─BatchScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+    BatchExchange { order: [rw_schemas.name ASC, pg_class.relname ASC], dist: Single }
+    └─BatchProject { exprs: [rw_schemas.name, pg_class.relname, Case((pg_class.relkind = 'r':Varchar), 'table':Varchar, (pg_class.relkind = 'v':Varchar), 'view':Varchar, (pg_class.relkind = 'm':Varchar), 'materialized view':Varchar, (pg_class.relkind = 'i':Varchar), 'index':Varchar, (pg_class.relkind = 'S':Varchar), 'sequence':Varchar, (pg_class.relkind = 's':Varchar), 'special':Varchar, (pg_class.relkind = 't':Varchar), 'TOAST table':Varchar, (pg_class.relkind = 'f':Varchar), 'foreign table':Varchar, (pg_class.relkind = 'p':Varchar), 'partitioned table':Varchar, (pg_class.relkind = 'I':Varchar), 'partitioned index':Varchar) as $expr1, PgGetUserbyid(pg_class.relowner) as $expr2] }
+      └─BatchSort { order: [rw_schemas.name ASC, pg_class.relname ASC] }
+        └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.relname, pg_class.relowner, pg_class.relkind, rw_schemas.name] }
+          ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+          │ └─BatchFilter { predicate: In(pg_class.relkind, 'r':Varchar, 'p':Varchar, 'v':Varchar, 'm':Varchar, 'S':Varchar, 'f':Varchar, '':Varchar) AND PgTableIsVisible(pg_class.oid) }
+          │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace, pg_class.relowner, pg_class.relkind], distribution: Single }
+          └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+            └─BatchFilter { predicate: (rw_schemas.name <> 'pg_catalog':Varchar) AND Not(RegexpEq(rw_schemas.name, '^pg_toast':Varchar)) AND (rw_schemas.name <> 'information_schema':Varchar) }
+              └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
 - sql: |
     create table auction (date_time date);
     select * from hop( auction, auction.date_time, INTERVAL '1', INTERVAL '3600' ) AS hop_1
@@ -294,7 +238,7 @@
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
       ├─LogicalHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: all }
       │ └─LogicalFilter { predicate: IsNotNull(auction.date_time) }
-      │   └─LogicalScan { table: auction, columns: [auction.date_time, auction._row_id] }
+      │   └─LogicalScan { table: auction, columns: [auction.date_time, auction._row_id, auction._rw_timestamp] }
       └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr2] }
         └─LogicalAgg { group_key: [$expr1], aggs: [] }
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
@@ -346,7 +290,7 @@
   logical_plan: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: t, columns: [t.v, t._row_id] }
+      ├─LogicalScan { table: t, columns: [t.v, t._row_id, t._rw_timestamp] }
       └─LogicalProject { exprs: [1:Int32] }
         └─LogicalFilter { predicate: (CorrelatedInputRef { index: 0, correlated_id: 1 } > 1:Int32) }
           └─LogicalAgg { aggs: [] }
@@ -365,14 +309,14 @@
   logical_plan: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id] }
+      ├─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id, a._rw_timestamp] }
       └─LogicalProject { exprs: [1:Int32] }
         └─LogicalApply { type: LeftSemi, on: true, correlated_id: 2 }
           ├─LogicalAgg { aggs: [] }
           │ └─LogicalProject { exprs: [] }
-          │   └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+          │   └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id, b._rw_timestamp] }
           └─LogicalProject { exprs: [CorrelatedInputRef { index: 0, correlated_id: 1 } as $expr1] }
-            └─LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id] }
+            └─LogicalScan { table: c, columns: [c.c1, c.c2, c._row_id, c._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a.a1, a.a1), output: [] }
@@ -381,8 +325,7 @@
         ├─LogicalJoin { type: Inner, on: true, output: all }
         │ ├─LogicalAgg { group_key: [a.a1], aggs: [] }
         │ │ └─LogicalScan { table: a, columns: [a.a1] }
-        │ └─LogicalAgg { aggs: [] }
-        │   └─LogicalScan { table: b, columns: [] }
+        │ └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
         └─LogicalJoin { type: Inner, on: true, output: all }
           ├─LogicalAgg { group_key: [a.a1], aggs: [] }
           │ └─LogicalScan { table: a, columns: [a.a1] }
@@ -395,19 +338,19 @@
     LogicalProject { exprs: [a.a1, a.a2] }
     └─LogicalFilter { predicate: (a.a1 = min(b.b1)) }
       └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-        ├─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id] }
+        ├─LogicalScan { table: a, columns: [a.a1, a.a2, a._row_id, a._rw_timestamp] }
         └─LogicalProject { exprs: [min(b.b1)] }
           └─LogicalAgg { aggs: [min(b.b1)] }
             └─LogicalProject { exprs: [b.b1] }
               └─LogicalFilter { predicate: (b.b2 = min(b.b1)) }
                 └─LogicalApply { type: LeftOuter, on: true, correlated_id: 2, max_one_row: true }
-                  ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+                  ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id, b._rw_timestamp] }
                   └─LogicalProject { exprs: [min(b.b1)] }
                     └─LogicalAgg { aggs: [min(b.b1)] }
                       └─LogicalProject { exprs: [b.b1] }
                         └─LogicalProject { exprs: [b.b1] }
                           └─LogicalFilter { predicate: (b.b1 = CorrelatedInputRef { index: 0, correlated_id: 1 }) }
-                            └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+                            └─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id, b._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: IsNotDistinctFrom(a.a1, a.a1) AND (a.a1 = min(b.b1)), output: [a.a1, a.a2] }
     ├─LogicalScan { table: a, columns: [a.a1, a.a2] }
@@ -457,12 +400,12 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.a, count] }
     └─LogicalApply { type: LeftOuter, on: true, correlated_id: 1, max_one_row: true }
-      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [count] }
         └─LogicalAgg { aggs: [count] }
           └─LogicalProject { exprs: [] }
             └─LogicalFilter { predicate: (t1.a <> CorrelatedInputRef { index: 1, correlated_id: 1 }) }
-              └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id] }
+              └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1._row_id, t1._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: LeftOuter, on: IsNotDistinctFrom(t1.b, t1.b), output: [t1.a, count(1:Int32)] }
     ├─LogicalScan { table: t1, columns: [t1.a, t1.b] }
@@ -486,21 +429,18 @@
     └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: [] }
       ├─LogicalShare { id: 2 }
       │ └─LogicalProject { exprs: [a1] }
-      │   └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
+      │   └─LogicalSource { source: a, is_shared: false, columns: [a1, a2, _row_id] }
       └─LogicalJoin { type: LeftSemi, on: IsNotDistinctFrom(a1, a1), output: all }
-        ├─LogicalJoin { type: Inner, on: true, output: all }
-        │ ├─LogicalAgg { group_key: [a1], aggs: [] }
-        │ │ └─LogicalShare { id: 2 }
-        │ │   └─LogicalProject { exprs: [a1] }
-        │ │     └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
-        │ └─LogicalAgg { aggs: [] }
-        │   └─LogicalSource { source: b, columns: [b1, b2, _row_id] }
+        ├─LogicalAgg { group_key: [a1], aggs: [] }
+        │ └─LogicalShare { id: 2 }
+        │   └─LogicalProject { exprs: [a1] }
+        │     └─LogicalSource { source: a, is_shared: false, columns: [a1, a2, _row_id] }
         └─LogicalJoin { type: Inner, on: true, output: [a1] }
           ├─LogicalAgg { group_key: [a1], aggs: [] }
           │ └─LogicalShare { id: 2 }
           │   └─LogicalProject { exprs: [a1] }
-          │     └─LogicalSource { source: a, columns: [a1, a2, _row_id] }
-          └─LogicalSource { source: c, columns: [c1, c2, _row_id] }
+          │     └─LogicalSource { source: a, is_shared: false, columns: [a1, a2, _row_id] }
+          └─LogicalSource { source: c, is_shared: false, columns: [c1, c2, _row_id] }
 - name: test subquery in table function
   sql: |
     create table t(x int[], y int[], k int primary key);
@@ -624,37 +564,36 @@
       └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number, integers._row_id, integers.i] }
         ├─StreamExchange { dist: HashShard(integers.i) }
         │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
-        └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-          └─StreamProject { exprs: [integers.i, row_number, integers._row_id] }
-            └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─StreamExchange { dist: HashShard(integers.i) }
-                └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
-                  └─StreamFilter { predicate: IsNotNull(integers.i) }
-                    └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+        └─StreamProject { exprs: [integers.i, row_number] }
+          └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+            └─StreamProject { exprs: [integers.i, row_number, integers._row_id] }
+              └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+                └─StreamExchange { dist: HashShard(integers.i) }
+                  └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
+                    └─StreamFilter { predicate: IsNotNull(integers.i) }
+                      └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
 - name: test over window subquery 2 (with nested loop join so cannot be transformed into a stream plan)
   sql: |
     CREATE TABLE integers(i INTEGER);
     SELECT i1.i, (SELECT row_number() OVER (ORDER BY i) FROM integers WHERE i1.i=i limit 1) col FROM integers i1, integers i2 ORDER BY i1.i;
   batch_plan: |-
-    BatchProject { exprs: [integers.i, row_number] }
-    └─BatchExchange { order: [integers.i ASC], dist: Single }
-      └─BatchProject { exprs: [integers.i, row_number, integers.i] }
-        └─BatchSort { order: [integers.i ASC] }
-          └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number] }
-            ├─BatchExchange { order: [], dist: HashShard(integers.i) }
-            │ └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
-            │   ├─BatchExchange { order: [], dist: Single }
-            │   │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
-            │   └─BatchExchange { order: [], dist: Single }
-            │     └─BatchScan { table: integers, columns: [], distribution: SomeShard }
-            └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-              └─BatchProject { exprs: [integers.i, row_number] }
-                └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-                  └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
-                    └─BatchSort { order: [integers.i ASC, integers.i ASC] }
-                      └─BatchProject { exprs: [integers.i, integers.i] }
-                        └─BatchFilter { predicate: IsNotNull(integers.i) }
-                          └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+    BatchExchange { order: [integers.i ASC], dist: Single }
+    └─BatchSort { order: [integers.i ASC] }
+      └─BatchHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number] }
+        ├─BatchExchange { order: [], dist: HashShard(integers.i) }
+        │ └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
+        │   ├─BatchExchange { order: [], dist: Single }
+        │   │ └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
+        │   └─BatchExchange { order: [], dist: Single }
+        │     └─BatchScan { table: integers, columns: [], distribution: SomeShard }
+        └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+          └─BatchProject { exprs: [integers.i, row_number] }
+            └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
+                └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+                  └─BatchProject { exprs: [integers.i, integers.i] }
+                    └─BatchFilter { predicate: IsNotNull(integers.i) }
+                      └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
   stream_error: |-
     Not supported: streaming nested-loop join
     HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
@@ -683,13 +622,14 @@
       └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, sum, integers._row_id, integers.i] }
         ├─StreamExchange { dist: HashShard(integers.i) }
         │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
-        └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-          └─StreamProject { exprs: [integers.i, sum, integers._row_id] }
-            └─StreamOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─StreamExchange { dist: HashShard(integers.i) }
-                └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
-                  └─StreamFilter { predicate: IsNotNull(integers.i) }
-                    └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+        └─StreamProject { exprs: [integers.i, sum] }
+          └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+            └─StreamProject { exprs: [integers.i, sum, integers._row_id] }
+              └─StreamOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+                └─StreamExchange { dist: HashShard(integers.i) }
+                  └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
+                    └─StreamFilter { predicate: IsNotNull(integers.i) }
+                      └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
 - name: test over window subquery 4  (with nested loop join so cannot be transformed into a stream plan)
   sql: |
     CREATE TABLE integers(i INTEGER);
@@ -842,9 +782,9 @@
     StreamMaterialize { columns: [col, k, ts, window_start, window_end], stream_key: [col, window_start, window_end], pk_columns: [col, window_start, window_end], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(1:Int32, window_start, window_end) }
       └─StreamHashJoin { type: Inner, predicate: 1:Int32 = t1.k, output: all }
-        ├─StreamAppendOnlyDedup { dedup_cols: [1:Int32] }
-        │ └─StreamExchange { dist: HashShard(1:Int32) }
-        │   └─StreamProject { exprs: [1:Int32] }
+        ├─StreamProject { exprs: [1:Int32] }
+        │ └─StreamAppendOnlyDedup { dedup_cols: [1:Int32] }
+        │   └─StreamExchange { dist: HashShard(1:Int32) }
         │     └─StreamValues { rows: [[1:Int32, 0:Int64], [2:Int32, 1:Int64]] }
         └─StreamExchange { dist: HashShard(t1.k) }
           └─StreamHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }
@@ -860,9 +800,7 @@
   batch_plan: |-
     BatchProject { exprs: [GenerateSeries(1:Int32, $0)] }
     └─BatchProjectSet { select_list: [GenerateSeries(1:Int32, $0)] }
-      └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-        ├─BatchValues { rows: [[]] }
-        └─BatchValues { rows: [[1:Int32]] }
+      └─BatchValues { rows: [[1:Int32]] }
 - name: array subquery
   sql: |
     select Array(select 1 union select 2);
@@ -879,3 +817,224 @@
   sql: |
     SELECT anon_1.f1 AS "IntegerRange(0, -2, 1)" FROM unnest(CASE WHEN (nullif(1, 0) IS NOT NULL AND sign(1) = sign( -2 - 0)) THEN array_remove(array((SELECT generate_series(0,  -2, 1) AS generate_series_1)),  -2) ELSE CAST(ARRAY[] AS SMALLINT[]) END) AS anon_1(f1);
   binder_error: 'Invalid input syntax: Only table-in-out functions can have subquery parameters. The table function has subquery parameters is unnest'
+- name: sys subquery
+  sql: |
+    SELECT
+    ARRAY (
+    SELECT
+    (SELECT CAST(attname AS TEXT)
+    FROM pg_attribute
+    WHERE attrelid = con1.conrelid
+    AND attnum = con1.conkey[i])
+    FROM generate_series(array_lower(con1.conkey, 1), array_upper(con1.conkey, 1)) AS i
+    ) AS "source_keys",
+    (SELECT nspname
+    FROM pg_namespace AS ns2
+    JOIN pg_class AS cl2 ON ns2.oid = cl2.relnamespace
+    WHERE cl2.oid = con1.confrelid) AS "target_schema",
+    (SELECT relname
+    FROM pg_class
+    WHERE oid = con1.confrelid) AS "target_table",
+    ARRAY (
+    SELECT
+    (SELECT CAST(attname AS TEXT)
+    FROM pg_attribute
+    WHERE attrelid = con1.confrelid
+    AND attnum = con1.confkey[i])
+    FROM generate_series(array_lower(con1.confkey, 1), array_upper(con1.confkey, 1)) AS i
+    ) AS "target_keys"
+    FROM pg_class AS cl
+    JOIN pg_namespace AS ns ON cl.relnamespace = ns.oid
+    JOIN pg_constraint AS con1 ON con1.conrelid = cl.oid
+    WHERE ns.nspname = 'public'
+    AND cl.relname = 'carriers'
+    AND con1.contype = 'f'
+    ORDER BY con1.conname;
+  batch_plan: |-
+    BatchProject { exprs: [$expr3, rw_schemas.name, pg_class.relname, $expr6] }
+    └─BatchExchange { order: [pg_constraint.conname ASC], dist: Single }
+      └─BatchSort { order: [pg_constraint.conname ASC] }
+        └─BatchHashJoin { type: LeftOuter, predicate: pg_constraint.conrelid IS NOT DISTINCT FROM pg_constraint.conrelid AND pg_constraint.confrelid IS NOT DISTINCT FROM pg_constraint.confrelid AND pg_constraint.conkey IS NOT DISTINCT FROM pg_constraint.conkey AND pg_constraint.confkey IS NOT DISTINCT FROM pg_constraint.confkey, output: [$expr3, rw_schemas.name, pg_class.relname, $expr6, pg_constraint.conname] }
+          ├─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+          │ └─BatchHashJoin { type: Inner, predicate: pg_class.oid = pg_constraint.conrelid, output: [pg_constraint.conname, pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey] }
+          │   ├─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+          │   │ └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.oid] }
+          │   │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+          │   │   │ └─BatchFilter { predicate: (pg_class.relname = 'carriers':Varchar) }
+          │   │   │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+          │   │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+          │   │     └─BatchFilter { predicate: (rw_schemas.name = 'public':Varchar) }
+          │   │       └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+          │   └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid) }
+          │     └─BatchFilter { predicate: (pg_constraint.contype = 'f':Varchar) }
+          │       └─BatchSysScan { table: pg_constraint, columns: [pg_constraint.conname, pg_constraint.contype, pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], distribution: Single }
+          └─BatchGroupTopN { order: [pg_constraint.conrelid ASC], limit: 1, offset: 0, group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey] }
+            └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+              └─BatchHashJoin { type: FullOuter, predicate: pg_constraint.conrelid IS NOT DISTINCT FROM pg_constraint.conrelid AND pg_constraint.confrelid IS NOT DISTINCT FROM pg_constraint.confrelid AND pg_constraint.conkey IS NOT DISTINCT FROM pg_constraint.conkey AND pg_constraint.confkey IS NOT DISTINCT FROM pg_constraint.confkey, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, $expr3, rw_schemas.name, pg_class.relname, $expr6] }
+                ├─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                │ └─BatchHashJoin { type: FullOuter, predicate: pg_constraint.conrelid IS NOT DISTINCT FROM pg_constraint.conrelid AND pg_constraint.confrelid IS NOT DISTINCT FROM pg_constraint.confrelid AND pg_constraint.conkey IS NOT DISTINCT FROM pg_constraint.conkey AND pg_constraint.confkey IS NOT DISTINCT FROM pg_constraint.confkey, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, $expr3, rw_schemas.name, pg_class.relname] }
+                │   ├─BatchExchange { order: [], dist: HashShard(pg_constraint.confrelid) }
+                │   │ └─BatchHashJoin { type: FullOuter, predicate: pg_constraint.conrelid IS NOT DISTINCT FROM pg_constraint.conrelid AND pg_constraint.confrelid IS NOT DISTINCT FROM pg_constraint.confrelid AND pg_constraint.conkey IS NOT DISTINCT FROM pg_constraint.conkey AND pg_constraint.confkey IS NOT DISTINCT FROM pg_constraint.confkey, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, $expr3, rw_schemas.name] }
+                │   │   ├─BatchProject { exprs: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, Coalesce(array_agg(rw_columns.name) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr3] }
+                │   │   │ └─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], aggs: [array_agg(rw_columns.name) filter(IsNotNull(1:Int32))] }
+                │   │   │   └─BatchHashJoin { type: LeftOuter, predicate: pg_constraint.conrelid IS NOT DISTINCT FROM pg_constraint.conrelid AND pg_constraint.confrelid IS NOT DISTINCT FROM pg_constraint.confrelid AND pg_constraint.conkey IS NOT DISTINCT FROM pg_constraint.conkey AND pg_constraint.confkey IS NOT DISTINCT FROM pg_constraint.confkey, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, rw_columns.name, 1:Int32] }
+                │   │   │     ├─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], aggs: [] }
+                │   │   │     │ └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                │   │   │     │   └─BatchHashJoin { type: Inner, predicate: pg_class.oid = pg_constraint.conrelid, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey] }
+                │   │   │     │     ├─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+                │   │   │     │     │ └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.oid] }
+                │   │   │     │     │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+                │   │   │     │     │   │ └─BatchFilter { predicate: (pg_class.relname = 'carriers':Varchar) }
+                │   │   │     │     │   │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+                │   │   │     │     │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+                │   │   │     │     │     └─BatchFilter { predicate: (rw_schemas.name = 'public':Varchar) }
+                │   │   │     │     │       └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+                │   │   │     │     └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid) }
+                │   │   │     │       └─BatchFilter { predicate: (pg_constraint.contype = 'f':Varchar) }
+                │   │   │     │         └─BatchSysScan { table: pg_constraint, columns: [pg_constraint.contype, pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], distribution: Single }
+                │   │   │     └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                │   │   │       └─BatchProject { exprs: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, rw_columns.name, 1:Int32] }
+                │   │   │         └─BatchHashJoin { type: LeftOuter, predicate: GenerateSeries(1:Int32, ArrayLength($2, 1:Int32)) IS NOT DISTINCT FROM GenerateSeries(1:Int32, ArrayLength($2, 1:Int32)) AND pg_constraint.conrelid IS NOT DISTINCT FROM pg_constraint.conrelid AND pg_constraint.confrelid IS NOT DISTINCT FROM pg_constraint.confrelid AND pg_constraint.conkey IS NOT DISTINCT FROM pg_constraint.conkey AND pg_constraint.confkey IS NOT DISTINCT FROM pg_constraint.confkey, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, rw_columns.name] }
+                │   │   │           ├─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($2, 1:Int32))) }
+                │   │   │           │ └─BatchProjectSet { select_list: [$0, $1, $2, $3, GenerateSeries(1:Int32, ArrayLength($2, 1:Int32))] }
+                │   │   │           │   └─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], aggs: [] }
+                │   │   │           │     └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                │   │   │           │       └─BatchHashJoin { type: Inner, predicate: pg_class.oid = pg_constraint.conrelid, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey] }
+                │   │   │           │         ├─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+                │   │   │           │         │ └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.oid] }
+                │   │   │           │         │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+                │   │   │           │         │   │ └─BatchFilter { predicate: (pg_class.relname = 'carriers':Varchar) }
+                │   │   │           │         │   │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+                │   │   │           │         │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+                │   │   │           │         │     └─BatchFilter { predicate: (rw_schemas.name = 'public':Varchar) }
+                │   │   │           │         │       └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+                │   │   │           │         └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid) }
+                │   │   │           │           └─BatchFilter { predicate: (pg_constraint.contype = 'f':Varchar) }
+                │   │   │           │             └─BatchSysScan { table: pg_constraint, columns: [pg_constraint.contype, pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], distribution: Single }
+                │   │   │           └─BatchGroupTopN { order: [GenerateSeries(1:Int32, ArrayLength($2, 1:Int32)) ASC], limit: 1, offset: 0, group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($2, 1:Int32))] }
+                │   │   │             └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($2, 1:Int32))) }
+                │   │   │               └─BatchHashJoin { type: Inner, predicate: $expr1 = $expr2 AND pg_constraint.conrelid = rw_columns.relation_id, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($2, 1:Int32)), rw_columns.name] }
+                │   │   │                 ├─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, $expr1) }
+                │   │   │                 │ └─BatchProject { exprs: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($2, 1:Int32)), ArrayAccess(pg_constraint.conkey, GenerateSeries(1:Int32, ArrayLength($2, 1:Int32))) as $expr1] }
+                │   │   │                 │   └─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($2, 1:Int32))], aggs: [] }
+                │   │   │                 │     └─BatchProjectSet { select_list: [$0, $1, $2, $3, GenerateSeries(1:Int32, ArrayLength($2, 1:Int32))] }
+                │   │   │                 │       └─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], aggs: [] }
+                │   │   │                 │         └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                │   │   │                 │           └─BatchHashJoin { type: Inner, predicate: pg_class.oid = pg_constraint.conrelid, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey] }
+                │   │   │                 │             ├─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+                │   │   │                 │             │ └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.oid] }
+                │   │   │                 │             │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+                │   │   │                 │             │   │ └─BatchFilter { predicate: (pg_class.relname = 'carriers':Varchar) }
+                │   │   │                 │             │   │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+                │   │   │                 │             │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+                │   │   │                 │             │     └─BatchFilter { predicate: (rw_schemas.name = 'public':Varchar) }
+                │   │   │                 │             │       └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+                │   │   │                 │             └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid) }
+                │   │   │                 │               └─BatchFilter { predicate: (pg_constraint.contype = 'f':Varchar) }
+                │   │   │                 │                 └─BatchSysScan { table: pg_constraint, columns: [pg_constraint.contype, pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], distribution: Single }
+                │   │   │                 └─BatchExchange { order: [], dist: HashShard(rw_columns.relation_id, $expr2) }
+                │   │   │                   └─BatchProject { exprs: [rw_columns.relation_id, rw_columns.name, rw_columns.position::Int16 as $expr2] }
+                │   │   │                     └─BatchFilter { predicate: (rw_columns.is_hidden = false:Boolean) }
+                │   │   │                       └─BatchSysScan { table: rw_columns, columns: [rw_columns.relation_id, rw_columns.name, rw_columns.position, rw_columns.is_hidden], distribution: Single }
+                │   │   └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                │   │     └─BatchHashJoin { type: Inner, predicate: pg_class.oid = pg_constraint.confrelid, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, rw_schemas.name] }
+                │   │       ├─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+                │   │       │ └─BatchHashJoin { type: Inner, predicate: rw_schemas.id = pg_class.relnamespace, output: [rw_schemas.name, pg_class.oid] }
+                │   │       │   ├─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+                │   │       │   │ └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+                │   │       │   └─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+                │   │       │     └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relnamespace], distribution: Single }
+                │   │       └─BatchExchange { order: [], dist: HashShard(pg_constraint.confrelid) }
+                │   │         └─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], aggs: [] }
+                │   │           └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                │   │             └─BatchHashJoin { type: Inner, predicate: pg_class.oid = pg_constraint.conrelid, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey] }
+                │   │               ├─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+                │   │               │ └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.oid] }
+                │   │               │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+                │   │               │   │ └─BatchFilter { predicate: (pg_class.relname = 'carriers':Varchar) }
+                │   │               │   │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+                │   │               │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+                │   │               │     └─BatchFilter { predicate: (rw_schemas.name = 'public':Varchar) }
+                │   │               │       └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+                │   │               └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid) }
+                │   │                 └─BatchFilter { predicate: (pg_constraint.contype = 'f':Varchar) }
+                │   │                   └─BatchSysScan { table: pg_constraint, columns: [pg_constraint.contype, pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], distribution: Single }
+                │   └─BatchHashJoin { type: Inner, predicate: pg_constraint.confrelid = pg_class.oid, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, pg_class.relname] }
+                │     ├─BatchExchange { order: [], dist: HashShard(pg_constraint.confrelid) }
+                │     │ └─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], aggs: [] }
+                │     │   └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                │     │     └─BatchHashJoin { type: Inner, predicate: pg_class.oid = pg_constraint.conrelid, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey] }
+                │     │       ├─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+                │     │       │ └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.oid] }
+                │     │       │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+                │     │       │   │ └─BatchFilter { predicate: (pg_class.relname = 'carriers':Varchar) }
+                │     │       │   │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+                │     │       │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+                │     │       │     └─BatchFilter { predicate: (rw_schemas.name = 'public':Varchar) }
+                │     │       │       └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+                │     │       └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid) }
+                │     │         └─BatchFilter { predicate: (pg_constraint.contype = 'f':Varchar) }
+                │     │           └─BatchSysScan { table: pg_constraint, columns: [pg_constraint.contype, pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], distribution: Single }
+                │     └─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+                │       └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname], distribution: Single }
+                └─BatchProject { exprs: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, Coalesce(array_agg(rw_columns.name) filter(IsNotNull(1:Int32)), ARRAY[]:List(Varchar)) as $expr6] }
+                  └─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], aggs: [array_agg(rw_columns.name) filter(IsNotNull(1:Int32))] }
+                    └─BatchHashJoin { type: LeftOuter, predicate: pg_constraint.conrelid IS NOT DISTINCT FROM pg_constraint.conrelid AND pg_constraint.confrelid IS NOT DISTINCT FROM pg_constraint.confrelid AND pg_constraint.conkey IS NOT DISTINCT FROM pg_constraint.conkey AND pg_constraint.confkey IS NOT DISTINCT FROM pg_constraint.confkey, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, rw_columns.name, 1:Int32] }
+                      ├─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], aggs: [] }
+                      │ └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                      │   └─BatchHashJoin { type: Inner, predicate: pg_class.oid = pg_constraint.conrelid, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey] }
+                      │     ├─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+                      │     │ └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.oid] }
+                      │     │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+                      │     │   │ └─BatchFilter { predicate: (pg_class.relname = 'carriers':Varchar) }
+                      │     │   │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+                      │     │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+                      │     │     └─BatchFilter { predicate: (rw_schemas.name = 'public':Varchar) }
+                      │     │       └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+                      │     └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid) }
+                      │       └─BatchFilter { predicate: (pg_constraint.contype = 'f':Varchar) }
+                      │         └─BatchSysScan { table: pg_constraint, columns: [pg_constraint.contype, pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], distribution: Single }
+                      └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                        └─BatchProject { exprs: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, rw_columns.name, 1:Int32] }
+                          └─BatchHashJoin { type: LeftOuter, predicate: GenerateSeries(1:Int32, ArrayLength($3, 1:Int32)) IS NOT DISTINCT FROM GenerateSeries(1:Int32, ArrayLength($3, 1:Int32)) AND pg_constraint.conrelid IS NOT DISTINCT FROM pg_constraint.conrelid AND pg_constraint.confrelid IS NOT DISTINCT FROM pg_constraint.confrelid AND pg_constraint.conkey IS NOT DISTINCT FROM pg_constraint.conkey AND pg_constraint.confkey IS NOT DISTINCT FROM pg_constraint.confkey, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, rw_columns.name] }
+                            ├─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($3, 1:Int32))) }
+                            │ └─BatchProjectSet { select_list: [$0, $1, $2, $3, GenerateSeries(1:Int32, ArrayLength($3, 1:Int32))] }
+                            │   └─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], aggs: [] }
+                            │     └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                            │       └─BatchHashJoin { type: Inner, predicate: pg_class.oid = pg_constraint.conrelid, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey] }
+                            │         ├─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+                            │         │ └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.oid] }
+                            │         │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+                            │         │   │ └─BatchFilter { predicate: (pg_class.relname = 'carriers':Varchar) }
+                            │         │   │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+                            │         │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+                            │         │     └─BatchFilter { predicate: (rw_schemas.name = 'public':Varchar) }
+                            │         │       └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+                            │         └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid) }
+                            │           └─BatchFilter { predicate: (pg_constraint.contype = 'f':Varchar) }
+                            │             └─BatchSysScan { table: pg_constraint, columns: [pg_constraint.contype, pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], distribution: Single }
+                            └─BatchGroupTopN { order: [GenerateSeries(1:Int32, ArrayLength($3, 1:Int32)) ASC], limit: 1, offset: 0, group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($3, 1:Int32))] }
+                              └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($3, 1:Int32))) }
+                                └─BatchHashJoin { type: Inner, predicate: $expr4 = $expr5 AND pg_constraint.confrelid = rw_columns.relation_id, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($3, 1:Int32)), rw_columns.name] }
+                                  ├─BatchExchange { order: [], dist: HashShard(pg_constraint.confrelid, $expr4) }
+                                  │ └─BatchProject { exprs: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($3, 1:Int32)), ArrayAccess(pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($3, 1:Int32))) as $expr4] }
+                                  │   └─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey, GenerateSeries(1:Int32, ArrayLength($3, 1:Int32))], aggs: [] }
+                                  │     └─BatchProjectSet { select_list: [$0, $1, $2, $3, GenerateSeries(1:Int32, ArrayLength($3, 1:Int32))] }
+                                  │       └─BatchHashAgg { group_key: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], aggs: [] }
+                                  │         └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey) }
+                                  │           └─BatchHashJoin { type: Inner, predicate: pg_class.oid = pg_constraint.conrelid, output: [pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey] }
+                                  │             ├─BatchExchange { order: [], dist: HashShard(pg_class.oid) }
+                                  │             │ └─BatchHashJoin { type: Inner, predicate: pg_class.relnamespace = rw_schemas.id, output: [pg_class.oid] }
+                                  │             │   ├─BatchExchange { order: [], dist: HashShard(pg_class.relnamespace) }
+                                  │             │   │ └─BatchFilter { predicate: (pg_class.relname = 'carriers':Varchar) }
+                                  │             │   │   └─BatchSysScan { table: pg_class, columns: [pg_class.oid, pg_class.relname, pg_class.relnamespace], distribution: Single }
+                                  │             │   └─BatchExchange { order: [], dist: HashShard(rw_schemas.id) }
+                                  │             │     └─BatchFilter { predicate: (rw_schemas.name = 'public':Varchar) }
+                                  │             │       └─BatchSysScan { table: rw_schemas, columns: [rw_schemas.id, rw_schemas.name], distribution: Single }
+                                  │             └─BatchExchange { order: [], dist: HashShard(pg_constraint.conrelid) }
+                                  │               └─BatchFilter { predicate: (pg_constraint.contype = 'f':Varchar) }
+                                  │                 └─BatchSysScan { table: pg_constraint, columns: [pg_constraint.contype, pg_constraint.conrelid, pg_constraint.confrelid, pg_constraint.conkey, pg_constraint.confkey], distribution: Single }
+                                  └─BatchExchange { order: [], dist: HashShard(rw_columns.relation_id, $expr5) }
+                                    └─BatchProject { exprs: [rw_columns.relation_id, rw_columns.name, rw_columns.position::Int16 as $expr5] }
+                                      └─BatchFilter { predicate: (rw_columns.is_hidden = false:Boolean) }
+                                        └─BatchSysScan { table: rw_columns, columns: [rw_columns.relation_id, rw_columns.name, rw_columns.position, rw_columns.is_hidden], distribution: Single }

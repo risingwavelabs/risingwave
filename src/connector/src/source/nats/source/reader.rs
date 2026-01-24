@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::sync::Arc;
 
 use async_nats::jetstream::consumer;
 use async_trait::async_trait;
@@ -25,11 +27,15 @@ use crate::parser::ParserConfig;
 use crate::source::common::into_chunk_stream;
 use crate::source::nats::NatsProperties;
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId, SplitReader,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitReader,
 };
 
 pub struct NatsSplitReader {
     consumer: consumer::Consumer<consumer::pull::Config>,
+    /// Hold the client Arc to keep it alive. This allows the shared client cache to reuse
+    /// the connection while we're still using it.
+    #[expect(dead_code)]
+    client: Arc<async_nats::Client>,
     #[expect(dead_code)]
     properties: NatsProperties,
     parser_config: ParserConfig,
@@ -84,7 +90,7 @@ impl SplitReader for NatsSplitReader {
         };
         properties.set_config(&mut config);
 
-        let consumer = properties
+        let (consumer, client) = properties
             .common
             .build_consumer(
                 properties.stream.clone(),
@@ -92,11 +98,13 @@ impl SplitReader for NatsSplitReader {
                 split_id.to_string(),
                 start_position.clone(),
                 config,
+                None, // Let build_consumer get/create the shared client
             )
             .await?;
 
         Ok(Self {
             consumer,
+            client,
             properties,
             parser_config,
             source_ctx,
@@ -105,7 +113,7 @@ impl SplitReader for NatsSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self.into_data_stream(), parser_config, source_context)

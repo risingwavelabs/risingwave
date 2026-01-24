@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 use std::fmt::{Debug, Display, Formatter};
 use std::hash::Hash;
 use std::ops::Index;
@@ -25,26 +25,70 @@ use risingwave_pb::stream_plan::ActorMapping as ActorMappingProto;
 use super::bitmap::VnodeBitmapExt;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::hash::VirtualNode;
+pub use crate::id::ActorId;
+use crate::id::WorkerId;
 use crate::util::compress::compress_data;
 use crate::util::iter_util::ZipEqDebug;
 
-// TODO: find a better place for this.
-pub type ActorId = u32;
+#[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct ActorAlignmentId(u64);
+
+impl ActorAlignmentId {
+    pub fn worker_id(&self) -> WorkerId {
+        ((self.0 >> 32) as u32).into()
+    }
+
+    pub fn actor_idx(&self) -> u32 {
+        self.0 as u32
+    }
+
+    pub fn new(worker_id: WorkerId, actor_idx: usize) -> Self {
+        Self((worker_id.as_raw_id() as u64) << 32 | actor_idx as u64)
+    }
+
+    pub fn new_single(worker_id: WorkerId) -> Self {
+        Self::new(worker_id, 0)
+    }
+}
+
+impl From<ActorAlignmentId> for u64 {
+    fn from(id: ActorAlignmentId) -> Self {
+        id.0
+    }
+}
+
+impl From<u64> for ActorAlignmentId {
+    fn from(id: u64) -> Self {
+        Self(id)
+    }
+}
+
+impl Display for ActorAlignmentId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[{}/{}]", self.worker_id(), self.actor_idx()))
+    }
+}
+
+impl Debug for ActorAlignmentId {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[{}/{}]", self.worker_id(), self.actor_idx()))
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct WorkerSlotId(u64);
 
 impl WorkerSlotId {
-    pub fn worker_id(&self) -> u32 {
-        (self.0 >> 32) as u32
+    pub fn worker_id(&self) -> WorkerId {
+        WorkerId::new((self.0 >> 32) as u32)
     }
 
     pub fn slot_idx(&self) -> u32 {
         self.0 as u32
     }
 
-    pub fn new(worker_id: u32, slot_idx: usize) -> Self {
-        Self((worker_id as u64) << 32 | slot_idx as u64)
+    pub fn new(worker_id: WorkerId, slot_idx: usize) -> Self {
+        Self((worker_id.as_raw_id() as u64) << 32 | slot_idx as u64)
     }
 }
 
@@ -81,7 +125,7 @@ pub trait VnodeMappingItem {
     type Item: Copy + Ord + Hash + Debug;
 }
 
-/// Exapnded mapping from virtual nodes to items, essentially a vector of items and can be indexed
+/// Expanded mapping from virtual nodes to items, essentially a vector of items and can be indexed
 /// by virtual nodes.
 pub type ExpandedMapping<T> = Vec<<T as VnodeMappingItem>::Item>;
 
@@ -139,11 +183,12 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
         }
     }
 
-    /// Create a vnode mapping with the single item. Should only be used for singletons.
+    /// Create a vnode mapping with the single item and length of 1.
     ///
-    /// For backwards compatibility, [`VirtualNode::COUNT_FOR_COMPAT`] is used as the vnode count.
+    /// Should only be used for singletons. If you want a different vnode count, call
+    /// [`VnodeMapping::new_uniform`] with `std::iter::once(item)` and desired length.
     pub fn new_single(item: T::Item) -> Self {
-        Self::new_uniform(std::iter::once(item), VirtualNode::COUNT_FOR_COMPAT)
+        Self::new_uniform(std::iter::once(item), 1)
     }
 
     /// The length (or count) of the vnode in this mapping.
@@ -182,7 +227,7 @@ impl<T: VnodeMappingItem> VnodeMapping<T> {
                     .tuple_windows()
                     .map(|(a, b)| (b - a) as usize),
             )
-            .flat_map(|(item, c)| std::iter::repeat(item).take(c))
+            .flat_map(|(item, c)| std::iter::repeat_n(item, c))
     }
 
     /// Iterate over all vnode-item pairs in this mapping.
@@ -298,6 +343,12 @@ pub mod marker {
     impl VnodeMappingItem for WorkerSlot {
         type Item = WorkerSlotId;
     }
+
+    /// A marker type for items of [`ActorAlignmentId`].
+    pub struct ActorAlignment;
+    impl VnodeMappingItem for ActorAlignment {
+        type Item = ActorAlignmentId;
+    }
 }
 
 /// A mapping from [`VirtualNode`] to [`ActorId`].
@@ -310,9 +361,17 @@ pub type WorkerSlotMapping = VnodeMapping<marker::WorkerSlot>;
 /// An expanded mapping from [`VirtualNode`] to [`WorkerSlotId`].
 pub type ExpandedWorkerSlotMapping = ExpandedMapping<marker::WorkerSlot>;
 
+/// A mapping from [`VirtualNode`] to [`ActorAlignmentId`].
+pub type ActorAlignmentMapping = VnodeMapping<marker::ActorAlignment>;
+/// An expanded mapping from [`VirtualNode`] to [`ActorAlignmentId`].
+pub type ExpandedActorAlignment = ExpandedMapping<marker::ActorAlignment>;
+
 impl ActorMapping {
     /// Transform the actor mapping to the worker slot mapping. Note that the parameter is a mapping from actor to worker.
-    pub fn to_worker_slot(&self, actor_to_worker: &HashMap<ActorId, u32>) -> WorkerSlotMapping {
+    pub fn to_worker_slot(
+        &self,
+        actor_to_worker: &HashMap<ActorId, WorkerId>,
+    ) -> WorkerSlotMapping {
         let mut worker_actors = HashMap::new();
         for actor_id in self.iter_unique() {
             let worker_id = actor_to_worker
@@ -330,6 +389,35 @@ impl ActorMapping {
         for (worker, actors) in worker_actors {
             for (idx, &actor) in actors.iter().enumerate() {
                 actor_location.insert(actor, WorkerSlotId::new(worker, idx));
+            }
+        }
+
+        self.transform(&actor_location)
+    }
+
+    /// Transform the actor mapping to the actor alignment mapping. Note that the parameter is a mapping from actor to worker.
+    pub fn to_actor_alignment(
+        &self,
+        actor_to_worker: &HashMap<ActorId, WorkerId>,
+    ) -> ActorAlignmentMapping {
+        let mut worker_actors = HashMap::new();
+
+        for (idx, actor_id) in self.iter_unique().enumerate() {
+            let worker_id = actor_to_worker
+                .get(&actor_id)
+                .cloned()
+                .unwrap_or_else(|| panic!("location for actor {} not found", actor_id));
+
+            worker_actors
+                .entry(worker_id)
+                .or_insert(BTreeSet::new())
+                .insert((actor_id, idx));
+        }
+
+        let mut actor_location = HashMap::new();
+        for (worker, idxes) in worker_actors {
+            for (actor, idx) in idxes {
+                actor_location.insert(actor, ActorAlignmentId::new(worker, idx));
             }
         }
 
@@ -385,6 +473,30 @@ impl WorkerSlotMapping {
     }
 }
 
+impl ActorAlignmentMapping {
+    pub fn from_assignment(
+        assignment: BTreeMap<WorkerId, BTreeMap<usize, Vec<usize>>>,
+        vnode_size: usize,
+    ) -> Self {
+        let mut all_bitmaps = HashMap::new();
+
+        for (worker_id, actors) in &assignment {
+            for (actor_idx, vnodes) in actors {
+                let mut bitmap_builder = BitmapBuilder::zeroed(vnode_size);
+                vnodes
+                    .iter()
+                    .for_each(|vnode| bitmap_builder.set(*vnode, true));
+                all_bitmaps.insert(
+                    ActorAlignmentId::new(*worker_id, *actor_idx),
+                    bitmap_builder.finish(),
+                );
+            }
+        }
+
+        Self::from_bitmaps(&all_bitmaps)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::iter::repeat_with;
@@ -416,7 +528,7 @@ mod tests {
 
     fn randoms() -> impl Iterator<Item = TestMapping> {
         COUNTS.iter().map(|&count| {
-            let raw = repeat_with(|| rand::thread_rng().gen_range(0..count as u32))
+            let raw = repeat_with(|| rand::rng().random_range(0..count as u32))
                 .take(VirtualNode::COUNT_FOR_TEST)
                 .collect_vec();
             TestMapping::from_expanded(&raw)

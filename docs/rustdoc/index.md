@@ -12,8 +12,6 @@ Here are the rustdocs of the core crates in RisingWave. You can read them to und
 
 <!-- Not all crates are listed here. For example, binary crates and test crates are not included. -->
 
-There's also a [Dash](https://kapeli.com/dash) docset feed containing all crate docs including dependencies, which might be handy for developing RisingWave: [subscribe here](dash-feed://https%3A%2F%2Frisingwavelabs.github.io%2Frisingwave%2FRisingWave.xml)
-
 ### Core Components
 
 - **Frontend**
@@ -49,6 +47,5 @@ Common functionalities shared inside RisingWave.
 
 The crates under `src/utils` are several independent util crates which helps to simplify development. We plan to publish them to [crates.io](https://crates.io/) in future when they are more mature.
 
-- [local_stats_alloc](local_stats_alloc/index.html)
 - [memcomparable](memcomparable/index.html)
 - [pgwire](pgwire/index.html)

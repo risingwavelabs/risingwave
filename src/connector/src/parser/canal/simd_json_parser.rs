@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,15 +15,15 @@
 use anyhow::Context;
 use itertools::Itertools;
 use risingwave_common::bail;
-use simd_json::prelude::{MutableObject, ValueAsScalar, ValueObjectAccess};
 use simd_json::BorrowedValue;
+use simd_json::prelude::{MutableObject, ValueAsScalar, ValueObjectAccess};
 
 use crate::error::ConnectorResult;
 use crate::only_parse_payload;
 use crate::parser::canal::operators::*;
+use crate::parser::unified::ChangeEventOperation;
 use crate::parser::unified::json::{JsonAccess, JsonParseOptions};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
-use crate::parser::unified::ChangeEventOperation;
 use crate::parser::{
     ByteStreamSourceParser, JsonProperties, ParserFormat, SourceStreamChunkRowWriter,
 };
@@ -141,6 +141,7 @@ mod tests {
 
     use super::*;
     use crate::parser::SourceStreamChunkBuilder;
+    use crate::source::SourceCtrlOpts;
 
     #[tokio::test]
     async fn test_data_types() {
@@ -162,12 +163,15 @@ mod tests {
         )
         .unwrap();
 
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 1);
+        let mut builder = SourceStreamChunkBuilder::new(descs, SourceCtrlOpts::for_test());
 
-        let writer = builder.row_writer();
-        parser.parse_inner(payload.to_vec(), writer).await.unwrap();
+        parser
+            .parse_inner(payload.to_vec(), builder.row_writer())
+            .await
+            .unwrap();
 
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         let (op, row) = chunk.rows().next().unwrap();
         assert_eq!(op, Op::Insert);
         assert_eq!(row.datum_at(0).to_owned_datum(), Some(ScalarImpl::Int32(1)));
@@ -197,7 +201,7 @@ mod tests {
         );
         assert_eq!(
             row.datum_at(5).to_owned_datum(),
-            Some(ScalarImpl::Utf8(Box::from("Kathleen".to_string())))
+            Some(ScalarImpl::Utf8(Box::from("Kathleen".to_owned())))
         );
         assert_eq!(
             row.datum_at(6).to_owned_datum(),
@@ -208,7 +212,7 @@ mod tests {
         assert_eq!(
             row.datum_at(7).to_owned_datum(),
             Some(ScalarImpl::Jsonb(JsonbVal::from(Value::from(
-                "{\"a\": 1, \"b\": 2}".to_string()
+                "{\"a\": 1, \"b\": 2}".to_owned()
             ))))
         );
     }
@@ -233,12 +237,15 @@ mod tests {
         )
         .unwrap();
 
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
+        let mut builder = SourceStreamChunkBuilder::new(descs, SourceCtrlOpts::for_test());
 
-        let writer = builder.row_writer();
-        parser.parse_inner(payload.to_vec(), writer).await.unwrap();
+        parser
+            .parse_inner(payload.to_vec(), builder.row_writer())
+            .await
+            .unwrap();
 
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
 
         let mut rows = chunk.rows();
 
@@ -287,12 +294,15 @@ mod tests {
         )
         .unwrap();
 
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 2);
+        let mut builder = SourceStreamChunkBuilder::new(descs, SourceCtrlOpts::for_test());
 
-        let writer = builder.row_writer();
-        parser.parse_inner(payload.to_vec(), writer).await.unwrap();
+        parser
+            .parse_inner(payload.to_vec(), builder.row_writer())
+            .await
+            .unwrap();
 
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
 
         let mut rows = chunk.rows();
 

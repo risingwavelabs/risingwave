@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(async_closure)]
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(map_try_insert)]
 #![feature(negative_impls)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
-#![feature(extract_if)]
 #![feature(if_let_guard)]
-#![feature(let_chains)]
 #![feature(assert_matches)]
 #![feature(box_patterns)]
 #![feature(macro_metavar_expr)]
@@ -29,15 +26,17 @@
 #![feature(extend_one)]
 #![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(result_flattening)]
 #![feature(error_generic_member_access)]
 #![feature(iterator_try_collect)]
 #![feature(used_with_arg)]
-#![feature(entry_insert)]
+#![feature(try_trait_v2)]
+#![feature(never_type)]
 #![recursion_limit = "256"]
 
 #[cfg(test)]
 risingwave_expr_impl::enable!();
+#[cfg(test)]
+risingwave_batch_executors::enable!();
 
 #[macro_use]
 mod catalog;
@@ -47,7 +46,7 @@ use std::time::Duration;
 
 pub use catalog::TableCatalog;
 mod binder;
-pub use binder::{bind_data_type, Binder};
+pub use binder::{Binder, bind_data_type};
 pub mod expr;
 pub mod handler;
 pub use handler::PgResponseStream;
@@ -62,14 +61,22 @@ pub mod session;
 mod stream_fragmenter;
 use risingwave_common::config::{MetricLevel, OverrideConfig};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 pub use stream_fragmenter::build_graph;
 mod utils;
-pub use utils::{explain_stream_graph, WithOptions, WithOptionsSecResolved};
+pub use utils::{WithOptions, WithOptionsSecResolved, explain_stream_graph};
 pub(crate) mod error;
 mod meta_client;
+pub mod metrics_reader;
+pub use metrics_reader::MetricsReaderImpl;
+
+#[cfg(feature = "datafusion")]
+pub mod datafusion;
+
 pub mod test_utils;
 mod user;
+pub mod webhook;
 
 pub mod health_service;
 mod monitor;
@@ -127,7 +134,7 @@ pub struct FrontendOpts {
         long,
         alias = "health-check-listener-addr",
         env = "RW_HEALTH_CHECK_LISTENER_ADDR",
-        default_value = "127.0.0.1:6786"
+        default_value = "0.0.0.0:6786"
     )]
     pub frontend_rpc_listener_addr: String,
 
@@ -148,6 +155,11 @@ pub struct FrontendOpts {
     #[override_opts(path = server.metrics_level)]
     pub metrics_level: Option<MetricLevel>,
 
+    /// Enable heap profile dump when memory usage is high.
+    #[clap(long, hide = true, env = "RW_HEAP_PROFILING_DIR")]
+    #[override_opts(path = server.heap_profiling.dir)]
+    pub heap_profiling_dir: Option<String>,
+
     #[clap(long, hide = true, env = "ENABLE_BARRIER_READ")]
     #[override_opts(path = batch.enable_barrier_read)]
     pub enable_barrier_read: Option<bool>,
@@ -160,6 +172,33 @@ pub struct FrontendOpts {
         default_value = "./secrets"
     )]
     pub temp_secret_file_dir: String,
+
+    /// Total available memory for the frontend node in bytes. Used for batch computing.
+    #[clap(long, env = "RW_FRONTEND_TOTAL_MEMORY_BYTES", default_value_t = default_frontend_total_memory_bytes())]
+    pub frontend_total_memory_bytes: usize,
+
+    /// The address that the webhook service listens to.
+    /// Usually the localhost + desired port.
+    #[clap(long, env = "RW_WEBHOOK_LISTEN_ADDR", default_value = "0.0.0.0:4560")]
+    pub webhook_listen_addr: String,
+
+    /// Address of the serverless backfill controller.
+    /// Needed if frontend receives a query like
+    /// CREATE MATERIALIZED VIEW ... WITH ( `cloud.serverless_backfill_enabled=true` )
+    /// Feature disabled by default.
+    #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
+    pub serverless_backfill_controller_addr: String,
+
+    /// Prometheus endpoint URL for querying metrics.
+    /// Optional, used for querying Prometheus metrics from the frontend.
+    #[clap(long, env = "RW_PROMETHEUS_ENDPOINT")]
+    pub prometheus_endpoint: Option<String>,
+
+    /// The additional selector used when querying Prometheus.
+    ///
+    /// The format is same as `PromQL`. Example: `instance="foo",namespace="bar"`
+    #[clap(long, env = "RW_PROMETHEUS_SELECTOR")]
+    pub prometheus_selector: Option<String>,
 }
 
 impl risingwave_common::opts::Opts for FrontendOpts {
@@ -181,7 +220,8 @@ impl Default for FrontendOpts {
 use std::future::Future;
 use std::pin::Pin;
 
-use pgwire::pg_protocol::TlsConfig;
+use pgwire::memory_manager::MessageMemoryManager;
+use pgwire::pg_protocol::{ConnectionContext, TlsConfig};
 
 use crate::session::SESSION_MANAGER;
 
@@ -194,6 +234,7 @@ pub fn start(
     // slow compile in release mode.
     Box::pin(async move {
         let listen_addr = opts.listen_addr.clone();
+        let webhook_listen_addr = opts.webhook_listen_addr.parse().unwrap();
         let tcp_keepalive =
             TcpKeepalive::new().with_time(Duration::from_secs(opts.tcp_keepalive_idle_secs as _));
 
@@ -208,16 +249,31 @@ pub fn start(
                 .map(|s| s.to_lowercase())
                 .collect::<HashSet<_>>(),
         );
+        let frontend_config = &session_mgr.env().frontend_config();
+        let message_memory_manager = Arc::new(MessageMemoryManager::new(
+            frontend_config.max_total_query_size_bytes,
+            frontend_config.min_single_query_size_bytes,
+            frontend_config.max_single_query_size_bytes,
+        ));
 
+        let webhook_service = crate::webhook::WebhookService::new(webhook_listen_addr);
+        let _task = tokio::spawn(webhook_service.serve());
         pg_serve(
             &listen_addr,
             tcp_keepalive,
             session_mgr.clone(),
-            TlsConfig::new_default(),
-            Some(redact_sql_option_keywords),
+            ConnectionContext {
+                tls_config: TlsConfig::new_default(),
+                redact_sql_option_keywords: Some(redact_sql_option_keywords),
+                message_memory_manager,
+            },
             shutdown,
         )
         .await
         .unwrap()
     })
+}
+
+pub fn default_frontend_total_memory_bytes() -> usize {
+    system_memory_available_bytes()
 }

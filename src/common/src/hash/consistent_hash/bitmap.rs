@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use std::ops::RangeInclusive;
 use std::sync::{Arc, LazyLock};
 
 use crate::bitmap::{Bitmap, BitmapBuilder};
-use crate::hash::table_distribution::SINGLETON_VNODE;
 use crate::hash::VirtualNode;
+use crate::hash::table_distribution::SINGLETON_VNODE;
 
 /// An extension trait for `Bitmap` to support virtual node operations.
 #[easy_ext::ext(VnodeBitmapExt)]
@@ -36,7 +36,7 @@ impl Bitmap {
     /// the bitmap.
     pub fn vnode_ranges(&self) -> impl Iterator<Item = RangeInclusive<VirtualNode>> + '_ {
         self.high_ranges()
-            .map(|r| (VirtualNode::from_index(*r.start())..=VirtualNode::from_index(*r.end())))
+            .map(|r| VirtualNode::from_index(*r.start())..=VirtualNode::from_index(*r.end()))
     }
 
     /// Returns whether only the [`SINGLETON_VNODE`] is set in the bitmap.
@@ -45,16 +45,16 @@ impl Bitmap {
     }
 
     /// Get the reference to a vnode bitmap for singleton actor or table, i.e., with length
-    /// [`VirtualNode::COUNT_FOR_COMPAT`] and only the [`SINGLETON_VNODE`] set to 1.
+    /// 1 and the only [`SINGLETON_VNODE`] set to true.
     pub fn singleton() -> &'static Self {
         Self::singleton_arc()
     }
 
     /// Get the reference to a vnode bitmap for singleton actor or table, i.e., with length
-    /// [`VirtualNode::COUNT_FOR_COMPAT`] and only the [`SINGLETON_VNODE`] set to 1.
+    /// 1 and the only [`SINGLETON_VNODE`] set to true.
     pub fn singleton_arc() -> &'static Arc<Self> {
         static SINGLETON: LazyLock<Arc<Bitmap>> = LazyLock::new(|| {
-            let mut builder = BitmapBuilder::zeroed(VirtualNode::COUNT_FOR_COMPAT);
+            let mut builder = BitmapBuilder::zeroed(1);
             builder.set(SINGLETON_VNODE.to_index(), true);
             builder.finish().into()
         });

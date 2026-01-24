@@ -67,7 +67,7 @@ echo "Commit: $COMMIT"
 echo "Branch: $BRANCH"
 echo "Date: $END_DATE"
 
-./qa ctl -I 52.207.243.214:8081 execution create-micro-benchmark-executions \
+./qa ctl -I qa-infra.risingwave-cloud.xyz:8081 execution create-micro-benchmark-executions \
   --exec-url "${BUILDKITE_BUILD_URL}" \
   --branch "$BRANCH" \
   --tag latest \

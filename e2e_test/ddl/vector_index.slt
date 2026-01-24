@@ -1,0 +1,62 @@
+statement ok
+create table non_append_only_table (id int primary key, name string, embedding vector(3));
+
+statement error Invalid input syntax: "non_append_only_table" is not append-only but vector index must be append-only
+create index i on non_append_only_table using flat (embedding) with (distance_type = 'inner_product');
+
+statement ok
+drop table non_append_only_table;
+
+statement ok
+create table items (id int primary key, name string, embedding vector(3)) append only;
+
+statement ok
+insert into items values (1, 'name1', '[1,2,3]'), (2, 'name2', '[4,5,6]'), (3, 'name3', '[7,8,9]');
+
+statement ok
+flush;
+
+statement error Invalid input syntax: vector index cannot specify order
+create index i on items using flat (embedding desc) with (distance_type = 'inner_product');
+
+statement error Invalid input syntax: vector index cannot specify order
+create index i on items using flat (embedding asc nulls last) with (distance_type = 'inner_product');
+
+statement error Invalid input syntax: vector index must be defined on exactly 1 column, but got 2
+create index i on items using flat (embedding, name) with (distance_type = 'inner_product');
+
+statement error Invalid input syntax: vector index must be defined on column of Vector type, but got Varchar
+create index i on items using flat (name) with (distance_type = 'inner_product');
+
+statement error Invalid input syntax: invalid index method unsupported
+create index i on items using unsupported (name) with (distance_type = 'inner_product');
+
+statement error Invalid input syntax: unsupported vector index distance type: invalid_distance
+create index i on items using flat (embedding) with (distance_type = 'invalid_distance');
+
+statement ok
+create index i on items using flat (embedding) include (name) with (distance_type = 'inner_product');
+
+statement ok
+drop index i;
+
+statement error invalid m value invalid: failed to parse invalid digit found in string
+create index i on items using hnsw (embedding) include (name) with (distance_type = 'inner_product', m = 'invalid');
+
+statement error invalid m value 0: should not be zero
+create index i on items using hnsw (embedding) include (name) with (distance_type = 'inner_product', m = '0');
+
+statement ok
+create index i on items using hnsw (embedding) include (name) with (distance_type = 'inner_product');
+
+statement ok
+drop index i;
+
+statement ok
+create index i on items using hnsw (embedding) include (name) with (distance_type = 'inner_product', m = 32, ef_construction = 40, max_level = 5);
+
+statement ok
+drop index i;
+
+statement ok
+drop table items;

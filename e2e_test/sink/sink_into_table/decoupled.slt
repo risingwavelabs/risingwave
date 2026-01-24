@@ -1,0 +1,70 @@
+statement ok
+DROP TABLE IF EXISTS s1_target cascade;
+
+statement ok
+DROP TABLE IF EXISTS fact;
+
+statement ok
+DROP TABLE IF EXISTS dim;
+
+statement ok
+set sink_decouple = true;
+
+statement ok
+create table fact(v0 int primary key, v1 int, v2 varchar, v3 varchar);
+
+# correspond to 1
+statement ok
+INSERT INTO fact
+  SELECT
+    x as v0,
+    1 as v1,
+    'abcdefgakjandjkw' as v2,
+    'jkb1ku1bu' as v3
+  FROM generate_series(1, 200000) t(x);
+
+# correspond to 2
+statement ok
+INSERT INTO fact
+  SELECT
+    x as v0,
+    2 as v1,
+    'abcdefgakjandjkw' as v2,
+    'jkb1ku1bu' as v3
+  FROM generate_series(200001, 400000) t(x);
+
+statement ok
+create table dim(v1 int);
+
+statement ok
+INSERT INTO dim VALUES(1), (2);
+
+statement ok
+create table s1_target(v0 int primary key, v1 int, v2 varchar, v3 varchar, dim_v1 int);
+
+statement ok
+CREATE SINK s1 INTO s1_target as
+SELECT v0, fact.v1 as v1, v2, v3, dim.v1 as dim_v1
+FROM fact
+JOIN dim ON fact.v1 = dim.v1;
+
+statement ok
+create materialized view m1 as
+  select v0, count(*)
+  from s1_target
+  group by v0;
+
+statement ok
+DELETE FROM dim;
+
+statement ok
+flush;
+
+statement ok
+DROP TABLE s1_target cascade;
+
+statement ok
+DROP TABLE fact cascade;
+
+statement ok
+DROP TABLE dim cascade;

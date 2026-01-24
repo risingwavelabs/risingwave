@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,9 @@
 // limitations under the License.
 
 use multimap::MultiMap;
+use risingwave_common::util::epoch::test_epoch;
 use risingwave_expr::table_function::repeat;
-use risingwave_stream::executor::ProjectSetExecutor;
+use risingwave_stream::executor::project::ProjectSetExecutor;
 use risingwave_stream::task::ActorEvalErrorReport;
 
 use crate::prelude::*;
@@ -29,7 +30,7 @@ fn create_executor() -> (MessageSender, BoxedMessageStream) {
         ],
     };
     let (tx, source) = MockSource::channel();
-    let source = source.into_executor(schema, PkIndices::new());
+    let source = source.into_executor(schema, StreamKey::new());
 
     let test_expr = build_from_pretty("(add:int8 $0:int8 $1:int8)");
     let test_expr_watermark = build_from_pretty("(add:int8 $0:int8 1:int8)");
@@ -60,6 +61,7 @@ fn create_executor() -> (MessageSender, BoxedMessageStream) {
 async fn test_project_set() {
     let (mut tx, mut project_set) = create_executor();
 
+    tx.push_barrier(test_epoch(1), false);
     tx.push_chunk(StreamChunk::from_pretty(
         " I I
         + 1 4
@@ -76,6 +78,7 @@ async fn test_project_set() {
     check_until_pending(
         &mut project_set,
         expect_test::expect![[r#"
+            - !barrier 1
             - !chunk |-
               +---+---+---+---+---+---+
               | + | 0 | 5 | 2 | 1 | 2 |

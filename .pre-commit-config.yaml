@@ -6,16 +6,17 @@ repos:
     rev: v2.3.0
     hooks:
     -   id: end-of-file-fixer
+        exclude: 'src/frontend/planner_test/tests/testdata/.*'
     -   id: trailing-whitespace
 -   repo: https://github.com/crate-ci/typos
-    rev: v1.23.1
+    rev: v1.30.2
     hooks:
       - id: typos
 -   repo: local
     hooks:
     -   id: rustfmt
         name: rustfmt
-        entry: rustfmt --edition 2021
+        entry: rustfmt --edition 2024
         language: system
         types: [rust]
     -   id: cargo sort

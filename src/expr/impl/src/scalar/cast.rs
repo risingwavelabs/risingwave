@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
 use std::str::FromStr;
 use std::sync::Arc;
 
 use futures_util::FutureExt;
 use itertools::Itertools;
-use risingwave_common::array::{ArrayImpl, DataChunk, ListRef, ListValue, StructRef, StructValue};
+use risingwave_common::array::{DataChunk, ListRef, ListValue, StructRef, StructValue, VectorVal};
 use risingwave_common::cast;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{Int256, JsonbRef, MapRef, MapValue, ToText, F64};
+use risingwave_common::types::{
+    DataType, F64, Int256, JsonbRef, MapRef, MapValue, ScalarRef as _, Serial, Timestamptz, ToText,
+};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_expr::expr::{build_func, Context, ExpressionBoxExt, InputRefExpression};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_common::util::row_id::row_id_to_unix_millis;
+use risingwave_expr::expr::{Context, ExpressionBoxExt, InputRefExpression, build_func};
+use risingwave_expr::{ExprError, Result, function};
 use risingwave_pb::expr::expr_node::PbType;
 use thiserror_ext::AsReport;
 
@@ -64,8 +66,14 @@ pub fn to_int256<T: TryInto<Int256>>(elem: T) -> Result<Int256> {
 }
 
 #[function("cast(jsonb) -> boolean")]
-pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
-    v.as_bool().map_err(|e| ExprError::Parse(e.into()))
+pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<Option<bool>> {
+    if v.is_jsonb_null() {
+        Ok(None)
+    } else {
+        v.as_bool()
+            .map(Some)
+            .map_err(|e| ExprError::Parse(e.into()))
+    }
 }
 
 /// Note that PostgreSQL casts JSON numbers from arbitrary precision `numeric` but we use `f64`.
@@ -76,16 +84,22 @@ pub fn jsonb_to_bool(v: JsonbRef<'_>) -> Result<bool> {
 #[function("cast(jsonb) -> decimal")]
 #[function("cast(jsonb) -> float4")]
 #[function("cast(jsonb) -> float8")]
-pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<T> {
-    v.as_number()
-        .map_err(|e| ExprError::Parse(e.into()))?
-        .try_into()
-        .map_err(|_| ExprError::NumericOutOfRange)
+pub fn jsonb_to_number<T: TryFrom<F64>>(v: JsonbRef<'_>) -> Result<Option<T>> {
+    if v.is_jsonb_null() {
+        Ok(None)
+    } else {
+        v.as_number()
+            .map_err(|e| ExprError::Parse(e.into()))?
+            .try_into()
+            .map(Some)
+            .map_err(|_| ExprError::NumericOutOfRange)
+    }
 }
 
 #[function("cast(int4) -> int2")]
 #[function("cast(int8) -> int2")]
 #[function("cast(int8) -> int4")]
+#[function("cast(int8) -> serial")]
 #[function("cast(serial) -> int8")]
 #[function("cast(float4) -> int2")]
 #[function("cast(float8) -> int2")]
@@ -137,6 +151,13 @@ where
     elem.into()
 }
 
+/// Extract the timestamp from row id.
+#[function("cast(serial) -> timestamptz")]
+pub fn serial_to_timestamptz(elem: Serial) -> Result<Timestamptz> {
+    let unix_ms = row_id_to_unix_millis(elem.as_row_id()).ok_or(ExprError::NumericOutOfRange)?;
+    Timestamptz::from_millis(unix_ms).ok_or(ExprError::NumericOutOfRange)
+}
+
 #[function("cast(varchar) -> boolean")]
 pub fn str_to_bool(input: &str) -> Result<bool> {
     cast::str_to_bool(input).map_err(|err| ExprError::Parse(err.into()))
@@ -160,18 +181,19 @@ pub fn int_to_bool(input: i32) -> bool {
 #[function("cast(jsonb) -> varchar")]
 #[function("cast(bytea) -> varchar")]
 #[function("cast(anyarray) -> varchar")]
-pub fn general_to_text(elem: impl ToText, mut writer: &mut impl Write) {
+#[function("cast(vector) -> varchar")]
+pub fn general_to_text(elem: impl ToText, mut writer: &mut impl std::fmt::Write) {
     elem.write(&mut writer).unwrap();
 }
 
 // TODO: use `ToBinary` and support all types
 #[function("pgwire_send(int8) -> bytea")]
-fn pgwire_send(elem: i64) -> Box<[u8]> {
-    elem.to_be_bytes().into()
+fn pgwire_send(elem: i64, writer: &mut impl std::io::Write) {
+    writer.write_all(&elem.to_be_bytes()).unwrap();
 }
 
 #[function("cast(boolean) -> varchar")]
-pub fn bool_to_varchar(input: bool, writer: &mut impl Write) {
+pub fn bool_to_varchar(input: bool, writer: &mut impl std::fmt::Write) {
     writer
         .write_str(if input { "true" } else { "false" })
         .unwrap();
@@ -180,13 +202,13 @@ pub fn bool_to_varchar(input: bool, writer: &mut impl Write) {
 /// `bool_out` is different from `cast(boolean) -> varchar` to produce a single char. `PostgreSQL`
 /// uses different variants of bool-to-string in different situations.
 #[function("bool_out(boolean) -> varchar")]
-pub fn bool_out(input: bool, writer: &mut impl Write) {
+pub fn bool_out(input: bool, writer: &mut impl std::fmt::Write) {
     writer.write_str(if input { "t" } else { "f" }).unwrap();
 }
 
 #[function("cast(varchar) -> bytea")]
-pub fn str_to_bytea(elem: &str) -> Result<Box<[u8]>> {
-    cast::str_to_bytea(elem).map_err(|err| ExprError::Parse(err.into()))
+pub fn str_to_bytea(elem: &str, writer: &mut impl std::io::Write) -> Result<()> {
+    cast::str_to_bytea(elem, writer).map_err(|err| ExprError::Parse(err.into()))
 }
 
 #[function("cast(varchar) -> anyarray", type_infer = "unreachable")]
@@ -194,16 +216,24 @@ fn str_to_list(input: &str, ctx: &Context) -> Result<ListValue> {
     ListValue::from_str(input, &ctx.return_type).map_err(|err| ExprError::Parse(err.into()))
 }
 
+#[function("cast(varchar) -> vector", type_infer = "unreachable")]
+fn str_to_vector(input: &str, ctx: &Context) -> Result<VectorVal> {
+    let DataType::Vector(size) = &ctx.return_type else {
+        unreachable!()
+    };
+    VectorVal::from_text(input, *size).map_err(|err| ExprError::Parse(err.into()))
+}
+
 /// Cast array with `source_elem_type` into array with `target_elem_type` by casting each element.
 #[function("cast(anyarray) -> anyarray", type_infer = "unreachable")]
 fn list_cast(input: ListRef<'_>, ctx: &Context) -> Result<ListValue> {
     let cast = build_func(
         PbType::Cast,
-        ctx.return_type.as_list().clone(),
-        vec![InputRefExpression::new(ctx.arg_types[0].as_list().clone(), 0).boxed()],
+        ctx.return_type.as_list_elem().clone(),
+        vec![InputRefExpression::new(ctx.arg_types[0].as_list_elem().clone(), 0).boxed()],
     )
     .unwrap();
-    let items = Arc::new(ArrayImpl::from(input.to_owned()));
+    let items = Arc::new(input.to_owned_scalar().into_array());
     let len = items.len();
     let list = cast
         .eval(&DataChunk::new(vec![items], len))
@@ -526,10 +556,9 @@ mod tests {
         }
 
         for i in 0..input.len() {
-            let row = OwnedRow::new(vec![input[i]
-                .as_ref()
-                .cloned()
-                .map(|str| str.to_scalar_value())]);
+            let row = OwnedRow::new(vec![
+                input[i].as_ref().cloned().map(|str| str.to_scalar_value()),
+            ]);
             let result = expr.eval_row(&row).await.unwrap();
             let expected = target[i].as_ref().cloned().map(|x| x.to_scalar_value());
             assert_eq!(result, expected);

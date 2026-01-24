@@ -14,22 +14,23 @@
 
 use std::collections::BTreeSet;
 
+use educe::Educe;
 use futures_util::FutureExt;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::{bail, must_match};
 use risingwave_common_estimate_size::{EstimateSize, KvSize};
+use risingwave_expr::Result;
 use risingwave_expr::aggregate::{
-    build_append_only, AggCall, AggType, AggregateFunction, AggregateState as AggImplState,
-    BoxedAggregateFunction,
+    AggCall, AggType, AggregateFunction, AggregateState as AggImplState, BoxedAggregateFunction,
+    PbAggKind, build_append_only,
 };
 use risingwave_expr::sig::FUNCTION_REGISTRY;
 use risingwave_expr::window_function::{
     BoxedWindowState, FrameBounds, StateEvictHint, StateKey, StatePos, WindowFuncCall,
     WindowFuncKind, WindowState,
 };
-use risingwave_expr::Result;
 use smallvec::SmallVec;
 
 use super::buffer::{RangeWindow, RowsWindow, SessionWindow, WindowBuffer, WindowImpl};
@@ -40,9 +41,9 @@ struct AggregateState<W>
 where
     W: WindowImpl<Key = StateKey, Value = StateValue>,
 {
-    agg_func: BoxedAggregateFunction,
     agg_impl: AggImpl,
     arg_data_types: Vec<DataType>,
+    ignore_nulls: bool,
     buffer: WindowBuffer<W>,
     buffer_heap_size: KvSize,
 }
@@ -65,7 +66,9 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
         direct_args: vec![],
     };
 
-    let (agg_func, agg_impl, enable_delta) = match agg_type {
+    let (agg_impl, enable_delta) = match agg_type {
+        AggType::Builtin(PbAggKind::FirstValue) => (AggImpl::Shortcut(Shortcut::FirstValue), false),
+        AggType::Builtin(PbAggKind::LastValue) => (AggImpl::Shortcut(Shortcut::LastValue), false),
         AggType::Builtin(kind) => {
             let agg_func_sig = FUNCTION_REGISTRY
                 .get(*kind, &arg_data_types, &call.return_type)
@@ -74,30 +77,28 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
             let (agg_impl, enable_delta) =
                 if agg_func_sig.is_retractable() && call.frame.exclusion.is_no_others() {
                     let init_state = agg_func.create_state()?;
-                    (AggImpl::Incremental(init_state), true)
+                    (AggImpl::Incremental(agg_func, init_state), true)
                 } else {
-                    (AggImpl::Full, false)
+                    (AggImpl::Full(agg_func), false)
                 };
-            (agg_func, agg_impl, enable_delta)
+            (agg_impl, enable_delta)
         }
         AggType::UserDefined(_) => {
             // TODO(rc): utilize `retract` method of embedded UDAF to do incremental aggregation
-            let agg_func = build_append_only(&agg_call)?;
-            (agg_func, AggImpl::Full, false)
+            (AggImpl::Full(build_append_only(&agg_call)?), false)
         }
         AggType::WrapScalar(_) => {
             // we have to feed the wrapped scalar function with all the rows in the window,
             // instead of doing incremental aggregation
-            let agg_func = build_append_only(&agg_call)?;
-            (agg_func, AggImpl::Full, false)
+            (AggImpl::Full(build_append_only(&agg_call)?), false)
         }
     };
 
     let this = match &call.frame.bounds {
         FrameBounds::Rows(frame_bounds) => Box::new(AggregateState {
-            agg_func,
             agg_impl,
             arg_data_types,
+            ignore_nulls: call.ignore_nulls,
             buffer: WindowBuffer::<RowsWindow<StateKey, StateValue>>::new(
                 RowsWindow::new(frame_bounds.clone()),
                 call.frame.exclusion,
@@ -106,9 +107,9 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
             buffer_heap_size: KvSize::new(),
         }) as BoxedWindowState,
         FrameBounds::Range(frame_bounds) => Box::new(AggregateState {
-            agg_func,
             agg_impl,
             arg_data_types,
+            ignore_nulls: call.ignore_nulls,
             buffer: WindowBuffer::<RangeWindow<StateValue>>::new(
                 RangeWindow::new(frame_bounds.clone()),
                 call.frame.exclusion,
@@ -117,9 +118,9 @@ pub(super) fn new(call: &WindowFuncCall) -> Result<BoxedWindowState> {
             buffer_heap_size: KvSize::new(),
         }) as BoxedWindowState,
         FrameBounds::Session(frame_bounds) => Box::new(AggregateState {
-            agg_func,
             agg_impl,
             arg_data_types,
+            ignore_nulls: call.ignore_nulls,
             buffer: WindowBuffer::<SessionWindow<StateValue>>::new(
                 SessionWindow::new(frame_bounds.clone()),
                 call.frame.exclusion,
@@ -181,15 +182,48 @@ where
     }
 
     fn slide(&mut self) -> Result<(Datum, StateEvictHint)> {
-        let wrapper = AggregatorWrapper {
-            agg_func: self.agg_func.as_ref(),
-            arg_data_types: &self.arg_data_types,
-        };
         let output = match self.agg_impl {
-            AggImpl::Full => wrapper.aggregate(self.buffer.curr_window_values()),
-            AggImpl::Incremental(ref mut state) => {
+            AggImpl::Full(ref agg_func) => {
+                let wrapper = AggregatorWrapper {
+                    agg_func: agg_func.as_ref(),
+                    arg_data_types: &self.arg_data_types,
+                };
+                wrapper.aggregate(self.buffer.curr_window_values())
+            }
+            AggImpl::Incremental(ref agg_func, ref mut state) => {
+                let wrapper = AggregatorWrapper {
+                    agg_func: agg_func.as_ref(),
+                    arg_data_types: &self.arg_data_types,
+                };
                 wrapper.update(state, self.buffer.consume_curr_window_values_delta())
             }
+            AggImpl::Shortcut(shortcut) => match shortcut {
+                Shortcut::FirstValue => Ok(if !self.ignore_nulls {
+                    // no `IGNORE NULLS`
+                    self.buffer
+                        .curr_window_values()
+                        .next()
+                        .and_then(|args| args[0].clone())
+                } else {
+                    // filter out NULLs
+                    self.buffer
+                        .curr_window_values()
+                        .find(|args| args[0].is_some())
+                        .and_then(|args| args[0].clone())
+                }),
+                Shortcut::LastValue => Ok(if !self.ignore_nulls {
+                    self.buffer
+                        .curr_window_values()
+                        .next_back()
+                        .and_then(|args| args[0].clone())
+                } else {
+                    self.buffer
+                        .curr_window_values()
+                        .rev()
+                        .find(|args| args[0].is_some())
+                        .and_then(|args| args[0].clone())
+                }),
+            },
         }?;
         let evict_hint = self.slide_inner();
         Ok((output, evict_hint))
@@ -197,16 +231,17 @@ where
 
     fn slide_no_output(&mut self) -> Result<StateEvictHint> {
         match self.agg_impl {
-            AggImpl::Full => {}
-            AggImpl::Incremental(ref mut state) => {
+            AggImpl::Full(..) => {}
+            AggImpl::Incremental(ref agg_func, ref mut state) => {
                 // for incremental agg, we need to update the state even if the caller doesn't need
                 // the output
                 let wrapper = AggregatorWrapper {
-                    agg_func: self.agg_func.as_ref(),
+                    agg_func: agg_func.as_ref(),
                     arg_data_types: &self.arg_data_types,
                 };
                 wrapper.update(state, self.buffer.consume_curr_window_values_delta())?;
             }
+            AggImpl::Shortcut(..) => {}
         };
         Ok(self.slide_inner())
     }
@@ -223,9 +258,18 @@ where
     }
 }
 
+#[derive(Educe)]
+#[educe(Debug)]
 enum AggImpl {
-    Incremental(AggImplState),
-    Full,
+    Incremental(#[educe(Debug(ignore))] BoxedAggregateFunction, AggImplState),
+    Full(#[educe(Debug(ignore))] BoxedAggregateFunction),
+    Shortcut(Shortcut),
+}
+
+#[derive(Debug, Clone, Copy)]
+enum Shortcut {
+    FirstValue,
+    LastValue,
 }
 
 struct AggregatorWrapper<'a> {

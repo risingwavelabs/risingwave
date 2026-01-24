@@ -19,10 +19,25 @@ pub use mqtt_common::{MqttCommon, QualityOfService as MqttQualityOfService};
 
 mod common;
 pub use common::{
-    AwsAuthProps, AwsPrivateLinkItem, KafkaCommon, KafkaPrivateLinkCommon, KinesisCommon,
-    MongodbCommon, NatsCommon, PulsarCommon, PulsarOauthCommon, RdKafkaPropertiesCommon,
-    PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
+    AwsAuthProps, AwsPrivateLinkItem, DISABLE_DEFAULT_CREDENTIAL, KafkaCommon,
+    KafkaConnectionProps, KafkaPrivateLinkCommon, KinesisCommon, MongodbCommon, NatsCommon,
+    NatsConnectionProps, PRIVATE_LINK_BROKER_REWRITE_MAP_KEY, PRIVATE_LINK_TARGETS_KEY,
+    PulsarCommon, PulsarOauthCommon, RdKafkaPropertiesCommon, SHARED_NATS_CLIENT,
 };
+mod connection;
+pub use connection::{
+    ConfluentSchemaRegistryConnection, Connection, ElasticsearchConnection, IcebergConnection,
+    KafkaConnection, SCHEMA_REGISTRY_CONNECTION_TYPE, read_kafka_log_level, validate_connection,
+};
+pub use iceberg::compaction::IcebergSinkCompactionUpdate;
 
 mod iceberg;
-pub use iceberg::IcebergCommon;
+#[cfg(not(madsim))]
+mod maybe_tls_connector;
+pub mod postgres;
+
+pub use iceberg::{IcebergCommon, IcebergTableIdentifier};
+pub use postgres::{PostgresExternalTable, SslMode, create_pg_client};
+
+#[cfg(test)]
+mod common_test;

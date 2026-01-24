@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 #![feature(trait_alias)]
 #![feature(coroutines)]
 #![feature(type_alias_impl_trait)]
-#![feature(let_chains)]
 #![feature(impl_trait_in_assoc_type)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
 
 #[macro_use]
 extern crate tracing;
@@ -30,6 +30,7 @@ pub mod telemetry;
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
 use clap::{Parser, ValueEnum};
 use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
@@ -37,6 +38,7 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
+use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use serde::{Deserialize, Serialize};
 
 /// If `total_memory_bytes` is not specified, the default memory limit will be set to
@@ -86,16 +88,35 @@ pub struct ComputeNodeOpts {
     pub total_memory_bytes: usize,
 
     /// Reserved memory for the compute node in bytes.
-    /// If not set, a portion (default to 30%) for the `total_memory_bytes` will be used as the reserved memory.
+    /// If not set, a portion (default to 30% for the first 16GB and 20% for the rest)
+    /// for the `total_memory_bytes` will be used as the reserved memory.
     ///
     /// The total memory compute and storage can use is `total_memory_bytes` - `reserved_memory_bytes`.
     #[clap(long, env = "RW_RESERVED_MEMORY_BYTES")]
     pub reserved_memory_bytes: Option<usize>,
 
+    /// Target memory usage for Memory Manager.
+    /// If not set, the default value is `total_memory_bytes` - `reserved_memory_bytes`
+    ///
+    /// It's strongly recommended to set it for standalone deployment.
+    ///
+    /// ## Why need this?
+    ///
+    /// Our [`crate::memory::manager::MemoryManager`] works by reading the memory statistics from
+    /// Jemalloc. This is fine when running the compute node alone; while for standalone mode,
+    /// the memory usage of **all nodes** are counted. Thus, we need to pass a reasonable total
+    /// usage so that the memory is kept around this value.
+    #[clap(long, env = "RW_MEMORY_MANAGER_TARGET_BYTES")]
+    pub memory_manager_target_bytes: Option<usize>,
+
     /// The parallelism that the compute node will register to the scheduler of the meta service.
     #[clap(long, env = "RW_PARALLELISM", default_value_t = default_parallelism())]
     #[override_opts(if_absent, path = streaming.actor_runtime_worker_threads_num)]
     pub parallelism: usize,
+
+    /// Resource group for scheduling, default value is "default"
+    #[clap(long, env = "RW_RESOURCE_GROUP", default_value_t = default_resource_group())]
+    pub resource_group: String,
 
     /// Decides whether the compute node can be used for streaming and serving.
     #[clap(long, env = "RW_COMPUTE_NODE_ROLE", value_enum, default_value_t = default_role())]
@@ -185,7 +206,10 @@ impl Role {
 fn validate_opts(opts: &ComputeNodeOpts) {
     let system_memory_available_bytes = system_memory_available_bytes();
     if opts.total_memory_bytes > system_memory_available_bytes {
-        let error_msg = format!("total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.", opts.total_memory_bytes, system_memory_available_bytes);
+        let error_msg = format!(
+            "total_memory_bytes {} is larger than the total memory available bytes {} that can be acquired.",
+            opts.total_memory_bytes, system_memory_available_bytes
+        );
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
@@ -230,7 +254,7 @@ pub fn start(
             .unwrap();
         tracing::info!("advertise addr is {}", advertise_addr);
 
-        compute_node_serve(listen_addr, advertise_addr, opts, shutdown).await;
+        compute_node_serve(listen_addr, advertise_addr, Arc::new(opts), shutdown).await;
     })
 }
 
@@ -240,6 +264,10 @@ pub fn default_total_memory_bytes() -> usize {
 
 pub fn default_parallelism() -> usize {
     total_cpu_available().ceil() as usize
+}
+
+pub fn default_resource_group() -> String {
+    DEFAULT_RESOURCE_GROUP.to_owned()
 }
 
 pub fn default_role() -> Role {

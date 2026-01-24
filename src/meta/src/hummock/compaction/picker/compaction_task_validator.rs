@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use risingwave_common::config::default::compaction_config;
+use risingwave_common::config::meta::default::compaction_config;
 use risingwave_pb::hummock::CompactionConfig;
 
 use super::{CompactionInput, LocalPickerStatistic};

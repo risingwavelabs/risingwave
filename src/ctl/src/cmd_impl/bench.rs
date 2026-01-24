@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,14 @@
 
 use std::ops::Bound;
 use std::ops::Bound::Unbounded;
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 use std::time::Instant;
 
-use anyhow::Result;
+use anyhow::{Result, anyhow};
 use clap::Subcommand;
 use futures::future::try_join_all;
-use futures::{pin_mut, Future, StreamExt};
+use futures::{Future, StreamExt, pin_mut};
 use risingwave_common::row::{self, OwnedRow};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_storage::store::PrefetchOptions;
@@ -29,8 +29,8 @@ use size::Size;
 use tokio::task::JoinHandle;
 
 use super::table::{get_table_catalog, make_state_table};
-use crate::common::HummockServiceOpts;
 use crate::CtlContext;
+use crate::common::HummockServiceOpts;
 
 #[derive(Subcommand)]
 pub enum BenchCommands {
@@ -97,6 +97,11 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                 )?)
                 .await?;
             let table = get_table_catalog(meta.clone(), mv_name).await?;
+            let committed_epoch = hummock
+                .inner()
+                .get_pinned_version()
+                .table_committed_epoch(table.id)
+                .ok_or_else(|| anyhow!("table id {} not exist", table.id))?;
             let mut handlers = vec![];
             for i in 0..threads {
                 let table = table.clone();
@@ -107,7 +112,8 @@ pub async fn do_bench(context: &CtlContext, cmd: BenchCommands) -> Result<()> {
                     tracing::info!(thread = i, "starting scan");
                     let state_table = {
                         let mut tb = make_state_table(hummock, &table).await;
-                        tb.init_epoch(EpochPair::new_test_epoch(u64::MAX));
+                        tb.init_epoch(EpochPair::new(u64::MAX, committed_epoch))
+                            .await?;
                         tb
                     };
                     loop {

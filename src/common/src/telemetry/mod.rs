@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,16 +20,16 @@ use std::env;
 
 use risingwave_pb::telemetry::PbTelemetryClusterType;
 pub use risingwave_telemetry_event::{
-    current_timestamp, post_telemetry_report_pb, report_event_common, request_to_telemetry_event,
-    TelemetryError, TelemetryResult,
+    TelemetryError, TelemetryResult, current_timestamp, post_telemetry_report_pb,
+    report_event_common, request_to_telemetry_event,
 };
 use serde::{Deserialize, Serialize};
 use sysinfo::System;
 
+use crate::RW_VERSION;
 use crate::util::env_var::env_var_is_true_or;
 use crate::util::resource_util::cpu::total_cpu_available;
 use crate::util::resource_util::memory::{system_memory_available_bytes, total_memory_used_bytes};
-use crate::RW_VERSION;
 
 type Result<T> = core::result::Result<T, TelemetryError>;
 
@@ -38,20 +38,28 @@ pub const TELEMETRY_CLUSTER_TYPE_HOSTED: &str = "hosted"; // hosted on RisingWav
 pub const TELEMETRY_CLUSTER_TYPE_KUBERNETES: &str = "kubernetes";
 pub const TELEMETRY_CLUSTER_TYPE_SINGLE_NODE: &str = "single-node";
 pub const TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE: &str = "docker-compose";
+const TELEMETRY_CLUSTER_TYPE_TEST: &str = "test";
+pub use risingwave_telemetry_event::{
+    TELEMETRY_RISINGWAVE_CLOUD_UUID, get_telemetry_risingwave_cloud_uuid,
+};
 
-pub use risingwave_telemetry_event::get_telemetry_risingwave_cloud_uuid;
-
-pub fn telemetry_cluster_type_from_env_var() -> PbTelemetryClusterType {
+pub fn telemetry_cluster_type_from_env_var() -> TelemetryResult<PbTelemetryClusterType> {
     let cluster_type = match env::var(TELEMETRY_CLUSTER_TYPE) {
         Ok(cluster_type) => cluster_type,
-        Err(_) => return PbTelemetryClusterType::Unspecified,
+        Err(_) => return Ok(PbTelemetryClusterType::Unspecified),
     };
     match cluster_type.as_str() {
-        TELEMETRY_CLUSTER_TYPE_HOSTED => PbTelemetryClusterType::CloudHosted,
-        TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => PbTelemetryClusterType::DockerCompose,
-        TELEMETRY_CLUSTER_TYPE_KUBERNETES => PbTelemetryClusterType::Kubernetes,
-        TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => PbTelemetryClusterType::SingleNode,
-        _ => PbTelemetryClusterType::Unspecified,
+        TELEMETRY_CLUSTER_TYPE_HOSTED => Ok(PbTelemetryClusterType::CloudHosted),
+        TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE => Ok(PbTelemetryClusterType::DockerCompose),
+        TELEMETRY_CLUSTER_TYPE_KUBERNETES => Ok(PbTelemetryClusterType::Kubernetes),
+        TELEMETRY_CLUSTER_TYPE_SINGLE_NODE => Ok(PbTelemetryClusterType::SingleNode),
+
+        // block the report if the cluster is in test env
+        // but it only blocks the report from meta node, not other nodes
+        TELEMETRY_CLUSTER_TYPE_TEST => Err(TelemetryError::from(
+            "test cluster type should not send telemetry report",
+        )),
+        _ => Err(TelemetryError::from("invalid cluster type")),
     }
 }
 
@@ -156,7 +164,7 @@ pub fn report_scarf_enabled() -> bool {
     telemetry_env_enabled()
         && !matches!(
             telemetry_cluster_type_from_env_var(),
-            PbTelemetryClusterType::CloudHosted
+            Ok(PbTelemetryClusterType::CloudHosted)
         )
 }
 
@@ -170,10 +178,10 @@ pub async fn report_to_scarf() {
     // keep trying every 1h until success
     loop {
         let res = reqwest::get(&request_url).await;
-        if let Ok(res) = res {
-            if res.status().is_success() {
-                break;
-            }
+        if let Ok(res) = res
+            && res.status().is_success()
+        {
+            break;
         }
         tokio::time::sleep(tokio::time::Duration::from_secs(3600)).await;
     }
@@ -185,17 +193,19 @@ mod tests {
 
     #[test]
     fn test_enable_scarf() {
-        std::env::set_var(TELEMETRY_ENV_ENABLE, "true");
+        unsafe { std::env::set_var(TELEMETRY_ENV_ENABLE, "true") };
 
         // setting env var to `Hosted` should disable scarf
-        std::env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_HOSTED);
+        unsafe { std::env::set_var(TELEMETRY_CLUSTER_TYPE, TELEMETRY_CLUSTER_TYPE_HOSTED) };
         assert!(!report_scarf_enabled());
 
         // setting env var to `DockerCompose` should enable scarf
-        std::env::set_var(
-            TELEMETRY_CLUSTER_TYPE,
-            TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE,
-        );
+        unsafe {
+            std::env::set_var(
+                TELEMETRY_CLUSTER_TYPE,
+                TELEMETRY_CLUSTER_TYPE_DOCKER_COMPOSE,
+            )
+        };
         assert!(report_scarf_enabled());
     }
 
@@ -223,25 +233,25 @@ mod tests {
             !is_enabled()
         }
 
-        std::env::set_var(key, "true");
+        unsafe { std::env::set_var(key, "true") };
         assert!(is_enabled());
 
-        std::env::set_var(key, "false");
+        unsafe { std::env::set_var(key, "false") };
         assert!(is_not_enabled());
 
-        std::env::set_var(key, "tRue");
+        unsafe { std::env::set_var(key, "tRue") };
         assert!(is_enabled());
 
-        std::env::set_var(key, "2");
+        unsafe { std::env::set_var(key, "2") };
         assert!(is_not_enabled());
 
-        std::env::set_var(key, "1");
+        unsafe { std::env::set_var(key, "1") };
         assert!(is_enabled());
 
-        std::env::set_var(key, "not_a_bool");
+        unsafe { std::env::set_var(key, "not_a_bool") };
         assert!(is_not_enabled());
 
-        std::env::remove_var(key);
+        unsafe { std::env::remove_var(key) };
         assert!(is_enabled());
     }
 }

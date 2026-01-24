@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::cmp;
 use risingwave_pb::hummock::KeyRange;
 
 use crate::key_range::KeyRangeCommon;
-use crate::{impl_key_range_common, key_range_cmp, KeyComparator};
+use crate::{KeyComparator, impl_key_range_common, key_range_cmp};
 
 impl_key_range_common!(KeyRange);
 

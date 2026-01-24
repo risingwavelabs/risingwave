@@ -1,0 +1,16 @@
+statement ok
+create table t(v1 int);
+
+statement ok
+alter table t set parallelism to 1;
+
+include ./inserts.slt.part
+
+
+query I retry 4 backoff 1s
+select count(*) from t;
+----
+30
+
+statement ok
+drop table t;

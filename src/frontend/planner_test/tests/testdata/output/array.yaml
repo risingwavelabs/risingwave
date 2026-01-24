@@ -12,7 +12,7 @@
     select (ARRAY[1, v1]) from t;
   logical_plan: |-
     LogicalProject { exprs: [Array(1:Int32, t.v1) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [Array(1:Int32, t.v1) as $expr1] }
@@ -62,10 +62,10 @@
   logical_plan: |-
     LogicalProject { exprs: [Array as $expr1] }
     └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  batch_plan: 'BatchValues { rows: [[ARRAY[]:List(Struct(StructType { field_names: ["f1"], field_types: [Int32] }))]] }'
+  batch_plan: 'BatchValues { rows: [[ARRAY[]:List(Struct(StructType { fields: [("f1", Int32)] }))]] }'
   stream_plan: |-
     StreamMaterialize { columns: [array, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
-    └─StreamValues { rows: [[ARRAY[]:List(Struct(StructType { field_names: ["f1"], field_types: [Int32] })), 0:Int64]] }
+    └─StreamValues { rows: [[ARRAY[]:List(Struct(StructType { fields: [("f1", Int32)] })), 0:Int64]] }
 - sql: |
     select array_cat(array[66], array[123]);
   logical_plan: |-
@@ -228,7 +228,7 @@
   sql: |
     create table t (v1 varchar[]);
     insert into t values ('{c,' || 'd}');
-  binder_error: 'Bind error: cannot cast type "character varying" to "character varying[]" in Assign context'
+  binder_error: cannot cast type "character varying" to "character varying[]" in Assign context
 - name: string to varchar[] in explicit context
   sql: |
     select ('{c,' || 'd}')::varchar[];

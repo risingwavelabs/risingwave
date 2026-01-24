@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,52 +12,46 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::Field;
 
-use crate::binder::bind_context::RecursiveUnion;
 use crate::binder::statement::RewriteExprsRecursive;
 use crate::binder::{BoundQuery, Relation, ShareId};
 use crate::error::{ErrorCode, Result};
-use crate::optimizer::plan_node::generic::{CHANGELOG_OP, _CHANGELOG_ROW_ID};
+use crate::optimizer::plan_node::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP};
 
 /// Share a relation during binding and planning.
 /// It could be used to share a (recursive) CTE, a source, a view and so on.
 
 #[derive(Debug, Clone)]
 pub enum BoundShareInput {
-    Query(Either<BoundQuery, RecursiveUnion>),
+    Query(BoundQuery),
     ChangeLog(Relation),
 }
 impl BoundShareInput {
     pub fn fields(&self) -> Result<Vec<(bool, Field)>> {
         match self {
-            BoundShareInput::Query(q) => match q {
-                Either::Left(q) => Ok(q
-                    .schema()
-                    .fields()
-                    .iter()
-                    .cloned()
-                    .map(|f| (false, f))
-                    .collect_vec()),
-                Either::Right(r) => Ok(r
-                    .schema
-                    .fields()
-                    .iter()
-                    .cloned()
-                    .map(|f| (false, f))
-                    .collect_vec()),
-            },
+            BoundShareInput::Query(q) => Ok(q
+                .schema()
+                .fields()
+                .iter()
+                .cloned()
+                .map(|f| (false, f))
+                .collect_vec()),
             BoundShareInput::ChangeLog(r) => {
                 let (fields, _name) = if let Relation::BaseTable(bound_base_table) = r {
                     (
                         bound_base_table.table_catalog.columns().to_vec(),
-                        bound_base_table.table_catalog.name().to_string(),
+                        bound_base_table.table_catalog.name().to_owned(),
+                    )
+                } else if let Relation::Source(bound_source) = r {
+                    (
+                        bound_source.catalog.columns.clone(),
+                        bound_source.catalog.name.clone(),
                     )
                 } else {
                     return Err(ErrorCode::BindError(
-                        "Change log CTE must be a base table".to_string(),
+                        "Change log CTE must be a table or source".to_owned(),
                     )
                     .into());
                 };
@@ -74,14 +68,14 @@ impl BoundShareInput {
                             false,
                             Field::with_name(
                                 risingwave_common::types::DataType::Int16,
-                                CHANGELOG_OP.to_string(),
+                                CHANGELOG_OP.to_owned(),
                             ),
                         ),
                         (
                             true,
                             Field::with_name(
                                 risingwave_common::types::DataType::Serial,
-                                _CHANGELOG_ROW_ID.to_string(),
+                                _CHANGELOG_ROW_ID.to_owned(),
                             ),
                         ),
                     ])
@@ -100,10 +94,7 @@ pub struct BoundShare {
 impl RewriteExprsRecursive for BoundShare {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         match &mut self.input {
-            BoundShareInput::Query(q) => match q {
-                Either::Left(q) => q.rewrite_exprs_recursive(rewriter),
-                Either::Right(r) => r.rewrite_exprs_recursive(rewriter),
-            },
+            BoundShareInput::Query(q) => q.rewrite_exprs_recursive(rewriter),
             BoundShareInput::ChangeLog(r) => r.rewrite_exprs_recursive(rewriter),
         };
     }

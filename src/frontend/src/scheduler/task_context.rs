@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,13 @@ use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
-use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_common::metrics_reader::MetricsReader;
+use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_rpc_client::ComputeClientPoolRef;
 
 use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::metrics_reader::MetricsReaderImpl;
 use crate::session::SessionImpl;
 
 /// Batch task execution context in frontend.
@@ -39,13 +41,13 @@ pub struct FrontendBatchTaskContext {
 }
 
 impl FrontendBatchTaskContext {
-    pub fn new(session: Arc<SessionImpl>) -> Self {
+    pub fn create(session: Arc<SessionImpl>) -> Arc<dyn BatchTaskContext> {
         let mem_context =
             MemoryContext::new(Some(session.env().mem_context()), TrAdderAtomic::new(0));
-        Self {
+        Arc::new(Self {
             session,
             mem_context,
-        }
+        })
     }
 }
 
@@ -103,5 +105,12 @@ impl BatchTaskContext for FrontendBatchTaskContext {
 
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
         Some(self.session.env().worker_node_manager_ref())
+    }
+
+    fn metrics_reader(&self) -> Arc<dyn MetricsReader> {
+        Arc::new(MetricsReaderImpl::new(
+            self.session.env().prometheus_client().cloned(),
+            self.session.env().prometheus_selector().to_owned(),
+        ))
     }
 }

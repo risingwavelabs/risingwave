@@ -17,28 +17,26 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use futures::stream::pending;
 use futures::StreamExt;
+use futures::stream::pending;
 use risingwave_common::catalog::ColumnId;
 
+use crate::WithOptionsSecResolved;
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::{
-    create_split_reader, BoxChunkSourceStream, ConnectorProperties, ConnectorState,
-    SourceColumnDesc, SourceContext, SplitReader,
+    BoxSourceChunkStream, ConnectorProperties, ConnectorState, SourceColumnDesc, SourceContext,
 };
-use crate::{dispatch_source_prop, WithOptionsSecResolved};
 
 #[derive(Clone, Debug)]
-pub struct FsSourceReader {
+pub struct LegacyFsSourceReader {
     pub config: ConnectorProperties,
     pub columns: Vec<SourceColumnDesc>,
     pub properties: WithOptionsSecResolved,
     pub parser_config: SpecificParserConfig,
 }
 
-impl FsSourceReader {
-    #[allow(clippy::too_many_arguments)]
+impl LegacyFsSourceReader {
     pub fn new(
         properties: WithOptionsSecResolved,
         columns: Vec<SourceColumnDesc>,
@@ -79,7 +77,7 @@ impl FsSourceReader {
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> ConnectorResult<BoxChunkSourceStream> {
+    ) -> ConnectorResult<BoxSourceChunkStream> {
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
 
@@ -92,11 +90,16 @@ impl FsSourceReader {
         let stream = match state {
             None => pending().boxed(),
             Some(splits) => {
-                dispatch_source_prop!(config, prop, {
-                    create_split_reader(*prop, splits, parser_config, source_ctx, None)
-                        .await?
-                        .into_stream()
-                })
+                config
+                    .create_split_reader(
+                        splits,
+                        parser_config,
+                        source_ctx,
+                        None,
+                        Default::default(),
+                    )
+                    .await?
+                    .0
             }
         };
         Ok(stream)

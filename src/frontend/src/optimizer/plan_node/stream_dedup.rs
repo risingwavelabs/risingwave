@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,18 @@
 
 use itertools::Itertools;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::DedupNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
-use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
-use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::PlanRef;
-use crate::stream_fragmenter::BuildFragmentGraphState;
+use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, generic};
 use crate::TableCatalog;
+use crate::optimizer::plan_node::StreamPlanRef as PlanRef;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::StreamKind;
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamDedup {
@@ -41,7 +42,7 @@ impl StreamDedup {
         let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
-            true,
+            StreamKind::AppendOnly,
             input.emit_on_window_close(),
             input.watermark_columns().clone(),
             input.columns_monotonicity().clone(),
@@ -73,7 +74,7 @@ impl StreamDedup {
 // assert!(self.base.append_only());
 impl_distill_by_unit!(StreamDedup, core, "StreamAppendOnlyDedup");
 
-impl PlanTreeNodeUnary for StreamDedup {
+impl PlanTreeNodeUnary<Stream> for StreamDedup {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -85,14 +86,14 @@ impl PlanTreeNodeUnary for StreamDedup {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamDedup }
+impl_plan_tree_node_for_unary! { Stream, StreamDedup }
 
 impl StreamNode for StreamDedup {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         let table_catalog = self
             .infer_internal_table_catalog()
             .with_id(state.gen_table_id_wrapped());
-        PbNodeBody::AppendOnlyDedup(DedupNode {
+        PbNodeBody::AppendOnlyDedup(Box::new(DedupNode {
             state_table: Some(table_catalog.to_internal_table_prost()),
             dedup_column_indices: self
                 .core
@@ -100,10 +101,10 @@ impl StreamNode for StreamDedup {
                 .iter()
                 .map(|idx| *idx as _)
                 .collect_vec(),
-        })
+        }))
     }
 }
 
-impl ExprRewritable for StreamDedup {}
+impl ExprRewritable<Stream> for StreamDedup {}
 
 impl ExprVisitable for StreamDedup {}

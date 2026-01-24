@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod cpu;
+#![allow(clippy::doc_markdown)]
+
 mod feature;
 mod key;
 mod manager;
+mod rwu;
 
 pub use feature::*;
 pub use key::*;
@@ -24,7 +26,7 @@ use risingwave_pb::telemetry::PbTelemetryEventStage;
 use risingwave_telemetry_event::report_event_common;
 
 pub(crate) fn report_telemetry(feature: &Feature, feature_name: &str, success_flag: bool) {
-    if !matches!(feature, Feature::TestPaid) {
+    if !matches!(feature, Feature::TestDummy) {
         let mut attr_builder = jsonbb::Builder::<Vec<u8>>::new();
         attr_builder.begin_object();
         attr_builder.add_string("success");
@@ -39,7 +41,7 @@ pub(crate) fn report_telemetry(feature: &Feature, feature_name: &str, success_fl
             None,
             None,
             Some(attr),
-            "paywall".to_string(),
+            "paywall".to_owned(),
         );
     }
 }

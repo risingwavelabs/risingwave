@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,14 @@ use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::plan_common::JoinType;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::TemporalJoinNode;
+use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, watermark_pretty, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary};
+use super::utils::{Distill, childless_record, watermark_pretty};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeBinary, StreamPlanRef as PlanRef, generic};
+use crate::TableCatalog;
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
@@ -34,20 +35,26 @@ use crate::optimizer::plan_node::{
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
-use crate::TableCatalog;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamTemporalJoin {
     pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
-    eq_join_predicate: EqJoinPredicate,
     append_only: bool,
+    is_nested_loop: bool,
 }
 
 impl StreamTemporalJoin {
-    pub fn new(core: generic::Join<PlanRef>, eq_join_predicate: EqJoinPredicate) -> Self {
+    pub fn new(core: generic::Join<PlanRef>, is_nested_loop: bool) -> Result<Self> {
+        core.on
+            .as_eq_predicate_ref()
+            .expect("StreamTemporalJoin requires JoinOn::EqPredicate in core");
         assert!(core.join_type == JoinType::Inner || core.join_type == JoinType::LeftOuter);
-        let append_only = core.left.append_only();
+        // TODO(kind): theoretically, the impl can handle upsert stream.
+        let stream_kind = reject_upsert_input!(core.left);
+        let append_only = stream_kind.is_append_only();
+        assert!(!is_nested_loop || append_only);
+
         let right = core.right.clone();
         let exchange: &StreamExchange = right
             .as_stream_exchange()
@@ -59,15 +66,23 @@ impl StreamTemporalJoin {
             .expect("should be a stream table scan");
         assert!(matches!(scan.core().as_of, Some(AsOf::ProcessTime)));
 
-        let l2o = core.l2i_col_mapping().composite(&core.i2o_col_mapping());
-        let dist = l2o.rewrite_provided_distribution(core.left.distribution());
+        let dist = if is_nested_loop {
+            // Use right side distribution directly if it's nested loop temporal join.
+            let r2o = core.r2i_col_mapping().composite(&core.i2o_col_mapping());
+            r2o.rewrite_provided_distribution(core.right.distribution())
+        } else {
+            // Use left side distribution directly if it's hash temporal join.
+            // https://github.com/risingwavelabs/risingwave/pull/19201#discussion_r1824031780
+            let l2o = core.l2i_col_mapping().composite(&core.i2o_col_mapping());
+            l2o.rewrite_provided_distribution(core.left.distribution())
+        };
 
         // Use left side watermark directly.
-        let watermark_columns = core.i2o_col_mapping().rewrite_bitset(
-            &core
-                .l2i_col_mapping()
-                .rewrite_bitset(core.left.watermark_columns()),
-        );
+        let watermark_columns = core
+            .left
+            .watermark_columns()
+            .map_clone(&core.l2i_col_mapping())
+            .map_clone(&core.i2o_col_mapping());
 
         let columns_monotonicity = core.i2o_col_mapping().rewrite_monotonicity_map(
             &core
@@ -78,18 +93,18 @@ impl StreamTemporalJoin {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            append_only,
+            stream_kind,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             columns_monotonicity,
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
-            eq_join_predicate,
             append_only,
-        }
+            is_nested_loop,
+        })
     }
 
     /// Get join type
@@ -98,11 +113,18 @@ impl StreamTemporalJoin {
     }
 
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
-        &self.eq_join_predicate
+        self.core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamTemporalJoin should store predicate as EqJoinPredicate")
     }
 
     pub fn append_only(&self) -> bool {
         self.append_only
+    }
+
+    pub fn is_nested_loop(&self) -> bool {
+        self.is_nested_loop
     }
 
     /// Return memo-table catalog and its `pk_indices`.
@@ -114,7 +136,7 @@ impl StreamTemporalJoin {
     /// Read pattern:
     ///   for each left input row (with delete op), construct pk prefix (`join_key` + `left_pk`) to fetch rows and delete them from the memo table.
     pub fn infer_memo_table_catalog(&self, right_scan: &StreamTableScan) -> TableCatalog {
-        let left_eq_indexes = self.eq_join_predicate.left_eq_indexes();
+        let left_eq_indexes = self.eq_join_predicate().left_eq_indexes();
         let read_prefix_len_hint = left_eq_indexes.len() + self.left().stream_key().unwrap().len();
 
         // Build internal table
@@ -170,6 +192,8 @@ impl Distill for StreamTemporalJoin {
             }),
         ));
 
+        vec.push(("nested_loop", Pretty::debug(&self.is_nested_loop)));
+
         if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
         }
@@ -183,7 +207,7 @@ impl Distill for StreamTemporalJoin {
     }
 }
 
-impl PlanTreeNodeBinary for StreamTemporalJoin {
+impl PlanTreeNodeBinary<Stream> for StreamTemporalJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -196,23 +220,23 @@ impl PlanTreeNodeBinary for StreamTemporalJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone())
+        Self::new(core, self.is_nested_loop).unwrap()
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamTemporalJoin }
+impl_plan_tree_node_for_binary! { Stream, StreamTemporalJoin }
 
 impl TryToStreamPb for StreamTemporalJoin {
     fn try_to_stream_prost_body(
         &self,
         state: &mut BuildFragmentGraphState,
     ) -> SchedulerResult<NodeBody> {
-        let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
-        let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
+        let left_jk_indices = self.eq_join_predicate().left_eq_indexes();
+        let right_jk_indices = self.eq_join_predicate().right_eq_indexes();
         let left_jk_indices_prost = left_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
         let right_jk_indices_prost = right_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
 
-        let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
+        let null_safe_prost = self.eq_join_predicate().null_safes().into_iter().collect();
 
         let right = self.right();
         let exchange: &StreamExchange = right
@@ -224,18 +248,25 @@ impl TryToStreamPb for StreamTemporalJoin {
             .as_stream_table_scan()
             .expect("should be a stream table scan");
 
-        Ok(NodeBody::TemporalJoin(TemporalJoinNode {
+        Ok(NodeBody::TemporalJoin(Box::new(TemporalJoinNode {
             join_type: self.core.join_type as i32,
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
             null_safe: null_safe_prost,
             condition: self
-                .eq_join_predicate
+                .eq_join_predicate()
                 .other_cond()
                 .as_expr_unless_true()
-                .map(|x| x.to_expr_proto()),
+                .map(|expr| {
+                    expr.to_expr_proto_checked_pure(
+                        self.left().stream_kind().is_retract()
+                            || self.right().stream_kind().is_retract(),
+                        "JOIN condition",
+                    )
+                })
+                .transpose()?,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
-            table_desc: Some(scan.core().table_desc.try_to_protobuf()?),
+            table_desc: Some(scan.core().table_catalog.table_desc().try_to_protobuf()?),
             table_output_indices: scan.core().output_col_idx.iter().map(|&i| i as _).collect(),
             memo_table: if self.append_only {
                 None
@@ -244,11 +275,12 @@ impl TryToStreamPb for StreamTemporalJoin {
                 memo_table = memo_table.with_id(state.gen_table_id_wrapped());
                 Some(memo_table.to_internal_table_prost())
             },
-        }))
+            is_nested_loop: self.is_nested_loop,
+        })))
     }
 }
 
-impl ExprRewritable for StreamTemporalJoin {
+impl ExprRewritable<Stream> for StreamTemporalJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -256,13 +288,12 @@ impl ExprRewritable for StreamTemporalJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core, self.eq_join_predicate.rewrite_exprs(r)).into()
+        Self::new(core, self.is_nested_loop).unwrap().into()
     }
 }
 
 impl ExprVisitable for StreamTemporalJoin {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
         self.core.visit_exprs(v);
-        self.eq_join_predicate.visit_exprs(v);
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,18 @@
 
 use std::collections::HashSet;
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::FieldDisplay;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill, TableCatalogBuilder};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Monotonicity, MonotonicityMap};
-use crate::stream_fragmenter::BuildFragmentGraphState;
+use super::utils::{Distill, TableCatalogBuilder, childless_record};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::TableCatalog;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::{Monotonicity, MonotonicityMap, WatermarkColumns};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamEowcSort {
@@ -55,8 +54,16 @@ impl StreamEowcSort {
         let fd_set = input.functional_dependency().clone();
         let dist = input.distribution().clone();
 
-        let mut watermark_columns = FixedBitSet::with_capacity(input.schema().len());
-        watermark_columns.insert(sort_column_index);
+        let mut watermark_columns = WatermarkColumns::new();
+        watermark_columns.insert(
+            sort_column_index,
+            // `StreamSort` operator will propagate input watermark as it is,
+            // so we can assign the same watermark group.
+            input
+                .watermark_columns()
+                .get_group(sort_column_index)
+                .unwrap(),
+        );
 
         // StreamEowcSort makes the sorting watermark column non-decreasing
         let mut columns_monotonicity = MonotonicityMap::new();
@@ -68,7 +75,7 @@ impl StreamEowcSort {
             stream_key,
             fd_set,
             dist,
-            true,
+            StreamKind::AppendOnly,
             true,
             watermark_columns,
             columns_monotonicity,
@@ -113,7 +120,7 @@ impl StreamEowcSort {
     }
 }
 
-impl PlanTreeNodeUnary for StreamEowcSort {
+impl PlanTreeNodeUnary<Stream> for StreamEowcSort {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -123,22 +130,22 @@ impl PlanTreeNodeUnary for StreamEowcSort {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamEowcSort }
+impl_plan_tree_node_for_unary! { Stream, StreamEowcSort }
 
 impl StreamNode for StreamEowcSort {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
-        PbNodeBody::Sort(SortNode {
+        PbNodeBody::Sort(Box::new(SortNode {
             state_table: Some(
                 self.infer_state_table()
                     .with_id(state.gen_table_id_wrapped())
                     .to_internal_table_prost(),
             ),
             sort_column_index: self.sort_column_index as _,
-        })
+        }))
     }
 }
 
-impl ExprRewritable for StreamEowcSort {}
+impl ExprRewritable<Stream> for StreamEowcSort {}
 
 impl ExprVisitable for StreamEowcSort {}

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,23 +16,50 @@ use std::str::FromStr;
 
 use itertools::Itertools;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+use risingwave_common::id::SourceId;
 use risingwave_common::types::{
-    DataType, Datum, DatumCow, Scalar, ScalarImpl, ScalarRefImpl, Timestamptz, ToDatumRef,
-    ToOwnedDatum,
+    DataType, Datum, DatumCow, Int256, ListValue, Scalar, ScalarImpl, ScalarRefImpl, StructValue,
+    Timestamp, Timestamptz, ToDatumRef, ToOwnedDatum,
 };
 use risingwave_connector_codec::decoder::AccessExt;
 use risingwave_pb::plan_common::additional_column::ColumnType;
 use thiserror_ext::AsReport;
 
 use super::{Access, AccessError, AccessResult, ChangeEvent, ChangeEventOperation};
+use crate::parser::TransactionControl;
 use crate::parser::debezium::schema_change::{SchemaChangeEnvelope, TableSchemaChange};
 use crate::parser::schema_change::TableChangeType;
-use crate::parser::TransactionControl;
 use crate::source::cdc::build_cdc_table_id;
 use crate::source::cdc::external::mysql::{
     mysql_type_to_rw_type, timestamp_val_to_timestamptz, type_name_to_mysql_type,
 };
+use crate::source::cdc::external::postgres::{pg_type_to_rw_type, type_name_to_pg_type};
 use crate::source::{ConnectorProperties, SourceColumnDesc};
+
+/// Checks if a given default value expression is a BIGSERIAL default.
+///
+/// Normally, all unsupported expressions should fail in `from_text` parsing.
+/// However, we make a special exception for `nextval()` function because:
+/// 1. When users set a column as BIGSERIAL (usually as primary key), PostgreSQL automatically generates
+///    a default value expression like `nextval('sequence_name'::regclass)`
+/// 2. This is a very common scenario in real-world usage
+/// 3. For existing columns with `nextval()` default, we skip parsing the default value
+///    to avoid schema change failures
+///
+/// TODO: In the future, if we can distinguish between newly added columns and existing columns,
+/// we should modify this logic to:
+/// - Skip default value parsing for existing columns with `nextval()`
+/// - Report error for newly added columns with `nextval()` (since they should be handled differently)
+fn is_bigserial_default(default_value_expression: &str) -> bool {
+    if default_value_expression.trim().is_empty() {
+        return false;
+    }
+
+    let expr = default_value_expression.trim();
+
+    // Return true if it is a `nextval()` function (bigserial default).
+    expr.starts_with("nextval(")
+}
 
 // Example of Debezium JSON value:
 // {
@@ -164,7 +191,8 @@ macro_rules! jsonb_access_field {
 /// <https://debezium.io/documentation/reference/2.6/connectors/mysql.html#mysql-schema-change-topic>
 pub fn parse_schema_change(
     accessor: &impl Access,
-    source_id: u32,
+    source_id: SourceId,
+    source_name: &str,
     connector_props: &ConnectorProperties,
 ) -> AccessResult<SchemaChangeEnvelope> {
     let mut schema_changes = vec![];
@@ -177,7 +205,7 @@ pub fn parse_schema_change(
         .to_string();
 
     if let Some(ScalarRefImpl::List(table_changes)) = accessor
-        .access(&[TABLE_CHANGES], &DataType::List(Box::new(DataType::Jsonb)))?
+        .access(&[TABLE_CHANGES], &DataType::Jsonb.list())?
         .to_datum_ref()
     {
         for datum in table_changes.iter() {
@@ -185,9 +213,10 @@ pub fn parse_schema_change(
                 Some(ScalarRefImpl::Jsonb(jsonb)) => jsonb,
                 _ => unreachable!(""),
             };
-
-            let id = jsonb_access_field!(jsonb, "id", string);
+            let id: String = jsonb_access_field!(jsonb, "id", string);
             let ty = jsonb_access_field!(jsonb, "type", string);
+
+            let table_name = id.trim_matches('"').to_owned();
             let ddl_type: TableChangeType = ty.as_str().into();
             if matches!(ddl_type, TableChangeType::Create | TableChangeType::Drop) {
                 tracing::debug!("skip table schema change for create/drop command");
@@ -201,27 +230,57 @@ pub fn parse_schema_change(
                 for col in columns.array_elements().unwrap() {
                     let name = jsonb_access_field!(col, "name", string);
                     let type_name = jsonb_access_field!(col, "typeName", string);
-
+                    // Determine if this column is an enum type
+                    let is_enum = matches!(col.access_object_field("enumValues"), Some(val) if !val.is_jsonb_null());
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
-                            DataType::from_str(type_name.as_str()).map_err(|err| {
-                                tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
-                                AccessError::UnsupportedType {
-                                    ty: type_name.clone(),
+                            let ty = type_name_to_pg_type(type_name.as_str());
+                            if is_enum {
+                                tracing::debug!(target: "auto_schema_change",
+                                    "Convert PostgreSQL user defined enum type '{}' to VARCHAR", type_name);
+                                DataType::Varchar
+                            } else {
+                                match ty {
+                                    Some(ty) => match pg_type_to_rw_type(&ty) {
+                                        Ok(data_type) => data_type,
+                                        Err(err) => {
+                                            tracing::warn!(error=%err.as_report(), "unsupported postgres type in schema change message");
+                                            return Err(AccessError::CdcAutoSchemaChangeError {
+                                                ty: type_name,
+                                                table_name: format!(
+                                                    "{}.{}",
+                                                    source_name, table_name
+                                                ),
+                                            });
+                                        }
+                                    },
+                                    None => {
+                                        return Err(AccessError::CdcAutoSchemaChangeError {
+                                            ty: type_name,
+                                            table_name: format!("{}.{}", source_name, table_name),
+                                        });
+                                    }
                                 }
-                            })?
+                            }
                         }
                         ConnectorProperties::MysqlCdc(_) => {
                             let ty = type_name_to_mysql_type(type_name.as_str());
                             match ty {
-                                Some(ty) => mysql_type_to_rw_type(&ty).map_err(|err| {
-                                    tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
-                                    AccessError::UnsupportedType {
-                                        ty: type_name.clone(),
+                                Some(ty) => match mysql_type_to_rw_type(&ty) {
+                                    Ok(data_type) => data_type,
+                                    Err(err) => {
+                                        tracing::warn!(error=%err.as_report(), "unsupported mysql type in schema change message");
+                                        return Err(AccessError::CdcAutoSchemaChangeError {
+                                            ty: type_name,
+                                            table_name: format!("{}.{}", source_name, table_name),
+                                        });
                                     }
-                                })?,
+                                },
                                 None => {
-                                    Err(AccessError::UnsupportedType { ty: type_name })?
+                                    return Err(AccessError::CdcAutoSchemaChangeError {
+                                        ty: type_name,
+                                        table_name: format!("{}.{}", source_name, table_name),
+                                    });
                                 }
                             }
                         }
@@ -233,71 +292,78 @@ pub fn parse_schema_change(
                     // handle default value expression, currently we only support constant expression
                     let column_desc = match col.access_object_field("defaultValueExpression") {
                         Some(default_val_expr_str) if !default_val_expr_str.is_jsonb_null() => {
-                            let value_text: Option<String>;
                             let default_val_expr_str = default_val_expr_str.as_str().unwrap();
-                            match *connector_props {
-                                ConnectorProperties::PostgresCdc(_) => {
-                                    // default value of non-number data type will be stored as
-                                    // "'value'::type"
-                                    match default_val_expr_str
-                                        .split("::")
-                                        .map(|s| s.trim_matches('\''))
-                                        .next()
-                                    {
-                                        None => {
-                                            value_text = None;
-                                        }
-                                        Some(val_text) => {
-                                            value_text = Some(val_text.to_string());
-                                        }
-                                    }
-                                }
-                                ConnectorProperties::MysqlCdc(_) => {
-                                    // mysql timestamp is mapped to timestamptz, we use UTC timezone to
-                                    // interpret its value
-                                    if data_type == DataType::Timestamptz {
-                                        value_text = Some(timestamp_val_to_timestamptz(default_val_expr_str).map_err(|err| {
-                                            tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
-                                            AccessError::TypeError {
-                                                expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
-                                                got: data_type.to_string(),
-                                                value: default_val_expr_str.to_string(),
-                                            }
-                                        })?);
-                                    } else {
-                                        value_text = Some(default_val_expr_str.to_string());
-                                    }
-                                }
-                                _ => {
-                                    unreachable!("connector doesn't support schema change")
-                                }
-                            }
-
-                            let snapshot_value: Datum = if let Some(value_text) = value_text {
-                                Some(ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
-                                    |err| {
-                                        tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to parse default value expression");
-                                        AccessError::TypeError {
-                                            expected: "constant expression".into(),
-                                            got: data_type.to_string(),
-                                            value: value_text,
-                                        }
-                                    },
-                                )?)
-                            } else {
-                                None
-                            };
-
-                            if snapshot_value.is_none() {
-                                tracing::warn!(target: "auto_schema_change", "failed to parse default value expression: {}", default_val_expr_str);
+                            // Only process constant default values
+                            if is_bigserial_default(default_val_expr_str) {
+                                tracing::warn!(target: "auto_schema_change",
+                                    "Ignoring unsupported BIGSERIAL default value expression: {}", default_val_expr_str);
                                 ColumnDesc::named(name, ColumnId::placeholder(), data_type)
                             } else {
-                                ColumnDesc::named_with_default_value(
-                                    name,
-                                    ColumnId::placeholder(),
-                                    data_type,
-                                    snapshot_value,
-                                )
+                                let value_text: Option<String>;
+                                match *connector_props {
+                                    ConnectorProperties::PostgresCdc(_) => {
+                                        // default value of non-number data type will be stored as
+                                        // "'value'::type"
+                                        match default_val_expr_str
+                                            .split("::")
+                                            .map(|s| s.trim_matches('\''))
+                                            .next()
+                                        {
+                                            None => {
+                                                value_text = None;
+                                            }
+                                            Some(val_text) => {
+                                                value_text = Some(val_text.to_owned());
+                                            }
+                                        }
+                                    }
+                                    ConnectorProperties::MysqlCdc(_) => {
+                                        // mysql timestamp is mapped to timestamptz, we use UTC timezone to
+                                        // interpret its value
+                                        if data_type == DataType::Timestamptz {
+                                            value_text = Some(timestamp_val_to_timestamptz(default_val_expr_str).map_err(|err| {
+                                                tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to convert timestamp value to timestamptz");
+                                                AccessError::TypeError {
+                                                    expected: "timestamp in YYYY-MM-DD HH:MM:SS".into(),
+                                                    got: data_type.to_string(),
+                                                    value: default_val_expr_str.to_owned(),
+                                                }
+                                            })?);
+                                        } else {
+                                            value_text = Some(default_val_expr_str.to_owned());
+                                        }
+                                    }
+                                    _ => {
+                                        unreachable!("connector doesn't support schema change")
+                                    }
+                                }
+
+                                let snapshot_value: Datum = if let Some(value_text) = value_text {
+                                    Some(ScalarImpl::from_text(value_text.as_str(), &data_type).map_err(
+                                        |err| {
+                                            tracing::error!(target: "auto_schema_change", error=%err.as_report(), "failed to parse default value expression");
+                                            AccessError::TypeError {
+                                                expected: "constant expression".into(),
+                                                got: data_type.to_string(),
+                                                value: value_text,
+                                            }
+                                        },
+                                    )?)
+                                } else {
+                                    None
+                                };
+
+                                if snapshot_value.is_none() {
+                                    tracing::warn!(target: "auto_schema_change", "failed to parse default value expression: {}", default_val_expr_str);
+                                    ColumnDesc::named(name, ColumnId::placeholder(), data_type)
+                                } else {
+                                    ColumnDesc::named_with_default_value(
+                                        name,
+                                        ColumnId::placeholder(),
+                                        data_type,
+                                        snapshot_value,
+                                    )
+                                }
                             }
                         }
                         _ => ColumnDesc::named(name, ColumnId::placeholder(), data_type),
@@ -476,8 +542,12 @@ where
     }
 }
 
+/// Access support for Mongo
+///
+/// For now, we considerate `strong_schema` typed `MongoDB` Debezium event jsons only.
 pub struct MongoJsonAccess<A> {
     accessor: A,
+    strong_schema: bool,
 }
 
 pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> AccessResult {
@@ -506,12 +576,12 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
         DataType::Varchar => match id_field {
             serde_json::Value::String(s) => Some(ScalarImpl::Utf8(s.clone().into())),
             serde_json::Value::Object(obj) if obj.contains_key("$oid") => Some(ScalarImpl::Utf8(
-                obj["$oid"].as_str().to_owned().unwrap_or_default().into(),
+                obj["$oid"].as_str().unwrap_or_default().into(),
             )),
             _ => return Err(type_error()),
         },
         DataType::Int32 => {
-            if let serde_json::Value::Object(ref obj) = id_field
+            if let serde_json::Value::Object(obj) = id_field
                 && obj.contains_key("$numberInt")
             {
                 let int_str = obj["$numberInt"].as_str().unwrap_or_default();
@@ -521,7 +591,7 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
             }
         }
         DataType::Int64 => {
-            if let serde_json::Value::Object(ref obj) = id_field
+            if let serde_json::Value::Object(obj) = id_field
                 && obj.contains_key("$numberLong")
             {
                 let int_str = obj["$numberLong"].as_str().unwrap_or_default();
@@ -535,9 +605,559 @@ pub fn extract_bson_id(id_type: &DataType, bson_doc: &serde_json::Value) -> Acce
     Ok(id)
 }
 
+/// Extract the field data from the bson document
+///
+/// BSON document is a JSON object with some special fields, such as:
+/// long integer: {"$numberLong": "1630454400000"}
+/// date time: {"$date": {"$numberLong": "1630454400000"}}
+///
+/// For now, we support only the Canonical format of the date and timestamp.
+///
+/// # NOTE:
+///
+/// - `field` indicates the field name in the bson document, if it is None, the `bson_doc` is the field itself.
+// similar to extract the "_id" field from the message payload
+pub fn extract_bson_field(
+    type_expected: &DataType,
+    bson_doc: &serde_json::Value,
+    field: Option<&str>,
+) -> AccessResult {
+    let type_error = |datum: &serde_json::Value| AccessError::TypeError {
+        expected: type_expected.to_string(),
+        got: match bson_doc {
+            serde_json::Value::Null => "null",
+            serde_json::Value::Bool(_) => "bool",
+            serde_json::Value::Number(_) => "number",
+            serde_json::Value::String(_) => "string",
+            serde_json::Value::Array(_) => "array",
+            serde_json::Value::Object(_) => "object",
+        }
+        .to_owned(),
+        value: datum.to_string(),
+    };
+
+    let datum = if let Some(field) = field {
+        let Some(bson_doc) = bson_doc.get(field) else {
+            return Err(type_error(bson_doc));
+        };
+        bson_doc
+    } else {
+        bson_doc
+    };
+
+    if datum.is_null() {
+        return Ok(None);
+    }
+
+    let field_datum: Datum = match type_expected {
+        DataType::Boolean => {
+            if datum.is_boolean() {
+                Some(ScalarImpl::Bool(datum.as_bool().unwrap()))
+            } else {
+                return Err(type_error(datum));
+            }
+        }
+        DataType::Jsonb => ScalarImpl::Jsonb(datum.clone().into()).into(),
+        DataType::Varchar => match datum {
+            serde_json::Value::String(s) => Some(ScalarImpl::Utf8(s.clone().into())),
+            serde_json::Value::Object(obj) if obj.contains_key("$oid") && field == Some("_id") => {
+                obj["oid"].as_str().map(|s| ScalarImpl::Utf8(s.into()))
+            }
+            _ => return Err(type_error(datum)),
+        },
+        DataType::Int16
+        | DataType::Int32
+        | DataType::Int64
+        | DataType::Int256
+        | DataType::Float32
+        | DataType::Float64 => {
+            if !datum.is_object() {
+                return Err(type_error(datum));
+            };
+
+            bson_extract_number(datum, type_expected)?
+        }
+
+        DataType::Date | DataType::Timestamp | DataType::Timestamptz => {
+            if let serde_json::Value::Object(mp) = datum {
+                if mp.contains_key("$timestamp") && mp["$timestamp"].is_object() {
+                    bson_extract_timestamp(datum, type_expected)?
+                } else if mp.contains_key("$date") {
+                    bson_extract_date(datum, type_expected)?
+                } else {
+                    return Err(type_error(datum));
+                }
+            } else {
+                return Err(type_error(datum));
+            }
+        }
+        DataType::Decimal => {
+            if let serde_json::Value::Object(obj) = datum
+                && obj.contains_key("$numberDecimal")
+                && obj["$numberDecimal"].is_string()
+            {
+                let number = obj["$numberDecimal"].as_str().unwrap();
+
+                let dec = risingwave_common::types::Decimal::from_str(number).map_err(|_| {
+                    AccessError::TypeError {
+                        expected: type_expected.to_string(),
+                        got: "unparsable string".into(),
+                        value: number.to_owned(),
+                    }
+                })?;
+                Some(ScalarImpl::Decimal(dec))
+            } else {
+                return Err(type_error(datum));
+            }
+        }
+
+        DataType::Bytea => {
+            if let serde_json::Value::Object(obj) = datum
+                && obj.contains_key("$binary")
+                && obj["$binary"].is_object()
+            {
+                use base64::Engine;
+
+                let binary = obj["$binary"].as_object().unwrap();
+
+                if !binary.contains_key("$base64")
+                    || !binary["$base64"].is_string()
+                    || !binary.contains_key("$subType")
+                    || !binary["$subType"].is_string()
+                {
+                    return Err(AccessError::TypeError {
+                        expected: type_expected.to_string(),
+                        got: "object".into(),
+                        value: datum.to_string(),
+                    });
+                }
+
+                let b64_str = binary["$base64"]
+                    .as_str()
+                    .ok_or_else(|| AccessError::TypeError {
+                        expected: type_expected.to_string(),
+                        got: "object".into(),
+                        value: datum.to_string(),
+                    })?;
+
+                // type is not used for now
+                let _type_str =
+                    binary["$subType"]
+                        .as_str()
+                        .ok_or_else(|| AccessError::TypeError {
+                            expected: type_expected.to_string(),
+                            got: "object".into(),
+                            value: datum.to_string(),
+                        })?;
+
+                let bytes = base64::prelude::BASE64_STANDARD
+                    .decode(b64_str)
+                    .map_err(|_| AccessError::TypeError {
+                        expected: "$binary object with $base64 string and $subType string field"
+                            .to_owned(),
+                        got: "string".to_owned(),
+                        value: bson_doc.to_string(),
+                    })?;
+                let bytea = ScalarImpl::Bytea(bytes.into());
+                Some(bytea)
+            } else {
+                return Err(type_error(datum));
+            }
+        }
+
+        DataType::Struct(struct_fields) => {
+            let mut datums = vec![];
+            for (field_name, field_type) in struct_fields.iter() {
+                let field_datum = extract_bson_field(field_type, datum, Some(field_name))?;
+                datums.push(field_datum);
+            }
+            let value = StructValue::new(datums);
+
+            Some(ScalarImpl::Struct(value))
+        }
+
+        DataType::List(list_type) => {
+            let elem_type = list_type.elem();
+            let Some(d_array) = datum.as_array() else {
+                return Err(type_error(datum));
+            };
+
+            let mut builder = elem_type.create_array_builder(d_array.len());
+            for item in d_array {
+                builder.append(extract_bson_field(elem_type, item, None)?);
+            }
+            Some(ScalarImpl::from(ListValue::new(builder.finish())))
+        }
+
+        _ => {
+            if let Some(field_name) = field {
+                unreachable!(
+                    "DebeziumMongoJsonParser::new must ensure {field_name} column datatypes."
+                )
+            } else {
+                let type_expected = type_expected.to_string();
+                unreachable!(
+                    "DebeziumMongoJsonParser::new must ensure type of `{type_expected}` matches datum `{datum}`"
+                )
+            }
+        }
+    };
+    Ok(field_datum)
+}
+
+fn bson_extract_number(bson_doc: &serde_json::Value, type_expected: &DataType) -> AccessResult {
+    let field_name = match type_expected {
+        DataType::Int16 => "$numberInt",
+        DataType::Int32 => "$numberInt",
+        DataType::Int64 => "$numberLong",
+        DataType::Int256 => "$numberLong",
+        DataType::Float32 => "$numberDouble",
+        DataType::Float64 => "$numberDouble",
+        _ => unreachable!("DebeziumMongoJsonParser::new must ensure column datatypes."),
+    };
+
+    let datum = bson_doc.get(field_name);
+    if datum.is_none() {
+        return Err(AccessError::TypeError {
+            expected: type_expected.to_string(),
+            got: "object".into(),
+            value: bson_doc.to_string(),
+        });
+    }
+
+    let datum = datum.unwrap();
+
+    if datum.is_string() {
+        let Some(num_str) = datum.as_str() else {
+            return Err(AccessError::TypeError {
+                expected: type_expected.to_string(),
+                got: "string".into(),
+                value: datum.to_string(),
+            });
+        };
+        // parse to float
+        if [DataType::Float32, DataType::Float64].contains(type_expected) {
+            match (num_str, type_expected) {
+                ("Infinity", DataType::Float64) => {
+                    return Ok(Some(ScalarImpl::Float64(f64::INFINITY.into())));
+                }
+                ("Infinity", DataType::Float32) => {
+                    return Ok(Some(ScalarImpl::Float32(f32::INFINITY.into())));
+                }
+                ("-Infinity", DataType::Float64) => {
+                    return Ok(Some(ScalarImpl::Float64(f64::NEG_INFINITY.into())));
+                }
+                ("-Infinity", DataType::Float32) => {
+                    return Ok(Some(ScalarImpl::Float32(f32::NEG_INFINITY.into())));
+                }
+                ("NaN", DataType::Float64) => {
+                    return Ok(Some(ScalarImpl::Float64(f64::NAN.into())));
+                }
+                ("NaN", DataType::Float32) => {
+                    return Ok(Some(ScalarImpl::Float32(f32::NAN.into())));
+                }
+                _ => {}
+            }
+
+            let parsed_num: f64 = match num_str.parse() {
+                Ok(n) => n,
+                Err(_e) => {
+                    return Err(AccessError::TypeError {
+                        expected: type_expected.to_string(),
+                        got: "string".into(),
+                        value: num_str.to_owned(),
+                    });
+                }
+            };
+            if *type_expected == DataType::Float64 {
+                return Ok(Some(ScalarImpl::Float64(parsed_num.into())));
+            } else {
+                let parsed_num = parsed_num as f32;
+                return Ok(Some(ScalarImpl::Float32(parsed_num.into())));
+            }
+        }
+        // parse to large int
+        if *type_expected == DataType::Int256 {
+            let parsed_num = match Int256::from_str(num_str) {
+                Ok(n) => n,
+                Err(_) => {
+                    return Err(AccessError::TypeError {
+                        expected: type_expected.to_string(),
+                        got: "string".into(),
+                        value: num_str.to_owned(),
+                    });
+                }
+            };
+            return Ok(Some(ScalarImpl::Int256(parsed_num)));
+        }
+
+        // parse to integer
+        let parsed_num: i64 = match num_str.parse() {
+            Ok(n) => n,
+            Err(_e) => {
+                return Err(AccessError::TypeError {
+                    expected: type_expected.to_string(),
+                    got: "string".into(),
+                    value: num_str.to_owned(),
+                });
+            }
+        };
+        match type_expected {
+            DataType::Int16 => {
+                if parsed_num < i16::MIN as i64 || parsed_num > i16::MAX as i64 {
+                    return Err(AccessError::TypeError {
+                        expected: type_expected.to_string(),
+                        got: "string".into(),
+                        value: num_str.to_owned(),
+                    });
+                }
+                return Ok(Some(ScalarImpl::Int16(parsed_num as i16)));
+            }
+            DataType::Int32 => {
+                if parsed_num < i32::MIN as i64 || parsed_num > i32::MAX as i64 {
+                    return Err(AccessError::TypeError {
+                        expected: type_expected.to_string(),
+                        got: "string".into(),
+                        value: num_str.to_owned(),
+                    });
+                }
+                return Ok(Some(ScalarImpl::Int32(parsed_num as i32)));
+            }
+            DataType::Int64 => {
+                return Ok(Some(ScalarImpl::Int64(parsed_num)));
+            }
+            _ => unreachable!("DebeziumMongoJsonParser::new must ensure column datatypes."),
+        }
+    }
+    if datum.is_null() {
+        return Err(AccessError::TypeError {
+            expected: type_expected.to_string(),
+            got: "null".into(),
+            value: bson_doc.to_string(),
+        });
+    }
+
+    if datum.is_array() {
+        return Err(AccessError::TypeError {
+            expected: type_expected.to_string(),
+            got: "array".to_owned(),
+            value: datum.to_string(),
+        });
+    }
+
+    if datum.is_object() {
+        return Err(AccessError::TypeError {
+            expected: type_expected.to_string(),
+            got: "object".to_owned(),
+            value: datum.to_string(),
+        });
+    }
+
+    if datum.is_boolean() {
+        return Err(AccessError::TypeError {
+            expected: type_expected.to_string(),
+            got: "boolean".into(),
+            value: bson_doc.to_string(),
+        });
+    }
+
+    if datum.is_number() {
+        let got_type = if datum.is_f64() { "f64" } else { "i64" };
+        return Err(AccessError::TypeError {
+            expected: type_expected.to_string(),
+            got: got_type.into(),
+            value: bson_doc.to_string(),
+        });
+    }
+
+    Err(AccessError::TypeError {
+        expected: type_expected.to_string(),
+        got: "unknown".into(),
+        value: bson_doc.to_string(),
+    })
+}
+
+fn bson_extract_date(bson_doc: &serde_json::Value, type_expected: &DataType) -> AccessResult {
+    // according to mongodb extended json v2
+    // the date could be:
+    //
+    // the timestamp type could be:
+    //
+    // both Canonical and Relaxed format:
+    // {"$timestamp": {"t": 1630454400, "i": 1}}
+    //
+    // Canonical: {"$date": {"$numberLong": "1630454400000"}}
+    // date is encoded as number of milliseconds since the Unix epoch
+    //
+    // Relaxed: {"$date": "2021-09-01T00:00:00.000Z"}
+    // date is encoded as ISO8601 string
+
+    let datum = &bson_doc["$date"];
+
+    let type_error = || AccessError::TypeError {
+        expected: type_expected.to_string(),
+        got: match bson_doc {
+            serde_json::Value::Null => "null",
+            serde_json::Value::Bool(_) => "bool",
+            serde_json::Value::Number(_) => "number",
+            serde_json::Value::String(_) => "string",
+            serde_json::Value::Array(_) => "array",
+            serde_json::Value::Object(_) => "object",
+        }
+        .to_owned(),
+        value: datum.to_string(),
+    };
+
+    // deal with the Canonical format only
+    let millis = match datum {
+        // Canonical format {"$date": {"$numberLong": "1630454400000"}}
+        serde_json::Value::Object(obj)
+            if obj.contains_key("$numberLong") && obj["$numberLong"].is_string() =>
+        {
+            obj["$numberLong"]
+                .as_str()
+                .unwrap()
+                .parse::<i64>()
+                .map_err(|_| AccessError::TypeError {
+                    expected: "timestamp".into(),
+                    got: "object".into(),
+                    value: datum.to_string(),
+                })?
+        }
+        // Relaxed format {"$date": "2021-09-01T00:00:00.000Z"}
+        serde_json::Value::String(s) => {
+            let dt =
+                chrono::DateTime::parse_from_rfc3339(s).map_err(|_| AccessError::TypeError {
+                    expected: "valid ISO-8601 date string".into(),
+                    got: "string".into(),
+                    value: datum.to_string(),
+                })?;
+            dt.timestamp_millis()
+        }
+
+        // jsonv1 format
+        // {"$date": 1630454400000}
+        serde_json::Value::Number(num) => num.as_i64().ok_or_else(|| AccessError::TypeError {
+            expected: "timestamp".into(),
+            got: "number".into(),
+            value: datum.to_string(),
+        })?,
+
+        _ => return Err(type_error()),
+    };
+
+    let datetime =
+        chrono::DateTime::from_timestamp_millis(millis).ok_or_else(|| AccessError::TypeError {
+            expected: "timestamp".into(),
+            got: "object".into(),
+            value: datum.to_string(),
+        })?;
+
+    let res = match type_expected {
+        DataType::Date => {
+            let naive = datetime.naive_local();
+            let dt = naive.date();
+            Some(ScalarImpl::Date(dt.into()))
+        }
+        DataType::Time => {
+            let naive = datetime.naive_local();
+            let dt = naive.time();
+            Some(ScalarImpl::Time(dt.into()))
+        }
+        DataType::Timestamp => {
+            let naive = datetime.naive_local();
+            let dt = Timestamp::from(naive);
+            Some(ScalarImpl::Timestamp(dt))
+        }
+        DataType::Timestamptz => {
+            let dt = datetime.into();
+            Some(ScalarImpl::Timestamptz(dt))
+        }
+        _ => unreachable!("DebeziumMongoJsonParser::new must ensure column datatypes."),
+    };
+    Ok(res)
+}
+
+fn bson_extract_timestamp(bson_doc: &serde_json::Value, type_expected: &DataType) -> AccessResult {
+    // according to mongodb extended json v2
+    // the date could be:
+    //
+    // the timestamp type could be:
+    //
+    // both Canonical and Relaxed format:
+    // {"$timestamp": {"t": 1630454400, "i": 1}}
+    // t is the number of seconds since the Unix epoch
+    //
+    // Canonical: {"$date": {"$numberLong": "1630454400000"}}
+    // date is encoded as number of milliseconds since the Unix epoch
+    //
+    // Relaxed: {"$date": "2021-09-01T00:00:00.000Z"}
+    // date is encoded as ISO8601 string
+    //
+    // *For now, we support the Canonical format only.*
+
+    let Some(obj) = bson_doc["$timestamp"].as_object() else {
+        return Err(AccessError::TypeError {
+            expected: "timestamp".into(),
+            got: "object".into(),
+            value: bson_doc.to_string(),
+        });
+    };
+
+    if !obj.contains_key("t") || !obj["t"].is_u64() || !obj.contains_key("i") || !obj["i"].is_u64()
+    {
+        return Err(AccessError::TypeError {
+            expected: "timestamp with valid seconds since epoch".into(),
+            got: "object".into(),
+            value: bson_doc.to_string(),
+        });
+    }
+
+    let since_epoch = obj["t"].as_i64().ok_or_else(|| AccessError::TypeError {
+        expected: "timestamp with valid seconds since epoch".into(),
+        got: "object".into(),
+        value: bson_doc.to_string(),
+    })?;
+
+    let chrono_datetime =
+        chrono::DateTime::from_timestamp(since_epoch, 0).ok_or_else(|| AccessError::TypeError {
+            expected: type_expected.to_string(),
+            got: "object".to_owned(),
+            value: bson_doc.to_string(),
+        })?;
+
+    let res = match type_expected {
+        DataType::Date => {
+            let naive = chrono_datetime.naive_local();
+            let dt = naive.date();
+            Some(ScalarImpl::Date(dt.into()))
+        }
+        DataType::Time => {
+            let naive = chrono_datetime.naive_local();
+            let dt = naive.time();
+            Some(ScalarImpl::Time(dt.into()))
+        }
+        DataType::Timestamp => {
+            let naive = chrono_datetime.naive_local();
+            let dt = Timestamp::from(naive);
+            Some(ScalarImpl::Timestamp(dt))
+        }
+        DataType::Timestamptz => {
+            let dt = chrono_datetime.into();
+            Some(ScalarImpl::Timestamptz(dt))
+        }
+        _ => unreachable!("DebeziumMongoJsonParser::new must ensure column datatypes."),
+    };
+
+    Ok(res)
+}
+
 impl<A> MongoJsonAccess<A> {
-    pub fn new(accessor: A) -> Self {
-        Self { accessor }
+    pub fn new(accessor: A, strong_schema: bool) -> Self {
+        Self {
+            accessor,
+            strong_schema,
+        }
     }
 }
 
@@ -554,12 +1174,29 @@ where
                 } else {
                     // fail to extract the "_id" field from the message payload
                     Err(AccessError::Undefined {
-                        name: "_id".to_string(),
-                        path: path[0].to_string(),
+                        name: "_id".to_owned(),
+                        path: path[0].to_owned(),
                     })?
                 }
             }
-            ["after" | "before", "payload"] => self.access(&[path[0]], &DataType::Jsonb),
+
+            ["after" | "before", "payload"] if !self.strong_schema => {
+                self.access(&[path[0]], &DataType::Jsonb)
+            }
+
+            ["after" | "before", field] if self.strong_schema => {
+                let payload = self.access_owned(&[path[0]], &DataType::Jsonb)?;
+                if let Some(ScalarImpl::Jsonb(bson_doc)) = payload {
+                    Ok(extract_bson_field(type_expected, &bson_doc.take(), Some(field))?.into())
+                } else {
+                    // fail to extract the expected field from the message payload
+                    Err(AccessError::Undefined {
+                        name: field.to_string(),
+                        path: path[0].to_owned(),
+                    })?
+                }
+            }
+
             // To handle a DELETE message, we need to extract the "_id" field from the message key, because it is not in the payload.
             // In addition, the "_id" field is named as "id" in the key. An example of message key:
             // {"schema":null,"payload":{"id":"{\"$oid\": \"65bc9fb6c485f419a7a877fe\"}"}}
@@ -572,8 +1209,8 @@ where
                     } else {
                         // fail to extract the "_id" field from the message key
                         Err(AccessError::Undefined {
-                            name: "_id".to_string(),
-                            path: "id".to_string(),
+                            name: "_id".to_owned(),
+                            path: "id".to_owned(),
                         })?
                     }
                 } else {

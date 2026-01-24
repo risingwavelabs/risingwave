@@ -14,24 +14,27 @@
 
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
-use std::sync::Once;
 use std::time::Instant;
 
 use anyhow::anyhow;
 use either::Either;
-use futures::stream::{select_with_strategy, PollNext};
+use futures::stream::{PollNext, select_with_strategy};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
-use risingwave_common::metrics::{LabelGuardedIntCounter, GLOBAL_ERROR_METRICS};
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::id::SourceId;
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntCounter};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::reader::desc::{SourceDesc, SourceDescBuilder};
 use risingwave_connector::source::{
-    BackfillInfo, BoxChunkSourceStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
+    BackfillInfo, BoxSourceChunkStream, SourceContext, SourceCtrlOpts, SplitId, SplitImpl,
     SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -40,9 +43,9 @@ use super::executor_core::StreamSourceCore;
 use super::source_backfill_state_table::BackfillStateTableHandler;
 use super::{apply_rate_limit, get_split_offset_col_idx};
 use crate::common::rate_limit::limited_chunk_size;
+use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::source_executor::WAIT_BARRIER_MULTIPLE_TIMES;
-use crate::executor::UpdateMutation;
 use crate::task::CreateMviewProgressReporter;
 
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
@@ -54,9 +57,21 @@ pub enum BackfillState {
     SourceCachingUp(String),
     Finished,
 }
-pub type BackfillStates = HashMap<SplitId, BackfillState>;
+pub type BackfillStates = HashMap<SplitId, BackfillStateWithProgress>;
 
-impl BackfillState {
+/// Only `state` field is the real state for fail-over.
+/// Other fields are for observability (but we still need to persist them).
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
+pub struct BackfillStateWithProgress {
+    pub state: BackfillState,
+    pub num_consumed_rows: u64,
+    /// The latest offset from upstream (inclusive). After we reach this offset, we can stop backfilling.
+    /// This is initialized with the latest available offset in the connector (if the connector provides the ability to fetch it)
+    /// so that we can finish backfilling even when upstream doesn't emit any data.
+    pub target_offset: Option<String>,
+}
+
+impl BackfillStateWithProgress {
     pub fn encode_to_json(self) -> JsonbVal {
         serde_json::to_value(self).unwrap().into()
     }
@@ -77,13 +92,15 @@ pub struct SourceBackfillExecutorInner<S: StateStore> {
     info: ExecutorInfo,
 
     /// Streaming source for external
-    // FIXME: some fields e.g. its state table is not used. We might need to refactor. Even latest_split_info is not used.
-    stream_source_core: StreamSourceCore<S>,
+    source_id: SourceId,
+    source_name: String,
+    column_ids: Vec<ColumnId>,
+    source_desc_builder: Option<SourceDescBuilder>,
     backfill_state_store: BackfillStateTableHandler<S>,
 
     /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
-    source_split_change_count: LabelGuardedIntCounter<4>,
+    source_split_change_count: LabelGuardedIntCounter,
 
     // /// Receiver of barrier channel.
     // barrier_receiver: Option<UnboundedReceiver<Barrier>>,
@@ -108,23 +125,26 @@ struct BackfillStage {
     ///
     /// Note: the offsets are not updated. Should use `state`'s offset to update before using it (`get_latest_unfinished_splits`).
     splits: Vec<SplitImpl>,
-    /// The latest offset from upstream (inclusive). After we reach this offset, we can stop backfilling.
-    /// This is initialized with the latest available offset in the connector (if the connector provides the ability to fetch it)
-    /// so that we can finish backfilling even when upstream doesn't emit any data.
-    target_offsets: HashMap<SplitId, Option<String>>,
+}
+
+enum ApplyMutationAfterBarrier {
+    SourceChangeSplit {
+        target_splits: Vec<SplitImpl>,
+        should_trim_state: bool,
+    },
+    ConnectorPropsChange,
 }
 
 impl BackfillStage {
+    fn total_backfilled_rows(&self) -> u64 {
+        self.states.values().map(|s| s.num_consumed_rows).sum()
+    }
+
     fn debug_assert_consistent(&self) {
         if cfg!(debug_assertions) {
-            let all_splits: HashSet<_> =
-                self.splits.iter().map(|split| split.id().clone()).collect();
+            let all_splits: HashSet<_> = self.splits.iter().map(|split| split.id()).collect();
             assert_eq!(
                 self.states.keys().cloned().collect::<HashSet<_>>(),
-                all_splits
-            );
-            assert_eq!(
-                self.target_offsets.keys().cloned().collect::<HashSet<_>>(),
                 all_splits
             );
         }
@@ -134,7 +154,7 @@ impl BackfillStage {
     fn get_latest_unfinished_splits(&self) -> StreamExecutorResult<Vec<SplitImpl>> {
         let mut unfinished_splits = Vec::new();
         for split in &self.splits {
-            let state = self.states.get(split.id().as_ref()).unwrap();
+            let state = &self.states.get(split.id().as_ref()).unwrap().state;
             match state {
                 BackfillState::Backfilling(Some(offset)) => {
                     let mut updated_split = split.clone();
@@ -152,7 +172,8 @@ impl BackfillStage {
     fn handle_upstream_row(&mut self, split_id: &str, offset: &str) -> bool {
         let mut vis = false;
         let state = self.states.get_mut(split_id).unwrap();
-        match state {
+        let state_inner = &mut state.state;
+        match state_inner {
             BackfillState::Backfilling(None) => {
                 // backfilling for this split is not started yet. Ignore this row
             }
@@ -163,12 +184,12 @@ impl BackfillStage {
                     }
                     Ordering::Equal => {
                         // backfilling for this split is finished just right.
-                        *state = BackfillState::Finished;
+                        *state_inner = BackfillState::Finished;
                     }
                     Ordering::Greater => {
                         // backfilling for this split produced more data than current source's progress.
                         // We should stop backfilling, and filter out rows from upstream with offset <= backfill_offset.
-                        *state = BackfillState::SourceCachingUp(backfill_offset.clone());
+                        *state_inner = BackfillState::SourceCachingUp(backfill_offset.clone());
                     }
                 }
             }
@@ -178,11 +199,11 @@ impl BackfillStage {
                         // Source caught up, but doesn't contain the last backfilled row.
                         // This may happen e.g., if Kafka performed compaction.
                         vis = true;
-                        *state = BackfillState::Finished;
+                        *state_inner = BackfillState::Finished;
                     }
                     Ordering::Equal => {
                         // Source just caught up with backfilling.
-                        *state = BackfillState::Finished;
+                        *state_inner = BackfillState::Finished;
                     }
                     Ordering::Greater => {
                         // Source is still behind backfilling.
@@ -194,11 +215,11 @@ impl BackfillStage {
                 // This split's backfilling is finished, we are waiting for other splits
             }
         }
-        if matches!(state, BackfillState::Backfilling(_)) {
-            *self.target_offsets.get_mut(split_id).unwrap() = Some(offset.to_string());
+        if matches!(state_inner, BackfillState::Backfilling(_)) {
+            state.target_offset = Some(offset.to_owned());
         }
         if vis {
-            debug_assert_eq!(*state, BackfillState::Finished);
+            debug_assert_eq!(*state_inner, BackfillState::Finished);
         }
         vis
     }
@@ -206,10 +227,11 @@ impl BackfillStage {
     /// Updates backfill states and returns whether the row backfilled from external system is visible.
     fn handle_backfill_row(&mut self, split_id: &str, offset: &str) -> bool {
         let state = self.states.get_mut(split_id).unwrap();
-        match state {
+        state.num_consumed_rows += 1;
+        let state_inner = &mut state.state;
+        match state_inner {
             BackfillState::Backfilling(_old_offset) => {
-                let target_offset = self.target_offsets.get(split_id).unwrap();
-                if let Some(target_offset) = target_offset
+                if let Some(target_offset) = &state.target_offset
                     && compare_kafka_offset(offset, target_offset).is_ge()
                 {
                     // Note1: If target_offset = offset, it seems we can mark the state as Finished without waiting for upstream to catch up
@@ -221,9 +243,9 @@ impl BackfillStage {
                     //
                     // Note3: if target_offset is None (e.g., when upstream doesn't emit messages at all), we will
                     // keep backfilling.
-                    *state = BackfillState::SourceCachingUp(offset.to_string());
+                    *state_inner = BackfillState::SourceCachingUp(offset.to_owned());
                 } else {
-                    *state = BackfillState::Backfilling(Some(offset.to_string()));
+                    *state_inner = BackfillState::Backfilling(Some(offset.to_owned()));
                 }
                 true
             }
@@ -259,7 +281,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         Self {
             actor_ctx,
             info,
-            stream_source_core,
+            source_id: stream_source_core.source_id,
+            source_name: stream_source_core.source_name,
+            column_ids: stream_source_core.column_ids,
+            source_desc_builder: stream_source_core.source_desc_builder,
             backfill_state_store,
             metrics,
             source_split_change_count,
@@ -273,7 +298,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         &self,
         source_desc: &SourceDesc,
         splits: Vec<SplitImpl>,
-    ) -> StreamExecutorResult<(BoxChunkSourceStream, HashMap<SplitId, BackfillInfo>)> {
+    ) -> StreamExecutorResult<(BoxSourceChunkStream, HashMap<SplitId, BackfillInfo>)> {
         let column_ids = source_desc
             .columns
             .iter()
@@ -281,13 +306,13 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .collect_vec();
         let source_ctx = SourceContext::new(
             self.actor_ctx.id,
-            self.stream_source_core.source_id,
+            self.source_id,
             self.actor_ctx.fragment_id,
-            self.stream_source_core.source_name.clone(),
+            self.source_name.clone(),
             source_desc.metrics.clone(),
             SourceCtrlOpts {
                 chunk_size: limited_chunk_size(self.rate_limit_rps),
-                rate_limit: self.rate_limit_rps,
+                split_txn: self.rate_limit_rps.is_some(), // when rate limiting, we may split txn
             },
             source_desc.source.config.clone(),
             None,
@@ -299,14 +324,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         // the executor can only know it's finished when data coming in.
         // For blocking DDL, this would be annoying.
 
-        let (stream, backfill_info) = source_desc
+        let (stream, res) = source_desc
             .source
-            .build_stream_for_backfill(Some(splits), column_ids, Arc::new(source_ctx))
+            .build_stream(Some(splits), column_ids, Arc::new(source_ctx), false)
             .await
             .map_err(StreamExecutorError::connector_error)?;
         Ok((
             apply_rate_limit(stream, self.rate_limit_rps).boxed(),
-            backfill_info,
+            res.backfill_info,
         ))
     }
 
@@ -316,49 +341,58 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
         // Poll the upstream to get the first barrier.
         let barrier = expect_first_barrier(&mut input).await?;
+        let first_epoch = barrier.epoch;
+        let owned_splits = barrier
+            .initial_split_assignment(self.actor_ctx.id)
+            .unwrap_or(&[])
+            .to_vec();
 
-        let mut core = self.stream_source_core;
+        let mut pause_control = PauseControl::new();
+        if barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id) {
+            pause_control.backfill_pause();
+        }
+        if barrier.is_pause_on_startup() {
+            pause_control.command_pause();
+        }
+        yield Message::Barrier(barrier);
 
-        let source_desc_builder: SourceDescBuilder = core.source_desc_builder.take().unwrap();
-        let source_desc = source_desc_builder
+        let source_desc_builder: SourceDescBuilder = self.source_desc_builder.take().unwrap();
+        let mut source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
-        let (Some(split_idx), Some(offset_idx)) = get_split_offset_col_idx(&source_desc.columns)
+
+        // source backfill only applies to kafka, so we don't need to get pulsar's `message_id_data_idx`.
+        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
         else {
             unreachable!("Partition and offset columns must be set.");
         };
 
-        let mut owned_splits = Vec::default();
-        if let Some(splits) = barrier.initial_split_assignment(self.actor_ctx.id) {
-            owned_splits = splits.to_vec();
-        }
-
-        self.backfill_state_store.init_epoch(barrier.epoch);
+        self.backfill_state_store.init_epoch(first_epoch).await?;
 
         let mut backfill_states: BackfillStates = HashMap::new();
-
-        for split in &owned_splits {
-            let split_id = split.id();
-            let backfill_state = self
+        {
+            let committed_reader = self
                 .backfill_state_store
-                .try_recover_from_state_store(&split_id)
-                .await?
-                .unwrap_or(BackfillState::Backfilling(None));
-            backfill_states.insert(split_id, backfill_state);
+                .new_committed_reader(first_epoch)
+                .await?;
+            for split in &owned_splits {
+                let split_id = split.id();
+                let backfill_state = committed_reader
+                    .try_recover_from_state_store(&split_id)
+                    .await?
+                    .unwrap_or(BackfillStateWithProgress {
+                        state: BackfillState::Backfilling(None),
+                        num_consumed_rows: 0,
+                        target_offset: None, // init with None
+                    });
+                backfill_states.insert(split_id, backfill_state);
+            }
         }
         let mut backfill_stage = BackfillStage {
-            // init with None
-            target_offsets: backfill_states
-                .keys()
-                .map(|split_id| (split_id.clone(), None))
-                .collect(),
             states: backfill_states,
             splits: owned_splits,
         };
         backfill_stage.debug_assert_consistent();
-
-        // Return the ownership of `stream_source_core` to the source executor.
-        self.stream_source_core = core;
 
         let (source_chunk_reader, backfill_info) = self
             .build_stream_source_reader(
@@ -368,14 +402,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             .instrument_await("source_build_reader")
             .await?;
         for (split_id, info) in &backfill_info {
+            let state = backfill_stage.states.get_mut(split_id).unwrap();
             match info {
                 BackfillInfo::NoDataToBackfill => {
-                    *backfill_stage.states.get_mut(split_id).unwrap() = BackfillState::Finished;
+                    state.state = BackfillState::Finished;
                 }
                 BackfillInfo::HasDataToBackfill { latest_offset } => {
                     // Note: later we will override it with the offset from the source message, and it's possible to become smaller than this value.
-                    *backfill_stage.target_offsets.get_mut(split_id).unwrap() =
-                        Some(latest_offset.clone());
+                    state.target_offset = Some(latest_offset.clone());
                 }
             }
         }
@@ -401,49 +435,53 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
         macro_rules! pause_reader {
             () => {
-                let (left, right) = backfill_stream.into_inner();
-                backfill_stream = select_with_strategy(
-                    left,
-                    futures::stream::pending().boxed().map(Either::Right),
-                    select_strategy,
-                );
-                // XXX: do we have to store the original reader? Can we simply rebuild the reader later?
-                paused_reader = Some(right);
+                if !pause_control.reader_paused {
+                    let (left, right) = backfill_stream.into_inner();
+                    backfill_stream = select_with_strategy(
+                        left,
+                        futures::stream::pending().boxed().map(Either::Right),
+                        select_strategy,
+                    );
+                    // XXX: do we have to store the original reader? Can we simply rebuild the reader later?
+                    paused_reader = Some(right);
+                    pause_control.reader_paused = true;
+                }
             };
         }
 
-        // If the first barrier requires us to pause on startup, pause the stream.
-        if barrier.is_pause_on_startup() {
+        macro_rules! resume_reader {
+            () => {
+                if pause_control.reader_paused {
+                    backfill_stream = select_with_strategy(
+                        input.by_ref().map(Either::Left),
+                        paused_reader
+                            .take()
+                            .expect("should have paused reader to resume"),
+                        select_strategy,
+                    );
+                    pause_control.reader_paused = false;
+                }
+            };
+        }
+
+        if pause_control.is_paused() {
             pause_reader!();
         }
 
-        let state_store = self.backfill_state_store.state_store.state_store().clone();
-        let table_id = self.backfill_state_store.state_store.table_id().into();
-        static STATE_TABLE_INITIALIZED: Once = Once::new();
-        tokio::spawn(async move {
-            // This is for self.backfill_finished() to be safe.
-            // We wait for 1st epoch's curr, i.e., the 2nd epoch's prev.
-            let epoch = barrier.epoch.curr;
-            tracing::info!("waiting for epoch: {}", epoch);
-            state_store
-                .try_wait_epoch(
-                    HummockReadEpoch::Committed(epoch),
-                    TryWaitEpochOptions { table_id },
-                )
-                .await
-                .expect("failed to wait epoch");
-            STATE_TABLE_INITIALIZED.call_once(|| ());
-            tracing::info!("finished waiting for epoch: {}", epoch);
-        });
-        yield Message::Barrier(barrier);
-
+        let state_store = self
+            .backfill_state_store
+            .state_store()
+            .state_store()
+            .clone();
+        let table_id = self.backfill_state_store.state_store().table_id();
+        let mut state_table_initialized = false;
         {
             let source_backfill_row_count = self
                 .metrics
                 .source_backfill_row_count
                 .with_guarded_label_values(&[
-                    &self.stream_source_core.source_id.to_string(),
-                    &self.stream_source_core.source_name,
+                    &self.source_id.to_string(),
+                    &self.source_name,
                     &self.actor_ctx.id.to_string(),
                     &self.actor_ctx.fragment_id.to_string(),
                 ]);
@@ -454,7 +492,6 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 as u128
                 * WAIT_BARRIER_MULTIPLE_TIMES;
             let mut last_barrier_time = Instant::now();
-            let mut self_paused = false;
 
             // The main logic of the loop is in handle_upstream_row and handle_backfill_row.
             'backfill_loop: while let Some(either) = backfill_stream.next().await {
@@ -463,16 +500,15 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                     Either::Left(msg) => {
                         let Ok(msg) = msg else {
                             let e = msg.unwrap_err();
-                            let core = &self.stream_source_core;
-                            tracing::warn!(
+                            tracing::error!(
                                 error = ?e.as_report(),
-                                source_id = %core.source_id,
+                                source_id = %self.source_id,
                                 "stream source reader error",
                             );
                             GLOBAL_ERROR_METRICS.user_source_error.report([
                                 "SourceReaderError".to_owned(),
-                                core.source_id.to_string(),
-                                core.source_name.to_owned(),
+                                self.source_id.to_string(),
+                                self.source_name.clone(),
                                 self.actor_ctx.fragment_id.to_string(),
                             ]);
 
@@ -494,58 +530,108 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                             Message::Barrier(barrier) => {
                                 last_barrier_time = Instant::now();
 
-                                if self_paused {
-                                    backfill_stream = select_with_strategy(
-                                        input.by_ref().map(Either::Left),
-                                        paused_reader.take().expect("no paused reader to resume"),
-                                        select_strategy,
-                                    );
-                                    self_paused = false;
+                                if pause_control.self_resume() {
+                                    resume_reader!();
                                 }
 
-                                let mut split_changed = false;
+                                let mut maybe_muatation = None;
                                 if let Some(ref mutation) = barrier.mutation.as_deref() {
                                     match mutation {
                                         Mutation::Pause => {
+                                            // pause_reader should not be invoked consecutively more than once.
+                                            pause_control.command_pause();
                                             pause_reader!();
                                         }
                                         Mutation::Resume => {
-                                            backfill_stream = select_with_strategy(
-                                                input.by_ref().map(Either::Left),
-                                                paused_reader
-                                                    .take()
-                                                    .expect("no paused reader to resume"),
-                                                select_strategy,
-                                            );
+                                            // pause_reader.take should not be invoked consecutively more than once.
+                                            if pause_control.command_resume() {
+                                                resume_reader!();
+                                            }
+                                        }
+                                        Mutation::StartFragmentBackfill { fragment_ids } => {
+                                            if fragment_ids.contains(&self.actor_ctx.fragment_id)
+                                                && pause_control.backfill_resume()
+                                            {
+                                                resume_reader!();
+                                            }
                                         }
                                         Mutation::SourceChangeSplit(actor_splits) => {
                                             tracing::info!(
                                                 actor_splits = ?actor_splits,
                                                 "source change split received"
                                             );
-                                            split_changed = self
-                                                .apply_split_change(
-                                                    actor_splits,
-                                                    &mut backfill_stage,
-                                                    true,
-                                                )
-                                                .await?;
+                                            maybe_muatation = actor_splits
+                                                .get(&self.actor_ctx.id)
+                                                .cloned()
+                                                .map(|target_splits| {
+                                                    ApplyMutationAfterBarrier::SourceChangeSplit {
+                                                        target_splits,
+                                                        should_trim_state: true,
+                                                    }
+                                                });
                                         }
                                         Mutation::Update(UpdateMutation {
                                             actor_splits, ..
                                         }) => {
-                                            split_changed = self
-                                                .apply_split_change(
-                                                    actor_splits,
-                                                    &mut backfill_stage,
-                                                    false,
-                                                )
-                                                .await?;
+                                            maybe_muatation = actor_splits
+                                                .get(&self.actor_ctx.id)
+                                                .cloned()
+                                                .map(|target_splits| {
+                                                    ApplyMutationAfterBarrier::SourceChangeSplit {
+                                                        target_splits,
+                                                        should_trim_state: false,
+                                                    }
+                                                });
+                                        }
+                                        Mutation::ConnectorPropsChange(maybe_mutation) => {
+                                            if let Some(props_plaintext) =
+                                                maybe_mutation.get(&self.source_id.as_raw_id())
+                                            {
+                                                source_desc
+                                                    .update_reader(props_plaintext.clone())?;
+
+                                                maybe_muatation = Some(
+                                                    ApplyMutationAfterBarrier::ConnectorPropsChange,
+                                                );
+                                            }
+                                        }
+                                        Mutation::Throttle(fragment_to_apply) => {
+                                            if let Some(entry) =
+                                                fragment_to_apply.get(&self.actor_ctx.fragment_id)
+                                                && entry.throttle_type() == ThrottleType::Backfill
+                                                && entry.rate_limit != self.rate_limit_rps
+                                            {
+                                                tracing::info!(
+                                                    "updating rate limit from {:?} to {:?}",
+                                                    self.rate_limit_rps,
+                                                    entry.rate_limit
+                                                );
+                                                self.rate_limit_rps = entry.rate_limit;
+                                                // rebuild reader
+                                                let (reader, _backfill_info) = self
+                                                    .build_stream_source_reader(
+                                                        &source_desc,
+                                                        backfill_stage
+                                                            .get_latest_unfinished_splits()?,
+                                                    )
+                                                    .await?;
+
+                                                backfill_stream = select_with_strategy(
+                                                    input.by_ref().map(Either::Left),
+                                                    reader.map(Either::Right),
+                                                    select_strategy,
+                                                );
+                                            }
                                         }
                                         _ => {}
                                     }
                                 }
-                                if split_changed {
+                                async fn rebuild_reader_on_split_changed(
+                                    this: &SourceBackfillExecutorInner<impl StateStore>,
+                                    backfill_stage: &BackfillStage,
+                                    source_desc: &SourceDesc,
+                                ) -> StreamExecutorResult<BoxSourceChunkStream>
+                                {
                                     // rebuild backfill_stream
                                     // Note: we don't put this part in a method, due to some complex lifetime issues.
 
@@ -553,53 +639,112 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         backfill_stage.get_latest_unfinished_splits()?;
                                     tracing::info!(
                                         "actor {:?} apply source split change to {:?}",
-                                        self.actor_ctx.id,
+                                        this.actor_ctx.id,
                                         latest_unfinished_splits
                                     );
 
                                     // Replace the source reader with a new one of the new state.
-                                    let (reader, _backfill_info) = self
+                                    let (reader, _backfill_info) = this
                                         .build_stream_source_reader(
-                                            &source_desc,
+                                            source_desc,
                                             latest_unfinished_splits,
                                         )
                                         .await?;
 
-                                    backfill_stream = select_with_strategy(
-                                        input.by_ref().map(Either::Left),
-                                        reader.map(Either::Right),
-                                        select_strategy,
-                                    );
+                                    Ok(reader)
                                 }
 
                                 self.backfill_state_store
                                     .set_states(backfill_stage.states.clone())
                                     .await?;
-                                self.backfill_state_store
-                                    .state_store
-                                    .commit(barrier.epoch)
-                                    .await?;
+                                self.backfill_state_store.commit(barrier.epoch).await?;
 
                                 if self.should_report_finished(&backfill_stage.states) {
-                                    // TODO: use a specialized progress for source
-                                    // Currently, `CreateMviewProgress` is designed for MV backfill, and rw_ddl_progress calculates
-                                    // progress based on the number of consumed rows and an estimated total number of rows from hummock.
-                                    // For now, we just rely on the same code path, and for source backfill, the progress will always be 99.99%.
-                                    tracing::debug!("progress finish");
-                                    let epoch = barrier.epoch;
-                                    self.progress.finish(epoch, 114514);
+                                    // drop the backfill kafka consumers
+                                    backfill_stream = select_with_strategy(
+                                        input.by_ref().map(Either::Left),
+                                        futures::stream::pending().boxed().map(Either::Right),
+                                        select_strategy,
+                                    );
+
+                                    self.progress.finish(
+                                        barrier.epoch,
+                                        backfill_stage.total_backfilled_rows(),
+                                    );
+
+                                    let barrier_epoch = barrier.epoch;
+                                    let is_checkpoint = barrier.is_checkpoint();
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
-                                    // After we reported finished, we still don't exit the loop.
-                                    // Because we need to handle split migration.
-                                    if STATE_TABLE_INITIALIZED.is_completed()
-                                        && self.backfill_finished(&backfill_stage.states).await?
-                                    {
-                                        break 'backfill_loop;
+                                    if let Some(to_apply_mutation) = maybe_muatation {
+                                        self.apply_split_change_after_yield_barrier(
+                                            barrier_epoch,
+                                            &mut backfill_stage,
+                                            to_apply_mutation,
+                                        )
+                                        .await?;
+                                    }
+
+                                    if !state_table_initialized {
+                                        if is_checkpoint {
+                                            // This is for self.backfill_finished() to be safe: wait until this actor can read all actors' written data.
+                                            // We wait for 2nd epoch
+                                            let epoch = barrier_epoch.prev;
+                                            tracing::info!("waiting for epoch: {}", epoch);
+                                            state_store
+                                                .try_wait_epoch(
+                                                    HummockReadEpoch::Committed(epoch),
+                                                    TryWaitEpochOptions { table_id },
+                                                )
+                                                .await?;
+                                            tracing::info!("finished waiting for epoch: {}", epoch);
+                                            state_table_initialized = true;
+                                        }
+                                    } else {
+                                        // After we reported finished, we still don't exit the loop.
+                                        // Because we need to handle split migration.
+                                        assert!(
+                                            state_table_initialized,
+                                            "state table should be initialized before checking backfill finished"
+                                        );
+                                        if self.backfill_finished(&backfill_stage.states).await? {
+                                            tracing::info!("source backfill finished");
+                                            break 'backfill_loop;
+                                        }
                                     }
                                 } else {
+                                    self.progress.update_for_source_backfill(
+                                        barrier.epoch,
+                                        backfill_stage.total_backfilled_rows(),
+                                    );
+
+                                    let barrier_epoch = barrier.epoch;
+                                    // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
+
+                                    if let Some(to_apply_mutation) = maybe_muatation
+                                        && self
+                                            .apply_split_change_after_yield_barrier(
+                                                barrier_epoch,
+                                                &mut backfill_stage,
+                                                to_apply_mutation,
+                                            )
+                                            .await?
+                                    {
+                                        let reader = rebuild_reader_on_split_changed(
+                                            &self,
+                                            &backfill_stage,
+                                            &source_desc,
+                                        )
+                                        .await?;
+
+                                        backfill_stream = select_with_strategy(
+                                            input.by_ref().map(Either::Left),
+                                            reader.map(Either::Right),
+                                            select_strategy,
+                                        );
+                                    }
                                 }
                             }
                             Message::Chunk(chunk) => {
@@ -630,17 +775,19 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         let chunk = msg?;
 
                         if last_barrier_time.elapsed().as_millis() > max_wait_barrier_time_ms {
+                            // Pause to let barrier catch up via backpressure of snapshot stream.
+                            pause_control.self_pause();
+                            pause_reader!();
+
                             // Exceeds the max wait barrier time, the source will be paused.
                             // Currently we can guarantee the
                             // source is not paused since it received stream
                             // chunks.
-                            self_paused = true;
                             tracing::warn!(
                                 "source {} paused, wait barrier for {:?}",
                                 self.info.identity,
                                 last_barrier_time.elapsed()
                             );
-                            pause_reader!();
 
                             // Only update `max_wait_barrier_time_ms` to capture
                             // `barrier_interval_ms`
@@ -671,16 +818,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             }
         }
 
-        let mut splits: HashSet<SplitId> = backfill_stage.states.keys().cloned().collect();
+        std::mem::drop(backfill_stream);
+        let mut states = backfill_stage.states;
         // Make sure `Finished` state is persisted.
-        self.backfill_state_store
-            .set_states(
-                splits
-                    .iter()
-                    .map(|s| (s.clone(), BackfillState::Finished))
-                    .collect(),
-            )
-            .await?;
+        self.backfill_state_store.set_states(states.clone()).await?;
 
         // All splits finished backfilling. Now we only forward the source data.
         #[for_await]
@@ -688,6 +829,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             let msg = msg?;
             match msg {
                 Message::Barrier(barrier) => {
+                    let mut split_changed = None;
                     if let Some(ref mutation) = barrier.mutation.as_deref() {
                         match mutation {
                             Mutation::Pause | Mutation::Resume => {
@@ -698,29 +840,33 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     actor_splits = ?actor_splits,
                                     "source change split received"
                                 );
-                                self.apply_split_change_forward_stage(
-                                    actor_splits,
-                                    &mut splits,
-                                    true,
-                                )
-                                .await?;
+                                split_changed = actor_splits
+                                    .get(&self.actor_ctx.id)
+                                    .cloned()
+                                    .map(|target_splits| (target_splits, &mut states, true));
                             }
                             Mutation::Update(UpdateMutation { actor_splits, .. }) => {
-                                self.apply_split_change_forward_stage(
-                                    actor_splits,
-                                    &mut splits,
-                                    false,
-                                )
-                                .await?;
+                                split_changed = actor_splits
+                                    .get(&self.actor_ctx.id)
+                                    .cloned()
+                                    .map(|target_splits| (target_splits, &mut states, false));
                             }
                             _ => {}
                         }
                     }
-                    self.backfill_state_store
-                        .state_store
-                        .commit(barrier.epoch)
-                        .await?;
+                    self.backfill_state_store.commit(barrier.epoch).await?;
+                    let barrier_epoch = barrier.epoch;
                     yield Message::Barrier(barrier);
+
+                    if let Some((target_splits, state, should_trim_state)) = split_changed {
+                        self.apply_split_change_forward_stage_after_yield_barrier(
+                            barrier_epoch,
+                            target_splits,
+                            state,
+                            should_trim_state,
+                        )
+                        .await?;
+                    }
                 }
                 Message::Chunk(chunk) => {
                     yield Message::Chunk(chunk);
@@ -743,7 +889,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     fn should_report_finished(&self, states: &BackfillStates) -> bool {
         states.values().all(|state| {
             matches!(
-                state,
+                state.state,
                 BackfillState::Finished | BackfillState::SourceCachingUp(_)
             )
         })
@@ -757,45 +903,59 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
     ///
     /// Note: at the beginning, the actor will only read the state written by itself.
     /// It needs to _wait until it can read all actors' written data_.
-    /// i.e., wait for the first checkpoint has been available.
+    /// i.e., wait for the second checkpoint has been available.
     ///
     /// See <https://github.com/risingwavelabs/risingwave/issues/18300> for more details.
     async fn backfill_finished(&self, states: &BackfillStates) -> StreamExecutorResult<bool> {
         Ok(states
             .values()
-            .all(|state| matches!(state, BackfillState::Finished))
+            .all(|state| matches!(state.state, BackfillState::Finished))
             && self
                 .backfill_state_store
-                .scan()
+                .scan_may_stale()
                 .await?
                 .into_iter()
-                .all(|state| matches!(state, BackfillState::Finished)))
+                .all(|state| matches!(state.state, BackfillState::Finished)))
     }
 
     /// For newly added splits, we do not need to backfill and can directly forward from upstream.
-    async fn apply_split_change(
+    async fn apply_split_change_after_yield_barrier(
         &mut self,
-        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
+        barrier_epoch: EpochPair,
         stage: &mut BackfillStage,
-        should_trim_state: bool,
+        to_apply_mutation: ApplyMutationAfterBarrier,
     ) -> StreamExecutorResult<bool> {
-        self.source_split_change_count.inc();
-        if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
-            if self
-                .update_state_if_changed(target_splits, stage, should_trim_state)
-                .await?
-            {
-                // Note: we don't rebuild backfill_stream here, due to some complex lifetime issues.
-                return Ok(true);
+        match to_apply_mutation {
+            ApplyMutationAfterBarrier::SourceChangeSplit {
+                target_splits,
+                should_trim_state,
+            } => {
+                self.source_split_change_count.inc();
+                {
+                    if self
+                        .update_state_if_changed(
+                            barrier_epoch,
+                            target_splits,
+                            stage,
+                            should_trim_state,
+                        )
+                        .await?
+                    {
+                        // Note: we don't rebuild backfill_stream here, due to some complex lifetime issues.
+                        Ok(true)
+                    } else {
+                        Ok(false)
+                    }
+                }
             }
+            ApplyMutationAfterBarrier::ConnectorPropsChange => Ok(true),
         }
-
-        Ok(false)
     }
 
     /// Returns `true` if split changed. Otherwise `false`.
     async fn update_state_if_changed(
         &mut self,
+        barrier_epoch: EpochPair,
         target_splits: Vec<SplitImpl>,
         stage: &mut BackfillStage,
         should_trim_state: bool,
@@ -806,6 +966,10 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         // Take out old states (immutable, only used to build target_state and check for added/dropped splits).
         // Will be set to target_state in the end.
         let old_states = std::mem::take(&mut stage.states);
+        let committed_reader = self
+            .backfill_state_store
+            .new_committed_reader(barrier_epoch)
+            .await?;
         // Iterate over the target (assigned) splits
         // - check if any new splits are added
         // - build target_state
@@ -816,15 +980,21 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
             } else {
                 split_changed = true;
 
-                let backfill_state = self
-                    .backfill_state_store
+                let backfill_state = committed_reader
                     .try_recover_from_state_store(&split_id)
                     .await?;
                 match backfill_state {
                     None => {
                         // Newly added split. We don't need to backfill.
-                        // Note that this branch is different from the initial barrier (BackfillState::Backfilling(None) there).
-                        target_state.insert(split_id, BackfillState::Finished);
+                        // Note that this branch is different from the initial barrier (BackfillStateInner::Backfilling(None) there).
+                        target_state.insert(
+                            split_id,
+                            BackfillStateWithProgress {
+                                state: BackfillState::Finished,
+                                num_consumed_rows: 0,
+                                target_offset: None,
+                            },
+                        );
                     }
                     Some(backfill_state) => {
                         // Migrated split. Backfill if unfinished.
@@ -858,33 +1028,28 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
         }
         stage.states = target_state;
         stage.splits = target_splits;
-        let old_target_offsets = std::mem::take(&mut stage.target_offsets);
-        stage.target_offsets = stage
-            .states
-            .keys()
-            .map(|split_id| {
-                (
-                    split_id.clone(),
-                    old_target_offsets.get(split_id).cloned().flatten(),
-                )
-            })
-            .collect();
         stage.debug_assert_consistent();
         Ok(split_changed)
     }
 
     /// For split change during forward stage, all newly added splits should be already finished.
     // We just need to update the state store if necessary.
-    async fn apply_split_change_forward_stage(
+    async fn apply_split_change_forward_stage_after_yield_barrier(
         &mut self,
-        split_assignment: &HashMap<ActorId, Vec<SplitImpl>>,
-        splits: &mut HashSet<SplitId>,
+        barrier_epoch: EpochPair,
+        target_splits: Vec<SplitImpl>,
+        states: &mut BackfillStates,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
         self.source_split_change_count.inc();
-        if let Some(target_splits) = split_assignment.get(&self.actor_ctx.id).cloned() {
-            self.update_state_if_changed_forward_stage(target_splits, splits, should_trim_state)
-                .await?;
+        {
+            self.update_state_if_changed_forward_stage(
+                barrier_epoch,
+                target_splits,
+                states,
+                should_trim_state,
+            )
+            .await?;
         }
 
         Ok(())
@@ -892,33 +1057,38 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
 
     async fn update_state_if_changed_forward_stage(
         &mut self,
+        barrier_epoch: EpochPair,
         target_splits: Vec<SplitImpl>,
-        current_splits: &mut HashSet<SplitId>,
+        states: &mut BackfillStates,
         should_trim_state: bool,
     ) -> StreamExecutorResult<()> {
-        let target_splits: HashSet<SplitId> = target_splits
-            .into_iter()
-            .map(|split| (split.id()))
-            .collect();
+        let target_splits: HashSet<SplitId> =
+            target_splits.into_iter().map(|split| split.id()).collect();
 
         let mut split_changed = false;
+        let mut newly_added_splits = vec![];
+
+        let committed_reader = self
+            .backfill_state_store
+            .new_committed_reader(barrier_epoch)
+            .await?;
 
         // Checks added splits
         for split_id in &target_splits {
-            if !current_splits.contains(split_id) {
+            if !states.contains_key(split_id) {
                 split_changed = true;
 
-                let backfill_state = self
-                    .backfill_state_store
+                let backfill_state = committed_reader
                     .try_recover_from_state_store(split_id)
                     .await?;
-                match backfill_state {
+                match &backfill_state {
                     None => {
                         // Newly added split. We don't need to backfill!
+                        newly_added_splits.push(split_id.clone());
                     }
                     Some(backfill_state) => {
                         // Migrated split. It should also be finished since we are in forwarding stage.
-                        match backfill_state {
+                        match backfill_state.state {
                             BackfillState::Finished => {}
                             _ => {
                                 return Err(anyhow::anyhow!(
@@ -930,11 +1100,19 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                         }
                     }
                 }
+                states.insert(
+                    split_id.clone(),
+                    backfill_state.unwrap_or(BackfillStateWithProgress {
+                        state: BackfillState::Finished,
+                        num_consumed_rows: 0,
+                        target_offset: None,
+                    }),
+                );
             }
         }
 
         // Checks dropped splits
-        for existing_split_id in current_splits.iter() {
+        for existing_split_id in states.keys() {
             if !target_splits.contains(existing_split_id) {
                 tracing::info!("split dropping detected: {}", existing_split_id);
                 split_changed = true;
@@ -947,19 +1125,31 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                 "apply split change"
             );
 
-            let dropped_splits =
-                current_splits.extract_if(|split_id| !target_splits.contains(split_id));
+            let dropped_splits = states.extract_if(|split_id, _| !target_splits.contains(split_id));
 
             if should_trim_state {
                 // trim dropped splits' state
-                self.backfill_state_store.trim_state(dropped_splits).await?;
+                self.backfill_state_store
+                    .trim_state(dropped_splits.map(|(k, _v)| k))
+                    .await?;
             }
 
+            // For migrated splits, and existing splits, we do not need to update
+            // state store, but only for newly added splits.
             self.backfill_state_store
                 .set_states(
-                    target_splits
+                    newly_added_splits
                         .into_iter()
-                        .map(|split_id| (split_id, BackfillState::Finished))
+                        .map(|split_id| {
+                            (
+                                split_id,
+                                BackfillStateWithProgress {
+                                    state: BackfillState::Finished,
+                                    num_consumed_rows: 0,
+                                    target_offset: None,
+                                },
+                            )
+                        })
                         .collect(),
                 )
                 .await?;
@@ -983,11 +1173,95 @@ impl<S: StateStore> Execute for SourceBackfillExecutor<S> {
 
 impl<S: StateStore> Debug for SourceBackfillExecutorInner<S> {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let core = &self.stream_source_core;
         f.debug_struct("SourceBackfillExecutor")
-            .field("source_id", &core.source_id)
-            .field("column_ids", &core.column_ids)
-            .field("pk_indices", &self.info.pk_indices)
+            .field("source_id", &self.source_id)
+            .field("column_ids", &self.column_ids)
+            .field("stream_key", &self.info.stream_key)
             .finish()
+    }
+}
+
+struct PauseControl {
+    // Paused due to backfill order control
+    backfill_paused: bool,
+    // Paused due to self-pause, e.g. let barrier catch up
+    self_paused: bool,
+    // Paused due to Pause command from meta, pause_on_next_bootstrap
+    command_paused: bool,
+    // reader paused
+    reader_paused: bool,
+}
+
+impl PauseControl {
+    fn new() -> Self {
+        Self {
+            backfill_paused: false,
+            self_paused: false,
+            command_paused: false,
+            reader_paused: false,
+        }
+    }
+
+    fn is_paused(&self) -> bool {
+        self.backfill_paused || self.command_paused || self.self_paused
+    }
+
+    /// returns whether we need to pause the reader.
+    fn backfill_pause(&mut self) {
+        if self.backfill_paused {
+            tracing::warn!("backfill_pause invoked twice");
+        }
+        self.backfill_paused = true;
+    }
+
+    /// returns whether we need to resume the reader.
+    /// same precedence as command.
+    fn backfill_resume(&mut self) -> bool {
+        if !self.backfill_paused {
+            tracing::warn!("backfill_resume invoked twice");
+        }
+        !self.command_paused
+    }
+
+    /// returns whether we need to pause the reader.
+    fn self_pause(&mut self) {
+        assert!(
+            !self.backfill_paused,
+            "backfill stream should not be read when backfill_pause is set"
+        );
+        assert!(
+            !self.command_paused,
+            "backfill stream should not be read when command_pause is set"
+        );
+        if self.self_paused {
+            tracing::warn!("self_pause invoked twice");
+        }
+        self.self_paused = true;
+    }
+
+    /// returns whether we need to resume the reader.
+    /// `self_resume` has the lowest precedence,
+    /// it can only resume if we are not paused due to `backfill_paused` or `command_paused`.
+    fn self_resume(&mut self) -> bool {
+        self.self_paused = false;
+        !(self.backfill_paused || self.command_paused)
+    }
+
+    /// returns whether we need to pause the reader.
+    fn command_pause(&mut self) {
+        if self.command_paused {
+            tracing::warn!("command_pause invoked twice");
+        }
+        self.command_paused = true;
+    }
+
+    /// returns whether we need to resume the reader.
+    /// same precedence as backfill.
+    fn command_resume(&mut self) -> bool {
+        if !self.command_paused {
+            tracing::warn!("command_resume invoked twice");
+        }
+        self.command_paused = false;
+        !self.backfill_paused
     }
 }

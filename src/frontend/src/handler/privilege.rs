@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use risingwave_common::acl::AclMode;
+use risingwave_pb::user::PbAction;
 use risingwave_pb::user::grant_privilege::PbObject;
 
-use crate::binder::{BoundQuery, BoundStatement, Relation};
 use crate::catalog::OwnedByUserCatalog;
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::Result;
@@ -24,114 +24,43 @@ use crate::user::UserId;
 
 #[derive(Debug)]
 pub struct ObjectCheckItem {
-    owner: UserId,
-    mode: AclMode,
+    pub(crate) owner: UserId,
+    pub(crate) mode: AclMode,
+    pub(crate) name: String,
     // todo: change it to object id.
-    object: PbObject,
+    pub(crate) object: PbObject,
 }
 
 impl ObjectCheckItem {
-    pub fn new(owner: UserId, mode: AclMode, object: PbObject) -> Self {
+    pub fn new(owner: UserId, mode: AclMode, name: String, object: impl Into<PbObject>) -> Self {
         Self {
             owner,
             mode,
-            object,
+            name,
+            object: object.into(),
         }
     }
-}
 
-/// resolve privileges in `relation`
-pub(crate) fn resolve_relation_privileges(
-    relation: &Relation,
-    mode: AclMode,
-    objects: &mut Vec<ObjectCheckItem>,
-) {
-    match relation {
-        Relation::Source(source) => {
-            let item = ObjectCheckItem {
-                owner: source.catalog.owner,
-                mode,
-                object: PbObject::SourceId(source.catalog.id),
-            };
-            objects.push(item);
-        }
-        Relation::BaseTable(table) => {
-            let item = ObjectCheckItem {
-                owner: table.table_catalog.owner,
-                mode,
-                object: PbObject::TableId(table.table_id.table_id),
-            };
-            objects.push(item);
-        }
-        Relation::Subquery(query) => {
-            if let crate::binder::BoundSetExpr::Select(select) = &query.query.body {
-                if let Some(sub_relation) = &select.from {
-                    resolve_relation_privileges(sub_relation, mode, objects);
-                }
-            }
-        }
-        Relation::Join(join) => {
-            resolve_relation_privileges(&join.left, mode, objects);
-            resolve_relation_privileges(&join.right, mode, objects);
-        }
-        Relation::WindowTableFunction(table) => {
-            resolve_relation_privileges(&table.input, mode, objects)
-        }
-        _ => {}
-    };
-}
-
-/// resolve privileges in `stmt`
-pub(crate) fn resolve_privileges(stmt: &BoundStatement) -> Vec<ObjectCheckItem> {
-    let mut objects = Vec::new();
-    match stmt {
-        BoundStatement::Insert(ref insert) => {
-            let object = ObjectCheckItem {
-                owner: insert.owner,
-                mode: AclMode::Insert,
-                object: PbObject::TableId(insert.table_id.table_id),
-            };
-            objects.push(object);
-            if let crate::binder::BoundSetExpr::Select(select) = &insert.source.body {
-                if let Some(sub_relation) = &select.from {
-                    resolve_relation_privileges(sub_relation, AclMode::Select, &mut objects);
-                }
-            }
-        }
-        BoundStatement::Delete(ref delete) => {
-            let object = ObjectCheckItem {
-                owner: delete.owner,
-                mode: AclMode::Delete,
-                object: PbObject::TableId(delete.table_id.table_id),
-            };
-            objects.push(object);
-        }
-        BoundStatement::Update(ref update) => {
-            let object = ObjectCheckItem {
-                owner: update.owner,
-                mode: AclMode::Update,
-                object: PbObject::TableId(update.table_id.table_id),
-            };
-            objects.push(object);
-        }
-        BoundStatement::Query(ref query) => objects.extend(resolve_query_privileges(query)),
-        BoundStatement::FetchCursor(_) => unimplemented!(),
-        BoundStatement::CreateView(ref create_view) => {
-            objects.extend(resolve_query_privileges(&create_view.query))
-        }
-    };
-    objects
-}
-
-/// resolve privileges in `query`
-pub(crate) fn resolve_query_privileges(query: &BoundQuery) -> Vec<ObjectCheckItem> {
-    let mut objects = Vec::new();
-    if let crate::binder::BoundSetExpr::Select(select) = &query.body {
-        if let Some(sub_relation) = &select.from {
-            resolve_relation_privileges(sub_relation, AclMode::Select, &mut objects);
-        }
+    pub fn error_message(&self) -> String {
+        let object_type = match self.object {
+            PbObject::DatabaseId(_) => "database",
+            PbObject::SchemaId(_) => "schema",
+            PbObject::TableId(_) => "table or materialized view",
+            PbObject::ViewId(_) => "view",
+            PbObject::SourceId(_) => "source",
+            PbObject::SinkId(_) => "sink",
+            PbObject::FunctionId(_) => "function",
+            PbObject::SubscriptionId(_) => "subscription",
+            PbObject::ConnectionId(_) => "connection",
+            PbObject::SecretId(_) => "secret",
+        };
+        format!(
+            "permission denied for {} \"{}\": {:?}",
+            object_type,
+            self.name,
+            PbAction::from(self.mode).as_str_name()
+        )
     }
-    objects
 }
 
 impl SessionImpl {
@@ -140,7 +69,7 @@ impl SessionImpl {
         let user_reader = self.env().user_info_reader();
         let reader = user_reader.read_guard();
 
-        if let Some(user) = reader.get_user_by_name(self.user_name()) {
+        if let Some(user) = reader.get_user_by_name(&self.user_name()) {
             if user.is_super {
                 return Ok(());
             }
@@ -148,13 +77,13 @@ impl SessionImpl {
                 if item.owner == user.id {
                     continue;
                 }
-                let has_privilege = user.check_privilege(&item.object, item.mode);
+                let has_privilege = user.has_privilege(item.object, item.mode);
                 if !has_privilege {
-                    return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+                    return Err(PermissionDenied(item.error_message()).into());
                 }
             }
         } else {
-            return Err(PermissionDenied("Session user is invalid".to_string()).into());
+            return Err(PermissionDenied("Session user is invalid".to_owned()).into());
         }
 
         Ok(())
@@ -164,7 +93,7 @@ impl SessionImpl {
     pub fn is_super_user(&self) -> bool {
         let reader = self.env().user_info_reader().read_guard();
 
-        if let Some(info) = reader.get_user_by_name(self.user_name()) {
+        if let Some(info) = reader.get_user_by_name(&self.user_name()) {
             info.is_super
         } else {
             false
@@ -190,7 +119,7 @@ impl SessionImpl {
             .env()
             .catalog_reader()
             .read_guard()
-            .get_schema_by_name(self.database(), schema_name)
+            .get_schema_by_name(&self.database(), schema_name)
             .unwrap()
             .owner();
 
@@ -200,8 +129,7 @@ impl SessionImpl {
             && !self.is_super_user()
         {
             return Err(PermissionDenied(
-                "Only the relation owner, the schema owner, and superuser can drop or alter a relation."
-                    .to_string(),
+                "Only the relation owner, the schema owner, and superuser can drop or alter a relation.".to_owned(),
             )
             .into());
         }
@@ -224,7 +152,7 @@ impl SessionImpl {
     ) -> Result<()> {
         if self.user_id() != db_schema.owner() && !self.is_super_user() {
             return Err(PermissionDenied(
-                "Only the owner, and superuser can drop or alter a schema or database.".to_string(),
+                "Only the owner, and superuser can drop or alter a schema or database.".to_owned(),
             )
             .into());
         }
@@ -255,7 +183,8 @@ mod tests {
         let check_items = vec![ObjectCheckItem::new(
             DEFAULT_SUPER_USER_ID,
             AclMode::Create,
-            PbObject::SchemaId(schema.id()),
+            "schema".to_owned(),
+            schema.id(),
         )];
         assert!(&session.check_privileges(&check_items).is_ok());
 
@@ -265,8 +194,8 @@ mod tests {
             )
             .await
             .unwrap();
-        let database = DEFAULT_DATABASE_NAME.to_string();
-        let user_name = "user".to_string();
+        let database = DEFAULT_DATABASE_NAME.to_owned();
+        let user_name = "user".to_owned();
         let user_id = {
             let user_reader = session.env().user_info_reader();
             user_reader

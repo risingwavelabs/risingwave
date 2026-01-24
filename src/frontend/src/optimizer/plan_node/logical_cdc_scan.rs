@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,19 +16,19 @@ use std::rc::Rc;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc};
+use risingwave_connector::source::cdc::CdcScanOptions;
 
 use super::generic::GenericPlanRef;
-use super::utils::{childless_record, Distill};
+use super::utils::{Distill, childless_record};
 use super::{
-    generic, ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch,
-    ToStream,
+    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
+    PredicatePushdown, StreamPlanRef, ToBatch, ToStream, generic,
 };
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::generic::CdcScanOptions;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, StreamCdcTableScan,
     ToStreamContext,
@@ -93,10 +93,10 @@ impl LogicalCdcScan {
 
     pub fn clone_with_output_indices(&self, output_col_idx: Vec<usize>) -> Self {
         generic::CdcScan::new(
-            self.table_name().to_string(),
+            self.table_name().to_owned(),
             output_col_idx,
             self.core.cdc_table_desc.clone(),
-            self.base.ctx().clone(),
+            self.base.ctx(),
             self.core.options.clone(),
         )
         .into()
@@ -107,7 +107,7 @@ impl LogicalCdcScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! {LogicalCdcScan}
+impl_plan_tree_node_for_leaf! { Logical, LogicalCdcScan}
 
 impl Distill for LogicalCdcScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -132,7 +132,7 @@ impl Distill for LogicalCdcScan {
                             Pretty::from(if verbose {
                                 format!("{}.{}", self.table_name(), col_name)
                             } else {
-                                col_name.to_string()
+                                col_name.clone()
                             })
                         })
                         .collect(),
@@ -150,15 +150,17 @@ impl ColPrunable for LogicalCdcScan {
             .iter()
             .map(|i| self.output_col_idx()[*i])
             .collect();
-        assert!(output_col_idx
-            .iter()
-            .all(|i| self.output_col_idx().contains(i)));
+        assert!(
+            output_col_idx
+                .iter()
+                .all(|i| self.output_col_idx().contains(i))
+        );
 
         self.clone_with_output_indices(output_col_idx).into()
     }
 }
 
-impl ExprRewritable for LogicalCdcScan {
+impl ExprRewritable<Logical> for LogicalCdcScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -191,17 +193,17 @@ impl PredicatePushdown for LogicalCdcScan {
 }
 
 impl ToBatch for LogicalCdcScan {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         unreachable!()
     }
 
-    fn to_batch_with_order_required(&self, _required_order: &Order) -> Result<PlanRef> {
+    fn to_batch_with_order_required(&self, _required_order: &Order) -> Result<BatchPlanRef> {
         unreachable!()
     }
 }
 
 impl ToStream for LogicalCdcScan {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         Ok(StreamCdcTableScan::new(self.core.clone()).into())
     }
 

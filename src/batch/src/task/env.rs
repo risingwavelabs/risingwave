@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,13 @@ use std::sync::Arc;
 use risingwave_common::config::{BatchConfig, MetricLevel};
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::worker_util::WorkerNodeId;
+use risingwave_connector::source::iceberg::IcebergScanMetrics;
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use risingwave_storage::StateStoreImpl;
 
-use crate::monitor::{
-    BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics, IcebergScanMetrics,
-};
+use crate::monitor::{BatchExecutorMetrics, BatchManagerMetrics, BatchSpillMetrics};
 use crate::task::BatchManager;
 
 /// The global environment for task execution.
@@ -100,7 +99,6 @@ impl BatchEnvironment {
     }
 
     // Create an instance for testing purpose.
-    #[cfg(test)]
     pub fn for_test() -> Self {
         use risingwave_dml::dml_manager::DmlManager;
         use risingwave_rpc_client::ComputeClientPool;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,16 +21,16 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::table::TableIter;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
-use crate::cache::cache_may_stale;
+use crate::cache::keyed_cache_may_stale;
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
+use crate::executor::lookup::LookupExecutor;
 use crate::executor::lookup::cache::LookupCache;
 use crate::executor::lookup::sides::{ArrangeJoinSide, ArrangeMessage, StreamJoinSide};
-use crate::executor::lookup::LookupExecutor;
 use crate::executor::monitor::LookupExecutorMetrics;
 use crate::executor::prelude::*;
 
@@ -89,7 +89,7 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// The join keys on the arrangement side.
     pub arrange_join_key_indices: Vec<usize>,
 
-    pub storage_table: StorageTable<S>,
+    pub batch_table: BatchTable<S>,
 
     pub watermark_epoch: AtomicU64Ref,
 
@@ -109,7 +109,7 @@ impl<S: StateStore> LookupExecutor<S> {
             stream_join_key_indices,
             arrange_join_key_indices,
             column_mapping,
-            storage_table,
+            batch_table: storage_table,
             watermark_epoch,
             chunk_size,
         } = params;
@@ -135,8 +135,8 @@ impl<S: StateStore> LookupExecutor<S> {
         let arrangement_data_types = arrangement.schema().data_types();
         let stream_data_types = stream.schema().data_types();
 
-        let arrangement_pk_indices = arrangement.pk_indices().to_vec();
-        let stream_pk_indices = stream.pk_indices().to_vec();
+        let arrangement_pk_indices = arrangement.stream_key().to_vec();
+        let stream_pk_indices = stream.stream_key().to_vec();
 
         // check if arrange join key is exactly the same as order rules
         {
@@ -186,7 +186,7 @@ impl<S: StateStore> LookupExecutor<S> {
 
         let metrics_info = MetricsInfo::new(
             ctx.streaming_metrics.clone(),
-            storage_table.table_id().table_id(),
+            storage_table.table_id(),
             ctx.id,
             "Lookup",
         );
@@ -209,7 +209,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 order_rules: arrangement_order_rules,
                 key_indices: arrange_join_key_indices,
                 use_current_epoch,
-                storage_table,
+                batch_table: storage_table,
             },
             column_mapping,
             key_indices_mapping,
@@ -240,7 +240,7 @@ impl<S: StateStore> LookupExecutor<S> {
         };
 
         let metrics = self.ctx.streaming_metrics.new_lookup_executor_metrics(
-            self.arrangement.storage_table.table_id(),
+            self.arrangement.batch_table.table_id(),
             self.ctx.id,
             self.ctx.fragment_id,
         );
@@ -288,7 +288,7 @@ impl<S: StateStore> LookupExecutor<S> {
                     }
                 }
                 ArrangeMessage::Stream(chunk) => {
-                    let chunk = chunk.compact();
+                    let chunk = chunk.compact_vis();
                     let (chunk, ops) = chunk.into_parts();
 
                     let mut builder = JoinStreamChunkBuilder::new(
@@ -329,11 +329,11 @@ impl<S: StateStore> LookupExecutor<S> {
         if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
             let previous_vnode_bitmap = self
                 .arrangement
-                .storage_table
+                .batch_table
                 .update_vnode_bitmap(vnode_bitmap.clone());
 
             // Manipulate the cache if necessary.
-            if cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
+            if keyed_cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
                 self.lookup_cache.clear();
             }
         }
@@ -371,7 +371,7 @@ impl<S: StateStore> LookupExecutor<S> {
             let all_data_iter = match self.arrangement.use_current_epoch {
                 true => {
                     self.arrangement
-                        .storage_table
+                        .batch_table
                         .batch_iter_with_pk_bounds(
                             HummockReadEpoch::NoWait(epoch_pair.curr),
                             &lookup_row,
@@ -383,7 +383,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 }
                 false => {
                     self.arrangement
-                        .storage_table
+                        .batch_table
                         .batch_iter_with_pk_bounds(
                             HummockReadEpoch::NoWait(epoch_pair.prev),
                             &lookup_row,

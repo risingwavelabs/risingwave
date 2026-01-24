@@ -17,8 +17,8 @@ use std::time::Duration;
 use futures::future::try_join_all;
 use itertools::Itertools;
 use risingwave_common::monitor::EndpointExt;
-use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::TieredCacheTracingRequest;
+use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use tonic::transport::Endpoint;
 
 use crate::common::CtlContext;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use std::alloc::{Allocator, Global};
 use std::borrow::Borrow;
 use std::hash::{BuildHasher, Hash};
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
 use risingwave_common::lru::{LruCache, RandomState};
 use risingwave_common::metrics::LabelGuardedIntGauge;
@@ -39,7 +39,7 @@ where
     inner: LruCache<K, V, S, A>,
 
     /// The entry with sequence less than `watermark_sequence` should be evicted.
-    /// `watermark_sequence` should only be updatd by `MemoryManager`.
+    /// `watermark_sequence` should only be updated by `MemoryManager`.
     watermark_sequence: Arc<AtomicSequence>,
 
     // Metrics info
@@ -102,9 +102,13 @@ where
         old_val
     }
 
-    // TODO(MrCroxx): REMOVE ME!!!
-    pub fn push(&mut self, k: K, v: V) -> Option<V> {
-        self.put(k, v)
+    pub fn remove(&mut self, k: &K) -> Option<V> {
+        let key_size = k.estimated_size();
+        let old_val = self.inner.remove(k);
+        if let Some(old_val) = &old_val {
+            self.reporter.dec(key_size + old_val.estimated_size());
+        }
+        old_val
     }
 
     pub fn get_mut(&mut self, k: &K) -> Option<MutGuard<'_, V>> {
@@ -196,7 +200,7 @@ impl<'a, V: EstimateSize> MutGuard<'a, V> {
     }
 }
 
-impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
+impl<V: EstimateSize> Drop for MutGuard<'_, V> {
     fn drop(&mut self) {
         let new_value_size = self.inner.estimated_size();
         if new_value_size != self.old_value_size {
@@ -209,7 +213,7 @@ impl<'a, V: EstimateSize> Drop for MutGuard<'a, V> {
     }
 }
 
-impl<'a, V: EstimateSize> Deref for MutGuard<'a, V> {
+impl<V: EstimateSize> Deref for MutGuard<'_, V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -217,21 +221,21 @@ impl<'a, V: EstimateSize> Deref for MutGuard<'a, V> {
     }
 }
 
-impl<'a, V: EstimateSize> DerefMut for MutGuard<'a, V> {
+impl<V: EstimateSize> DerefMut for MutGuard<'_, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.inner
     }
 }
 
 struct HeapSizeReporter {
-    metrics: LabelGuardedIntGauge<3>,
+    metrics: LabelGuardedIntGauge,
     heap_size: usize,
     last_reported: usize,
 }
 
 impl HeapSizeReporter {
     fn new(
-        heap_size_metrics: LabelGuardedIntGauge<3>,
+        heap_size_metrics: LabelGuardedIntGauge,
         heap_size: usize,
         last_reported: usize,
     ) -> Self {

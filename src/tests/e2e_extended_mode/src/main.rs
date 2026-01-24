@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::process::exit;
 
 use clap::Parser;
-use risingwave_e2e_extended_mode_test::{run_test_suit, Opts};
+use risingwave_e2e_extended_mode_test::{Opts, run_test_suit};
 
 #[tokio::main(flavor = "multi_thread", worker_threads = 5)]
 async fn main() {

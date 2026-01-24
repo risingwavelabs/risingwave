@@ -26,6 +26,7 @@ class TrainingModelService(ModelServicer):
         super(TrainingModelService, self).__init__()
         self.model = GradientBoostingRegressor()
         self.conn = psycopg.connect("dbname=dev user=root host=frontend-node-0 port=4566")
+        print("training service up!")
     def Training(self, request, context):
         print(f"get data for training!")
         try:
@@ -58,7 +59,7 @@ class TrainingModelService(ModelServicer):
                 df = pd.DataFrame(list(results))
                 train_x2 = df.drop(columns=[0,1])
                 train_x = pd.concat([train_x1, train_x2], axis=1)
-                result = self.model.predict(train_x)
+                result = self.model.predict(train_x)[0]
                 return GetAmountResponse(amount = result)
         except Exception as e:
             print(traceback.format_exc())

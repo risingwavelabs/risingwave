@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::TableId;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_pb::stream_plan::SourceBackfillNode;
 
@@ -32,15 +31,13 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
         node: &Self::Node,
         store: impl StateStore,
     ) -> StreamResult<Executor> {
-        let source_id = TableId::new(node.upstream_source_id);
+        let source_id = node.upstream_source_id;
         let source_name = node.source_name.clone();
         let source_info = node.get_info()?;
 
         let options_with_secret =
             WithOptionsSecResolved::new(node.with_properties.clone(), node.secret_refs.clone());
         let source_desc_builder = super::source::create_source_desc_builder(
-            "source backfill",
-            &source_id,
             node.columns.clone(),
             &params,
             source_info.clone(),
@@ -74,7 +71,7 @@ impl ExecutorBuilder for SourceBackfillExecutorBuilder {
         );
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.id);
+            .register_create_mview_progress(&params.actor_context);
 
         let exec = SourceBackfillExecutorInner::new(
             params.actor_context.clone(),

@@ -7,21 +7,13 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
 easy-ext = "1"
-either = "1.13.0"
+either = "1.15.0"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 http = "1"
-hyper = "1"
-itertools = { workspace = true }
 lru = { workspace = true }
 moka = { version = "0.12.0", features = ["future"] }
 paste = "1"
@@ -32,7 +24,7 @@ risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 rw_futures_util = { workspace = true }
 static_assertions = "1"
-thiserror = "1"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -45,15 +37,14 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tower = "0.4"
+tower = "0.5"
 tracing = "0.1"
-url = "2.5.0"
-
-[dev-dependencies]
-risingwave_hummock_sdk = { workspace = true }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
+
+[dev-dependencies]
+risingwave_hummock_sdk = { workspace = true }
 
 [lints]
 workspace = true

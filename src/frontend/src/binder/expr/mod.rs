@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,25 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::slice;
+
 use itertools::Itertools;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, PG_CATALOG_SCHEMA_NAME};
-use risingwave_common::types::{DataType, MapType};
+use risingwave_common::catalog::PG_CATALOG_SCHEMA_NAME;
+use risingwave_common::types::{DataType, MapType, StructType};
 use risingwave_common::util::iter_util::zip_eq_fast;
 use risingwave_common::{bail_no_function, bail_not_implemented, not_implemented};
-use risingwave_pb::plan_common::{AdditionalColumn, ColumnDescVersion};
 use risingwave_sqlparser::ast::{
     Array, BinaryOperator, DataType as AstDataType, EscapeChar, Expr, Function, JsonPredicateType,
-    ObjectName, Query, StructField, TrimWhereField, UnaryOperator,
+    ObjectName, Query, TrimWhereField, UnaryOperator,
 };
 
-use crate::binder::expr::function::is_sys_function_without_args;
 use crate::binder::Binder;
+use crate::binder::expr::function::is_sys_function_without_args;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::expr::{Expr as _, ExprImpl, ExprType, FunctionCall, InputRef, Parameter, SubqueryKind};
-use crate::handler::create_sql_function::SQL_UDF_PATTERN;
+use crate::expr::{
+    Expr as _, ExprImpl, ExprRewriter as _, ExprType, FunctionCall, InputRef,
+    InputRefDepthRewriter, Parameter, SubqueryKind,
+};
 
 mod binary_op;
 mod column;
@@ -51,8 +54,8 @@ impl Binder {
     /// the boundary of a subquery. Otherwise, the source chain might be too deep
     /// and confusing to the user.
     // TODO(error-handling): use a dedicated error type during binding to make it clear.
-    pub fn bind_expr(&mut self, expr: Expr) -> Result<ExprImpl> {
-        self.bind_expr_inner(expr.clone()).map_err(|e| {
+    pub fn bind_expr(&mut self, expr: &Expr) -> Result<ExprImpl> {
+        self.bind_expr_inner(expr).map_err(|e| {
             RwError::from(ErrorCode::BindErrorRoot {
                 expr: expr.to_string(),
                 error: Box::new(e),
@@ -60,24 +63,24 @@ impl Binder {
         })
     }
 
-    fn bind_expr_inner(&mut self, expr: Expr) -> Result<ExprImpl> {
+    fn bind_expr_inner(&mut self, expr: &Expr) -> Result<ExprImpl> {
         match expr {
             // literal
             Expr::Value(v) => Ok(ExprImpl::Literal(Box::new(self.bind_value(v)?))),
             Expr::TypedString { data_type, value } => {
                 let s: ExprImpl = self.bind_string(value)?.into();
-                s.cast_explicit(bind_data_type(&data_type)?)
+                s.cast_explicit(&bind_data_type(data_type)?)
                     .map_err(Into::into)
             }
             Expr::Row(exprs) => self.bind_row(exprs),
             // input ref
             Expr::Identifier(ident) => {
-                if is_sys_function_without_args(&ident) {
+                if is_sys_function_without_args(ident) {
                     // Rewrite a system variable to a function call, e.g. `SELECT current_schema;`
                     // will be rewritten to `SELECT current_schema();`.
                     // NOTE: Here we don't 100% follow the behavior of Postgres, as it doesn't
                     // allow `session_user()` while we do.
-                    self.bind_function(Function::no_arg(ObjectName(vec![ident])))
+                    self.bind_function(&Function::no_arg(ObjectName(vec![ident.clone()])))
                 } else if let Some(ref lambda_args) = self.context.lambda_args {
                     // We don't support capture, so if the expression is in the lambda context,
                     // we'll not bind it for table columns.
@@ -89,111 +92,136 @@ impl Binder {
                                 .into(),
                         )
                     }
+                } else if let Some(ctx) = self.secure_compare_context.as_ref() {
+                    // Currently, the generated columns are not supported yet. So the ident here should only be one of the following
+                    // - `headers`
+                    // - secret name
+                    // - the name of the payload column
+                    // TODO(Kexiang): Generated columns or INCLUDE clause should be supported.
+                    if ident.real_value() == *"headers" {
+                        Ok(InputRef::new(0, DataType::Jsonb).into())
+                    } else if ctx.secret_name.is_some()
+                        && ident.real_value() == *ctx.secret_name.as_ref().unwrap()
+                    {
+                        Ok(InputRef::new(1, DataType::Varchar).into())
+                    } else if ident.real_value() == ctx.column_name {
+                        Ok(InputRef::new(2, DataType::Bytea).into())
+                    } else {
+                        Err(
+                            ErrorCode::ItemNotFound(format!("Unknown arg: {}", ident.real_value()))
+                                .into(),
+                        )
+                    }
                 } else {
-                    self.bind_column(&[ident])
+                    self.bind_column(slice::from_ref(ident))
                 }
             }
-            Expr::CompoundIdentifier(idents) => self.bind_column(&idents),
+            Expr::CompoundIdentifier(idents) => self.bind_column(idents),
             Expr::FieldIdentifier(field_expr, idents) => {
-                self.bind_single_field_column(*field_expr, &idents)
+                self.bind_single_field_column(field_expr, idents)
             }
             // operators & functions
-            Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, *expr),
-            Expr::BinaryOp { left, op, right } => self.bind_binary_op(*left, op, *right),
-            Expr::Nested(expr) => self.bind_expr_inner(*expr),
+            Expr::UnaryOp { op, expr } => self.bind_unary_expr(op, expr),
+            Expr::BinaryOp { left, op, right } => self.bind_binary_op(left, op, right),
+            Expr::Nested(expr) => self.bind_expr_inner(expr),
             Expr::Array(Array { elem: exprs, .. }) => self.bind_array(exprs),
-            Expr::Index { obj, index } => self.bind_index(*obj, *index),
+            Expr::Index { obj, index } => self.bind_index(obj, index),
             Expr::ArrayRangeIndex { obj, start, end } => {
-                self.bind_array_range_index(*obj, start, end)
+                self.bind_array_range_index(obj, start.as_deref(), end.as_deref())
             }
             Expr::Function(f) => self.bind_function(f),
-            Expr::Subquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Scalar),
-            Expr::Exists(q) => self.bind_subquery_expr(*q, SubqueryKind::Existential),
+            Expr::Subquery(q) => self.bind_subquery_expr(q, SubqueryKind::Scalar),
+            Expr::Exists(q) => self.bind_subquery_expr(q, SubqueryKind::Existential),
             Expr::InSubquery {
                 expr,
                 subquery,
                 negated,
-            } => self.bind_in_subquery(*expr, *subquery, negated),
+            } => self.bind_in_subquery(expr, subquery, *negated),
             // special syntax (except date/time or string)
-            Expr::Cast { expr, data_type } => self.bind_cast(*expr, data_type),
-            Expr::IsNull(expr) => self.bind_is_operator(ExprType::IsNull, *expr),
-            Expr::IsNotNull(expr) => self.bind_is_operator(ExprType::IsNotNull, *expr),
-            Expr::IsTrue(expr) => self.bind_is_operator(ExprType::IsTrue, *expr),
-            Expr::IsNotTrue(expr) => self.bind_is_operator(ExprType::IsNotTrue, *expr),
-            Expr::IsFalse(expr) => self.bind_is_operator(ExprType::IsFalse, *expr),
-            Expr::IsNotFalse(expr) => self.bind_is_operator(ExprType::IsNotFalse, *expr),
-            Expr::IsUnknown(expr) => self.bind_is_unknown(ExprType::IsNull, *expr),
-            Expr::IsNotUnknown(expr) => self.bind_is_unknown(ExprType::IsNotNull, *expr),
-            Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(*left, *right),
-            Expr::IsNotDistinctFrom(left, right) => self.bind_not_distinct_from(*left, *right),
+            Expr::Cast { expr, data_type } => self.bind_cast(expr, data_type),
+            Expr::IsNull(expr) => self.bind_is_operator(ExprType::IsNull, expr),
+            Expr::IsNotNull(expr) => self.bind_is_operator(ExprType::IsNotNull, expr),
+            Expr::IsTrue(expr) => self.bind_is_operator(ExprType::IsTrue, expr),
+            Expr::IsNotTrue(expr) => self.bind_is_operator(ExprType::IsNotTrue, expr),
+            Expr::IsFalse(expr) => self.bind_is_operator(ExprType::IsFalse, expr),
+            Expr::IsNotFalse(expr) => self.bind_is_operator(ExprType::IsNotFalse, expr),
+            Expr::IsUnknown(expr) => self.bind_is_unknown(ExprType::IsNull, expr),
+            Expr::IsNotUnknown(expr) => self.bind_is_unknown(ExprType::IsNotNull, expr),
+            Expr::IsDistinctFrom(left, right) => self.bind_distinct_from(left, right),
+            Expr::IsNotDistinctFrom(left, right) => self.bind_not_distinct_from(left, right),
             Expr::IsJson {
                 expr,
                 negated,
                 item_type,
                 unique_keys: false,
-            } => self.bind_is_json(*expr, negated, item_type),
+            } => self.bind_is_json(expr, *negated, *item_type),
             Expr::Case {
                 operand,
                 conditions,
                 results,
                 else_result,
-            } => self.bind_case(operand, conditions, results, else_result),
+            } => self.bind_case(
+                operand.as_deref(),
+                conditions,
+                results,
+                else_result.as_deref(),
+            ),
             Expr::Between {
                 expr,
                 negated,
                 low,
                 high,
-            } => self.bind_between(*expr, negated, *low, *high),
+            } => self.bind_between(expr, *negated, low, high),
             Expr::Like {
                 negated,
                 expr,
                 pattern,
                 escape_char,
-            } => self.bind_like(ExprType::Like, *expr, negated, *pattern, escape_char),
+            } => self.bind_like(ExprType::Like, expr, *negated, pattern, *escape_char),
             Expr::ILike {
                 negated,
                 expr,
                 pattern,
                 escape_char,
-            } => self.bind_like(ExprType::ILike, *expr, negated, *pattern, escape_char),
+            } => self.bind_like(ExprType::ILike, expr, *negated, pattern, *escape_char),
             Expr::SimilarTo {
                 expr,
                 negated,
                 pattern,
                 escape_char,
-            } => self.bind_similar_to(*expr, negated, *pattern, escape_char),
+            } => self.bind_similar_to(expr, *negated, pattern, *escape_char),
             Expr::InList {
                 expr,
                 list,
                 negated,
-            } => self.bind_in_list(*expr, list, negated),
+            } => self.bind_in_list(expr, list, *negated),
             // special syntax for date/time
-            Expr::Extract { field, expr } => self.bind_extract(field, *expr),
+            Expr::Extract { field, expr } => self.bind_extract(field, expr),
             Expr::AtTimeZone {
                 timestamp,
                 time_zone,
-            } => self.bind_at_time_zone(*timestamp, *time_zone),
+            } => self.bind_at_time_zone(timestamp, time_zone),
             // special syntax for string
             Expr::Trim {
                 expr,
                 trim_where,
                 trim_what,
-            } => self.bind_trim(*expr, trim_where, trim_what),
+            } => self.bind_trim(expr, trim_where.as_ref(), trim_what.as_deref()),
             Expr::Substring {
                 expr,
                 substring_from,
                 substring_for,
-            } => self.bind_substring(*expr, substring_from, substring_for),
-            Expr::Position { substring, string } => self.bind_position(*substring, *string),
+            } => self.bind_substring(expr, substring_from.as_deref(), substring_for.as_deref()),
+            Expr::Position { substring, string } => self.bind_position(substring, string),
             Expr::Overlay {
                 expr,
                 new_substring,
                 start,
                 count,
-            } => self.bind_overlay(*expr, *new_substring, *start, count),
-            Expr::Parameter { index } => self.bind_parameter(index),
-            Expr::Collate { expr, collation } => self.bind_collate(*expr, collation),
-            Expr::ArraySubquery(q) => self.bind_subquery_expr(*q, SubqueryKind::Array),
+            } => self.bind_overlay(expr, new_substring, start, count.as_deref()),
+            Expr::Parameter { index } => self.bind_parameter(*index),
+            Expr::Collate { expr, collation } => self.bind_collate(expr, collation),
+            Expr::ArraySubquery(q) => self.bind_subquery_expr(q, SubqueryKind::Array),
             Expr::Map { entries } => self.bind_map(entries),
             Expr::IsJson {
                 unique_keys: true, ..
@@ -210,12 +238,12 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_extract(&mut self, field: String, expr: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_extract(&mut self, field: &String, expr: &Expr) -> Result<ExprImpl> {
         let arg = self.bind_expr_inner(expr)?;
         let arg_type = arg.return_type();
         Ok(FunctionCall::new(
             ExprType::Extract,
-            vec![self.bind_string(field.clone())?.into(), arg],
+            vec![self.bind_string(field)?.into(), arg],
         )
         .map_err(|_| {
             not_implemented!(
@@ -228,7 +256,7 @@ impl Binder {
         .into())
     }
 
-    pub(super) fn bind_at_time_zone(&mut self, input: Expr, time_zone: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_at_time_zone(&mut self, input: &Expr, time_zone: &Expr) -> Result<ExprImpl> {
         let input = self.bind_expr_inner(input)?;
         let time_zone = self.bind_expr_inner(time_zone)?;
         FunctionCall::new(ExprType::AtTimeZone, vec![input, time_zone]).map(Into::into)
@@ -236,8 +264,8 @@ impl Binder {
 
     pub(super) fn bind_in_list(
         &mut self,
-        expr: Expr,
-        list: Vec<Expr>,
+        expr: &Expr,
+        list: &[Expr],
         negated: bool,
     ) -> Result<ExprImpl> {
         let left = self.bind_expr_inner(expr)?;
@@ -250,29 +278,43 @@ impl Binder {
                 false => non_const_exprs.push(expr),
             }
         }
-        let mut ret = FunctionCall::new(ExprType::In, bound_expr_list)?.into();
+
+        let mut ret = if bound_expr_list.len() == 1 {
+            None
+        } else {
+            Some(FunctionCall::new(ExprType::In, bound_expr_list)?.into())
+        };
         // Non-const exprs are not part of IN-expr in backend and rewritten into OR-Equal-exprs.
         for expr in non_const_exprs {
-            ret = FunctionCall::new(
-                ExprType::Or,
-                vec![
-                    ret,
-                    FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into(),
-                ],
-            )?
-            .into();
+            if let Some(inner_ret) = ret {
+                ret = Some(
+                    FunctionCall::new(
+                        ExprType::Or,
+                        vec![
+                            inner_ret,
+                            FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into(),
+                        ],
+                    )?
+                    .into(),
+                );
+            } else {
+                ret = Some(FunctionCall::new(ExprType::Equal, vec![left.clone(), expr])?.into());
+            }
         }
         if negated {
-            Ok(FunctionCall::new_unchecked(ExprType::Not, vec![ret], DataType::Boolean).into())
+            Ok(
+                FunctionCall::new_unchecked(ExprType::Not, vec![ret.unwrap()], DataType::Boolean)
+                    .into(),
+            )
         } else {
-            Ok(ret)
+            Ok(ret.unwrap())
         }
     }
 
     pub(super) fn bind_in_subquery(
         &mut self,
-        expr: Expr,
-        subquery: Query,
+        expr: &Expr,
+        subquery: &Query,
         negated: bool,
     ) -> Result<ExprImpl> {
         let bound_expr = self.bind_expr_inner(expr)?;
@@ -289,7 +331,7 @@ impl Binder {
 
     pub(super) fn bind_is_json(
         &mut self,
-        expr: Expr,
+        expr: &Expr,
         negated: bool,
         item_type: JsonPredicateType,
     ) -> Result<ExprImpl> {
@@ -313,25 +355,30 @@ impl Binder {
         }
     }
 
-    pub(super) fn bind_unary_expr(&mut self, op: UnaryOperator, expr: Expr) -> Result<ExprImpl> {
-        let func_type = match op {
+    pub(super) fn bind_unary_expr(&mut self, op: &UnaryOperator, expr: &Expr) -> Result<ExprImpl> {
+        let func_type = match &op {
             UnaryOperator::Not => ExprType::Not,
             UnaryOperator::Minus => ExprType::Neg,
-            UnaryOperator::PGAbs => ExprType::Abs,
-            UnaryOperator::PGBitwiseNot => ExprType::BitwiseNot,
             UnaryOperator::Plus => {
                 return self.rewrite_positive(expr);
             }
-            UnaryOperator::PGSquareRoot => ExprType::Sqrt,
-            UnaryOperator::PGCubeRoot => ExprType::Cbrt,
-            _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
+            UnaryOperator::Custom(name) => match name.as_str() {
+                "~" => ExprType::BitwiseNot,
+                "@" => ExprType::Abs,
+                "|/" => ExprType::Sqrt,
+                "||/" => ExprType::Cbrt,
+                _ => bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op),
+            },
+            UnaryOperator::PGQualified(_) => {
+                bail_not_implemented!(issue = 112, "unsupported unary expression: {:?}", op)
+            }
         };
         let expr = self.bind_expr_inner(expr)?;
         FunctionCall::new(func_type, vec![expr]).map(|f| f.into())
     }
 
     /// Directly returns the expression itself if it is a positive number.
-    fn rewrite_positive(&mut self, expr: Expr) -> Result<ExprImpl> {
+    fn rewrite_positive(&mut self, expr: &Expr) -> Result<ExprImpl> {
         let expr = self.bind_expr_inner(expr)?;
         let return_type = expr.return_type();
         if return_type.is_numeric() {
@@ -342,10 +389,10 @@ impl Binder {
 
     pub(super) fn bind_trim(
         &mut self,
-        expr: Expr,
+        expr: &Expr,
         // BOTH | LEADING | TRAILING
-        trim_where: Option<TrimWhereField>,
-        trim_what: Option<Box<Expr>>,
+        trim_where: Option<&TrimWhereField>,
+        trim_what: Option<&Expr>,
     ) -> Result<ExprImpl> {
         let mut inputs = vec![self.bind_expr_inner(expr)?];
         let func_type = match trim_where {
@@ -355,31 +402,31 @@ impl Binder {
             None => ExprType::Trim,
         };
         if let Some(t) = trim_what {
-            inputs.push(self.bind_expr_inner(*t)?);
+            inputs.push(self.bind_expr_inner(t)?);
         }
         Ok(FunctionCall::new(func_type, inputs)?.into())
     }
 
     fn bind_substring(
         &mut self,
-        expr: Expr,
-        substring_from: Option<Box<Expr>>,
-        substring_for: Option<Box<Expr>>,
+        expr: &Expr,
+        substring_from: Option<&Expr>,
+        substring_for: Option<&Expr>,
     ) -> Result<ExprImpl> {
         let mut args = vec![
             self.bind_expr_inner(expr)?,
             match substring_from {
-                Some(expr) => self.bind_expr_inner(*expr)?,
+                Some(expr) => self.bind_expr_inner(expr)?,
                 None => ExprImpl::literal_int(1),
             },
         ];
         if let Some(expr) = substring_for {
-            args.push(self.bind_expr_inner(*expr)?);
+            args.push(self.bind_expr_inner(expr)?);
         }
         FunctionCall::new(ExprType::Substr, args).map(|f| f.into())
     }
 
-    fn bind_position(&mut self, substring: Expr, string: Expr) -> Result<ExprImpl> {
+    fn bind_position(&mut self, substring: &Expr, string: &Expr) -> Result<ExprImpl> {
         let args = vec![
             // Note that we reverse the order of arguments.
             self.bind_expr_inner(string)?,
@@ -390,10 +437,10 @@ impl Binder {
 
     fn bind_overlay(
         &mut self,
-        expr: Expr,
-        new_substring: Expr,
-        start: Expr,
-        count: Option<Box<Expr>>,
+        expr: &Expr,
+        new_substring: &Expr,
+        start: &Expr,
+        count: Option<&Expr>,
     ) -> Result<ExprImpl> {
         let mut args = vec![
             self.bind_expr_inner(expr)?,
@@ -401,9 +448,54 @@ impl Binder {
             self.bind_expr_inner(start)?,
         ];
         if let Some(count) = count {
-            args.push(self.bind_expr_inner(*count)?);
+            args.push(self.bind_expr_inner(count)?);
         }
         FunctionCall::new(ExprType::Overlay, args).map(|f| f.into())
+    }
+
+    fn is_binding_inline_sql_udf(&self) -> bool {
+        self.context.sql_udf_arguments.is_some()
+    }
+
+    /// Returns whether we're binding SQL UDF by checking if any of the upper subquery context has
+    /// `sql_udf_arguments` set.
+    fn is_binding_subquery_sql_udf(&self) -> bool {
+        self.upper_subquery_contexts
+            .iter()
+            .any(|(context, _)| context.sql_udf_arguments.is_some())
+    }
+
+    /// Bind a parameter for SQL UDF.
+    fn bind_sql_udf_parameter(&mut self, name: &str) -> Result<ExprImpl> {
+        for (depth, context) in std::iter::once(&self.context)
+            .chain((self.upper_subquery_contexts.iter().rev()).map(|(context, _)| context))
+            .enumerate()
+        {
+            // Only lookup the first non-empty udf context. If the parameter is not found in the
+            // current context, we will continue to the upper context.
+            if let Some(args) = &context.sql_udf_arguments {
+                if let Some(expr) = args.get(name) {
+                    // The arguments recorded in the context is relative to the that context.
+                    // We need to shift the depth to the current context.
+                    let mut rewriter = InputRefDepthRewriter::new(depth);
+                    return Ok(rewriter.rewrite_expr(expr.clone()));
+                } else {
+                    // A UDF cannot access parameters from outer UDFs. Do not continue but directly
+                    // return an error.
+                    break;
+                }
+            }
+        }
+
+        Err(ErrorCode::BindError(format!(
+            "failed to find {} parameter {name}",
+            if name.starts_with('$') {
+                "unnamed"
+            } else {
+                "named"
+            }
+        ))
+        .into())
     }
 
     fn bind_parameter(&mut self, index: u64) -> Result<ExprImpl> {
@@ -411,16 +503,9 @@ impl Binder {
         // Note: This is specific to sql udf with unnamed parameters, since the
         // parameters will be parsed and treated as `Parameter`.
         // For detailed explanation, consider checking `bind_column`.
-        if self.udf_context.global_count() != 0 {
-            if let Some(expr) = self.udf_context.get_expr(&format!("${index}")) {
-                return Ok(expr.clone());
-            }
-            // Same as `bind_column`, the error message here
-            // help with hint display when invalid definition occurs
-            return Err(ErrorCode::BindError(format!(
-                "{SQL_UDF_PATTERN} failed to find unnamed parameter ${index}"
-            ))
-            .into());
+        if self.is_binding_inline_sql_udf() || self.is_binding_subquery_sql_udf() {
+            let column_name = format!("${index}");
+            return self.bind_sql_udf_parameter(&column_name);
         }
 
         Ok(Parameter::new(index, self.param_types.clone()).into())
@@ -429,10 +514,10 @@ impl Binder {
     /// Bind `expr (not) between low and high`
     pub(super) fn bind_between(
         &mut self,
-        expr: Expr,
+        expr: &Expr,
         negated: bool,
-        low: Expr,
-        high: Expr,
+        low: &Expr,
+        high: &Expr,
     ) -> Result<ExprImpl> {
         let expr = self.bind_expr_inner(expr)?;
         let low = self.bind_expr_inner(low)?;
@@ -467,9 +552,9 @@ impl Binder {
     fn bind_like(
         &mut self,
         expr_type: ExprType,
-        expr: Expr,
+        expr: &Expr,
         negated: bool,
-        pattern: Expr,
+        pattern: &Expr,
         escape_char: Option<EscapeChar>,
     ) -> Result<ExprImpl> {
         if matches!(pattern, Expr::AllOp(_) | Expr::SomeOp(_)) {
@@ -485,13 +570,13 @@ impl Binder {
             }
             // Use the `bind_binary_op` path to handle the ALL|ANY pattern.
             let op = match (expr_type, negated) {
-                (ExprType::Like, false) => BinaryOperator::PGLikeMatch,
-                (ExprType::Like, true) => BinaryOperator::PGNotLikeMatch,
-                (ExprType::ILike, false) => BinaryOperator::PGILikeMatch,
-                (ExprType::ILike, true) => BinaryOperator::PGNotILikeMatch,
+                (ExprType::Like, false) => BinaryOperator::Custom("~~".to_owned()),
+                (ExprType::Like, true) => BinaryOperator::Custom("!~~".to_owned()),
+                (ExprType::ILike, false) => BinaryOperator::Custom("~~*".to_owned()),
+                (ExprType::ILike, true) => BinaryOperator::Custom("!~~*".to_owned()),
                 _ => unreachable!(),
             };
-            return self.bind_binary_op(expr, op, pattern);
+            return self.bind_binary_op(expr, &op, pattern);
         }
         let expr = self.bind_expr_inner(expr)?;
         let pattern = self.bind_expr_inner(pattern)?;
@@ -522,9 +607,9 @@ impl Binder {
     /// Bind `<expr> [ NOT ] SIMILAR TO <pat> ESCAPE <esc_text>`
     pub(super) fn bind_similar_to(
         &mut self,
-        expr: Expr,
+        expr: &Expr,
         negated: bool,
-        pattern: Expr,
+        pattern: &Expr,
         escape_char: Option<EscapeChar>,
     ) -> Result<ExprImpl> {
         let expr = self.bind_expr_inner(expr)?;
@@ -558,17 +643,17 @@ impl Binder {
     /// e.g., select case 1 when (...) then (...) else (...) end;
     fn check_constant_case_when_optimization(
         &mut self,
-        conditions: Vec<Expr>,
-        results_expr: Vec<ExprImpl>,
-        operand: Option<Box<Expr>>,
-        fallback: Option<ExprImpl>,
+        conditions: &[Expr],
+        results_expr: &[ExprImpl],
+        operand: Option<&Expr>,
+        fallback: Option<&ExprImpl>,
         constant_case_when_eval_inputs: &mut Vec<ExprImpl>,
     ) -> bool {
         // The operand value to be compared later
         let operand_value;
 
         if let Some(operand) = operand {
-            let Ok(operand) = self.bind_expr_inner(*operand) else {
+            let Ok(operand) = self.bind_expr_inner(operand) else {
                 return false;
             };
             if !operand.is_const() {
@@ -581,12 +666,12 @@ impl Binder {
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
             if let Expr::Value(_) = condition.clone() {
-                let Ok(res) = self.bind_expr_inner(condition.clone()) else {
+                let Ok(res) = self.bind_expr_inner(condition) else {
                     return false;
                 };
                 // Found a match
                 if res == operand_value {
-                    constant_case_when_eval_inputs.push(result);
+                    constant_case_when_eval_inputs.push(result.clone());
                     return true;
                 }
             } else {
@@ -604,13 +689,13 @@ impl Binder {
             return false;
         };
 
-        constant_case_when_eval_inputs.push(fallback);
+        constant_case_when_eval_inputs.push(fallback.clone());
         true
     }
 
     /// Helper function to compare or set column identifier
     /// used in `check_convert_simple_form`
-    fn compare_or_set(col_expr: &mut Option<Expr>, test_expr: Expr) -> bool {
+    fn compare_or_set(col_expr: &mut Option<Expr>, test_expr: &Expr) -> bool {
         let Expr::Identifier(test_ident) = test_expr else {
             return false;
         };
@@ -622,7 +707,7 @@ impl Binder {
                 return false;
             }
         } else {
-            *col_expr = Some(Expr::Identifier(test_ident));
+            *col_expr = Some(Expr::Identifier(test_ident.clone()));
         }
         true
     }
@@ -630,8 +715,8 @@ impl Binder {
     /// left expression and right expression must be either:
     /// `<constant> <Eq> <identifier>` or `<identifier> <Eq> <constant>`
     /// used in `check_convert_simple_form`
-    fn check_invariant(left: Expr, op: BinaryOperator, right: Expr) -> bool {
-        if op != BinaryOperator::Eq {
+    fn check_invariant(left: &Expr, op: &BinaryOperator, right: &Expr) -> bool {
+        if op != &BinaryOperator::Eq {
             return false;
         }
         if let Expr::Identifier(_) = left {
@@ -657,8 +742,8 @@ impl Binder {
     /// Note: this function will be invoked per arm
     fn try_extract_simple_form(
         &mut self,
-        ident_expr: Expr,
-        constant_expr: Expr,
+        ident_expr: &Expr,
+        constant_expr: &Expr,
         column_expr: &mut Option<Expr>,
         inputs: &mut Vec<ExprImpl>,
     ) -> bool {
@@ -677,8 +762,8 @@ impl Binder {
     /// If so, this expression could also be converted to constant lookup
     fn check_convert_simple_form(
         &mut self,
-        conditions: Vec<Expr>,
-        results_expr: Vec<ExprImpl>,
+        conditions: &[Expr],
+        results_expr: &[ExprImpl],
         fallback: Option<ExprImpl>,
         constant_lookup_inputs: &mut Vec<ExprImpl>,
     ) -> bool {
@@ -686,27 +771,27 @@ impl Binder {
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
             if let Expr::BinaryOp { left, op, right } = condition {
-                if !Self::check_invariant(*(left.clone()), op.clone(), *(right.clone())) {
+                if !Self::check_invariant(left, op, right) {
                     return false;
                 }
-                if let Expr::Identifier(_) = *(left.clone()) {
+                if let Expr::Identifier(_) = &**left {
                     if !self.try_extract_simple_form(
-                        *left,
-                        *right,
+                        left,
+                        right,
                         &mut column_expr,
                         constant_lookup_inputs,
                     ) {
                         return false;
                     }
                 } else if !self.try_extract_simple_form(
-                    *right,
-                    *left,
+                    right,
+                    left,
                     &mut column_expr,
                     constant_lookup_inputs,
                 ) {
                     return false;
                 }
-                constant_lookup_inputs.push(result);
+                constant_lookup_inputs.push(result.clone());
             } else {
                 return false;
             }
@@ -716,7 +801,7 @@ impl Binder {
         let Some(operand) = column_expr else {
             return false;
         };
-        let Ok(bound_operand) = self.bind_expr_inner(operand) else {
+        let Ok(bound_operand) = self.bind_expr_inner(&operand) else {
             return false;
         };
         constant_lookup_inputs.insert(0, bound_operand);
@@ -734,9 +819,9 @@ impl Binder {
     /// into `ConstantLookupExpression`
     fn check_bind_case_optimization(
         &mut self,
-        conditions: Vec<Expr>,
-        results_expr: Vec<ExprImpl>,
-        operand: Option<Box<Expr>>,
+        conditions: &[Expr],
+        results_expr: &[ExprImpl],
+        operand: Option<&Expr>,
         fallback: Option<ExprImpl>,
         constant_lookup_inputs: &mut Vec<ExprImpl>,
     ) -> bool {
@@ -745,7 +830,7 @@ impl Binder {
         }
 
         if let Some(operand) = operand {
-            let Ok(operand) = self.bind_expr_inner(*operand) else {
+            let Ok(operand) = self.bind_expr_inner(operand) else {
                 return false;
             };
             // This optimization should be done in subsequent optimization phase
@@ -767,8 +852,8 @@ impl Binder {
         }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
-            if let Expr::Value(_) = condition.clone() {
-                let Ok(input) = self.bind_expr_inner(condition.clone()) else {
+            if let Expr::Value(_) = condition {
+                let Ok(input) = self.bind_expr_inner(condition) else {
                     return false;
                 };
                 constant_lookup_inputs.push(input);
@@ -778,7 +863,7 @@ impl Binder {
                 return false;
             }
 
-            constant_lookup_inputs.push(result);
+            constant_lookup_inputs.push(result.clone());
         }
 
         // The fallback arm for case-when expression
@@ -791,28 +876,28 @@ impl Binder {
 
     pub(super) fn bind_case(
         &mut self,
-        operand: Option<Box<Expr>>,
-        conditions: Vec<Expr>,
-        results: Vec<Expr>,
-        else_result: Option<Box<Expr>>,
+        operand: Option<&Expr>,
+        conditions: &[Expr],
+        results: &[Expr],
+        else_result: Option<&Expr>,
     ) -> Result<ExprImpl> {
         let mut inputs = Vec::new();
         let results_expr: Vec<ExprImpl> = results
-            .into_iter()
+            .iter()
             .map(|expr| self.bind_expr_inner(expr))
             .collect::<Result<_>>()?;
         let else_result_expr = else_result
-            .map(|expr| self.bind_expr_inner(*expr))
+            .map(|expr| self.bind_expr_inner(expr))
             .transpose()?;
 
         let mut constant_lookup_inputs = Vec::new();
         let mut constant_case_when_eval_inputs = Vec::new();
 
         let constant_case_when_flag = self.check_constant_case_when_optimization(
-            conditions.clone(),
-            results_expr.clone(),
-            operand.clone(),
-            else_result_expr.clone(),
+            conditions,
+            &results_expr,
+            operand,
+            else_result_expr.as_ref(),
             &mut constant_case_when_eval_inputs,
         );
 
@@ -820,9 +905,9 @@ impl Binder {
             // Sanity check
             if constant_case_when_eval_inputs.len() != 1 {
                 return Err(ErrorCode::BindError(
-                    "expect `constant_case_when_eval_inputs` only contains a single bound expression".to_string()
+                    "expect `constant_case_when_eval_inputs` only contains a single bound expression".to_owned()
                 )
-                .into());
+                    .into());
             }
             // Directly return the first element of the vector
             return Ok(constant_case_when_eval_inputs[0].take());
@@ -830,9 +915,9 @@ impl Binder {
 
         // See if the case-when expression can be optimized
         let optimize_flag = self.check_bind_case_optimization(
-            conditions.clone(),
-            results_expr.clone(),
-            operand.clone(),
+            conditions,
+            &results_expr,
+            operand,
             else_result_expr.clone(),
             &mut constant_lookup_inputs,
         );
@@ -842,16 +927,17 @@ impl Binder {
         }
 
         for (condition, result) in zip_eq_fast(conditions, results_expr) {
+            let condition = condition.clone();
             let condition = match operand {
-                Some(ref t) => Expr::BinaryOp {
-                    left: t.clone(),
+                Some(t) => Expr::BinaryOp {
+                    left: t.clone().into(),
                     op: BinaryOperator::Eq,
                     right: Box::new(condition),
                 },
                 None => condition,
             };
             inputs.push(
-                self.bind_expr_inner(condition)
+                self.bind_expr_inner(&condition)
                     .and_then(|expr| expr.enforce_bool_clause("CASE WHEN"))?,
             );
             inputs.push(result);
@@ -871,33 +957,37 @@ impl Binder {
         Ok(FunctionCall::new(ExprType::Case, inputs)?.into())
     }
 
-    pub(super) fn bind_is_operator(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_is_operator(
+        &mut self,
+        func_type: ExprType,
+        expr: &Expr,
+    ) -> Result<ExprImpl> {
         let expr = self.bind_expr_inner(expr)?;
         Ok(FunctionCall::new(func_type, vec![expr])?.into())
     }
 
-    pub(super) fn bind_is_unknown(&mut self, func_type: ExprType, expr: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_is_unknown(&mut self, func_type: ExprType, expr: &Expr) -> Result<ExprImpl> {
         let expr = self
             .bind_expr_inner(expr)?
-            .cast_implicit(DataType::Boolean)?;
+            .cast_implicit(&DataType::Boolean)?;
         Ok(FunctionCall::new(func_type, vec![expr])?.into())
     }
 
-    pub(super) fn bind_distinct_from(&mut self, left: Expr, right: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_distinct_from(&mut self, left: &Expr, right: &Expr) -> Result<ExprImpl> {
         let left = self.bind_expr_inner(left)?;
         let right = self.bind_expr_inner(right)?;
         let func_call = FunctionCall::new(ExprType::IsDistinctFrom, vec![left, right]);
         Ok(func_call?.into())
     }
 
-    pub(super) fn bind_not_distinct_from(&mut self, left: Expr, right: Expr) -> Result<ExprImpl> {
+    pub(super) fn bind_not_distinct_from(&mut self, left: &Expr, right: &Expr) -> Result<ExprImpl> {
         let left = self.bind_expr_inner(left)?;
         let right = self.bind_expr_inner(right)?;
         let func_call = FunctionCall::new(ExprType::IsNotDistinctFrom, vec![left, right]);
         Ok(func_call?.into())
     }
 
-    pub(super) fn bind_cast(&mut self, expr: Expr, data_type: AstDataType) -> Result<ExprImpl> {
+    pub(super) fn bind_cast(&mut self, expr: &Expr, data_type: &AstDataType) -> Result<ExprImpl> {
         match &data_type {
             // Casting to Regclass type means getting the oid of expr.
             // See https://www.postgresql.org/docs/current/datatype-oid.html.
@@ -917,14 +1007,28 @@ impl Binder {
                     Err(ErrorCode::BindError(format!("Can't cast {} to regproc", lhs_ty)).into())
                 }
             }
-            _ => self.bind_cast_inner(expr, bind_data_type(&data_type)?),
+            // Redirect cast char to varchar to make system like Metabase happy.
+            // Char is not supported in RisingWave, but some ecosystem tools like Metabase will use it.
+            // Notice that the behavior of `char` and `varchar` is different in PostgreSQL.
+            // The following sql result should be different in PostgreSQL:
+            // ```
+            // select 'a'::char(2) = 'a '::char(2);
+            // ----------
+            // t
+            //
+            // select 'a'::varchar = 'a '::varchar;
+            // ----------
+            // f
+            // ```
+            AstDataType::Char(_) => self.bind_cast_inner(expr, &DataType::Varchar),
+            _ => self.bind_cast_inner(expr, &bind_data_type(data_type)?),
         }
     }
 
-    pub fn bind_cast_inner(&mut self, expr: Expr, data_type: DataType) -> Result<ExprImpl> {
+    pub fn bind_cast_inner(&mut self, expr: &Expr, data_type: &DataType) -> Result<ExprImpl> {
         match (expr, data_type) {
-            (Expr::Array(Array { elem: ref expr, .. }), DataType::List(element_type)) => {
-                self.bind_array_cast(expr.clone(), element_type)
+            (Expr::Array(Array { elem: expr, .. }), DataType::List(list_type)) => {
+                self.bind_array_cast(expr, list_type.elem())
             }
             (Expr::Map { entries }, DataType::Map(m)) => self.bind_map_cast(entries, m),
             (expr, data_type) => {
@@ -934,7 +1038,7 @@ impl Binder {
         }
     }
 
-    pub fn bind_collate(&mut self, expr: Expr, collation: ObjectName) -> Result<ExprImpl> {
+    pub fn bind_collate(&mut self, expr: &Expr, collation: &ObjectName) -> Result<ExprImpl> {
         if !["C", "POSIX"].contains(&collation.real_value().as_str()) {
             bail_not_implemented!("Collate collation other than `C` or `POSIX` is not implemented");
         }
@@ -958,34 +1062,6 @@ impl Binder {
     }
 }
 
-/// Given a type `STRUCT<v1 int>`, this function binds the field `v1 int`.
-pub fn bind_struct_field(column_def: &StructField) -> Result<ColumnDesc> {
-    let field_descs = if let AstDataType::Struct(defs) = &column_def.data_type {
-        defs.iter()
-            .map(|f| {
-                Ok(ColumnDesc::named(
-                    f.name.real_value(),
-                    ColumnId::new(0), // Literals don't have `column_id`.
-                    bind_data_type(&f.data_type)?,
-                ))
-            })
-            .collect::<Result<Vec<_>>>()?
-    } else {
-        vec![]
-    };
-    Ok(ColumnDesc {
-        data_type: bind_data_type(&column_def.data_type)?,
-        column_id: ColumnId::new(0),
-        name: column_def.name.real_value(),
-        field_descs,
-        type_name: "".to_string(),
-        generated_or_default_column: None,
-        description: None,
-        additional_column: AdditionalColumn { column_type: None },
-        version: ColumnDescVersion::Pr13707,
-    })
-}
-
 pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
     let new_err = || not_implemented!("unsupported data type: {:}", data_type);
     let data_type = match data_type {
@@ -1003,17 +1079,17 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Timestamp(false) => DataType::Timestamp,
         AstDataType::Timestamp(true) => DataType::Timestamptz,
         AstDataType::Interval => DataType::Interval,
-        AstDataType::Array(datatype) => DataType::List(Box::new(bind_data_type(datatype)?)),
+        AstDataType::Array(datatype) => DataType::list(bind_data_type(datatype)?),
         AstDataType::Char(..) => {
             bail_not_implemented!("CHAR is not supported, please use VARCHAR instead")
         }
-        AstDataType::Struct(types) => DataType::new_struct(
+        AstDataType::Struct(types) => StructType::new(
             types
                 .iter()
-                .map(|f| bind_data_type(&f.data_type))
+                .map(|f| Ok((f.name.real_value(), bind_data_type(&f.data_type)?)))
                 .collect::<Result<Vec<_>>>()?,
-            types.iter().map(|f| f.name.real_value()).collect_vec(),
-        ),
+        )
+        .into(),
         AstDataType::Map(kv) => {
             let key = bind_data_type(&kv.0)?;
             let value = bind_data_type(&kv.1)?;
@@ -1049,13 +1125,24 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
                         "Column type SERIAL is not supported".into(),
                         "Please remove the SERIAL column".into(),
                     )
-                    .into())
+                    .into());
                 }
                 _ => return Err(new_err().into()),
             }
         }
         AstDataType::Bytea => DataType::Bytea,
         AstDataType::Jsonb => DataType::Jsonb,
+        AstDataType::Vector(size) => match (1..=DataType::VEC_MAX_SIZE).contains(&(*size as _)) {
+            true => DataType::Vector(*size as _),
+            false => {
+                return Err(ErrorCode::BindError(format!(
+                    "vector size {} is out of range [1, {}]",
+                    size,
+                    DataType::VEC_MAX_SIZE
+                ))
+                .into());
+            }
+        },
         AstDataType::Regclass
         | AstDataType::Regproc
         | AstDataType::Uuid

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,30 +14,39 @@
 
 use std::collections::HashMap;
 
+pub use batch_posix_fs_source::{BatchPosixFsEnumerator, BatchPosixFsReader, BatchPosixFsSplit};
+pub use opendal_enumerator::OpendalEnumerator;
+
 pub mod azblob_source;
+pub mod batch_posix_fs_source;
 pub mod gcs_source;
 pub mod posix_fs_source;
 pub mod s3_source;
 
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 pub mod opendal_enumerator;
 pub mod opendal_reader;
 
-use self::opendal_enumerator::OpendalEnumerator;
+use phf::{Set, phf_set};
+
 use self::opendal_reader::OpendalReader;
+use super::OpendalFsSplit;
 use super::file_common::CompressionFormat;
 pub use super::s3::S3PropertiesCommon;
-use super::OpendalFsSplit;
-use crate::error::ConnectorResult;
+use crate::enforce_secret::EnforceSecret;
+use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::{SourceProperties, UnknownFields};
 
 pub const AZBLOB_CONNECTOR: &str = "azblob";
 pub const GCS_CONNECTOR: &str = "gcs";
-// The new s3_v2 will use opendal.
+/// The new `s3_v2` will use opendal.
+/// Note: user uses `connector='s3'`, which is converted to `connector='s3_v2'` in frontend (in `validate_compatibility`).
+/// If user inputs `connector='s3_v2'`, it will be rejected.
 pub const OPENDAL_S3_CONNECTOR: &str = "s3_v2";
 pub const POSIX_FS_CONNECTOR: &str = "posix_fs";
+pub const BATCH_POSIX_FS_CONNECTOR: &str = "__for_testing_only_batch_posix_fs";
 
 pub const DEFAULT_REFRESH_INTERVAL_SEC: u64 = 60;
 
@@ -47,7 +56,11 @@ pub struct FsSourceCommon {
     #[serde(rename = "refresh.interval.sec")]
     #[serde_as(as = "Option<DisplayFromStr>")]
     pub refresh_interval_sec: Option<u64>,
+
+    #[serde(rename = "compression_format", default = "Default::default")]
+    pub compression_format: CompressionFormat,
 }
+
 #[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
 pub struct GcsProperties {
     #[serde(rename = "gcs.bucket_name")]
@@ -72,6 +85,13 @@ pub struct GcsProperties {
 
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+}
+
+impl EnforceSecret for GcsProperties {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "gcs.credential",
+        "gcs.service_account"
+    };
 }
 
 impl UnknownFields for GcsProperties {
@@ -101,7 +121,11 @@ impl OpendalSource for OpendalS3 {
     type Properties = OpendalS3Properties;
 
     fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
-        OpendalEnumerator::new_s3_source(properties.s3_properties, properties.assume_role)
+        OpendalEnumerator::new_s3_source(
+            &properties.s3_properties,
+            properties.assume_role,
+            properties.fs_common.compression_format,
+        )
     }
 }
 
@@ -143,6 +167,12 @@ pub struct OpendalS3Properties {
     pub unknown_fields: HashMap<String, String>,
 }
 
+impl EnforceSecret for OpendalS3Properties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
+        S3PropertiesCommon::enforce_secret(prop_iter)
+    }
+}
+
 impl UnknownFields for OpendalS3Properties {
     fn unknown_fields(&self) -> HashMap<String, String> {
         self.unknown_fields.clone()
@@ -174,6 +204,12 @@ pub struct PosixFsProperties {
     pub unknown_fields: HashMap<String, String>,
     #[serde(rename = "compression_format", default = "Default::default")]
     pub compression_format: CompressionFormat,
+}
+
+impl EnforceSecret for PosixFsProperties {
+    fn enforce_secret<'a>(_prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
+        Ok(())
+    }
 }
 
 impl UnknownFields for PosixFsProperties {
@@ -215,6 +251,13 @@ pub struct AzblobProperties {
     pub compression_format: CompressionFormat,
 }
 
+impl EnforceSecret for AzblobProperties {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "azblob.credentials.account_key",
+        "azblob.credentials.account_name",
+    };
+}
+
 impl UnknownFields for AzblobProperties {
     fn unknown_fields(&self) -> HashMap<String, String> {
         self.unknown_fields.clone()
@@ -238,4 +281,41 @@ impl OpendalSource for OpendalAzblob {
     fn new_enumerator(properties: Self::Properties) -> ConnectorResult<OpendalEnumerator<Self>> {
         OpendalEnumerator::new_azblob_source(properties)
     }
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq, WithOptions)]
+pub struct BatchPosixFsProperties {
+    /// The root directory of the files to search. The files will be searched recursively.
+    #[serde(rename = "batch_posix_fs.root")]
+    pub root: String,
+
+    /// The glob pattern to match files under root directory.
+    #[serde(rename = "match_pattern", default)]
+    pub match_pattern: Option<String>,
+
+    #[serde(flatten)]
+    pub fs_common: FsSourceCommon,
+
+    #[serde(flatten)]
+    pub unknown_fields: HashMap<String, String>,
+}
+
+impl EnforceSecret for BatchPosixFsProperties {
+    fn enforce_secret<'a>(_prop_iter: impl Iterator<Item = &'a str>) -> Result<(), ConnectorError> {
+        Ok(())
+    }
+}
+
+impl UnknownFields for BatchPosixFsProperties {
+    fn unknown_fields(&self) -> HashMap<String, String> {
+        self.unknown_fields.clone()
+    }
+}
+
+impl SourceProperties for BatchPosixFsProperties {
+    type Split = batch_posix_fs_source::BatchPosixFsSplit;
+    type SplitEnumerator = batch_posix_fs_source::BatchPosixFsEnumerator;
+    type SplitReader = batch_posix_fs_source::BatchPosixFsReader;
+
+    const SOURCE_NAME: &'static str = BATCH_POSIX_FS_CONNECTOR;
 }

@@ -18,7 +18,7 @@ use std::sync::LazyLock;
 use openssl::error::ErrorStack;
 use openssl::symm::{Cipher, Crypter, Mode as CipherMode};
 use regex::Regex;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 #[derive(Debug, Clone, PartialEq)]
 enum Algorithm {
@@ -79,7 +79,7 @@ impl CipherConfig {
                 return Err(ExprError::InvalidParam {
                     name: "mode",
                     reason: format!("expect aes for algorithm, but got: {:?}", algo).into(),
-                })
+                });
             }
         };
 
@@ -90,7 +90,7 @@ impl CipherConfig {
                 return Err(ExprError::InvalidParam {
                     name: "mode",
                     reason: format!("expect cbc or ecb for mode, but got: {}", mode).into(),
-                })
+                });
             }
         };
 
@@ -101,7 +101,7 @@ impl CipherConfig {
                 return Err(ExprError::InvalidParam {
                     name: "mode",
                     reason: format!("expect pkcs or none for padding, but got: {}", padding).into(),
-                })
+                });
             }
         };
 
@@ -116,7 +116,7 @@ impl CipherConfig {
                 return Err(ExprError::InvalidParam {
                     name: "key",
                     reason: format!("invalid key length: {}, expect 16, 24 or 32", n).into(),
-                })
+                });
             }
         };
 

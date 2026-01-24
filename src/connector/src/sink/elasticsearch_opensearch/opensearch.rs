@@ -18,9 +18,10 @@ use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use tonic::async_trait;
 
 use super::super::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
-use super::super::{DummySinkCommitCoordinator, Sink, SinkError, SinkParam, SinkWriterParam};
+use super::super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use super::elasticsearch_opensearch_client::ElasticSearchOpenSearchSinkWriter;
-use super::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
+use super::elasticsearch_opensearch_config::{ElasticSearchOpenSearchConfig, OpenSearchConfig};
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::Result;
 
 pub const OPENSEARCH_SINK: &str = "opensearch";
@@ -30,25 +31,37 @@ pub struct OpenSearchSink {
     config: ElasticSearchOpenSearchConfig,
     schema: Schema,
     pk_indices: Vec<usize>,
+    is_append_only: bool,
 }
 
+impl EnforceSecret for OpenSearchSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            ElasticSearchOpenSearchConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
 #[async_trait]
 impl TryFrom<SinkParam> for OpenSearchSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
-        let config = ElasticSearchOpenSearchConfig::from_btreemap(param.properties)?;
+        let pk_indices = param.downstream_pk_or_empty();
+        let config = OpenSearchConfig::from_btreemap(param.properties)?.inner;
         Ok(Self {
             config,
             schema,
-            pk_indices: param.downstream_pk,
+            pk_indices,
+            is_append_only: param.sink_type.is_append_only(),
         })
     }
 }
 
 impl Sink for OpenSearchSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<ElasticSearchOpenSearchSinkWriter>;
 
     const SINK_NAME: &'static str = OPENSEARCH_SINK;
@@ -69,6 +82,7 @@ impl Sink for OpenSearchSink {
             self.schema.clone(),
             self.pk_indices.clone(),
             Self::SINK_NAME,
+            self.is_append_only,
         )?
         .into_log_sinker(self.config.concurrent_requests))
     }
@@ -89,20 +103,22 @@ impl Sink for OpenSearchSink {
                     if std::matches!(user_specified, SinkDecouple::Disable)
                         && commit_checkpoint_interval > 1
                     {
-                        return Err(SinkError::Config(anyhow!("config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled")));
+                        return Err(SinkError::Config(anyhow!(
+                            "config conflict: `commit_checkpoint_interval` larger than 1 means that sink decouple must be enabled, but session config sink_decouple is disabled"
+                        )));
                     }
                 }
                 None => match user_specified {
                     risingwave_common::session_config::sink_decouple::SinkDecouple::Default
                     | risingwave_common::session_config::sink_decouple::SinkDecouple::Enable => {
                         desc.properties.insert(
-                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITH_SINK_DECOUPLE.to_string(),
                         );
                     }
                     risingwave_common::session_config::sink_decouple::SinkDecouple::Disable => {
                         desc.properties.insert(
-                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_string(),
+                            crate::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL.to_owned(),
                             crate::sink::decouple_checkpoint_log_sink::DEFAULT_COMMIT_CHECKPOINT_INTERVAL_WITHOUT_SINK_DECOUPLE.to_string(),
                         );
                     }
@@ -120,9 +136,5 @@ impl Sink for OpenSearchSink {
             | risingwave_common::session_config::sink_decouple::SinkDecouple::Enable => Ok(true),
             risingwave_common::session_config::sink_decouple::SinkDecouple::Disable => Ok(false),
         }
-    }
-
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        Err(SinkError::Coordinator(anyhow!("no coordinator")))
     }
 }

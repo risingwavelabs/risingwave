@@ -7,14 +7,11 @@ create sink s1 from t with (connector = 'blackhole');
 statement ok
 create sink s2 as select avg(v1), v2 from t group by v2 with (connector = 'blackhole');
 
-statement error The sink cannot be append-only
+statement error cannot be append-only
 create sink s3 from t with (connector = 'blackhole', type = 'append-only');
 
 statement ok
 create sink s3 from t with (connector = 'blackhole', type = 'append-only', force_append_only = 'true');
-
-statement error Cannot force the sink to be append-only
-create sink s4 from t with (connector = 'blackhole', type = 'upsert', force_append_only = 'true');
 
 statement error
 create sink invalid_sink_type from t with (connector = 'blackhole', type = 'invalid');
@@ -24,6 +21,30 @@ create sink invalid_force_append_only from t with (connector = 'blackhole', forc
 
 statement error unsupported sink type invalid
 create sink invalid_connector from t with (connector = 'invalid');
+
+statement ok
+set sink_decouple=false;
+
+statement error
+CREATE SINK file_sink
+FROM
+  t
+WITH
+(
+  connector = 's3',
+  s3.region_name = 'test',
+  s3.bucket_name = 'test',
+  s3.path = '',
+  type = 'append-only',
+  force_append_only='true'
+) FORMAT PLAIN ENCODE PARQUET(force_append_only='true');
+----
+db error: ERROR: Failed to run the query
+
+Caused by:
+  Not supported: File sink can only be created with sink_decouple enabled.
+HINT: Please run `set sink_decouple = true` first.
+
 
 statement ok
 drop sink s1

@@ -122,11 +122,11 @@ macro_rules! def_anyhow_newtype {
 
     (
         $(#[$attr:meta])* $vis:vis $name:ident
-        $(, $from:ty => $context:tt)* $(,)?
+        $(, $(#[$attr_inner:meta])* $from:ty => $context:tt)* $(,)?
     ) => {
         #[derive(::thiserror::Error, ::std::fmt::Debug)]
         #[error(transparent)]
-        $(#[$attr])* $vis struct $name(#[from] #[backtrace] ::anyhow::Error);
+        $(#[$attr])* $vis struct $name(#[from] #[backtrace] pub ::anyhow::Error);
 
         impl $name {
             /// Unwrap the newtype to get the inner [`anyhow::Error`].
@@ -137,15 +137,17 @@ macro_rules! def_anyhow_newtype {
             /// Get the type name of the inner error.
             pub fn variant_name(&self) -> &'static str {
                 $(
+                    $(#[$attr_inner])*
                     if self.0.downcast_ref::<$from>().is_some() {
                         return stringify!($from);
                     }
                 )*
-                return "connector_error";
+                return stringify!($name);
             }
         }
 
         $(
+            $(#[$attr_inner])*
             impl From<$from> for $name {
                 fn from(error: $from) -> Self {
                     def_anyhow_newtype!(@from error $context)
@@ -154,4 +156,30 @@ macro_rules! def_anyhow_newtype {
         )*
     };
 }
-pub use def_anyhow_newtype;
+
+/// Define a newtype + it's variant in the specified type.
+/// This is useful when you want to define a new error type,
+/// but also want to define a variant for it in another enum.
+#[macro_export]
+macro_rules! def_anyhow_variant {
+    (
+        $(#[$attr:meta])* $vis:vis $name:ident,
+        $enum_name:ident $variant_name:ident
+        $(, $from:ty => $context:tt)* $(,)?
+    ) => {
+        def_anyhow_newtype! {
+            $(#[$attr])* $vis $name
+            $(, $from => $context)*
+        }
+
+        $(
+            impl From<$from> for $enum_name {
+                fn from(error: $from) -> Self {
+                    $enum_name::$variant_name($name::from(error))
+                }
+            }
+        )*
+    }
+}
+
+pub use {def_anyhow_newtype, def_anyhow_variant};

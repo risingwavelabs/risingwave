@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use risingwave_common::test_utils::{rand_bitmap, rand_chunk};
 use risingwave_common::types::DataType;
 
@@ -28,7 +28,7 @@ struct DataChunkBenchCase {
 impl DataChunkBenchCase {
     pub fn new(name: &str, data_types: Vec<DataType>) -> Self {
         Self {
-            name: name.to_string(),
+            name: name.to_owned(),
             data_types,
         }
     }
@@ -59,7 +59,7 @@ fn bench_data_chunk_compact(c: &mut Criterion) {
                     ),
                     |b| {
                         b.iter(|| {
-                            let _ = chunk.clone().compact();
+                            let _ = chunk.clone().compact_vis();
                         })
                     },
                 );

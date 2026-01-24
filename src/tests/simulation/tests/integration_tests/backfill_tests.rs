@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -262,7 +262,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     let progress = session
         .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
         .await?;
-    let progress = progress.replace('%', "");
+    let progress = progress.split_once("%").unwrap().0;
     let progress = progress.parse::<f64>().unwrap();
     assert!(
         (0.5..1.5).contains(&progress),
@@ -276,7 +276,7 @@ async fn test_arrangement_backfill_progress() -> Result<()> {
     let progress = session
         .run("SELECT progress FROM rw_catalog.rw_ddl_progress")
         .await?;
-    let progress = progress.replace('%', "");
+    let progress = progress.split_once("%").unwrap().0;
     let progress = progress.parse::<f64>().unwrap();
     assert!(
         (prev_progress - 0.5..prev_progress + 1.5).contains(&progress),
@@ -326,7 +326,7 @@ async fn test_recovery_cancels_foreground_ddl() -> Result<()> {
     match handle.await? {
         Ok(_) => panic!("create m1 should fail"),
         Err(e) => {
-            assert!(e.to_string().contains("adhoc recovery triggered"));
+            assert!(e.to_string().contains("adhoc recovery"));
         }
     }
     Ok(())

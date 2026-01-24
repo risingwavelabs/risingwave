@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,15 +17,16 @@ use itertools::Itertools;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::{bail_not_implemented, not_implemented};
-use risingwave_expr::aggregate::{AggType, PbAggKind};
+use risingwave_expr::aggregate::{AggType, PbAggKind, agg_types};
 use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter,
-    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
-    StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
+    BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    StreamEowcOverWindow, StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
+    gen_filter_and_pushdown, try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
@@ -37,7 +38,7 @@ use crate::optimizer::plan_node::logical_agg::LogicalAggBuilder;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, Literal, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
 };
-use crate::optimizer::property::{Order, RequiredDist};
+use crate::optimizer::property::RequiredDist;
 use crate::utils::{ColIndexMapping, Condition, IndexSet};
 
 struct LogicalOverWindowBuilder<'a> {
@@ -96,26 +97,19 @@ impl<'a> LogicalOverWindowBuilder<'a> {
     }
 
     fn try_rewrite_window_function(&mut self, window_func: WindowFunction) -> Result<ExprImpl> {
-        let (kind, args, return_type, partition_by, order_by, frame) = (
-            window_func.kind,
-            window_func.args,
-            window_func.return_type,
-            window_func.partition_by,
-            window_func.order_by,
-            window_func.frame,
-        );
+        let WindowFunction {
+            kind,
+            args,
+            return_type,
+            partition_by,
+            order_by,
+            ignore_nulls,
+            frame,
+        } = window_func;
 
         let new_expr = if let WindowFuncKind::Aggregate(agg_type) = &kind
-            && matches!(
-                agg_type,
-                AggType::Builtin(
-                    PbAggKind::Avg
-                        | PbAggKind::StddevPop
-                        | PbAggKind::StddevSamp
-                        | PbAggKind::VarPop
-                        | PbAggKind::VarSamp
-                )
-            ) {
+            && matches!(agg_type, agg_types::rewritten!())
+        {
             let agg_call = AggCall::new(
                 agg_type.clone(),
                 args,
@@ -129,9 +123,10 @@ impl<'a> LogicalOverWindowBuilder<'a> {
                     // AggCall -> WindowFunction
                     WindowFunction::new(
                         WindowFuncKind::Aggregate(agg_call.agg_type),
-                        partition_by.clone(),
-                        agg_call.order_by.clone(),
                         agg_call.args.clone(),
+                        false, // we don't support `IGNORE NULLS` for these functions now
+                        partition_by.clone(),
+                        agg_call.order_by,
                         frame.clone(),
                     )?,
                 ))
@@ -139,9 +134,10 @@ impl<'a> LogicalOverWindowBuilder<'a> {
         } else {
             ExprImpl::from(self.push_window_func(WindowFunction::new(
                 kind,
+                args,
+                ignore_nulls,
                 partition_by,
                 order_by,
-                args,
                 frame,
             )?))
         };
@@ -151,7 +147,7 @@ impl<'a> LogicalOverWindowBuilder<'a> {
     }
 }
 
-impl<'a> ExprRewriter for LogicalOverWindowBuilder<'a> {
+impl ExprRewriter for LogicalOverWindowBuilder<'_> {
     fn rewrite_window_function(&mut self, window_func: WindowFunction) -> ExprImpl {
         let dummy = Literal::new(None, window_func.return_type()).into();
         match self.try_rewrite_window_function(window_func) {
@@ -226,7 +222,7 @@ impl<'a> OverWindowProjectBuilder<'a> {
     }
 }
 
-impl<'a> ExprVisitor for OverWindowProjectBuilder<'a> {
+impl ExprVisitor for OverWindowProjectBuilder<'_> {
     fn visit_window_function(&mut self, window_function: &WindowFunction) {
         if let Err(e) = self.try_visit_window_function(window_function) {
             self.error = Some(e);
@@ -278,7 +274,7 @@ impl LogicalOverWindow {
         let rewritten_selected_items = over_window_builder.rewrite_selected_items(select_exprs)?;
 
         for window_func in &window_functions {
-            if window_func.kind.is_rank() && window_func.order_by.sort_exprs.is_empty() {
+            if window_func.kind.is_numbering() && window_func.order_by.sort_exprs.is_empty() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
                     "window rank function without order by: {:?}",
                     window_func
@@ -338,6 +334,7 @@ impl LogicalOverWindow {
                 //     == `first_value(x) over (rows between N preceding and N preceding)`
                 // `lead(x, const offset N) over ()`
                 //     == `first_value(x) over (rows between N following and N following)`
+                assert!(!window_function.ignore_nulls); // the conversion is not applicable to `LAG`/`LEAD` with `IGNORE NULLS`
 
                 let offset = if args.len() > 1 {
                     let offset_expr = args.remove(1);
@@ -348,7 +345,9 @@ impl LogicalOverWindow {
                         ))
                         .into());
                     }
-                    let const_offset = offset_expr.cast_implicit(DataType::Int64)?.try_fold_const();
+                    let const_offset = offset_expr
+                        .cast_implicit(&DataType::Int64)?
+                        .try_fold_const();
                     if const_offset.is_none() {
                         // should already be checked in `WindowFunction::infer_return_type`,
                         // but just in case
@@ -409,6 +408,7 @@ impl LogicalOverWindow {
             kind,
             return_type: window_function.return_type,
             args,
+            ignore_nulls: window_function.ignore_nulls,
             partition_by,
             order_by,
             frame,
@@ -455,10 +455,12 @@ impl LogicalOverWindow {
 
     pub fn split_with_rule(&self, groups: Vec<Vec<usize>>) -> PlanRef {
         assert!(groups.iter().flatten().all_unique());
-        assert!(groups
-            .iter()
-            .flatten()
-            .all(|&idx| idx < self.window_functions().len()));
+        assert!(
+            groups
+                .iter()
+                .flatten()
+                .all(|&idx| idx < self.window_functions().len())
+        );
 
         let input_len = self.input().schema().len();
         let original_out_fields = (0..input_len + self.window_functions().len()).collect_vec();
@@ -493,7 +495,7 @@ impl LogicalOverWindow {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalOverWindow {
+impl PlanTreeNodeUnary<Logical> for LogicalOverWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -502,7 +504,6 @@ impl PlanTreeNodeUnary for LogicalOverWindow {
         Self::new(self.core.window_functions.clone(), input)
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,
@@ -525,7 +526,7 @@ impl PlanTreeNodeUnary for LogicalOverWindow {
     }
 }
 
-impl_plan_tree_node_for_unary! { LogicalOverWindow }
+impl_plan_tree_node_for_unary! { Logical, LogicalOverWindow }
 impl_distill_by_unit!(LogicalOverWindow, core, "LogicalOverWindow");
 
 impl ColPrunable for LogicalOverWindow {
@@ -534,7 +535,7 @@ impl ColPrunable for LogicalOverWindow {
 
         let (req_cols_input_part, req_cols_win_func_part) = {
             let mut in_input = required_cols.to_vec();
-            let in_win_funcs: IndexSet = in_input.extract_if(|i| *i >= input_len).collect();
+            let in_win_funcs: IndexSet = in_input.extract_if(.., |i| *i >= input_len).collect();
             (IndexSet::from(in_input), in_win_funcs)
         };
 
@@ -587,7 +588,7 @@ impl ColPrunable for LogicalOverWindow {
     }
 }
 
-impl ExprRewritable for LogicalOverWindow {}
+impl ExprRewritable<Logical> for LogicalOverWindow {}
 
 impl ExprVisitable for LogicalOverWindow {}
 
@@ -624,34 +625,23 @@ macro_rules! empty_partition_by_not_implemented {
 }
 
 impl ToBatch for LogicalOverWindow {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         assert!(
             self.core.funcs_have_same_partition_and_order(),
             "must apply OverWindowSplitRule before generating physical plan"
         );
 
-        // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
-        // empty PARTITION BY by simply removing the following check.
-        let partition_key_indices = self.window_functions()[0]
-            .partition_by
-            .iter()
-            .map(|e| e.index())
-            .collect_vec();
-        if partition_key_indices.is_empty() {
-            empty_partition_by_not_implemented!();
-        }
-
         let input = self.input().to_batch()?;
-        let new_logical = OverWindow {
-            input,
-            ..self.core.clone()
-        };
-        Ok(BatchOverWindow::new(new_logical).into())
+        let core = self.core.clone_with_input(input);
+        Ok(BatchOverWindow::new(core).into())
     }
 }
 
 impl ToStream for LogicalOverWindow {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         use super::stream::prelude::*;
 
         assert!(
@@ -659,7 +649,19 @@ impl ToStream for LogicalOverWindow {
             "must apply OverWindowSplitRule before generating physical plan"
         );
 
-        let stream_input = self.core.input.to_stream(ctx)?;
+        let partition_key_indices = self.window_functions()[0]
+            .partition_by
+            .iter()
+            .map(|e| e.index())
+            .collect_vec();
+        // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
+        // empty PARTITION BY by simply removing the following check.
+        if partition_key_indices.is_empty() {
+            empty_partition_by_not_implemented!();
+        }
+
+        let input = try_enforce_locality_requirement(self.input(), &partition_key_indices);
+        let stream_input = input.to_stream(ctx)?;
 
         if ctx.emit_on_window_close() {
             // Emit-On-Window-Close case
@@ -668,7 +670,7 @@ impl ToStream for LogicalOverWindow {
             if order_by.len() != 1 || order_by[0].order_type != OrderType::ascending() {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "Only support window functions order by single column and in ascending order"
-                        .to_string(),
+                        .to_owned(),
                 )
                 .into());
             }
@@ -676,29 +678,21 @@ impl ToStream for LogicalOverWindow {
                 .watermark_columns()
                 .contains(order_by[0].column_index)
             {
-                return Err(ErrorCode::InvalidInputSyntax(
-                    "The column ordered by must be a watermark column".to_string(),
-                )
+                let order_by_col = &input.schema().fields()[order_by[0].column_index].name;
+                return Err(ErrorCode::InvalidInputSyntax(format!(
+                    "The ORDER BY column `{}` must be a watermark column",
+                    order_by_col
+                ))
                 .into());
             }
             let order_key_index = order_by[0].column_index;
 
-            let partition_key_indices = self.window_functions()[0]
-                .partition_by
-                .iter()
-                .map(|e| e.index())
-                .collect_vec();
-            if partition_key_indices.is_empty() {
-                empty_partition_by_not_implemented!();
-            }
-
             let sort_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
-                    .enforce_if_not_satisfies(stream_input, &Order::any())?;
+                    .streaming_enforce_if_not_satisfies(stream_input)?;
             let sort = StreamEowcSort::new(sort_input, order_key_index);
 
-            let mut core = self.core.clone();
-            core.input = sort.into();
+            let core = self.core.clone_with_input(sort.into());
             Ok(StreamEowcOverWindow::new(core).into())
         } else {
             // General (Emit-On-Update) case
@@ -714,23 +708,12 @@ impl ToStream for LogicalOverWindow {
                 );
             }
 
-            // TODO(rc): Let's not introduce too many cases at once. Later we may decide to support
-            // empty PARTITION BY by simply removing the following check.
-            let partition_key_indices = self.window_functions()[0]
-                .partition_by
-                .iter()
-                .map(|e| e.index())
-                .collect_vec();
-            if partition_key_indices.is_empty() {
-                empty_partition_by_not_implemented!();
-            }
-
             let new_input =
                 RequiredDist::shard_by_key(stream_input.schema().len(), &partition_key_indices)
-                    .enforce_if_not_satisfies(stream_input, &Order::any())?;
-            let mut core = self.core.clone();
-            core.input = new_input;
-            Ok(StreamOverWindow::new(core).into())
+                    .streaming_enforce_if_not_satisfies(stream_input)?;
+            let core = self.core.clone_with_input(new_input);
+
+            Ok(StreamOverWindow::new(core)?.into())
         }
     }
 

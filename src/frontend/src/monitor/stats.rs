@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,11 +17,11 @@ use std::collections::HashMap;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use prometheus::core::{AtomicI64, AtomicU64, GenericCounter, GenericGauge};
+use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_with_registry,
-    register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, Registry,
+    Histogram, HistogramVec, IntGauge, Registry, exponential_buckets, histogram_opts,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_with_registry, register_int_gauge_with_registry,
 };
 use risingwave_common::metrics::TrAdderGauge;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -96,8 +96,8 @@ pub struct CursorMetrics {
     pub subscription_cursor_query_duration: HistogramVec,
     pub subscription_cursor_declare_duration: HistogramVec,
     pub subscription_cursor_fetch_duration: HistogramVec,
-    subsription_cursor_nums: GenericGauge<AtomicI64>,
-    invalid_subsription_cursor_nums: GenericGauge<AtomicI64>,
+    subscription_cursor_nums: IntGauge,
+    invalid_subscription_cursor_nums: IntGauge,
     subscription_cursor_last_fetch_duration: HistogramVec,
     _cursor_metrics_collector: Option<Arc<CursorMetricsCollector>>,
 }
@@ -134,14 +134,14 @@ impl CursorMetrics {
         let subscription_cursor_fetch_duration =
             register_histogram_vec_with_registry!(opts, &["subscription_name"], registry).unwrap();
 
-        let subsription_cursor_nums = register_int_gauge_with_registry!(
-            "subsription_cursor_nums",
+        let subscription_cursor_nums = register_int_gauge_with_registry!(
+            "subscription_cursor_nums",
             "The number of subscription cursor",
             registry
         )
         .unwrap();
-        let invalid_subsription_cursor_nums = register_int_gauge_with_registry!(
-            "invalid_subsription_cursor_nums",
+        let invalid_subscription_cursor_nums = register_int_gauge_with_registry!(
+            "invalid_subscription_cursor_nums",
             "The number of invalid subscription cursor",
             registry
         )
@@ -160,8 +160,8 @@ impl CursorMetrics {
             subscription_cursor_query_duration,
             subscription_cursor_declare_duration,
             subscription_cursor_fetch_duration,
-            subsription_cursor_nums,
-            invalid_subsription_cursor_nums,
+            subscription_cursor_nums,
+            invalid_subscription_cursor_nums,
             subscription_cursor_last_fetch_duration,
         }
     }
@@ -173,8 +173,8 @@ impl CursorMetrics {
     pub fn start_with_session_map(&mut self, session_map: SessionMapRef) {
         self._cursor_metrics_collector = Some(Arc::new(CursorMetricsCollector::new(
             session_map,
-            self.subsription_cursor_nums.clone(),
-            self.invalid_subsription_cursor_nums.clone(),
+            self.subscription_cursor_nums.clone(),
+            self.invalid_subscription_cursor_nums.clone(),
             self.subscription_cursor_last_fetch_duration.clone(),
         )));
     }
@@ -187,8 +187,8 @@ impl CursorMetrics {
 }
 
 pub struct PeriodicCursorMetrics {
-    pub subsription_cursor_nums: i64,
-    pub invalid_subsription_cursor_nums: i64,
+    pub subscription_cursor_nums: i64,
+    pub invalid_subscription_cursor_nums: i64,
     pub subscription_cursor_last_fetch_duration: HashMap<String, f64>,
 }
 
@@ -199,8 +199,8 @@ struct CursorMetricsCollector {
 impl CursorMetricsCollector {
     fn new(
         session_map: SessionMapRef,
-        subsription_cursor_nums: GenericGauge<AtomicI64>,
-        invalid_subsription_cursor_nums: GenericGauge<AtomicI64>,
+        subscription_cursor_nums: IntGauge,
+        invalid_subscription_cursor_nums: IntGauge,
         subscription_cursor_last_fetch_duration: HistogramVec,
     ) -> Self {
         const COLLECT_INTERVAL_SECONDS: u64 = 60;
@@ -222,17 +222,17 @@ impl CursorMetricsCollector {
                 }
 
                 let session_vec = { session_map.read().values().cloned().collect::<Vec<_>>() };
-                let mut subsription_cursor_nums_value = 0;
-                let mut invalid_subsription_cursor_nums_value = 0;
+                let mut subscription_cursor_nums_value = 0;
+                let mut invalid_subscription_cursor_nums_value = 0;
                 for session in &session_vec {
                     let periodic_cursor_metrics = session
                         .get_cursor_manager()
                         .get_periodic_cursor_metrics()
                         .await;
-                    subsription_cursor_nums_value +=
-                        periodic_cursor_metrics.subsription_cursor_nums;
-                    invalid_subsription_cursor_nums_value +=
-                        periodic_cursor_metrics.invalid_subsription_cursor_nums;
+                    subscription_cursor_nums_value +=
+                        periodic_cursor_metrics.subscription_cursor_nums;
+                    invalid_subscription_cursor_nums_value +=
+                        periodic_cursor_metrics.invalid_subscription_cursor_nums;
                     for (subscription_name, duration) in
                         &periodic_cursor_metrics.subscription_cursor_last_fetch_duration
                     {
@@ -241,8 +241,8 @@ impl CursorMetricsCollector {
                             .observe(*duration);
                     }
                 }
-                subsription_cursor_nums.set(subsription_cursor_nums_value);
-                invalid_subsription_cursor_nums.set(invalid_subsription_cursor_nums_value);
+                subscription_cursor_nums.set(subscription_cursor_nums_value);
+                invalid_subscription_cursor_nums.set(invalid_subscription_cursor_nums_value);
             }
         });
         Self {

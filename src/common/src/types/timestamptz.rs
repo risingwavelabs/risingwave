@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,12 +21,12 @@ use byteorder::{BigEndian, ReadBytesExt};
 use bytes::BytesMut;
 use chrono::{DateTime, Datelike, TimeZone, Utc};
 use chrono_tz::Tz;
-use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::ZeroHeapSize;
 use serde::{Deserialize, Serialize};
 
-use super::to_text::ToText;
 use super::DataType;
+use super::to_text::ToText;
 use crate::array::ArrayResult;
 
 /// Timestamp with timezone.
@@ -102,6 +102,11 @@ impl Timestamptz {
         Self(timestamp_micros)
     }
 
+    /// Creates a `Timestamptz` from microseconds.
+    pub fn from_nanos(timestamp_nanos: i64) -> Option<Self> {
+        timestamp_nanos.checked_div(1_000).map(Self)
+    }
+
     /// Returns the number of non-leap-microseconds since January 1, 1970 UTC.
     pub fn timestamp_micros(&self) -> i64 {
         self.0
@@ -110,6 +115,11 @@ impl Timestamptz {
     /// Returns the number of non-leap-milliseconds since January 1, 1970 UTC.
     pub fn timestamp_millis(&self) -> i64 {
         self.0.div_euclid(1_000)
+    }
+
+    /// Returns the number of non-leap-nanosseconds since January 1, 1970 UTC.
+    pub fn timestamp_nanos(&self) -> Option<i64> {
+        self.0.checked_mul(1_000)
     }
 
     /// Returns the number of non-leap seconds since January 1, 1970 0:00:00 UTC (aka "UNIX
@@ -166,8 +176,8 @@ impl FromStr for Timestamptz {
 
     fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
         pub const ERROR_MSG: &str = concat!(
-            "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)"
-            , "\nFor example: '2021-04-01 00:00:00+00:00'"
+            "Can't cast string to timestamp with time zone (expected format is YYYY-MM-DD HH:MM:SS[.D+{up to 6 digits}] followed by +hh:mm or literal Z)",
+            "\nFor example: '2021-04-01 00:00:00+00:00'"
         );
         // Try `speedate` first
         // * It is also used by `str_to_{date,time,timestamp}`
@@ -189,9 +199,6 @@ impl FromStr for Timestamptz {
         };
         if ret.time.tz_offset.is_none() {
             return Err(ERROR_MSG);
-        }
-        if ret.date.year < 1600 {
-            return Err("parsing timestamptz with year < 1600 unsupported");
         }
         Ok(Timestamptz(
             ret.timestamp_tz()

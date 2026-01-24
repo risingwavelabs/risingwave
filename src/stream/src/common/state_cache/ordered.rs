@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use risingwave_common::array::Op;
-use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 
 use super::{StateCache, StateCacheFiller};
 
@@ -41,7 +41,10 @@ impl<K: Ord + EstimateSize, V: EstimateSize> Default for OrderedStateCache<K, V>
 }
 
 impl<K: Ord + EstimateSize, V: EstimateSize> StateCache for OrderedStateCache<K, V> {
-    type Filler<'a> = &'a mut Self where Self: 'a;
+    type Filler<'a>
+        = &'a mut Self
+    where
+        Self: 'a;
     type Key = K;
     type Value = V;
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,13 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 use comfy_table::{Attribute, Cell, Row, Table};
 use itertools::Itertools;
+use risingwave_common::catalog::FragmentTypeFlag;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
-use risingwave_pb::meta::table_fragments::State;
+use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::meta::table_fragments::State;
 use risingwave_pb::source::ConnectorSplits;
-use risingwave_pb::stream_plan::FragmentTypeFlag;
 
 use crate::CtlContext;
 
@@ -40,14 +41,10 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
         revision: _,
     } = get_cluster_info(context).await?;
 
-    let mut actor_splits_map: BTreeMap<u32, (usize, String)> = BTreeMap::new();
+    let mut actor_splits_map: BTreeMap<ActorId, (usize, String)> = BTreeMap::new();
 
     // build actor_splits_map
     for table_fragment in &table_fragments {
-        if table_fragment.actor_splits.is_empty() {
-            continue;
-        }
-
         for fragment in table_fragment.fragments.values() {
             let fragment_type_mask = fragment.fragment_type_mask;
             if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
@@ -63,29 +60,31 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
 
             for actor in &fragment.actors {
                 if let Some(ConnectorSplits { splits }) = actor_splits.remove(&actor.actor_id) {
+                    let num_splits = splits.len();
                     let splits = splits
                         .iter()
                         .map(|split| SplitImpl::try_from(split).unwrap())
                         .map(|split| split.id())
                         .collect_vec()
                         .join(",");
-                    actor_splits_map.insert(actor.actor_id, (splits.len(), splits));
+                    actor_splits_map.insert(actor.actor_id, (num_splits, splits));
                 }
             }
         }
     }
 
-    // print in the second iteration. Otherwise we don't have upstream splits info
+    // print in the second iteration. Otherwise, we don't have upstream splits info
     for table_fragment in &table_fragments {
-        if table_fragment.actor_splits.is_empty() {
-            continue;
-        }
         if ignore_id {
             println!("Table");
         } else {
             println!("Table #{}", table_fragment.table_id);
         }
-        for fragment in table_fragment.fragments.values() {
+        for fragment in table_fragment
+            .fragments
+            .values()
+            .sorted_by_key(|f| f.fragment_id)
+        {
             let fragment_type_mask = fragment.fragment_type_mask;
             if fragment_type_mask & FragmentTypeFlag::Source as u32 == 0
                 && fragment_type_mask & FragmentTypeFlag::SourceScan as u32 == 0
@@ -101,7 +100,7 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
             println!(
                 "\tFragment{} ({})",
                 if ignore_id {
-                    "".to_string()
+                    "".to_owned()
                 } else {
                     format!(" #{}", fragment.fragment_id)
                 },
@@ -111,36 +110,17 @@ pub async fn source_split_info(context: &CtlContext, ignore_id: bool) -> anyhow:
                     "SourceScan"
                 }
             );
-            for actor in &fragment.actors {
+            for actor in fragment.actors.iter().sorted_by_key(|a| a.actor_id) {
                 if let Some((split_count, splits)) = actor_splits_map.get(&actor.actor_id) {
                     println!(
-                        "\t\tActor{} ({} splits): [{}]{}",
+                        "\t\tActor{} ({} splits): [{}]",
                         if ignore_id {
-                            "".to_string()
+                            "".to_owned()
                         } else {
                             format!(" #{:<3}", actor.actor_id,)
                         },
                         split_count,
                         splits,
-                        if !actor.upstream_actor_id.is_empty() {
-                            assert!(
-                                actor.upstream_actor_id.len() == 1,
-                                "should have only one upstream actor, got {actor:?}"
-                            );
-                            let upstream_splits =
-                                actor_splits_map.get(&actor.upstream_actor_id[0]).unwrap();
-                            format!(
-                                " <- Upstream Actor{}: [{}]",
-                                if ignore_id {
-                                    "".to_string()
-                                } else {
-                                    format!(" #{}", actor.upstream_actor_id[0])
-                                },
-                                upstream_splits.1
-                            )
-                        } else {
-                            "".to_string()
-                        }
                     );
                 } else {
                     println!(
@@ -191,7 +171,7 @@ pub async fn cluster_info(context: &CtlContext) -> anyhow::Result<()> {
 
     let mut table = Table::new();
 
-    let cross_out_if_creating = |cell: Cell, fid: u32| -> Cell {
+    let cross_out_if_creating = |cell: Cell, fid: FragmentId| -> Cell {
         match fragment_states[&fid] {
             State::Unspecified => unreachable!(),
             State::Creating => cell.add_attribute(Attribute::CrossedOut),

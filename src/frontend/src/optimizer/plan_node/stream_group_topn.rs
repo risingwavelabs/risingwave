@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,19 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
 use super::stream::prelude::*;
-use super::utils::{plan_node_name, watermark_pretty, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode};
+use super::utils::{Distill, plan_node_name, watermark_pretty};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+};
+use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::property::{MonotonicityMap, Order};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGroupTopN {
@@ -36,25 +37,20 @@ pub struct StreamGroupTopN {
 }
 
 impl StreamGroupTopN {
-    pub fn new(core: generic::TopN<PlanRef>, vnode_col_idx: Option<usize>) -> Self {
+    pub fn new(core: generic::TopN<PlanRef>, vnode_col_idx: Option<usize>) -> Result<Self> {
         assert!(!core.group_key.is_empty());
         assert!(core.limit_attr.limit() > 0);
-        let input = &core.input;
-        let schema = input.schema().clone();
+        reject_upsert_input!(core.input);
 
-        // FIXME(rc): Actually only watermark messages on the first group-by column are propagated
-        // acccoring to the current GroupTopN implementation. This should be fixed.
-        let watermark_columns = if input.append_only() {
-            input.watermark_columns().clone()
-        } else {
-            let mut watermark_columns = FixedBitSet::with_capacity(schema.len());
-            for &idx in &core.group_key {
-                if input.watermark_columns().contains(idx) {
-                    watermark_columns.insert(idx);
-                }
-            }
-            watermark_columns
-        };
+        let input = &core.input;
+
+        // NOTE: The executor only forwards watermarks on the first group-by column.
+        // Keep the optimizer in sync so EOWC won't be enabled on unsupported plans.
+        //
+        // TODO: Actually it's also safe to forward watermarks on
+        // - other group key columns,
+        // - ascending ORDER BY columns on append-only input.
+        let watermark_columns = input.watermark_columns().retain_clone(&[core.group_key[0]]);
 
         let mut stream_key = core
             .stream_key()
@@ -75,17 +71,18 @@ impl StreamGroupTopN {
             Some(stream_key),
             core.functional_dependency(),
             input.distribution().clone(),
-            false,
+            StreamKind::Retract,
             // TODO: https://github.com/risingwavelabs/risingwave/issues/8348
             false,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
-        StreamGroupTopN {
+
+        Ok(StreamGroupTopN {
             base,
             core,
             vnode_col_idx,
-        }
+        })
     }
 
     pub fn limit_attr(&self) -> TopNLimit {
@@ -129,9 +126,9 @@ impl StreamNode for StreamGroupTopN {
             order_by: self.topn_order().to_protobuf(),
         };
         if self.input().append_only() {
-            PbNodeBody::AppendOnlyGroupTopN(group_topn_node)
+            PbNodeBody::AppendOnlyGroupTopN(Box::new(group_topn_node))
         } else {
-            PbNodeBody::GroupTopN(group_topn_node)
+            PbNodeBody::GroupTopN(Box::new(group_topn_node))
         }
     }
 }
@@ -149,9 +146,9 @@ impl Distill for StreamGroupTopN {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamGroupTopN }
+impl_plan_tree_node_for_unary! { Stream, StreamGroupTopN }
 
-impl PlanTreeNodeUnary for StreamGroupTopN {
+impl PlanTreeNodeUnary<Stream> for StreamGroupTopN {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -159,10 +156,10 @@ impl PlanTreeNodeUnary for StreamGroupTopN {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core, self.vnode_col_idx)
+        Self::new(core, self.vnode_col_idx).unwrap()
     }
 }
 
-impl ExprRewritable for StreamGroupTopN {}
+impl ExprRewritable<Stream> for StreamGroupTopN {}
 
 impl ExprVisitable for StreamGroupTopN {}

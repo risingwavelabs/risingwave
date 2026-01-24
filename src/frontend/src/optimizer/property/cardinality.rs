@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::{max, min, Ordering};
+use std::cmp::{Ordering, max, min};
 use std::ops::{Add, Mul, RangeFrom, RangeInclusive, Sub};
 
 use risingwave_pb::plan_common::PbCardinality;

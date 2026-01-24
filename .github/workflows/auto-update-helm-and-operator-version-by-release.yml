@@ -37,7 +37,7 @@ jobs:
           echo "NEW_CHART_VERSION=$NEW_VERSION" >> $GITHUB_ENV
 
       - name: Create Pull Request
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.PR_TOKEN }}
           commit-message: 'chore: bump risingwave to ${{ env.NEW_APP_VERSION }}, release chart ${{ env.NEW_CHART_VERSION }}'
@@ -66,7 +66,7 @@ jobs:
           grep -rl "risingwavelabs/risingwave:$PREV_VERSION" . | xargs sed -i "s|risingwavelabs/risingwave:$PREV_VERSION|risingwavelabs/risingwave:${{ env.NEW_APP_VERSION }}|g"
 
       - name: Create Pull Request for risingwave-operator
-        uses: peter-evans/create-pull-request@v6
+        uses: peter-evans/create-pull-request@v7
         with:
           token: ${{ secrets.PR_TOKEN }}
           commit-message: 'chore: bump risingwave image tags to ${{ env.NEW_APP_VERSION }}'

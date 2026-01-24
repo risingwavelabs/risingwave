@@ -157,4 +157,53 @@
     );
   expected_outputs:
     - explain_output
-
+- id: create_upsert_jdbc_sink_with_downstream_pk1_separate_sink
+  sql: |
+    set streaming_separate_sink to true;
+    create table t1 (v1 int, v2 double precision, v3 varchar, v4 bigint, v5 decimal, primary key (v3,v4));
+    explain create sink s1_mysql as select v1, v2, v3, v5 from t1 WITH (
+      connector='jdbc',
+      primary_key='v1,v2',
+      jdbc.url='jdbc:mysql://127.0.0.1:8306/mydb?user=root',
+      table.name='t1sink',
+      type='upsert');
+  expected_outputs:
+    - explain_output
+- id: create_mock_iceberg_sink_upsert_with_range_partition_separate_sink
+  sql: |
+    set streaming_separate_sink to true;
+    create table t1 (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
+    explain create sink s1 as select v1 as v1, v2 as v2, v3 as v3, v4 as v4 from t1 WITH (
+      connector = 'iceberg',
+      type = 'upsert',
+      catalog.type = 'mock',
+      catalog.name = 'demo',
+      database.name = 'demo_db',
+      table.name = 'range_table',
+      warehouse.path = 's3://icebergdata/demo',
+      s3.endpoint = 'http://127.0.0.1:9301',
+      s3.region = 'us-east-1',
+      s3.access.key = 'hummockadmin',
+      s3.secret.key = 'hummockadmin',
+      primary_key = 'v1'
+    );
+  expected_outputs:
+    - explain_output
+- id: separate_aggregation_and_sink
+  sql: |
+    set streaming_separate_sink to true;
+    create table t (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
+    create table sink_table (v1 date, v2 bigint);
+    explain create sink s into sink_table as select v1, count(*) from t group by v1
+    with (type = 'append-only', force_append_only = 'true');
+  expected_outputs:
+    - explain_output
+- id: separate_join_and_sink
+  sql: |
+    set streaming_separate_sink to true;
+    create table t (v1 date, v2 timestamp, v3 timestamp with time zone, v4 timestamp);
+    create table sink_table (v1 date, v2 timestamp);
+    explain create sink s into sink_table as select t1.v1, t2.v2 from t t1 join t t2 on t1.v1 = t2.v1
+    with (type = 'append-only', force_append_only = 'true');
+  expected_outputs:
+    - explain_output

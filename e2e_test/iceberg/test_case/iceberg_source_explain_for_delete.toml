@@ -1,0 +1,11 @@
+init_sqls = [
+    'CREATE SCHEMA IF NOT EXISTS demo_db',
+    'DROP TABLE IF EXISTS demo_db.test_explain_for_delete',
+]
+
+slt = 'test_case/iceberg_source_explain_for_delete.slt'
+
+drop_sqls = [
+    'DROP TABLE IF EXISTS demo_db.test_explain_for_delete',
+    'DROP SCHEMA IF EXISTS demo_db',
+]

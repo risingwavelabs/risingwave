@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::default::compaction_config;
 use risingwave_common::config::CompactionConfig as CompactionConfigOpt;
-use risingwave_pb::hummock::compaction_config::CompactionMode;
+use risingwave_common::config::meta::default::compaction_config;
 use risingwave_pb::hummock::CompactionConfig;
+use risingwave_pb::hummock::compaction_config::CompactionMode;
 
 pub struct CompactionConfigBuilder {
     config: CompactionConfig,
@@ -38,13 +38,13 @@ impl CompactionConfigBuilder {
                 // L0/L1 and L2 do not use compression algorithms
                 // L3 - L4 use Lz4, else use Zstd
                 compression_algorithm: vec![
-                    "None".to_string(),
-                    "None".to_string(),
-                    "None".to_string(),
-                    "Lz4".to_string(),
-                    "Lz4".to_string(),
-                    "Zstd".to_string(),
-                    "Zstd".to_string(),
+                    "None".to_owned(),
+                    "None".to_owned(),
+                    "None".to_owned(),
+                    "Lz4".to_owned(),
+                    "Lz4".to_owned(),
+                    "Zstd".to_owned(),
+                    "Zstd".to_owned(),
                 ],
                 compaction_filter_mask: compaction_config::compaction_filter_mask(),
                 max_sub_compaction: compaction_config::max_sub_compaction(),
@@ -71,6 +71,28 @@ impl CompactionConfigBuilder {
                 disable_auto_group_scheduling: Some(
                     compaction_config::disable_auto_group_scheduling(),
                 ),
+                max_overlapping_level_size: Some(compaction_config::max_overlapping_level_size()),
+                sst_allowed_trivial_move_max_count: Some(
+                    compaction_config::sst_allowed_trivial_move_max_count(),
+                ),
+                emergency_level0_sst_file_count: Some(
+                    compaction_config::emergency_level0_sst_file_count(),
+                ),
+                emergency_level0_sub_level_partition: Some(
+                    compaction_config::emergency_level0_sub_level_partition(),
+                ),
+                level0_stop_write_threshold_max_sst_count: Some(
+                    compaction_config::level0_stop_write_threshold_max_sst_count(),
+                ),
+                level0_stop_write_threshold_max_size: Some(
+                    compaction_config::level0_stop_write_threshold_max_size(),
+                ),
+                enable_optimize_l0_interval_selection: Some(
+                    compaction_config::enable_optimize_l0_interval_selection(),
+                ),
+                vnode_aligned_level_size_threshold:
+                    compaction_config::vnode_aligned_level_size_threshold(),
+                max_kv_count_for_xor16: compaction_config::max_kv_count_for_xor16(),
             },
         }
     }
@@ -100,6 +122,18 @@ impl CompactionConfigBuilder {
             .level0_max_compact_file_number(opt.level0_max_compact_file_number)
             .tombstone_reclaim_ratio(opt.tombstone_reclaim_ratio)
             .max_level(opt.max_level as u64)
+            .sst_allowed_trivial_move_min_size(Some(opt.sst_allowed_trivial_move_min_size))
+            .sst_allowed_trivial_move_max_count(Some(opt.sst_allowed_trivial_move_max_count))
+            .max_overlapping_level_size(Some(opt.max_overlapping_level_size))
+            .emergency_level0_sst_file_count(Some(opt.emergency_level0_sst_file_count))
+            .emergency_level0_sub_level_partition(Some(opt.emergency_level0_sub_level_partition))
+            .level0_stop_write_threshold_max_sst_count(Some(
+                opt.level0_stop_write_threshold_max_sst_count,
+            ))
+            .level0_stop_write_threshold_max_size(Some(opt.level0_stop_write_threshold_max_size))
+            .enable_optimize_l0_interval_selection(Some(opt.enable_optimize_l0_interval_selection))
+            .vnode_aligned_level_size_threshold(opt.vnode_aligned_level_size_threshold)
+            .max_kv_count_for_xor16(opt.max_kv_count_for_xor16)
     }
 
     pub fn build(self) -> CompactionConfig {
@@ -161,4 +195,14 @@ builder_field! {
     level0_overlapping_sub_level_compact_level_count: u32,
     tombstone_reclaim_ratio: u32,
     sst_allowed_trivial_move_min_size: Option<u64>,
+    sst_allowed_trivial_move_max_count: Option<u32>,
+    disable_auto_group_scheduling: Option<bool>,
+    max_overlapping_level_size: Option<u64>,
+    emergency_level0_sst_file_count: Option<u32>,
+    emergency_level0_sub_level_partition: Option<u32>,
+    level0_stop_write_threshold_max_sst_count: Option<u32>,
+    level0_stop_write_threshold_max_size: Option<u64>,
+    enable_optimize_l0_interval_selection: Option<bool>,
+    vnode_aligned_level_size_threshold: Option<u64>,
+    max_kv_count_for_xor16: Option<u64>,
 }

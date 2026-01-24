@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,13 +17,17 @@ use std::hash::Hash;
 
 use bytes::{Buf, BufMut, BytesMut};
 use jsonbb::{Value, ValueRef};
-use postgres_types::{accepts, to_sql_checked, FromSql, IsNull, ToSql, Type};
+use postgres_types::{FromSql, IsNull, ToSql, Type, accepts, to_sql_checked};
 use risingwave_common_estimate_size::EstimateSize;
+use thiserror_ext::AsReport;
 
 use super::{
-    Datum, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum, F64,
+    Datum, F64, IntoOrdered, ListValue, MapType, MapValue, ScalarImpl, StructRef, ToOwnedDatum,
 };
-use crate::types::{DataType, Scalar, ScalarRef, StructType, StructValue};
+use crate::types::{
+    DEBEZIUM_UNAVAILABLE_JSON, DEBEZIUM_UNAVAILABLE_VALUE, DataType, ListType, Scalar, ScalarRef,
+    StructType, StructValue,
+};
 use crate::util::iter_util::ZipEqDebug;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -133,8 +137,8 @@ impl crate::types::to_binary::ToBinary for JsonbRef<'_> {
     fn to_binary_with_type(
         &self,
         _ty: &crate::types::DataType,
-    ) -> super::to_binary::Result<Option<bytes::Bytes>> {
-        Ok(Some(self.value_serialize().into()))
+    ) -> super::to_binary::Result<bytes::Bytes> {
+        Ok(self.value_serialize().into())
     }
 }
 
@@ -142,6 +146,18 @@ impl std::str::FromStr for JsonbVal {
     type Err = <Value as std::str::FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self(s.parse()?))
+    }
+}
+
+impl JsonbVal {
+    /// Create a `JsonbVal` from a string, with special handling for Debezium's unavailable value placeholder.
+    /// Returns a Result to handle parsing errors properly.
+    pub fn from_debezium_unavailable_value(s: &str) -> Result<Self, serde_json::Error> {
+        // Special handling for Debezium's unavailable value placeholder
+        if s.len() == DEBEZIUM_UNAVAILABLE_VALUE.len() && s == DEBEZIUM_UNAVAILABLE_VALUE {
+            return Ok(DEBEZIUM_UNAVAILABLE_JSON.clone());
+        }
         Ok(Self(s.parse()?))
     }
 }
@@ -245,11 +261,6 @@ impl<'a> JsonbRef<'a> {
         Self(ValueRef::Null)
     }
 
-    /// Returns a value for empty string.
-    pub const fn empty_string() -> Self {
-        Self(ValueRef::String(""))
-    }
-
     /// Returns true if this is a jsonb `null`.
     pub fn is_jsonb_null(&self) -> bool {
         self.0.is_null()
@@ -342,7 +353,7 @@ impl<'a> JsonbRef<'a> {
     ///   * Jsonb string is displayed with quotes but treated as its inner value here.
     pub fn force_str<W: std::fmt::Write>(&self, writer: &mut W) -> std::fmt::Result {
         match self.0 {
-            ValueRef::String(v) => writer.write_str(v),
+            ValueRef::String(v) => writer.write_str(v.as_str()),
             ValueRef::Null => Ok(()),
             ValueRef::Bool(_) | ValueRef::Number(_) | ValueRef::Array(_) | ValueRef::Object(_) => {
                 use crate::types::to_text::ToText as _;
@@ -408,41 +419,24 @@ impl<'a> JsonbRef<'a> {
 
     /// Convert the jsonb value to a datum.
     pub fn to_datum(self, ty: &DataType) -> Result<Datum, String> {
-        if !matches!(
-            ty,
-            DataType::Jsonb
-                | DataType::Boolean
-                | DataType::Int16
-                | DataType::Int32
-                | DataType::Int64
-                | DataType::Float32
-                | DataType::Float64
-                | DataType::Varchar
-                | DataType::List(_)
-                | DataType::Struct(_)
-        ) {
-            return Err(format!("cannot cast jsonb to {ty}"));
-        }
         if self.0.as_null().is_some() {
             return Ok(None);
         }
-        Ok(Some(match ty {
+        let datum = match ty {
             DataType::Jsonb => ScalarImpl::Jsonb(self.into()),
-            DataType::Boolean => ScalarImpl::Bool(self.as_bool()?),
-            DataType::Int16 => ScalarImpl::Int16(self.as_number()?.try_into()?),
-            DataType::Int32 => ScalarImpl::Int32(self.as_number()?.try_into()?),
-            DataType::Int64 => ScalarImpl::Int64(self.as_number()?.try_into()?),
-            DataType::Float32 => ScalarImpl::Float32(self.as_number()?.try_into()?),
-            DataType::Float64 => ScalarImpl::Float64(self.as_number()?),
-            DataType::Varchar => ScalarImpl::Utf8(self.force_string().into()),
-            DataType::List(t) => ScalarImpl::List(self.to_list(t)?),
+            DataType::List(l) => ScalarImpl::List(self.to_list(l)?),
             DataType::Struct(s) => ScalarImpl::Struct(self.to_struct(s)?),
-            _ => unreachable!(),
-        }))
+            _ => {
+                let s = self.force_string();
+                ScalarImpl::from_text(&s, ty).map_err(|e| format!("{}", e.as_report()))?
+            }
+        };
+        Ok(Some(datum))
     }
 
     /// Convert the jsonb value to a list value.
-    pub fn to_list(self, elem_type: &DataType) -> Result<ListValue, String> {
+    pub fn to_list(self, ty: &ListType) -> Result<ListValue, String> {
+        let elem_type = ty.elem();
         let array = self
             .0
             .as_array()
@@ -479,7 +473,7 @@ impl<'a> JsonbRef<'a> {
             .as_object()
             .ok_or_else(|| format!("cannot convert to map from a jsonb {}", self.type_name()))?;
         if !matches!(ty.key(), DataType::Varchar) {
-            return Err("cannot convert jsonb to a map with non-string keys".to_string());
+            return Err("cannot convert jsonb to a map with non-string keys".to_owned());
         }
 
         let mut keys: Vec<Datum> = Vec::with_capacity(object.len());
@@ -586,36 +580,80 @@ impl<F: std::fmt::Write> std::io::Write for FmtToIoUnchecked<F> {
 }
 
 impl ToSql for JsonbVal {
-    accepts!(JSONB);
+    accepts!(JSON, JSONB);
 
     to_sql_checked!();
 
     fn to_sql(
         &self,
-        _ty: &Type,
+        ty: &Type,
         out: &mut BytesMut,
     ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
     where
         Self: Sized,
     {
-        out.put_u8(1);
+        if matches!(*ty, Type::JSONB) {
+            out.put_u8(1);
+        }
         write!(out, "{}", self.0).unwrap();
         Ok(IsNull::No)
     }
 }
 
 impl<'a> FromSql<'a> for JsonbVal {
+    accepts!(JSON, JSONB);
+
     fn from_sql(
-        _ty: &Type,
+        ty: &Type,
         mut raw: &'a [u8],
     ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
-        if raw.is_empty() || raw.get_u8() != 1 {
-            return Err("invalid jsonb encoding".into());
-        }
-        Ok(JsonbVal::from(Value::from_text(raw)?))
+        Ok(match *ty {
+            // Here we allow mapping JSON of pg to JSONB of rw. But please note the JSONB and JSON have different behaviors in postgres.
+            // An example of different semantics for duplicated keys in an object:
+            // test=# select jsonb_each('{"foo": 1, "bar": 2, "foo": 3}');
+            //  jsonb_each
+            //  ------------
+            //   (bar,2)
+            //   (foo,3)
+            //  (2 rows)
+            // test=# select json_each('{"foo": 1, "bar": 2, "foo": 3}');
+            //   json_each
+            //  -----------
+            //   (foo,1)
+            //   (bar,2)
+            //   (foo,3)
+            //  (3 rows)
+            Type::JSON => JsonbVal::from(Value::from_text(raw)?),
+            Type::JSONB => {
+                if raw.is_empty() || raw.get_u8() != 1 {
+                    return Err("invalid jsonb encoding".into());
+                }
+                JsonbVal::from(Value::from_text(raw)?)
+            }
+            _ => {
+                bail_not_implemented!("the JsonbVal's postgres decoding for {ty} is unsupported")
+            }
+        })
     }
+}
 
-    fn accepts(ty: &Type) -> bool {
-        matches!(*ty, Type::JSONB)
+impl ToSql for JsonbRef<'_> {
+    accepts!(JSON, JSONB);
+
+    to_sql_checked!();
+
+    fn to_sql(
+        &self,
+        ty: &Type,
+        out: &mut BytesMut,
+    ) -> Result<IsNull, Box<dyn std::error::Error + Sync + Send>>
+    where
+        Self: Sized,
+    {
+        if matches!(*ty, Type::JSONB) {
+            out.put_u8(1);
+        }
+        write!(out, "{}", self.0).unwrap();
+        Ok(IsNull::No)
     }
 }

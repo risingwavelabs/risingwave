@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -20,8 +20,8 @@
 
 use std::sync::Arc;
 
-pub use super::arrow_53::{
-    arrow_array, arrow_buffer, arrow_cast, arrow_schema, FromArrow, ToArrow,
+pub use super::arrow_54::{
+    FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
 };
 use crate::array::{ArrayError, ArrayImpl, DataType, DecimalArray, JsonbArray};
 
@@ -209,17 +209,16 @@ mod tests {
         let mut builder = MapArrayBuilder::with_type(3, rw_map_type.clone());
         builder.append_owned(Some(
             MapValue::try_from_kv(
-                ListValue::from_str("{a,b,c}", &DataType::List(Box::new(DataType::Varchar)))
-                    .unwrap(),
-                ListValue::from_str("{1,2,3}", &DataType::List(Box::new(DataType::Int32))).unwrap(),
+                ListValue::from_str("{a,b,c}", &DataType::Varchar.list()).unwrap(),
+                ListValue::from_str("{1,2,3}", &DataType::Int32.list()).unwrap(),
             )
             .unwrap(),
         ));
         builder.append_owned(None);
         builder.append_owned(Some(
             MapValue::try_from_kv(
-                ListValue::from_str("{a,c}", &DataType::List(Box::new(DataType::Varchar))).unwrap(),
-                ListValue::from_str("{1,3}", &DataType::List(Box::new(DataType::Int32))).unwrap(),
+                ListValue::from_str("{a,c}", &DataType::Varchar.list()).unwrap(),
+                ListValue::from_str("{1,3}", &DataType::Int32.list()).unwrap(),
             )
             .unwrap(),
         ));
@@ -276,6 +275,12 @@ mod tests {
             MapArray
             [
               StructArray
+            -- validity:
+            [
+              valid,
+              valid,
+              valid,
+            ]
             [
             -- child 0: "key" (Utf8)
             StringArray
@@ -294,6 +299,11 @@ mod tests {
             ],
               null,
               StructArray
+            -- validity:
+            [
+              valid,
+              valid,
+            ]
             [
             -- child 0: "key" (Utf8)
             StringArray
@@ -308,9 +318,14 @@ mod tests {
               3,
             ]
             ],
-            ]
-        "#]]
-        .assert_debug_eq(&arrow);
+            ]"#]]
+        .assert_eq(
+            &format!("{:#?}", arrow)
+                .lines()
+                .map(|s| s.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n"),
+        );
 
         let rw_array_new = UdfArrowConvert::default()
             .from_map_array(arrow.as_any().downcast_ref().unwrap())

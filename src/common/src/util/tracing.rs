@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -106,7 +106,7 @@ impl TracingContext {
         // See [Trace Context](https://www.w3.org/TR/trace-context/) for these header names.
         for key in ["traceparent", "tracestate"] {
             let value = headers.get(key)?.to_str().ok()?;
-            map.insert(key.to_string(), value.to_string());
+            map.insert(key.to_owned(), value.to_owned());
         }
 
         Some(Self::from_w3c(&map))

@@ -59,7 +59,7 @@ where
             ka.access(path, type_expected)
         } else {
             Err(AccessError::Undefined {
-                name: "key".to_string(),
+                name: "key".to_owned(),
                 path: String::new(),
             })
         }
@@ -70,19 +70,25 @@ where
             va.access(path, type_expected)
         } else {
             Err(AccessError::Undefined {
-                name: "value".to_string(),
+                name: "value".to_owned(),
                 path: String::new(),
             })
         }
     }
 
-    pub fn access_field(&self, desc: &SourceColumnDesc) -> AccessResult<DatumCow<'_>> {
-        match desc.additional_column.column_type {
-            Some(AdditionalColumnType::Key(_)) => self.access_key(&[&desc.name], &desc.data_type),
+    pub fn access_field<const KEY_ONLY: bool>(
+        &self,
+        desc: &SourceColumnDesc,
+    ) -> AccessResult<DatumCow<'_>> {
+        match (&desc.additional_column.column_type, KEY_ONLY) {
+            (Some(AdditionalColumnType::Key(_)), _) => {
+                self.access_key(&[&desc.name], &desc.data_type)
+            }
             // hack here: Get the whole payload as a single column
             // use a special mark empty slice as path to represent the whole payload
-            Some(AdditionalColumnType::Payload(_)) => self.access_value(&[], &desc.data_type),
-            None => self.access_value(&[&desc.name], &desc.data_type),
+            (Some(AdditionalColumnType::Payload(_)), _) => self.access_value(&[], &desc.data_type),
+            (None, false) => self.access_value(&[&desc.name], &desc.data_type),
+            (_, true) => Ok(DatumCow::Owned(None)),
             _ => unreachable!(),
         }
     }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use pretty_xmlish::{Pretty, StrAssocArr};
 use risingwave_common::catalog::Schema;
 
-use super::{impl_distill_unit_from_fields, GenericPlanNode, GenericPlanRef};
+use super::{GenericPlanNode, GenericPlanRef, impl_distill_unit_from_fields};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::FunctionalDependencySet;
 
@@ -35,7 +35,7 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
     fn schema(&self) -> Schema {
         let mut schema = self.inputs[0].schema().clone();
         if let Some(source_col) = self.source_col {
-            schema.fields[source_col].name = "$src".to_string();
+            schema.fields[source_col].name = "$src".to_owned();
             schema
         } else {
             schema
@@ -68,6 +68,17 @@ impl<PlanRef: GenericPlanRef> GenericPlanNode for Union<PlanRef> {
 }
 
 impl<PlanRef: GenericPlanRef> Union<PlanRef> {
+    pub fn clone_with_inputs<OtherPlanRef>(
+        &self,
+        inputs: Vec<OtherPlanRef>,
+    ) -> Union<OtherPlanRef> {
+        Union {
+            all: self.all,
+            inputs,
+            source_col: self.source_col,
+        }
+    }
+
     pub fn fields_pretty<'a>(&self) -> StrAssocArr<'a> {
         vec![("all", Pretty::debug(&self.all))]
     }

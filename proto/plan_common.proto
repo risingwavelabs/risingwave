@@ -21,9 +21,6 @@ enum ColumnDescVersion {
   // Introduced in https://github.com/risingwavelabs/risingwave/pull/13707#discussion_r1429947537,
   // in case DEFAULT_KEY_COLUMN_NAME changes
   COLUMN_DESC_VERSION_PR_13707 = 1;
-
-  // for test only
-  COLUMN_DESC_VERSION_MAX = 2147483647;
 }
 
 message ColumnDesc {
@@ -32,12 +29,13 @@ message ColumnDesc {
   // we store the column name in column desc now just for debug, but in future
   // we should store it in ColumnCatalog but not here
   string name = 3;
-  // For STRUCT type.
-  repeated ColumnDesc field_descs = 4;
-  // The user-defined type's name. Empty if the column type is a builtin type.
-  // For example, when the type is created from a protobuf schema file,
-  // this field will store the message name.
-  string type_name = 5;
+
+  // Deprecated fields for struct type.
+  // TODO(struct): support struct type name and store it in `DataType`.
+  reserved 4;
+  reserved "field_descs";
+  reserved 5;
+  reserved "type_name";
 
   // deprecated, breaking change
   // GeneratedColumnDesc generated_column = 6 [deprecated = true];
@@ -61,6 +59,8 @@ message ColumnDesc {
   ColumnDescVersion version = 10;
 
   AdditionalColumn additional_column = 11;
+
+  optional bool nullable = 12;
 }
 
 message ColumnCatalog {
@@ -100,24 +100,25 @@ message StorageTableDesc {
   // Total vnode count of the table.
   //
   // Can be unset if the table is created in older versions where variable vnode count is not
-  // supported, in which case a default value of 256 should be used.
+  // supported, in which case a default value of 256 (or 1 for singleton) should be used.
   // Use `VnodeCountCompat::vnode_count` to access it.
   optional uint32 maybe_vnode_count = 12;
 }
 
-message AsOf {
-  message ProcessTime {}
-  message Timestamp {
-    int64 timestamp = 1;
-  }
-  message Version {
-    int64 version = 1;
-  }
-  oneof as_of_type {
-    ProcessTime process_time = 1;
-    Timestamp timestamp = 2;
-    Version version = 3;
-  }
+message VectorIndexReaderDesc {
+  // The table_id of the vector index to search.
+  uint32 table_id = 1;
+  // The columns of the vector index info.
+  repeated plan_common.ColumnDesc info_column_desc = 2;
+  repeated uint32 info_output_indices = 3;
+  // Whether or not to include the distance column in the output
+  bool include_distance = 4;
+  // The number of nearest neighbors to return.
+  uint32 top_n = 5;
+  // The distance metric to use for the search.
+  common.DistanceType distance_type = 6;
+  // The ef_search used to query hnsw index
+  uint32 hnsw_ef_search = 7;
 }
 
 // Represents a table in external database for CDC scenario
@@ -236,6 +237,7 @@ message Cardinality {
 // Provide statement-local context, e.g. session info like time zone, for execution.
 message ExprContext {
   string time_zone = 1;
+  bool strict_mode = 2;
 }
 
 message AdditionalColumnKey {}
@@ -267,6 +269,10 @@ message AdditionalColumnPayload {}
 // this type means we read all headers as a whole
 message AdditionalColumnHeaders {}
 
+message AdditionalSubject {}
+
+message AdditionalColumnPulsarMessageIdData {}
+
 message AdditionalColumn {
   oneof column_type {
     AdditionalColumnKey key = 1;
@@ -281,6 +287,8 @@ message AdditionalColumn {
     AdditionalTableName table_name = 10;
     AdditionalCollectionName collection_name = 11;
     AdditionalColumnPayload payload = 12;
+    AdditionalSubject subject = 13;
+    AdditionalColumnPulsarMessageIdData pulsar_message_id_data = 14;
   }
 }
 
@@ -294,4 +302,17 @@ enum AdditionalColumnType {
   ADDITIONAL_COLUMN_TYPE_FILENAME = 6;
   ADDITIONAL_COLUMN_TYPE_NORMAL = 7;
   ADDITIONAL_COLUMN_TYPE_PAYLOAD = 8;
+  ADDITIONAL_COLUMN_TYPE_PULSAR_MESSAGE_ID_DATA = 9; // for pulsar source, used for ack message
+}
+
+message SourceRefreshMode {
+  message SourceRefreshModeStreaming {}
+  message SourceRefreshModeFullReload {
+    optional int64 refresh_interval_sec = 1;
+  }
+
+  oneof refresh_mode {
+    SourceRefreshModeStreaming streaming = 1;
+    SourceRefreshModeFullReload full_reload = 2;
+  }
 }

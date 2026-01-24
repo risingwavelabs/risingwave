@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,10 +22,10 @@ use clippy_utils::source::snippet_opt;
 use itertools::Itertools;
 use rustc_ast::{Crate, Expr, ExprKind, FormatArgs};
 use rustc_data_structures::fx::FxHashMap;
-use rustc_lexer::{tokenize, TokenKind};
+use rustc_lexer::{FrontmatterAllowed, TokenKind, tokenize};
 use rustc_lint::{EarlyContext, EarlyLintPass};
 use rustc_session::impl_lint_pass;
-use rustc_span::{hygiene, Span};
+use rustc_span::{Span, hygiene};
 
 /// Populates [`FormatArgsStorage`] with AST [`FormatArgs`] nodes
 pub struct FormatArgsCollector {
@@ -104,7 +104,7 @@ fn has_span_from_proc_macro(cx: &EarlyContext<'_>, args: &FormatArgs) -> bool {
         let Some(snippet) = snippet_opt(cx, between_span) else {
             return true;
         };
-        for token in tokenize(&snippet) {
+        for token in tokenize(&snippet, FrontmatterAllowed::No) {
             match token.kind {
                 TokenKind::LineComment { .. }
                 | TokenKind::BlockComment { .. }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::distributions::Alphanumeric;
+use rand::distr::Alphanumeric;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::DEFAULT_LENGTH;
 use crate::types::{Datum, Scalar};
@@ -30,7 +30,7 @@ impl VarcharRandomVariableLengthField {
     }
 
     pub fn generate_string(&mut self, offset: u64) -> String {
-        let len = rand::thread_rng().gen_range(0..=DEFAULT_LENGTH * 2);
+        let len = rand::rng().random_range(0..=DEFAULT_LENGTH * 2);
         StdRng::seed_from_u64(offset ^ self.seed)
             .sample_iter(&Alphanumeric)
             .take(len)
@@ -94,7 +94,7 @@ impl VarcharConstant {
     pub fn generate_datum() -> Datum {
         Some(
             Self::CONSTANT_STRING
-                .to_string()
+                .to_owned()
                 .into_boxed_str()
                 .to_scalar_value(),
         )

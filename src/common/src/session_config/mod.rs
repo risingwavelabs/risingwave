@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,8 @@
 // limitations under the License.
 
 mod non_zero64;
-mod over_window;
+mod opt;
+pub mod parallelism;
 mod query_mode;
 mod search_path;
 pub mod sink_decouple;
@@ -21,16 +22,20 @@ mod transaction_isolation_level;
 mod visibility_mode;
 
 use chrono_tz::Tz;
-pub use over_window::OverWindowCachePolicy;
+use itertools::Itertools;
+pub use opt::OptionConfig;
 pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
 use serde::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
+use crate::config::mutate::TomlTableMutateExt;
+use crate::config::streaming::{JoinEncodingType, OverWindowCachePolicy};
+use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
+use crate::session_config::parallelism::ConfigParallelism;
 use crate::session_config::sink_decouple::SinkDecouple;
 use crate::session_config::transaction_isolation_level::IsolationLevel;
 pub use crate::session_config::visibility_mode::VisibilityMode;
@@ -57,9 +62,25 @@ type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
 // otherwise seems like it can't infer the type of -1 when written inline.
 const DISABLE_BACKFILL_RATE_LIMIT: i32 = -1;
 const DISABLE_SOURCE_RATE_LIMIT: i32 = -1;
+const DISABLE_DML_RATE_LIMIT: i32 = -1;
+const DISABLE_SINK_RATE_LIMIT: i32 = -1;
 
-#[serde_as]
+/// Default to bypass cluster limits iff in debug mode.
+const BYPASS_CLUSTER_LIMITS: bool = cfg!(debug_assertions);
+
 /// This is the Session Config of RisingWave.
+///
+/// All config entries implement `Display` and `FromStr` for getter and setter, to be read and
+/// altered within a session.
+///
+/// Users can change the default value of a configuration entry using `ALTER SYSTEM SET`. To
+/// facilitate this, a `serde` implementation is used as the wire format for retrieving initial
+/// configurations and updates from the meta service. It's important to note that the meta
+/// service stores the overridden value of each configuration entry per row with `Display` in
+/// the meta store, rather than using the `serde` format. However, we still delegate the `serde`
+/// impl of all fields to `Display`/`FromStr` to make it consistent.
+#[serde_with::apply(_ => #[serde_as(as = "serde_with::DisplayFromStr")] )]
+#[serde_with::serde_as]
 #[derive(Clone, Debug, Deserialize, Serialize, SessionConfig, ConfigDoc, PartialEq)]
 pub struct SessionConfig {
     /// If `RW_IMPLICIT_FLUSH` is on, then every INSERT/UPDATE/DELETE statement will block
@@ -76,8 +97,7 @@ pub struct SessionConfig {
     /// A temporary config variable to force query running in either local or distributed mode.
     /// The default value is auto which means let the system decide to run batch queries in local
     /// or distributed mode automatically.
-    #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = QueryMode::default(), flags = "NO_ALTER_SYS")]
+    #[parameter(default = QueryMode::default())]
     query_mode: QueryMode,
 
     /// Sets the number of digits displayed for floating-point values.
@@ -109,6 +129,12 @@ pub struct SessionConfig {
     #[parameter(default = false, rename = "batch_enable_distributed_dml")]
     batch_enable_distributed_dml: bool,
 
+    /// Evaluate expression in strict mode for batch queries.
+    /// If set to false, an expression failure will not cause an error but leave a null value
+    /// on the result set.
+    #[parameter(default = true)]
+    batch_expr_strict_mode: bool,
+
     /// The max gap allowed to transform small range scan into multi point lookup.
     #[parameter(default = 8)]
     max_split_range_gap: i32,
@@ -116,23 +142,19 @@ pub struct SessionConfig {
     /// Sets the order in which schemas are searched when an object (table, data type, function, etc.)
     /// is referenced by a simple name with no schema specified.
     /// See <https://www.postgresql.org/docs/14/runtime-config-client.html#GUC-SEARCH-PATH>
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = SearchPath::default())]
     search_path: SearchPath,
 
     /// If `VISIBILITY_MODE` is all, we will support querying data without checkpoint.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = VisibilityMode::default())]
     visibility_mode: VisibilityMode,
 
     /// See <https://www.postgresql.org/docs/current/transaction-iso.html>
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = IsolationLevel::default())]
     transaction_isolation: IsolationLevel,
 
     /// Select as of specific epoch.
     /// Sets the historical epoch for querying data. If 0, querying latest data.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     query_epoch: ConfigNonZeroU64,
 
@@ -145,9 +167,32 @@ pub struct SessionConfig {
     ///
     /// If a non-zero value is set, streaming queries will be scheduled to use a fixed number of parallelism.
     /// Note that the value will be bounded at `STREAMING_MAX_PARALLELISM`.
-    #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = ConfigNonZeroU64::default())]
-    streaming_parallelism: ConfigNonZeroU64,
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism: ConfigParallelism,
+
+    /// Specific parallelism for backfill. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_backfill: ConfigParallelism,
+
+    /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_table: ConfigParallelism,
+
+    /// Specific parallelism for sink. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_sink: ConfigParallelism,
+
+    /// Specific parallelism for index. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_index: ConfigParallelism,
+
+    /// Specific parallelism for source. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_source: ConfigParallelism,
+
+    /// Specific parallelism for materialized view. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_materialized_view: ConfigParallelism,
 
     /// Enable delta join for streaming queries. Defaults to false.
     #[parameter(default = false, alias = "rw_streaming_enable_delta_join")]
@@ -156,6 +201,11 @@ pub struct SessionConfig {
     /// Enable bushy join for streaming queries. Defaults to true.
     #[parameter(default = true, alias = "rw_streaming_enable_bushy_join")]
     streaming_enable_bushy_join: bool,
+
+    /// Force filtering to be done inside the join whenever there's a choice between optimizations.
+    /// Defaults to false.
+    #[parameter(default = false, alias = "rw_streaming_force_filter_inside_join")]
+    streaming_force_filter_inside_join: bool,
 
     /// Enable arrangement backfill for streaming queries. Defaults to true.
     /// When set to true, the parallelism of the upstream fragment will be
@@ -171,6 +221,27 @@ pub struct SessionConfig {
     /// Allow `jsonb` in stream key
     #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
+
+    /// Unsafe: allow impure expressions on non-append-only streams without materialization.
+    ///
+    /// This may lead to inconsistent results or panics due to re-evaluation on updates/retracts.
+    #[parameter(default = false)]
+    streaming_unsafe_allow_unmaterialized_impure_expr: bool,
+
+    /// Separate consecutive `StreamHashJoin` by no-shuffle `StreamExchange`
+    #[parameter(default = false)]
+    streaming_separate_consecutive_join: bool,
+
+    /// Separate `StreamSink` by no-shuffle `StreamExchange`
+    #[parameter(default = false)]
+    streaming_separate_sink: bool,
+
+    /// Determine which encoding will be used to encode join rows in operator cache.
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None)]
+    streaming_join_encoding: OptionConfig<JoinEncodingType>,
 
     /// Enable join ordering for streaming and batch queries. Defaults to true.
     #[parameter(default = true, alias = "rw_enable_join_ordering")]
@@ -202,7 +273,6 @@ pub struct SessionConfig {
     interval_style: String,
 
     /// If `BATCH_PARALLELISM` is non-zero, batch queries will use this parallelism.
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = ConfigNonZeroU64::default())]
     batch_parallelism: ConfigNonZeroU64,
 
@@ -223,7 +293,6 @@ pub struct SessionConfig {
     client_encoding: String,
 
     /// Enable decoupling sink and internal streaming graph or not
-    #[serde_as(as = "DisplayFromStr")]
     #[parameter(default = SinkDecouple::default())]
     sink_decouple: SinkDecouple,
 
@@ -249,7 +318,7 @@ pub struct SessionConfig {
     lock_timeout: i32,
 
     /// For limiting the startup time of a shareable CDC streaming source when the source is being created. Unit: seconds.
-    #[parameter(default = 30)]
+    #[parameter(default = 60)]
     cdc_source_wait_streaming_start_timeout: i32,
 
     /// see <https://www.postgresql.org/docs/current/runtime-config-client.html#GUC-ROW-SECURITY>.
@@ -273,11 +342,25 @@ pub struct SessionConfig {
     #[parameter(default = DISABLE_SOURCE_RATE_LIMIT)]
     source_rate_limit: i32,
 
+    /// Set streaming rate limit (rows per second) for each parallelism for table DML.
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the DML.
+    #[parameter(default = DISABLE_DML_RATE_LIMIT)]
+    dml_rate_limit: i32,
+
+    /// Set sink rate limit (rows per second) for each parallelism for external sink.
+    /// If set to -1, disable rate limit.
+    /// If set to 0, this pauses the sink.
+    #[parameter(default = DISABLE_SINK_RATE_LIMIT)]
+    sink_rate_limit: i32,
+
     /// Cache policy for partition cache in streaming over window.
-    /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
-    #[serde_as(as = "DisplayFromStr")]
-    #[parameter(default = OverWindowCachePolicy::default(), alias = "rw_streaming_over_window_cache_policy")]
-    streaming_over_window_cache_policy: OverWindowCachePolicy,
+    /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None, alias = "rw_streaming_over_window_cache_policy")]
+    streaming_over_window_cache_policy: OptionConfig<OverWindowCachePolicy>,
 
     /// Run DDL statements in background
     #[parameter(default = false)]
@@ -287,8 +370,8 @@ pub struct SessionConfig {
     ///
     /// When enabled, `CREATE SOURCE` will create a source streaming job, and `CREATE MATERIALIZED VIEWS` from the source
     /// will forward the data from the same source streaming job, and also backfill prior data from the external source.
-    #[parameter(default = false, alias = "rw_enable_shared_source")]
-    enable_shared_source: bool,
+    #[parameter(default = true)]
+    streaming_use_shared_source: bool,
 
     /// Shows the server-side character set encoding. At present, this parameter can be shown but not set, because the encoding is determined at database creation time.
     #[parameter(default = SERVER_ENCODING)]
@@ -300,7 +383,7 @@ pub struct SessionConfig {
     /// Bypass checks on cluster limits
     ///
     /// When enabled, `CREATE MATERIALIZED VIEW` will not fail if the cluster limit is hit.
-    #[parameter(default = false)]
+    #[parameter(default = BYPASS_CLUSTER_LIMITS)]
     bypass_cluster_limits: bool,
 
     /// The maximum number of parallelism a streaming query can use. Defaults to 256.
@@ -312,8 +395,89 @@ pub struct SessionConfig {
     /// It's not always a good idea to set this to a very large number, as it may cause performance
     /// degradation when performing range scans on the table or the materialized view.
     // a.k.a. vnode count
-    #[parameter(default = VirtualNode::COUNT_FOR_COMPAT, check_hook = check_vnode_count)]
+    #[parameter(default = VirtualNode::COUNT_FOR_COMPAT, check_hook = check_streaming_max_parallelism)]
     streaming_max_parallelism: usize,
+
+    /// Used to provide the connection information for the iceberg engine.
+    /// Format: `iceberg_engine_connection` = `schema_name.connection_name`.
+    #[parameter(default = "", check_hook = check_iceberg_engine_connection)]
+    iceberg_engine_connection: String,
+
+    /// Whether the streaming join should be unaligned or not.
+    #[parameter(default = false)]
+    streaming_enable_unaligned_join: bool,
+
+    /// The timeout for reading from the buffer of the sync log store on barrier.
+    /// Every epoch we will attempt to read the full buffer of the sync log store.
+    /// If we hit the timeout, we will stop reading and continue.
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None)]
+    streaming_sync_log_store_pause_duration_ms: OptionConfig<usize>,
+
+    /// The max buffer size for sync logstore, before we start flushing.
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None)]
+    streaming_sync_log_store_buffer_size: OptionConfig<usize>,
+
+    /// Whether to disable purifying the definition of the table or source upon retrieval.
+    /// Only set this if encountering issues with functionalities like `SHOW` or `ALTER TABLE/SOURCE`.
+    /// This config may be removed in the future.
+    #[parameter(default = false, flags = "NO_ALTER_SYS")]
+    disable_purify_definition: bool,
+
+    /// The `ef_search` used in querying hnsw vector index
+    #[parameter(default = 40_usize)] // default value borrowed from pg_vector
+    batch_hnsw_ef_search: usize,
+
+    /// Enable index selection for queries
+    #[parameter(default = true)]
+    enable_index_selection: bool,
+
+    /// Enable locality backfill for streaming queries. Defaults to false.
+    #[parameter(default = false)]
+    enable_locality_backfill: bool,
+
+    /// Duration in seconds before notifying the user that a long-running DDL operation (e.g., DROP TABLE, CANCEL JOBS)
+    /// is still running. Set to 0 to disable notifications. Defaults to 30 seconds.
+    #[parameter(default = 30u32)]
+    slow_ddl_notification_secs: u32,
+
+    /// Unsafe: Enable storage retention for non-append-only tables.
+    /// Enabling this can lead to streaming inconsistency and node panic
+    /// if there is any row INSERT/UPDATE/DELETE operation corresponding to the ttled primary key.
+    #[parameter(default = false)]
+    unsafe_enable_storage_retention_for_non_append_only_tables: bool,
+
+    /// Enable DataFusion Engine
+    /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
+    #[parameter(default = false)]
+    enable_datafusion_engine: bool,
+
+    /// Emit chunks in upsert format for `UPDATE` and `DELETE` DMLs.
+    /// May lead to undefined behavior if the table is created with `ON CONFLICT DO NOTHING`.
+    ///
+    /// When enabled:
+    /// - `UPDATE` will only emit `Insert` records for new rows, instead of `Update` records.
+    /// - `DELETE` will only include key columns and pad the rest with NULL, instead of emitting complete rows.
+    #[parameter(default = false)]
+    upsert_dml: bool,
+}
+
+fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
+    if val.is_empty() {
+        return Ok(());
+    }
+
+    let parts: Vec<&str> = val.split('.').collect();
+    if parts.len() != 2 {
+        return Err("Invalid iceberg engine connection format, Should be set to this format: schema_name.connection_name.".to_owned());
+    }
+
+    Ok(())
 }
 
 fn check_timezone(val: &str) -> Result<(), String> {
@@ -326,7 +490,7 @@ fn check_client_encoding(val: &str) -> Result<(), String> {
     // https://github.com/postgres/postgres/blob/REL_15_3/src/common/encnames.c#L525
     let clean = val.replace(|c: char| !c.is_ascii_alphanumeric(), "");
     if !clean.eq_ignore_ascii_case("UTF8") {
-        Err("Only support 'UTF8' for CLIENT_ENCODING".to_string())
+        Err("Only support 'UTF8' for CLIENT_ENCODING".to_owned())
     } else {
         Ok(())
     }
@@ -336,16 +500,17 @@ fn check_bytea_output(val: &str) -> Result<(), String> {
     if val == "hex" {
         Ok(())
     } else {
-        Err("Only support 'hex' for BYTEA_OUTPUT".to_string())
+        Err("Only support 'hex' for BYTEA_OUTPUT".to_owned())
     }
 }
 
-/// Check if the provided value is a valid vnode count.
-/// Note that we use term `max_parallelism` when it's user-facing.
-fn check_vnode_count(val: &usize) -> Result<(), String> {
+/// Check if the provided value is a valid max parallelism.
+fn check_streaming_max_parallelism(val: &usize) -> Result<(), String> {
     match val {
-        0 => Err("STREAMING_MAX_PARALLELISM must be greater than 0".to_owned()),
-        1..=VirtualNode::MAX_COUNT => Ok(()),
+        // TODO(var-vnode): this is to prevent confusion with singletons, after we distinguish
+        // them better, we may allow 1 as the max parallelism (though not much point).
+        0 | 1 => Err("STREAMING_MAX_PARALLELISM must be greater than 1".to_owned()),
+        2..=VirtualNode::MAX_COUNT => Ok(()),
         _ => Err(format!(
             "STREAMING_MAX_PARALLELISM must be less than or equal to {}",
             VirtualNode::MAX_COUNT
@@ -397,8 +562,63 @@ impl ConfigReporter for () {
     fn report_status(&mut self, _key: &str, _new_val: String) {}
 }
 
+def_anyhow_newtype! {
+    pub SessionConfigToOverrideError,
+    toml::ser::Error => "failed to serialize session config",
+    ConfigMergeError => transparent,
+}
+
+impl SessionConfig {
+    /// Generate an initial override for the streaming config from the session config.
+    pub fn to_initial_streaming_config_override(
+        &self,
+    ) -> Result<String, SessionConfigToOverrideError> {
+        let mut table = toml::Table::new();
+
+        // TODO: make this more type safe.
+        // We `unwrap` here to assert the hard-coded keys are correct.
+        if let Some(v) = self.streaming_join_encoding.as_ref() {
+            table
+                .upsert("streaming.developer.join_encoding_type", v)
+                .unwrap();
+        }
+        if let Some(v) = self.streaming_sync_log_store_pause_duration_ms.as_ref() {
+            table
+                .upsert("streaming.developer.sync_log_store_pause_duration_ms", v)
+                .unwrap();
+        }
+        if let Some(v) = self.streaming_sync_log_store_buffer_size.as_ref() {
+            table
+                .upsert("streaming.developer.sync_log_store_buffer_size", v)
+                .unwrap();
+        }
+        if let Some(v) = self.streaming_over_window_cache_policy.as_ref() {
+            table
+                .upsert("streaming.developer.over_window_cache_policy", v)
+                .unwrap();
+        }
+
+        let res = toml::to_string(&table)?;
+
+        // Validate all fields are valid by trying to merge it to the default config.
+        if !res.is_empty() {
+            let merged =
+                merge_streaming_config_section(&StreamingConfig::default(), res.as_str())?.unwrap();
+
+            let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+            if !unrecognized_keys.is_empty() {
+                bail!("unrecognized configs: {:?}", unrecognized_keys);
+            }
+        }
+
+        Ok(res)
+    }
+}
+
 #[cfg(test)]
 mod test {
+    use expect_test::expect;
+
     use super::*;
 
     #[derive(SessionConfig)]
@@ -410,12 +630,45 @@ mod test {
     #[test]
     fn test_session_config_alias() {
         let mut config = TestConfig::default();
-        config.set("test_param", "2".to_string(), &mut ()).unwrap();
+        config.set("test_param", "2".to_owned(), &mut ()).unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "2");
         config
-            .set("alias_param_test", "3".to_string(), &mut ())
+            .set("alias_param_test", "3".to_owned(), &mut ())
             .unwrap();
         assert_eq!(config.get("test_param_alias").unwrap(), "3");
         assert!(TestConfig::check_no_alter_sys("test_param").unwrap());
+    }
+
+    #[test]
+    fn test_initial_streaming_config_override() {
+        let mut config = SessionConfig::default();
+        config
+            .set_streaming_join_encoding(Some(JoinEncodingType::Cpu).into(), &mut ())
+            .unwrap();
+        config
+            .set_streaming_over_window_cache_policy(
+                Some(OverWindowCachePolicy::RecentFirstN).into(),
+                &mut (),
+            )
+            .unwrap();
+
+        // Check the converted config override string.
+        let override_str = config.to_initial_streaming_config_override().unwrap();
+        expect![[r#"
+            [streaming.developer]
+            join_encoding_type = "cpu_optimized"
+            over_window_cache_policy = "recent_first_n"
+        "#]]
+        .assert_eq(&override_str);
+
+        // Try merging it to the default streaming config.
+        let merged = merge_streaming_config_section(&StreamingConfig::default(), &override_str)
+            .unwrap()
+            .unwrap();
+        assert_eq!(merged.developer.join_encoding_type, JoinEncodingType::Cpu);
+        assert_eq!(
+            merged.developer.over_window_cache_policy,
+            OverWindowCachePolicy::RecentFirstN
+        );
     }
 }

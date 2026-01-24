@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,16 +19,15 @@ use risingwave_common::monitor::EndpointExt;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::{
-    GetNewSstIdsRequest, GetNewSstIdsResponse, ReportCompactionTaskRequest,
-    ReportCompactionTaskResponse, ReportFullScanTaskRequest, ReportFullScanTaskResponse,
-    ReportVacuumTaskRequest, ReportVacuumTaskResponse,
+    GetNewObjectIdsRequest, GetNewObjectIdsResponse, ReportCompactionTaskRequest,
+    ReportCompactionTaskResponse,
 };
 use risingwave_pb::meta::system_params_service_client::SystemParamsServiceClient;
 use risingwave_pb::meta::{GetSystemParamsRequest, GetSystemParamsResponse};
 use risingwave_pb::monitor_service::monitor_service_client::MonitorServiceClient;
 use risingwave_pb::monitor_service::{StackTraceRequest, StackTraceResponse};
 use tokio::sync::RwLock;
-use tokio_retry::strategy::{jitter, ExponentialBackoff};
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::transport::{Channel, Endpoint};
 
 use crate::error::{Result, RpcError};
@@ -55,11 +54,11 @@ impl CompactorClient {
         })
     }
 
-    pub async fn stack_trace(&self) -> Result<StackTraceResponse> {
+    pub async fn stack_trace(&self, req: StackTraceRequest) -> Result<StackTraceResponse> {
         Ok(self
             .monitor_client
-            .to_owned()
-            .stack_trace(StackTraceRequest::default())
+            .clone()
+            .stack_trace(req)
             .await
             .map_err(RpcError::from_compactor_status)?
             .into_inner())
@@ -121,9 +120,9 @@ impl GrpcCompactorProxyClient {
 
     pub async fn get_new_sst_ids(
         &self,
-        request: GetNewSstIdsRequest,
-    ) -> std::result::Result<tonic::Response<GetNewSstIdsResponse>, tonic::Status> {
-        retry_rpc!(self, get_new_sst_ids, request, GetNewSstIdsResponse)
+        request: GetNewObjectIdsRequest,
+    ) -> std::result::Result<tonic::Response<GetNewObjectIdsResponse>, tonic::Status> {
+        retry_rpc!(self, get_new_object_ids, request, GetNewObjectIdsResponse)
     }
 
     pub async fn report_compaction_task(
@@ -136,25 +135,6 @@ impl GrpcCompactorProxyClient {
             request,
             ReportCompactionTaskResponse
         )
-    }
-
-    pub async fn report_full_scan_task(
-        &self,
-        request: ReportFullScanTaskRequest,
-    ) -> std::result::Result<tonic::Response<ReportFullScanTaskResponse>, tonic::Status> {
-        retry_rpc!(
-            self,
-            report_full_scan_task,
-            request,
-            ReportFullScanTaskResponse
-        )
-    }
-
-    pub async fn report_vacuum_task(
-        &self,
-        request: ReportVacuumTaskRequest,
-    ) -> std::result::Result<tonic::Response<ReportVacuumTaskResponse>, tonic::Status> {
-        retry_rpc!(self, report_vacuum_task, request, ReportVacuumTaskResponse)
     }
 
     pub async fn get_system_params(

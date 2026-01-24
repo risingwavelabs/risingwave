@@ -12,35 +12,32 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::Context;
 use async_nats::jetstream::consumer::AckPolicy;
-use futures::future::try_join_all;
-use futures::stream::pending;
 use futures::StreamExt;
+use futures::stream::pending;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnId;
-use rw_futures_util::select_all;
 use thiserror_ext::AsReport as _;
 
+use crate::WithOptionsSecResolved;
 use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::filesystem::opendal_source::opendal_enumerator::OpendalEnumerator;
 use crate::source::filesystem::opendal_source::{
-    OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3, OpendalSource,
-    DEFAULT_REFRESH_INTERVAL_SEC,
+    DEFAULT_REFRESH_INTERVAL_SEC, OpendalAzblob, OpendalGcs, OpendalPosixFs, OpendalS3,
+    OpendalSource,
 };
 use crate::source::filesystem::{FsPageItem, OpendalFsSplit};
 use crate::source::{
-    create_split_reader, BackfillInfo, BoxChunkSourceStream, BoxTryStream, Column,
-    ConnectorProperties, ConnectorState, SourceColumnDesc, SourceContext, SplitId, SplitReader,
+    BoxSourceChunkStream, BoxTryStream, Column, ConnectorProperties, ConnectorState,
+    CreateSplitReaderOpt, CreateSplitReaderResult, SourceColumnDesc, SourceContext,
     WaitCheckpointTask,
 };
-use crate::{dispatch_source_prop, WithOptionsSecResolved};
 
 #[derive(Clone, Debug)]
 pub struct SourceReader {
@@ -100,8 +97,11 @@ impl SourceReader {
             }
             ConnectorProperties::OpendalS3(prop) => {
                 list_interval_sec = get_list_interval_sec(prop.fs_common.refresh_interval_sec);
-                let lister: OpendalEnumerator<OpendalS3> =
-                    OpendalEnumerator::new_s3_source(prop.s3_properties, prop.assume_role)?;
+                let lister: OpendalEnumerator<OpendalS3> = OpendalEnumerator::new_s3_source(
+                    &prop.s3_properties,
+                    prop.assume_role,
+                    prop.fs_common.compression_format,
+                )?;
                 Ok(build_opendal_fs_list_stream(lister, list_interval_sec))
             }
             ConnectorProperties::Azblob(prop) => {
@@ -140,85 +140,23 @@ impl SourceReader {
                     AckPolicy::None => None,
                 }
             }
+            ConnectorProperties::Pulsar(_) => Some(WaitCheckpointTask::AckPulsarMessage(vec![])),
             _ => None,
         })
     }
 
-    pub async fn build_stream_for_backfill(
-        &self,
-        state: ConnectorState,
-        column_ids: Vec<ColumnId>,
-        source_ctx: Arc<SourceContext>,
-    ) -> ConnectorResult<(BoxChunkSourceStream, HashMap<SplitId, BackfillInfo>)> {
-        let Some(splits) = state else {
-            return Ok((pending().boxed(), HashMap::new()));
-        };
-        let config = self.config.clone();
-        let columns = self.get_target_columns(column_ids)?;
-
-        let data_gen_columns = Some(
-            columns
-                .iter()
-                .map(|col| Column {
-                    name: col.name.clone(),
-                    data_type: col.data_type.clone(),
-                    is_visible: col.is_visible(),
-                })
-                .collect_vec(),
-        );
-
-        let parser_config = ParserConfig {
-            specific: self.parser_config.clone(),
-            common: CommonParserConfig {
-                rw_columns: columns,
-            },
-        };
-
-        let support_multiple_splits = config.support_multiple_splits();
-        dispatch_source_prop!(config, prop, {
-            let readers = if support_multiple_splits {
-                tracing::debug!(
-                    "spawning connector split reader for multiple splits {:?}",
-                    splits
-                );
-                let reader =
-                    create_split_reader(*prop, splits, parser_config, source_ctx, data_gen_columns)
-                        .await?;
-
-                vec![reader]
-            } else {
-                let to_reader_splits = splits.into_iter().map(|split| vec![split]);
-                try_join_all(to_reader_splits.into_iter().map(|splits| {
-                    tracing::debug!(?splits, "spawning connector split reader");
-                    let props = prop.clone();
-                    let data_gen_columns = data_gen_columns.clone();
-                    let parser_config = parser_config.clone();
-                    // TODO: is this reader split across multiple threads...? Realistically, we want
-                    // source_ctx to live in a single actor.
-                    let source_ctx = source_ctx.clone();
-                    create_split_reader(*props, splits, parser_config, source_ctx, data_gen_columns)
-                }))
-                .await?
-            };
-
-            let backfill_info = readers.iter().flat_map(|r| r.backfill_info()).collect();
-
-            Ok((
-                select_all(readers.into_iter().map(|r| r.into_stream())).boxed(),
-                backfill_info,
-            ))
-        })
-    }
-
-    /// Build `SplitReader`s and then `BoxChunkSourceStream` from the given `ConnectorState` (`SplitImpl`s).
+    /// Build `SplitReader`s and then `BoxSourceChunkStream` from the given `ConnectorState` (`SplitImpl`s).
+    ///
+    /// If `seek_to_latest` is true, will also return the latest splits after seek.
     pub async fn build_stream(
         &self,
         state: ConnectorState,
         column_ids: Vec<ColumnId>,
         source_ctx: Arc<SourceContext>,
-    ) -> ConnectorResult<BoxChunkSourceStream> {
+        seek_to_latest: bool,
+    ) -> ConnectorResult<(BoxSourceChunkStream, CreateSplitReaderResult)> {
         let Some(splits) = state else {
-            return Ok(pending().boxed());
+            return Ok((pending().boxed(), Default::default()));
         };
         let config = self.config.clone();
         let columns = self.get_target_columns(column_ids)?;
@@ -241,35 +179,18 @@ impl SourceReader {
             },
         };
 
-        let support_multiple_splits = config.support_multiple_splits();
-        dispatch_source_prop!(config, prop, {
-            let readers = if support_multiple_splits {
-                tracing::debug!(
-                    "spawning connector split reader for multiple splits {:?}",
-                    splits
-                );
-                let reader =
-                    create_split_reader(*prop, splits, parser_config, source_ctx, data_gen_columns)
-                        .await?;
-
-                vec![reader]
-            } else {
-                let to_reader_splits = splits.into_iter().map(|split| vec![split]);
-                try_join_all(to_reader_splits.into_iter().map(|splits| {
-                    tracing::debug!(?splits, "spawning connector split reader");
-                    let props = prop.clone();
-                    let data_gen_columns = data_gen_columns.clone();
-                    let parser_config = parser_config.clone();
-                    // TODO: is this reader split across multiple threads...? Realistically, we want
-                    // source_ctx to live in a single actor.
-                    let source_ctx = source_ctx.clone();
-                    create_split_reader(*props, splits, parser_config, source_ctx, data_gen_columns)
-                }))
-                .await?
-            };
-
-            Ok(select_all(readers.into_iter().map(|r| r.into_stream())).boxed())
-        })
+        config
+            .create_split_reader(
+                splits,
+                parser_config,
+                source_ctx,
+                data_gen_columns,
+                CreateSplitReaderOpt {
+                    seek_to_latest,
+                    ..Default::default()
+                },
+            )
+            .await
     }
 }
 
@@ -281,13 +202,12 @@ async fn build_opendal_fs_list_stream<Src: OpendalSource>(
     loop {
         let matcher = lister.get_matcher();
         let mut object_metadata_iter = lister.list().await?;
-
         while let Some(list_res) = object_metadata_iter.next().await {
             match list_res {
                 Ok(res) => {
                     if matcher
                         .as_ref()
-                        .map(|m| m.matches(&res.name))
+                        .map(|m| m.matches(&res.name) || m.to_string() == res.name)
                         .unwrap_or(true)
                     {
                         yield res

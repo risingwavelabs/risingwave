@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use std::hash::Hash;
 use pretty_xmlish::XmlNode;
 use risingwave_common::catalog::Schema;
 
-use super::{stream, EqJoinPredicate, PlanNodeId};
+use super::{EqJoinPredicate, PlanNodeId};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{Distribution, FunctionalDependencySet};
 
@@ -39,6 +39,8 @@ mod project;
 pub use project::*;
 mod filter;
 pub use filter::*;
+mod gap_fill;
+pub use gap_fill::*;
 mod expand;
 pub use expand::*;
 mod source;
@@ -77,10 +79,6 @@ mod limit;
 pub use limit::*;
 mod max_one_row;
 pub use max_one_row::*;
-mod cte_ref;
-pub use cte_ref::*;
-mod recursive_union;
-pub use recursive_union::*;
 mod changelog;
 pub use changelog::*;
 mod now;
@@ -91,6 +89,16 @@ pub use file_scan::*;
 
 mod postgres_query;
 pub use postgres_query::*;
+
+mod mysql_query;
+
+pub use mysql_query::*;
+
+mod locality_provider;
+pub use locality_provider::*;
+
+mod vector_index_lookup_join;
+pub use vector_index_lookup_join::*;
 
 pub trait DistillUnit {
     fn distill_with_name<'a>(&self, name: impl Into<Cow<'a, str>>) -> XmlNode<'a>;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
-use itertools::Itertools;
+use anyhow::{Context, anyhow};
 use risingwave_common::secret::{LocalSecretManager, SecretEncryption};
 use risingwave_hummock_sdk::FrontendHummockVersion;
+use risingwave_meta::MetaResult;
 use risingwave_meta::controller::catalog::Catalog;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta::MetaResult;
 use risingwave_pb::backup_service::MetaBackupManifestId;
 use risingwave_pb::catalog::{Secret, Table};
 use risingwave_pb::common::worker_node::State::Running;
-use risingwave_pb::common::{WorkerNode, WorkerType};
+use risingwave_pb::common::{ClusterResource, WorkerNode, WorkerType};
 use risingwave_pb::hummock::WriteLimits;
 use risingwave_pb::meta::meta_snapshot::SnapshotVersion;
 use risingwave_pb::meta::notification_service_server::NotificationService;
@@ -157,25 +156,21 @@ impl NotificationServiceImpl {
     async fn get_worker_slot_mapping_snapshot(
         &self,
     ) -> MetaResult<(Vec<FragmentWorkerSlotMapping>, NotificationVersion)> {
-        let fragment_guard = self
+        let mappings = self
             .metadata_manager
             .catalog_controller
-            .get_inner_read_guard()
-            .await;
-        let worker_slot_mappings = fragment_guard
-            .all_running_fragment_mappings()
-            .await?
-            .collect_vec();
+            .get_worker_slot_mappings();
+
         let notification_version = self.env.notification_manager().current_version().await;
-        Ok((worker_slot_mappings, notification_version))
+        Ok((mappings, notification_version))
     }
 
     fn get_serving_vnode_mappings(&self) -> Vec<FragmentWorkerSlotMapping> {
         self.serving_vnode_mapping
             .all()
             .iter()
-            .map(|(fragment_id, mapping)| FragmentWorkerSlotMapping {
-                fragment_id: *fragment_id,
+            .map(|(&fragment_id, mapping)| FragmentWorkerSlotMapping {
+                fragment_id,
                 mapping: Some(mapping.to_protobuf()),
             })
             .collect()
@@ -187,28 +182,43 @@ impl NotificationServiceImpl {
             .cluster_controller
             .get_inner_read_guard()
             .await;
-        let nodes = cluster_guard
+        let compute_nodes = cluster_guard
             .list_workers(Some(WorkerType::ComputeNode.into()), Some(Running.into()))
             .await?;
+        let frontends = cluster_guard
+            .list_workers(Some(WorkerType::Frontend.into()), Some(Running.into()))
+            .await?;
+        let worker_nodes = compute_nodes
+            .into_iter()
+            .chain(frontends.into_iter())
+            .collect();
         let notification_version = self.env.notification_manager().current_version().await;
-        Ok((nodes, notification_version))
+        Ok((worker_nodes, notification_version))
     }
 
-    async fn get_tables_and_creating_tables_snapshot(
-        &self,
-    ) -> MetaResult<(Vec<Table>, NotificationVersion)> {
+    async fn get_tables_snapshot(&self) -> MetaResult<(Vec<Table>, NotificationVersion)> {
         let catalog_guard = self
             .metadata_manager
             .catalog_controller
             .get_inner_read_guard()
             .await;
-        let tables = catalog_guard.list_all_state_tables().await?;
+        let mut tables = catalog_guard.list_all_state_tables().await?;
+        tables.extend(catalog_guard.dropped_tables.values().cloned());
         let notification_version = self.env.notification_manager().current_version().await;
         Ok((tables, notification_version))
     }
 
+    /// Get the total resource of the cluster.
+    async fn get_cluster_resource(&self) -> ClusterResource {
+        self.metadata_manager
+            .cluster_controller
+            .cluster_resource()
+            .await
+    }
+
     async fn compactor_subscribe(&self) -> MetaResult<MetaSnapshot> {
-        let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await?;
+        let (tables, catalog_version) = self.get_tables_snapshot().await?;
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             tables,
@@ -216,6 +226,7 @@ impl NotificationServiceImpl {
                 catalog_version,
                 ..Default::default()
             }),
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
@@ -244,6 +255,15 @@ impl NotificationServiceImpl {
 
         let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
             self.get_worker_slot_mapping_snapshot().await?;
+
+        let streaming_job_count = self.metadata_manager.count_streaming_job().await?;
+        if streaming_job_count > 0 && streaming_worker_slot_mappings.is_empty() {
+            tracing::warn!(
+                streaming_job_count,
+                "frontend subscribe returns empty streaming_worker_slot_mappings while streaming jobs exist; meta may still be recovering"
+            );
+        }
+
         let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
 
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
@@ -265,6 +285,8 @@ impl NotificationServiceImpl {
             params: serde_json::to_string(&session_params)
                 .context("failed to encode session params")?,
         });
+
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             databases,
@@ -289,18 +311,20 @@ impl NotificationServiceImpl {
             serving_worker_slot_mappings,
             streaming_worker_slot_mappings,
             session_params,
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
 
     async fn hummock_subscribe(&self) -> MetaResult<MetaSnapshot> {
-        let (tables, catalog_version) = self.get_tables_and_creating_tables_snapshot().await?;
+        let (tables, catalog_version) = self.get_tables_snapshot().await?;
         let hummock_version = self
             .hummock_manager
             .on_current_version(|version| version.into())
             .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
-        let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
+        let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
+        let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {
             tables,
@@ -315,18 +339,22 @@ impl NotificationServiceImpl {
             hummock_write_limits: Some(WriteLimits {
                 write_limits: hummock_write_limits,
             }),
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
 
     async fn compute_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (secrets, catalog_version) = self.get_decrypted_secret_snapshot().await?;
+        let cluster_resource = self.get_cluster_resource().await;
+
         Ok(MetaSnapshot {
             secrets,
             version: Some(SnapshotVersion {
                 catalog_version,
                 ..Default::default()
             }),
+            cluster_resource: Some(cluster_resource),
             ..Default::default()
         })
     }
@@ -336,7 +364,6 @@ impl NotificationServiceImpl {
 impl NotificationService for NotificationServiceImpl {
     type SubscribeStream = UnboundedReceiverStream<Notification>;
 
-    #[cfg_attr(coverage, coverage(off))]
     async fn subscribe(
         &self,
         request: Request<SubscribeRequest>,
@@ -350,8 +377,7 @@ impl NotificationService for NotificationServiceImpl {
         let (tx, rx) = mpsc::unbounded_channel();
         self.env
             .notification_manager()
-            .insert_sender(subscribe_type, worker_key.clone(), tx)
-            .await;
+            .insert_sender(subscribe_type, worker_key.clone(), tx);
 
         let meta_snapshot = match subscribe_type {
             SubscribeType::Compactor => self.compactor_subscribe().await?,

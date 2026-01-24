@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,11 +23,11 @@ use xxhash_rust::xxh64;
 use super::{HummockError, HummockResult};
 
 unsafe fn read_u64(ptr: *const u8) -> u64 {
-    ptr::read_unaligned(ptr as *const u64)
+    unsafe { ptr::read_unaligned(ptr as *const u64) }
 }
 
 unsafe fn read_u32(ptr: *const u8) -> u32 {
-    ptr::read_unaligned(ptr as *const u32)
+    unsafe { ptr::read_unaligned(ptr as *const u32) }
 }
 
 #[inline]
@@ -60,7 +60,6 @@ pub fn xxhash64_checksum(data: &[u8]) -> u64 {
 }
 
 /// Verifies the checksum of the data equals the given checksum with xxhash64.
-
 pub fn xxhash64_verify(data: &[u8], checksum: u64) -> HummockResult<()> {
     let data_checksum = xxhash64_checksum(data);
     if data_checksum != checksum {

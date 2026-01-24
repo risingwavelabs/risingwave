@@ -17,13 +17,16 @@
 mod util;
 
 use std::env;
-use std::sync::OnceLock;
+use std::sync::{LazyLock, OnceLock};
 
 use prost::Message;
+use risingwave_common_log::LogSuppressor;
 use risingwave_pb::telemetry::{
-    EventMessage as PbEventMessage, PbTelemetryDatabaseObject,
+    EventMessage as PbEventMessage, PbBatchEventMessage, PbTelemetryDatabaseObject,
     TelemetryEventStage as PbTelemetryEventStage,
 };
+use thiserror_ext::AsReport;
+use tokio::sync::mpsc::UnboundedSender;
 pub use util::*;
 
 pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
@@ -32,6 +35,7 @@ pub type TelemetryResult<T> = core::result::Result<T, TelemetryError>;
 pub type TelemetryError = String;
 
 pub static TELEMETRY_TRACKING_ID: OnceLock<String> = OnceLock::new();
+pub static TELEMETRY_EVENT_REPORT_TX: OnceLock<UnboundedSender<PbEventMessage>> = OnceLock::new();
 
 pub const TELEMETRY_REPORT_URL: &str = "https://telemetry.risingwave.dev/api/v2/report";
 
@@ -41,6 +45,25 @@ pub const TELEMETRY_RISINGWAVE_CLOUD_UUID: &str = "RISINGWAVE_CLOUD_UUID";
 pub fn get_telemetry_risingwave_cloud_uuid() -> Option<String> {
     env::var(TELEMETRY_RISINGWAVE_CLOUD_UUID).ok()
 }
+
+pub async fn do_telemetry_event_report(event_stash: &mut Vec<PbEventMessage>) {
+    if event_stash.is_empty() {
+        return;
+    }
+
+    const TELEMETRY_EVENT_REPORT_TYPE: &str = "events"; // the batch report url
+    let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_EVENT_REPORT_TYPE).to_owned();
+    let batch_message = PbBatchEventMessage {
+        events: std::mem::take(event_stash),
+    };
+
+    post_telemetry_report_pb(&url, batch_message.encode_to_vec())
+        .await
+        .unwrap_or_else(|e| tracing::debug!("{}", e));
+}
+
+pub const TELEMETRY_EVENT_REPORT_INTERVAL: u64 = 10; // 10 seconds
+pub const TELEMETRY_EVENT_REPORT_STASH_SIZE: usize = 100; // 100 events to trigger a report action
 
 pub fn report_event_common(
     event_stage: PbTelemetryEventStage,
@@ -55,7 +78,15 @@ pub fn report_event_common(
     if let Some(tracking_id) = TELEMETRY_TRACKING_ID.get() {
         event_tracking_id = tracking_id.to_string();
     } else {
-        tracing::info!("Telemetry tracking_id is not set, event reporting disabled");
+        static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+            LazyLock::new(|| LogSuppressor::per_minute(1));
+        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+            tracing::info!(
+                suppressed_count,
+                event_name,
+                "Telemetry tracking_id is not set, event reporting disabled"
+            );
+        }
         return;
     }
 
@@ -95,45 +126,10 @@ pub fn request_to_telemetry_event(
         node,
         is_test,
     };
-    let report_bytes = event.encode_to_vec();
 
-    tokio::spawn(async move {
-        const TELEMETRY_EVENT_REPORT_TYPE: &str = "event";
-        let url = (TELEMETRY_REPORT_URL.to_owned() + "/" + TELEMETRY_EVENT_REPORT_TYPE).to_owned();
-        post_telemetry_report_pb(&url, report_bytes)
-            .await
-            .unwrap_or_else(|e| tracing::info!("{}", e))
-    });
-}
-
-#[cfg(test)]
-mod test {
-
-    use super::*;
-
-    #[ignore]
-    #[tokio::test]
-    async fn test_telemetry_report_event() {
-        let event_stage = PbTelemetryEventStage::CreateStreamJob;
-        let event_name = "test_feature";
-        let catalog_id = 1;
-        let connector_name = Some("test_connector".to_string());
-        let object = Some(PbTelemetryDatabaseObject::Source);
-        let attributes = None;
-        let node = "test_node".to_string();
-
-        request_to_telemetry_event(
-            "7d45669c-08c7-4571-ae3d-d3a3e70a2f7e".to_string(),
-            event_stage,
-            event_name,
-            catalog_id,
-            connector_name,
-            object,
-            attributes,
-            node,
-            true,
-        );
-
-        tokio::time::sleep(tokio::time::Duration::from_secs(1)).await;
+    if let Some(tx) = TELEMETRY_EVENT_REPORT_TX.get() {
+        let _ = tx.send(event).inspect_err(|e| {
+            tracing::warn!("Failed to send telemetry event queue: {}", e.as_report())
+        });
     }
 }

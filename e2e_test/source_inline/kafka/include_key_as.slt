@@ -25,6 +25,7 @@ cat <<EOF | rpk topic produce 'test_include_key' -f "%k^%v\n"
 {"ID": 8}^
 EOF
 
+# Can create upsert source since #22856, but the key must be included and used as pk
 statement error
 CREATE SOURCE upsert_students (
     "ID" INT,
@@ -42,16 +43,14 @@ FORMAT UPSERT ENCODE JSON
 db error: ERROR: Failed to run the query
 
 Caused by:
-  Bind error: can't CREATE SOURCE with FORMAT UPSERT
-
-Hint: use CREATE TABLE instead
+  Protocol error: INCLUDE KEY clause not set
 
 Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
 example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
     INCLUDE KEY [AS <key_name>]
     WITH (...)
-    FORMAT UPSERT ENCODE JSON (...)
+    FORMAT UPSERT ENCODE JSON
 
 
 # upsert format must have a pk
@@ -80,7 +79,7 @@ example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
     INCLUDE KEY [AS <key_name>]
     WITH (...)
-    FORMAT UPSERT ENCODE JSON (...)
+    FORMAT UPSERT ENCODE JSON
 
 
 # upsert format pk must be the key column
@@ -109,11 +108,12 @@ example:
     CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
     INCLUDE KEY [AS <key_name>]
     WITH (...)
-    FORMAT UPSERT ENCODE JSON (...)
+    FORMAT UPSERT ENCODE JSON
 
 
-statement error
-CREATE SOURCE upsert_students (
+# Tests for upsert source are located at e2e_test/source_inline/kafka/upsert_source.slt
+statement ok
+CREATE SOURCE upsert_students_src (
     primary key (rw_key),
     "ID" INT,
     "firstName" VARCHAR,
@@ -126,21 +126,7 @@ INCLUDE KEY AS rw_key
 WITH (
 	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
 	topic = 'test_include_key')
-FORMAT UPSERT ENCODE JSON
-----
-db error: ERROR: Failed to run the query
-
-Caused by:
-  Bind error: can't CREATE SOURCE with FORMAT UPSERT
-
-Hint: use CREATE TABLE instead
-
-Hint: For FORMAT UPSERT ENCODE JSON, INCLUDE KEY must be specified and the key column must be used as primary key.
-example:
-    CREATE TABLE <table_name> ( PRIMARY KEY ([rw_key | <key_name>]) )
-    INCLUDE KEY [AS <key_name>]
-    WITH (...)
-    FORMAT UPSERT ENCODE JSON (...)
+FORMAT UPSERT ENCODE JSON;
 
 
 statement ok
@@ -161,7 +147,7 @@ FORMAT PLAIN ENCODE JSON
 
 statement ok
 CREATE TABLE upsert_students (
-    primary key (rw_key),
+    primary key (my_key),
     "ID" INT,
     "firstName" VARCHAR,
     "lastName" VARCHAR,
@@ -169,11 +155,16 @@ CREATE TABLE upsert_students (
     height REAL,
     weight REAL,
 )
-INCLUDE KEY AS rw_key
+INCLUDE KEY AS my_key
 WITH (
 	${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
 	topic = 'test_include_key')
 FORMAT UPSERT ENCODE JSON
+
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'upsert_students';
+----
+CREATE TABLE upsert_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL, PRIMARY KEY (my_key)) INCLUDE KEY AS my_key
 
 
 system ok
@@ -222,15 +213,19 @@ WITH (
 	topic = 'test_additional_columns')
 FORMAT PLAIN ENCODE JSON
 
-# Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 3s
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'additional_columns';
+----
+CREATE TABLE additional_columns (a INT) INCLUDE key AS key_col INCLUDE partition AS partition_col INCLUDE offset AS offset_col INCLUDE timestamp AS timestamp_col INCLUDE header AS header_col_combined INCLUDE header 'header1' AS header_col_1 INCLUDE header 'header2' AS header_col_2 INCLUDE header 'header2' CHARACTER VARYING AS header_col_3 INCLUDE header 'header3' AS header_col_4
 
-query ?
+# Wait enough time to ensure SourceExecutor consumes all Kafka data.
+
+query ? retry 4 backoff 1s
 select count(rw_key) from plain_students
 ----
 15
 
-query ???????
+query ??????? retry 3 backoff 1s
 select * from plain_students order by ("ID", "firstName");
 ----
 1	Ethan	Martinez	18	6.1	180	\x7b224944223a20317d
@@ -250,7 +245,7 @@ NULL	NULL	NULL	NULL	NULL	NULL	\x7b224944223a20377d
 NULL	NULL	NULL	NULL	NULL	NULL	\x7b224944223a20387d
 
 
-query ???????
+query ??????? retry 3 backoff 1s
 select * from upsert_students order by "ID";
 ----
 1	Ethan	Martinez	18	6.1	180	\x7b224944223a20317d
@@ -262,7 +257,7 @@ select * from upsert_students order by "ID";
 9	Jacob	Anderson	20	5.8	155	\x7b224944223a20397d
 
 
-query ?
+query ? retry 3 backoff 1s
 SELECT count(*)
 FROM   additional_columns
 WHERE  key_col IS NOT NULL
@@ -274,7 +269,7 @@ WHERE  key_col IS NOT NULL
 11
 
 
-query ??
+query ?? retry 3 backoff 1s
 WITH arr AS (SELECT header_col_combined FROM additional_columns),
 unnested AS (SELECT unnest(header_col_combined) FROM arr)
 select *, count(*) from unnested group by 1 order by 1;
@@ -282,10 +277,13 @@ select *, count(*) from unnested group by 1 order by 1;
 (header1,"\\x7631") 11
 (header2,"\\x7632") 11
 
-query ????
+query ???? retry 3 backoff 1s
 select header_col_1, header_col_2, header_col_3, header_col_4 from additional_columns limit 1
 ----
 \x7631	\x7632	v2	NULL
+
+statement ok
+drop source upsert_students_src;
 
 statement ok
 drop table upsert_students

@@ -18,7 +18,6 @@ use risingwave_sqlparser::ast::CloseCursorStatement;
 use super::RwPgResponse;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
-use crate::Binder;
 
 pub async fn handle_close_cursor(
     handle_args: HandlerArgs,
@@ -26,10 +25,10 @@ pub async fn handle_close_cursor(
 ) -> Result<RwPgResponse> {
     let session = handle_args.session.clone();
     let cursor_manager = session.get_cursor_manager();
-    let db_name = session.database();
     if let Some(cursor_name) = stmt.cursor_name {
-        let (_, cursor_name) = Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
-        cursor_manager.remove_cursor(cursor_name).await?;
+        cursor_manager
+            .remove_cursor(&cursor_name.real_value())
+            .await?;
     } else {
         cursor_manager.remove_all_cursor().await;
     }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::env;
-use std::path::Path;
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use itertools::Itertools;
 
-use super::{risingwave_cmd, ExecuteContext, Task};
+use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_tempo_endpoint, FrontendConfig};
+use crate::{FrontendConfig, add_tempo_endpoint};
 
 pub struct FrontendService {
     config: FrontendConfig,
@@ -66,6 +64,23 @@ impl FrontendService {
         let provide_tempo = config.provide_tempo.as_ref().unwrap();
         add_tempo_endpoint(provide_tempo, cmd)?;
 
+        // Add Prometheus endpoint and selector if configured
+        match config.provide_prometheus.as_ref().unwrap().as_slice() {
+            [] => {}
+            [prometheus] => {
+                cmd.arg("--prometheus-endpoint")
+                    .arg(format!("http://{}:{}", prometheus.address, prometheus.port));
+                // Note: prometheus_selector is not currently configured in risedev.yml
+                // but we can add it here if needed in the future
+            }
+            _ => {
+                return Err(anyhow!(
+                    "unexpected prometheus config {:?}, only 1 instance is supported",
+                    config.provide_prometheus
+                ));
+            }
+        }
+
         Ok(())
     }
 }
@@ -75,15 +90,8 @@ impl Task for FrontendService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let mut cmd = risingwave_cmd("frontend-node")?;
+        let mut cmd = ctx.risingwave_cmd("frontend-node")?;
 
-        if crate::util::is_enable_backtrace() {
-            cmd.env("RUST_BACKTRACE", "1");
-        }
-
-        let prefix_config = env::var("PREFIX_CONFIG")?;
-        cmd.arg("--config-path")
-            .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;
 
         if !self.config.user_managed {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,11 @@ use itertools::Itertools;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
-use thiserror::Error;
-use thiserror_ext::AsReport;
 
-use super::{cast_ok, infer_some_all, infer_type, CastContext, Expr, ExprImpl, Literal};
-use crate::error::{ErrorCode, Result as RwResult};
-use crate::expr::{ExprDisplay, ExprType, ExprVisitor, ImpureAnalyzer};
+use super::type_inference::cast;
+use super::{CastContext, CastError, Expr, ExprImpl, Literal, infer_some_all, infer_type};
+use crate::error::Result as RwResult;
+use crate::expr::{ExprDisplay, ExprType, bail_cast_error, is_impure_func_call};
 
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct FunctionCall {
@@ -111,7 +110,7 @@ impl FunctionCall {
     /// The input `child` remains unchanged when this returns an error.
     pub fn cast_mut(
         child: &mut ExprImpl,
-        target: DataType,
+        target: &DataType,
         allows: CastContext,
     ) -> Result<(), CastError> {
         if let ExprImpl::Parameter(expr) = child
@@ -135,31 +134,32 @@ impl FunctionCall {
             let datum = literal
                 .get_data()
                 .as_ref()
-                .map(|scalar| ScalarImpl::from_text(scalar.as_utf8(), &target))
+                .map(|scalar| ScalarImpl::from_text(scalar.as_utf8(), target))
                 .transpose();
             if let Ok(datum) = datum {
-                *child = Literal::new(datum, target).into();
+                *child = Literal::new(datum, target.clone()).into();
                 return Ok(());
             }
             // else when eager parsing fails, just proceed as normal.
             // Some callers are not ready to handle `'a'::int` error here.
         }
+
         let source = child.return_type();
-        if source == target {
-            Ok(())
-        // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
-        // in frontend.
-        } else if child.is_untyped() || cast_ok(&source, &target, allows) {
-            // Always Ok below. Safe to mutate `child`.
-            let owned = std::mem::replace(child, ExprImpl::literal_bool(false));
-            *child = Self::new_unchecked(ExprType::Cast, vec![owned], target).into();
-            Ok(())
-        } else {
-            Err(CastError(format!(
-                "cannot cast type \"{}\" to \"{}\" in {:?} context",
-                source, target, allows
-            )))
+        if &source == target {
+            return Ok(());
         }
+
+        if child.is_untyped() {
+            // Casting from unknown is allowed in all context. And PostgreSQL actually does the parsing
+            // in frontend.
+        } else {
+            cast(&source, target, allows)?;
+        }
+
+        // Always Ok below. Safe to mutate `child`.
+        let owned = std::mem::replace(child, ExprImpl::literal_bool(false));
+        *child = Self::new_unchecked(ExprType::Cast, vec![owned], target.clone()).into();
+        Ok(())
     }
 
     /// Cast a `ROW` expression to the target type. We intentionally disallow casting arbitrary
@@ -167,32 +167,38 @@ impl FunctionCall {
     /// is castable to VARCHAR. It's to simply the casting rules.
     fn cast_row_expr(
         func: &mut FunctionCall,
-        target_type: DataType,
+        target_type: &DataType,
         allows: CastContext,
     ) -> Result<(), CastError> {
+        // Can only cast to a struct type.
         let DataType::Struct(t) = &target_type else {
-            return Err(CastError(format!(
-                "cannot cast type \"{}\" to \"{}\" in {:?} context",
-                func.return_type(),
+            bail_cast_error!(
+                "cannot cast type \"{}\" to \"{}\"",
+                func.return_type(), // typically "record"
                 target_type,
-                allows
-            )));
+            );
         };
-        match t.len().cmp(&func.inputs.len()) {
+
+        let expected_len = t.len();
+        let actual_len = func.inputs.len();
+
+        match expected_len.cmp(&actual_len) {
             std::cmp::Ordering::Equal => {
                 // FIXME: `func` shall not be in a partially mutated state when one of its fields
                 // fails to cast.
                 func.inputs
                     .iter_mut()
                     .zip_eq_fast(t.types())
-                    .try_for_each(|(e, t)| Self::cast_mut(e, t.clone(), allows))?;
-                func.return_type = target_type;
+                    .try_for_each(|(e, t)| Self::cast_mut(e, t, allows))?;
+                func.return_type = target_type.clone();
                 Ok(())
             }
-            std::cmp::Ordering::Less => Err(CastError("Input has too few columns.".to_string())),
-            std::cmp::Ordering::Greater => {
-                Err(CastError("Input has too many columns.".to_string()))
-            }
+            std::cmp::Ordering::Less => bail_cast_error!(
+                "input has too many columns, expected {expected_len} but got {actual_len}"
+            ),
+            std::cmp::Ordering::Greater => bail_cast_error!(
+                "input has too few columns, expected {expected_len} but got {actual_len}"
+            ),
         }
     }
 
@@ -220,11 +226,13 @@ impl FunctionCall {
                 let return_type = infer_some_all(func_types, &mut inputs)?;
                 Ok(FunctionCall::new_unchecked(expr_type, inputs, return_type).into())
             }
-            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull => Ok(FunctionCall::new(
-                expr_type,
-                vec![Self::new_binary_op_func(func_types, inputs)?],
-            )?
-            .into()),
+            ExprType::Not | ExprType::IsNotNull | ExprType::IsNull | ExprType::Neg => {
+                Ok(FunctionCall::new(
+                    expr_type,
+                    vec![Self::new_binary_op_func(func_types, inputs)?],
+                )?
+                .into())
+            }
             _ => Ok(FunctionCall::new(expr_type, inputs)?.into()),
         }
     }
@@ -279,9 +287,7 @@ impl FunctionCall {
     }
 
     pub fn is_pure(&self) -> bool {
-        let mut a = ImpureAnalyzer { impure: false };
-        a.visit_function_call(self);
-        !a.impure
+        !is_impure_func_call(self)
     }
 }
 
@@ -290,16 +296,21 @@ impl Expr for FunctionCall {
         self.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
         use risingwave_pb::expr::expr_node::*;
         use risingwave_pb::expr::*;
-        ExprNode {
+
+        let children = self
+            .inputs()
+            .iter()
+            .map(|input| input.try_to_expr_proto())
+            .try_collect()?;
+
+        Ok(ExprNode {
             function_type: self.func_type().into(),
             return_type: Some(self.return_type().to_protobuf()),
-            rex_node: Some(RexNode::FuncCall(FunctionCall {
-                children: self.inputs().iter().map(Expr::to_expr_proto).collect(),
-            })),
-        }
+            rex_node: Some(RexNode::FuncCall(FunctionCall { children })),
+        })
     }
 }
 
@@ -415,20 +426,10 @@ fn explain_verbose_binary_op(
 }
 
 pub fn is_row_function(expr: &ExprImpl) -> bool {
-    if let ExprImpl::FunctionCall(func) = expr {
-        if func.func_type() == ExprType::Row {
-            return true;
-        }
+    if let ExprImpl::FunctionCall(func) = expr
+        && func.func_type() == ExprType::Row
+    {
+        return true;
     }
     false
-}
-
-#[derive(Debug, Error)]
-#[error("{0}")]
-pub struct CastError(pub(super) String);
-
-impl From<CastError> for ErrorCode {
-    fn from(value: CastError) -> Self {
-        ErrorCode::BindError(value.to_report_string())
-    }
 }

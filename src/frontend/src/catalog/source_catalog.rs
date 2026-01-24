@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,17 @@
 use risingwave_common::catalog::{ColumnCatalog, SourceVersionId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
-use risingwave_pb::catalog::source::OptionalAssociatedTableId;
 use risingwave_pb::catalog::{PbSource, StreamSourceInfo, WatermarkDesc};
+use risingwave_pb::plan_common::SourceRefreshMode;
+use risingwave_sqlparser::ast;
+use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport as _;
 
+use super::purify::try_purify_table_source_create_sql_ast;
 use super::{ColumnId, ConnectionId, DatabaseId, OwnedByUserCatalog, SchemaId, SourceId};
 use crate::catalog::TableId;
+use crate::error::Result;
+use crate::session::current::notice_to_user;
 use crate::user::UserId;
 
 /// This struct `SourceCatalog` is used in frontend.
@@ -28,6 +34,8 @@ use crate::user::UserId;
 pub struct SourceCatalog {
     pub id: SourceId,
     pub name: String,
+    pub schema_id: SchemaId,
+    pub database_id: DatabaseId,
     pub columns: Vec<ColumnCatalog>,
     pub pk_col_ids: Vec<ColumnId>,
     pub append_only: bool,
@@ -45,20 +53,28 @@ pub struct SourceCatalog {
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
     pub rate_limit: Option<u32>,
+    pub refresh_mode: Option<SourceRefreshMode>,
 }
 
 impl SourceCatalog {
-    /// Returns the SQL statement that can be used to create this source.
+    /// Returns the SQL definition when the source was created.
     pub fn create_sql(&self) -> String {
         self.definition.clone()
     }
 
-    pub fn to_prost(&self, schema_id: SchemaId, database_id: DatabaseId) -> PbSource {
+    /// Returns the parsed SQL definition when the source was created.
+    ///
+    /// Returns error if it's invalid.
+    pub fn create_sql_ast(&self) -> Result<ast::Statement> {
+        Ok(Parser::parse_exactly_one(&self.definition)?)
+    }
+
+    pub fn to_prost(&self) -> PbSource {
         let (with_properties, secret_refs) = self.with_properties.clone().into_parts();
         PbSource {
             id: self.id,
-            schema_id,
-            database_id,
+            schema_id: self.schema_id,
+            database_id: self.database_id,
             name: self.name.clone(),
             row_id_index: self.row_id_index.map(|idx| idx as _),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect(),
@@ -71,14 +87,13 @@ impl SourceCatalog {
             connection_id: self.connection_id,
             initialized_at_epoch: self.initialized_at_epoch.map(|x| x.0),
             created_at_epoch: self.created_at_epoch.map(|x| x.0),
-            optional_associated_table_id: self
-                .associated_table_id
-                .map(|id| OptionalAssociatedTableId::AssociatedTableId(id.table_id)),
+            optional_associated_table_id: self.associated_table_id.map(Into::into),
             version: self.version,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             secret_refs,
             rate_limit: self.rate_limit,
+            refresh_mode: self.refresh_mode,
         }
     }
 
@@ -92,12 +107,64 @@ impl SourceCatalog {
             .get_connector()
             .expect("connector name is missing")
     }
+
+    pub fn is_iceberg_connector(&self) -> bool {
+        self.with_properties.is_iceberg_connector()
+    }
+}
+
+impl SourceCatalog {
+    /// Returns the SQL definition when the source was created, purified with best effort.
+    pub fn create_sql_purified(&self) -> String {
+        self.create_sql_ast_purified()
+            .and_then(|stmt| stmt.try_to_string().map_err(Into::into))
+            .unwrap_or_else(|_| self.create_sql())
+    }
+
+    /// Returns the parsed SQL definition when the source was created, purified with best effort.
+    ///
+    /// Returns error if it's invalid.
+    pub fn create_sql_ast_purified(&self) -> Result<ast::Statement> {
+        if self.with_properties.is_cdc_connector() {
+            // For CDC sources, we should not purify the SQL definition to add column definitions
+            // or constraints.
+            return self.create_sql_ast();
+        }
+
+        match try_purify_table_source_create_sql_ast(
+            self.create_sql_ast()?,
+            &self.columns,
+            self.row_id_index,
+            &self.pk_col_ids,
+        ) {
+            Ok(stmt) => return Ok(stmt),
+            Err(e) => notice_to_user(format!(
+                "error occurred while purifying definition for source \"{}\", \
+                     results may be inaccurate: {}",
+                self.name,
+                e.as_report()
+            )),
+        }
+
+        self.create_sql_ast()
+    }
+
+    /// Fills the `definition` field with the purified SQL definition.
+    ///
+    /// There's no need to call this method for correctness because we automatically purify the
+    /// SQL definition at the time of querying. However, this helps to maintain more accurate
+    /// `definition` field in the catalog when directly inspected for debugging purposes.
+    pub fn fill_purified_create_sql(&mut self) {
+        self.definition = self.create_sql_purified();
+    }
 }
 
 impl From<&PbSource> for SourceCatalog {
     fn from(prost: &PbSource) -> Self {
         let id = prost.id;
         let name = prost.name.clone();
+        let database_id = prost.database_id;
+        let schema_id = prost.schema_id;
         let prost_columns = prost.columns.clone();
         let pk_col_ids = prost
             .pk_column_ids
@@ -105,7 +172,7 @@ impl From<&PbSource> for SourceCatalog {
             .into_iter()
             .map(Into::into)
             .collect();
-        let options_with_secrets =
+        let connector_props_with_secrets =
             WithOptionsSecResolved::new(prost.with_properties.clone(), prost.secret_refs.clone());
         let columns = prost_columns.into_iter().map(ColumnCatalog::from).collect();
         let row_id_index = prost.row_id_index.map(|idx| idx as _);
@@ -114,9 +181,7 @@ impl From<&PbSource> for SourceCatalog {
         let owner = prost.owner;
         let watermark_descs = prost.get_watermark_descs().clone();
 
-        let associated_table_id = prost.optional_associated_table_id.map(|id| match id {
-            OptionalAssociatedTableId::AssociatedTableId(id) => id,
-        });
+        let associated_table_id = prost.optional_associated_table_id.map(Into::into);
         let version = prost.version;
 
         let connection_id = prost.connection_id;
@@ -125,15 +190,17 @@ impl From<&PbSource> for SourceCatalog {
         Self {
             id,
             name,
+            schema_id,
+            database_id,
             columns,
             pk_col_ids,
             append_only,
             owner,
             info: prost.info.clone().unwrap(),
             row_id_index,
-            with_properties: options_with_secrets,
+            with_properties: connector_props_with_secrets,
             watermark_descs,
-            associated_table_id: associated_table_id.map(|x| x.into()),
+            associated_table_id,
             definition: prost.definition.clone(),
             connection_id,
             created_at_epoch: prost.created_at_epoch.map(Epoch::from),
@@ -142,6 +209,7 @@ impl From<&PbSource> for SourceCatalog {
             created_at_cluster_version: prost.created_at_cluster_version.clone(),
             initialized_at_cluster_version: prost.initialized_at_cluster_version.clone(),
             rate_limit,
+            refresh_mode: prost.refresh_mode,
         }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -106,7 +106,7 @@ pub fn gen_pbtable_inner(
     let distribution_key = distribution_key.into_iter().map(|i| i as i32).collect_vec();
 
     PbTable {
-        id: table_id.table_id(),
+        id: table_id,
         columns: prost_columns,
         pk: prost_pk,
         read_prefix_len_hint: read_prefix_len_hint as u32,

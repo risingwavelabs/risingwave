@@ -1,16 +1,18 @@
-// Copyright 2024 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector.source.common;
 
@@ -26,7 +28,6 @@ import org.slf4j.LoggerFactory;
 
 public class PostgresValidator extends DatabaseValidator implements AutoCloseable {
     static final Logger LOG = LoggerFactory.getLogger(PostgresValidator.class);
-
     private final Map<String, String> userProps;
 
     private final TableSchema tableSchema;
@@ -50,6 +51,18 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     private final boolean isCdcSourceJob;
     private final int pgVersion;
 
+    private static class ColumnInfo {
+        String dataType;
+        Long charMaxLength;
+        String udtName;
+
+        ColumnInfo(String dataType, Long charMaxLength, String udtName) {
+            this.dataType = dataType;
+            this.charMaxLength = charMaxLength;
+            this.udtName = udtName;
+        }
+    }
+
     public PostgresValidator(
             Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
             throws SQLException {
@@ -65,7 +78,17 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         var password = userProps.get(DbzConnectorConfig.PASSWORD);
         this.jdbcConnection = DriverManager.getConnection(jdbcUrl, user, password);
 
-        this.isAwsRds = dbHost.contains(AWS_RDS_HOST);
+        // Determine if this is AWS RDS (priority from high to low):
+        // 1. Explicit user configuration via 'postgres.is.aws.rds'
+        // 2. Automatic detection via hostname containing 'amazonaws.com'
+        // 3. Test-only parameter 'test.only.force.rds' (for backward compatibility)
+        this.isAwsRds =
+                Boolean.parseBoolean(
+                                userProps.getOrDefault(DbzConnectorConfig.PG_IS_AWS_RDS, "false"))
+                        || dbHost.contains(AWS_RDS_HOST)
+                        || userProps
+                                .getOrDefault(DbzConnectorConfig.PG_TEST_ONLY_FORCE_RDS, "false")
+                                .equalsIgnoreCase("true");
         this.dbName = dbName;
         this.user = user;
         this.schemaName = userProps.get(DbzConnectorConfig.PG_SCHEMA_NAME);
@@ -86,8 +109,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
     @Override
     public void validateDbConfig() {
         try {
-            if (pgVersion > 16) {
-                throw ValidatorUtils.failedPrecondition("Postgres version should be less than 16.");
+            // whenever a newer PG version is released, Debezium will take
+            // some time to support it. So even though 18 is not released yet, we put a version
+            // guard here.
+            if (pgVersion >= 18) {
+                throw ValidatorUtils.failedPrecondition(
+                        "Postgres major version should be less than or equal to 17.");
             }
 
             try (var stmt = jdbcConnection.createStatement()) {
@@ -204,12 +231,14 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             stmt.setString(2, this.tableName);
             var res = stmt.executeQuery();
 
-            // Field names in lower case -> data type
-            Map<String, String> schema = new HashMap<>();
+            Map<String, ColumnInfo> schema = new HashMap<>();
             while (res.next()) {
                 var field = res.getString(1);
                 var dataType = res.getString(2);
-                schema.put(field.toLowerCase(), dataType);
+                Long charMaxLength =
+                        res.getObject(3) == null ? null : ((Number) res.getObject(3)).longValue();
+                var udtName = res.getString(4);
+                schema.put(field, new ColumnInfo(dataType, charMaxLength, udtName));
             }
 
             for (var e : tableSchema.getColumnTypes().entrySet()) {
@@ -217,12 +246,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var dataType = schema.get(e.getKey().toLowerCase());
-                if (dataType == null) {
+                var colInfo = schema.get(e.getKey());
+                if (colInfo == null) {
                     throw ValidatorUtils.invalidArgument(
                             "Column '" + e.getKey() + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(dataType, e.getValue())) {
+                if (!isDataTypeCompatible(colInfo, e.getValue())) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + e.getKey());
                 }
@@ -254,24 +283,18 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         boolean isSuperUser = false;
         if (this.isAwsRds) {
             // check privileges for aws rds postgres
-            boolean hasReplicationRole;
+            boolean hasReplicationRole = false;
             try (var stmt =
                     jdbcConnection.prepareStatement(
                             ValidatorUtils.getSql("postgres.rds.role.check"))) {
                 stmt.setString(1, this.user);
+                stmt.setString(2, this.user);
                 var res = stmt.executeQuery();
-                var hashSet = new HashSet<String>();
                 while (res.next()) {
                     // check rds_superuser role or rds_replication role is granted
-                    var memberof = res.getArray("memberof");
-                    if (memberof != null) {
-                        var members = (String[]) memberof.getArray();
-                        hashSet.addAll(Arrays.asList(members));
-                    }
-                    LOG.info("rds memberof: {}", hashSet);
+                    isSuperUser = res.getBoolean(1);
+                    hasReplicationRole = res.getBoolean(2);
                 }
-                isSuperUser = hashSet.contains("rds_superuser");
-                hasReplicationRole = hashSet.contains("rds_replication");
             }
 
             if (!isSuperUser && !hasReplicationRole) {
@@ -320,9 +343,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         ValidatorUtils.getSql("postgres.table_read_privilege.check"))) {
-            stmt.setString(1, this.schemaName);
-            stmt.setString(2, this.tableName);
-            stmt.setString(3, this.user);
+            stmt.setString(1, this.user);
+            stmt.setString(2, String.format("\"%s\".\"%s\"", this.schemaName, this.tableName));
             var res = stmt.executeQuery();
             while (res.next()) {
                 if (!res.getBoolean(1)) {
@@ -354,22 +376,22 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             }
         }
 
-        if (!isPublicationExists) {
+        if (!isPublicationExists && !pubAutoCreate) {
             // We require a publication on upstream to publish table cdc events
-            if (!pubAutoCreate) {
-                throw ValidatorUtils.invalidArgument(
-                        "Publication '" + pubName + "' doesn't exist and auto create is disabled");
-            } else {
-                // createPublicationIfNeeded(Optional.empty());
-                LOG.info(
-                        "Publication '{}' doesn't exist, will be created in the process of streaming job.",
-                        this.pubName);
-            }
+            throw ValidatorUtils.invalidArgument(
+                    "Publication '" + pubName + "' doesn't exist and auto create is disabled");
         }
 
         // If the source properties is created by share source, skip the following
         // check of publication
         if (isCdcSourceJob) {
+            if (!isPublicationExists) {
+                LOG.info(
+                        "creating cdc source job: publication '{}' doesn't exist, creating...",
+                        pubName);
+                DbzSourceUtils.createPostgresPublicationInValidate(userProps);
+                LOG.info("creating cdc source job: publication '{}' created successfully", pubName);
+            }
             return;
         }
 
@@ -651,38 +673,131 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    private boolean isDataTypeCompatible(String pgDataType, Data.DataType.TypeName typeName) {
+    private boolean isDataTypeCompatible(ColumnInfo colInfo, Data.DataType.TypeName typeName) {
         int val = typeName.getNumber();
-        switch (pgDataType) {
-            case "smallint":
-                return Data.DataType.TypeName.INT16_VALUE <= val
-                        && val <= Data.DataType.TypeName.INT64_VALUE;
-            case "integer":
-                return Data.DataType.TypeName.INT32_VALUE <= val
-                        && val <= Data.DataType.TypeName.INT64_VALUE;
-            case "bigint":
-                return val == Data.DataType.TypeName.INT64_VALUE;
-            case "float":
-            case "real":
-                return val == Data.DataType.TypeName.FLOAT_VALUE
-                        || val == Data.DataType.TypeName.DOUBLE_VALUE;
+        LOG.info(
+                "Data type compatibility check: PostgreSQL type '{}', colInfo.udtName: {}",
+                colInfo.dataType,
+                colInfo.udtName);
+        switch (colInfo.dataType) {
             case "boolean":
+                // BOOLEAN -> BOOLEAN
                 return val == Data.DataType.TypeName.BOOLEAN_VALUE;
-            case "double":
+            case "bit":
+                // The bit type needs to be judged together with character_maximum_length
+                if (colInfo.charMaxLength == null || colInfo.charMaxLength == 1) {
+                    // bit(1) -> BOOLEAN
+                    return val == Data.DataType.TypeName.BOOLEAN_VALUE;
+                } else {
+                    // bit(n>1) is not supported
+                    return false;
+                }
+            case "smallint":
+                // SMALLINT -> SMALLINT
+                return val == Data.DataType.TypeName.INT16_VALUE;
+            case "integer":
+                // INTEGER -> INTEGER
+                return val == Data.DataType.TypeName.INT32_VALUE;
+            case "bigint":
+            case "oid":
+                // BIGINT, OID -> BIGINT
+                return val == Data.DataType.TypeName.INT64_VALUE;
+            case "real":
+                // REAL -> REAL
+                return val == Data.DataType.TypeName.FLOAT_VALUE;
             case "double precision":
+                // DOUBLE PRECISION -> DOUBLE PRECISION
                 return val == Data.DataType.TypeName.DOUBLE_VALUE;
-            case "decimal":
+            case "character varying":
+            case "character":
+            case "char":
+                // CHARACTER VARYING, CHARACTER, CHAR -> CHARACTER VARYING
+                return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "text":
+            case "xml":
+            case "uuid":
+            case "inet":
+            case "cidr":
+            case "macaddr":
+            case "macaddr8":
+            case "int4range":
+            case "int8range":
+            case "numrange":
+            case "tsrange":
+            case "tstzrange":
+            case "daterange":
+                // TEXT, XML, UUID, INET, CIDR, MACADDR, MACADDR8, INT4RANGE, INT8RANGE,
+                // NUMRANGE, TSRANGE, TSTZRANGE, DATERANGE -> CHARACTER VARYING
+                return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "timestamp with time zone":
+            case "timestamptz":
+                // TIMESTAMPTZ, TIMESTAMP WITH TIME ZONE -> TIMESTAMP WITH TIME ZONE
+                return val == Data.DataType.TypeName.TIMESTAMPTZ_VALUE;
+            case "timestamp without time zone":
+            case "timestamp":
+                // TIMESTAMP WITHOUT TIME ZONE, TIMESTAMP -> TIMESTAMP WITHOUT TIME ZONE
+                return val == Data.DataType.TypeName.TIMESTAMP_VALUE;
+            case "time with time zone":
+            case "timetz":
+                // TIMETZ, TIME WITH TIME ZONE -> TIME WITHOUT TIME ZONE (assume UTC)
+                return val == Data.DataType.TypeName.TIME_VALUE;
+            case "time without time zone":
+            case "time":
+                // TIME WITHOUT TIME ZONE, TIME -> TIME WITHOUT TIME ZONE
+                return val == Data.DataType.TypeName.TIME_VALUE;
+            case "interval":
+                // INTERVAL [P] -> INTERVAL
+                return val == Data.DataType.TypeName.INTERVAL_VALUE;
+            case "bytea":
+                // BYTEA -> BYTEA
+                return val == Data.DataType.TypeName.BYTEA_VALUE;
+            case "geometry":
+                // PostGIS GEOMETRY -> BYTEA (stored as EWKB bytes)
+                return val == Data.DataType.TypeName.BYTEA_VALUE;
+            case "json":
+            case "jsonb":
+                // JSON, JSONB -> JSONB
+                return val == Data.DataType.TypeName.JSONB_VALUE;
+            case "date":
+                // DATE -> DATE
+                return val == Data.DataType.TypeName.DATE_VALUE;
             case "numeric":
+                // NUMERIC -> DECIMAL, INT256, VARCHAR
                 return val == Data.DataType.TypeName.DECIMAL_VALUE
-                        // We allow user to map numeric into rw_int256 or varchar to avoid precision
-                        // loss in the conversion from pg-numeric to rw-numeric
                         || val == Data.DataType.TypeName.INT256_VALUE
                         || val == Data.DataType.TypeName.VARCHAR_VALUE;
-            case "varchar":
-            case "character varying":
-                return val == Data.DataType.TypeName.VARCHAR_VALUE;
+            case "money":
+                // MONEY -> NUMERIC
+                return val == Data.DataType.TypeName.DECIMAL_VALUE;
+            case "point":
+                // POINT -> STRUCT<x REAL, y REAL>
+                return val == Data.DataType.TypeName.STRUCT_VALUE;
+            case "ARRAY":
+                // ARRAY -> LIST
+                return val == Data.DataType.TypeName.LIST_VALUE;
+            case "USER-DEFINED":
+                // Handle user-defined types like enum, citext, geometry, etc.
+                if (colInfo.udtName != null) {
+                    switch (colInfo.udtName.toLowerCase()) {
+                        case "citext":
+                            // CITEXT -> CHARACTER VARYING
+                            return val == Data.DataType.TypeName.VARCHAR_VALUE;
+                        case "geometry":
+                            // PostGIS GEOMETRY -> BYTEA (stored as EWKB bytes)
+                            return val == Data.DataType.TypeName.BYTEA_VALUE;
+                        case "ltree":
+                            return false;
+                        case "hstore":
+                            return false;
+                        default:
+                            // For other user-defined types, assume they are enum types and check
+                            // if they are compatible with VARCHAR
+                            return val == Data.DataType.TypeName.VARCHAR_VALUE;
+                    }
+                }
+                return false;
             default:
-                return true; // true for other uncovered types
+                return false; // false for other uncovered types
         }
     }
 }

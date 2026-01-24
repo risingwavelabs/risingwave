@@ -1,0 +1,98 @@
+[package]
+name = "risingwave_batch_executors"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+anyhow = "1"
+assert_matches = "1"
+async-trait = "0.1"
+bytes = "1"
+either = "1"
+foyer = { workspace = true }
+futures = { version = "0.3", default-features = false, features = ["alloc"] }
+futures-async-stream = { workspace = true }
+futures-util = "0.3"
+hashbrown = { workspace = true }
+itertools = { workspace = true }
+linkme = { workspace = true }
+mysql_async = { workspace = true }
+opendal = { workspace = true }
+prometheus = { version = "0.14", features = ["process"] }
+rand = { workspace = true }
+risingwave_batch = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
+risingwave_connector = { workspace = true }
+risingwave_dml = { workspace = true }
+risingwave_expr = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_pb = { workspace = true }
+risingwave_rpc_client = { workspace = true }
+risingwave_storage = { workspace = true }
+rw_futures_util = { workspace = true }
+
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+    "signal",
+    "fs",
+] }
+tokio-postgres = "0.7"
+tracing = "0.1"
+uuid = { version = "1", features = ["v4"] }
+
+[target.'cfg(not(madsim))'.dependencies]
+workspace-hack = { path = "../../workspace-hack" }
+
+[dev-dependencies]
+criterion = { workspace = true, features = ["async_tokio", "async"] }
+rand = { workspace = true }
+risingwave_expr_impl = { workspace = true }
+risingwave_hummock_sdk = { workspace = true }
+risingwave_storage = { workspace = true, features = ["test"] }
+tempfile = "3"
+tikv-jemallocator = { workspace = true }
+tokio-stream = { workspace = true }
+
+[[bench]]
+name = "filter"
+harness = false
+
+[[bench]]
+name = "nested_loop_join"
+harness = false
+
+[[bench]]
+name = "hash_join"
+harness = false
+
+[[bench]]
+name = "sort"
+harness = false
+
+[[bench]]
+name = "top_n"
+harness = false
+
+[[bench]]
+name = "hash_agg"
+harness = false
+
+[[bench]]
+name = "expand"
+harness = false
+
+[[bench]]
+name = "limit"
+harness = false
+
+[lints]
+workspace = true

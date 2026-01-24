@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
+use risingwave_pb::stream_plan::ExpandNode;
 use risingwave_pb::stream_plan::expand_node::Subset;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::ExpandNode;
 
 use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, MonotonicityMap};
 use crate::stream_fragmenter::BuildFragmentGraphState;
@@ -43,15 +44,12 @@ impl StreamExpand {
             Distribution::Broadcast => unreachable!(),
         };
 
-        let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
-        watermark_columns.extend(input.watermark_columns().ones().map(|idx| idx + input_len));
-
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
-            watermark_columns,
+            input.watermark_columns().right_shift_clone(input_len),
             MonotonicityMap::new(),
         );
         StreamExpand { base, core }
@@ -62,7 +60,7 @@ impl StreamExpand {
     }
 }
 
-impl PlanTreeNodeUnary for StreamExpand {
+impl PlanTreeNodeUnary<Stream> for StreamExpand {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -74,18 +72,18 @@ impl PlanTreeNodeUnary for StreamExpand {
     }
 }
 
-impl_plan_tree_node_for_unary! { StreamExpand }
+impl_plan_tree_node_for_unary! { Stream, StreamExpand }
 impl_distill_by_unit!(StreamExpand, core, "StreamExpand");
 
 impl StreamNode for StreamExpand {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::Expand(ExpandNode {
+        PbNodeBody::Expand(Box::new(ExpandNode {
             column_subsets: self
                 .column_subsets()
                 .iter()
                 .map(|subset| subset_to_protobuf(subset))
                 .collect(),
-        })
+        }))
     }
 }
 
@@ -94,6 +92,6 @@ fn subset_to_protobuf(subset: &[usize]) -> Subset {
     Subset { column_indices }
 }
 
-impl ExprRewritable for StreamExpand {}
+impl ExprRewritable<Stream> for StreamExpand {}
 
 impl ExprVisitable for StreamExpand {}

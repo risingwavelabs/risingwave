@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,7 +25,7 @@ use crate::sql_gen::{Column, Expr, Ident, ObjectName, SqlGenerator, Table};
 type Context = (Vec<Column>, Vec<Table>);
 
 /// Context utils
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     pub(crate) fn add_relations_to_context(&mut self, mut tables: Vec<Table>) {
         for rel in &tables {
             let mut bound_columns = rel.get_qualified_columns();
@@ -53,7 +53,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
 }
 
 /// Gen utils
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     pub(crate) fn gen_table_name_with_prefix(&mut self, prefix: &str) -> String {
         format!("{}_{}", prefix, &self.gen_relation_id())
     }

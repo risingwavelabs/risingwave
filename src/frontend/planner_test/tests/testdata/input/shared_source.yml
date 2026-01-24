@@ -9,7 +9,7 @@
     ) FORMAT PLAIN ENCODE JSON;
   expected_outputs: []
 - with_config_map:
-    enable_shared_source: true
+    streaming_use_shared_source: true
   sql: |
     /* The shared source config doesn't affect table with connector. */
     EXPLAIN CREATE TABLE s(x int,y int)
@@ -25,44 +25,55 @@
 # We use with_config_map to control the config when CREATE SOURCE, and use another SET statement to change the config for CREATE MV
 #
 # batch: All 4 plans should be the same.
-# stream: StreamSourceScan (with backfill) should be used only for the last 2. The first 2 use StreamSource. enable_shared_source changes the behavior of CREATE SOURCE, but not CREATE MATERIALIZED VIEW
+# stream: StreamSourceScan (with backfill) should be used only for the last 2. The first 2 use StreamSource. streaming_use_shared_source changes the behavior of CREATE SOURCE, but not CREATE MATERIALIZED VIEW
 - with_config_map:
-    enable_shared_source: false
+    streaming_use_shared_source: false
   before:
     - create_source
   sql: |
-    SET enable_shared_source = false;
+    SET streaming_use_shared_source = false;
     select * from s;
   expected_outputs:
     - batch_plan
     - stream_plan
 - with_config_map:
-    enable_shared_source: false
+    streaming_use_shared_source: false
   before:
     - create_source
   sql: |
-    SET enable_shared_source = true;
+    SET streaming_use_shared_source = true;
     select * from s;
   expected_outputs:
     - batch_plan
     - stream_plan
 - with_config_map:
-    enable_shared_source: true
+    streaming_use_shared_source: true
   before:
     - create_source
   sql: |
-    SET enable_shared_source = false;
+    SET streaming_use_shared_source = false;
     select * from s;
   expected_outputs:
     - batch_plan
     - stream_plan
 - with_config_map:
-    enable_shared_source: true
+    streaming_use_shared_source: true
   before:
     - create_source
   sql: |
-    SET enable_shared_source = true;
+    SET streaming_use_shared_source = true;
     select * from s;
   expected_outputs:
     - batch_plan
+    - stream_plan
+- with_config_map:
+    streaming_use_shared_source: true
+  before:
+    - create_source
+  sql: |
+    CREATE TABLE t(x int,y int);
+    set streaming_use_snapshot_backfill = true;
+    select * from s union select * from t;
+  expected_outputs:
+    - logical_plan
     - stream_plan

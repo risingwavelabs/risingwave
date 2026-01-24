@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::SearchPath;
-use risingwave_expr::{capture_context, function, ExprError};
+use risingwave_expr::{ExprError, capture_context, function};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
 use super::context::{AUTH_CONTEXT, CATALOG_READER, DB_NAME, SEARCH_PATH};
+use crate::Binder;
+use crate::binder::ResolveQualifiedNameError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::{CatalogError, CatalogReader};
 use crate::session::AuthContext;
@@ -29,6 +32,8 @@ enum ResolveRegclassError {
     Parser(#[from] ParserError),
     #[error("catalog error: {0}")]
     Catalog(#[from] CatalogError),
+    #[error("resolve qualified name error: {0}")]
+    ResolveQualifiedName(#[from] ResolveQualifiedNameError),
 }
 
 impl From<ResolveRegclassError> for ExprError {
@@ -36,6 +41,10 @@ impl From<ResolveRegclassError> for ExprError {
         match e {
             ResolveRegclassError::Parser(e) => ExprError::Parse(e.to_report_string().into()),
             ResolveRegclassError::Catalog(e) => ExprError::InvalidParam {
+                name: "name",
+                reason: e.to_report_string().into(),
+            },
+            ResolveRegclassError::ResolveQualifiedName(e) => ExprError::InvalidParam {
                 name: "name",
                 reason: e.to_report_string().into(),
             },
@@ -50,7 +59,7 @@ fn resolve_regclass_impl(
     search_path: &SearchPath,
     db_name: &str,
     class_name: &str,
-) -> Result<u32, ExprError> {
+) -> Result<ObjectId, ExprError> {
     resolve_regclass_inner(catalog, auth_context, search_path, db_name, class_name)
         .map_err(Into::into)
 }
@@ -61,31 +70,22 @@ fn resolve_regclass_inner(
     search_path: &SearchPath,
     db_name: &str,
     class_name: &str,
-) -> Result<u32, ResolveRegclassError> {
+) -> Result<ObjectId, ResolveRegclassError> {
     // We use the full parser here because this function needs to accept every legal way
     // of identifying an object in PG SQL as a valid value for the varchar
     // literal.  For example: 'foo', 'public.foo', '"my table"', and
     // '"my schema".foo' must all work as values passed pg_table_size.
     let obj = Parser::parse_object_name_str(class_name)?;
 
-    if obj.0.len() == 1 {
-        let class_name = obj.0[0].real_value();
-        let schema_path = SchemaPath::Path(search_path, &auth_context.user_name);
-        Ok(catalog
-            .read_guard()
-            .get_id_by_class_name(db_name, schema_path, &class_name)?)
-    } else {
-        let schema = obj.0[0].real_value();
-        let class_name = obj.0[1].real_value();
-        let schema_path = SchemaPath::Name(&schema);
-        Ok(catalog
-            .read_guard()
-            .get_id_by_class_name(db_name, schema_path, &class_name)?)
-    }
+    let (schema_name, class_name) = Binder::resolve_schema_qualified_name(db_name, &obj)?;
+    let schema_path = SchemaPath::new(schema_name.as_deref(), search_path, &auth_context.user_name);
+    Ok(catalog
+        .read_guard()
+        .get_id_by_class_name(db_name, schema_path, &class_name)?)
 }
 
 #[function("cast_regclass(varchar) -> int4")]
 fn cast_regclass(class_name: &str) -> Result<i32, ExprError> {
     let oid = resolve_regclass_impl_captured(class_name)?;
-    Ok(oid as i32)
+    Ok(oid.as_i32_id())
 }

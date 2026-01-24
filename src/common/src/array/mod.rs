@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ mod stream_chunk_iter;
 pub mod stream_record;
 pub mod struct_array;
 mod utf8_array;
+mod vector_array;
 
 use std::convert::From;
 use std::hash::{Hash, Hasher};
@@ -53,7 +54,7 @@ pub use decimal_array::{DecimalArray, DecimalArrayBuilder};
 pub use interval_array::{IntervalArray, IntervalArrayBuilder};
 pub use iterator::ArrayIterator;
 pub use jsonb_array::{JsonbArray, JsonbArrayBuilder};
-pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue};
+pub use list_array::{ListArray, ListArrayBuilder, ListRef, ListValue, ListWrite, ListWriter};
 pub use map_array::{MapArray, MapArrayBuilder, MapRef, MapValue};
 use paste::paste;
 pub use primitive_array::{PrimitiveArray, PrimitiveArrayBuilder, PrimitiveArrayItemType};
@@ -63,6 +64,10 @@ pub use stream_chunk::{Op, StreamChunk, StreamChunkTestExt};
 pub use stream_chunk_builder::StreamChunkBuilder;
 pub use struct_array::{StructArray, StructArrayBuilder, StructRef, StructValue};
 pub use utf8_array::*;
+pub use vector_array::{
+    Finite32, VECTOR_AS_LIST_TYPE, VECTOR_DISTANCE_TYPE, VECTOR_ITEM_TYPE, VectorArray,
+    VectorArrayBuilder, VectorDistanceType, VectorItemType, VectorRef, VectorVal,
+};
 
 pub use self::error::ArrayError;
 pub use crate::array::num256_array::{Int256Array, Int256ArrayBuilder};
@@ -221,10 +226,12 @@ pub trait Array:
     /// Retrieve a reference to value without checking the index boundary.
     #[inline]
     unsafe fn value_at_unchecked(&self, idx: usize) -> Option<Self::RefItem<'_>> {
-        if !self.is_null_unchecked(idx) {
-            Some(self.raw_value_at_unchecked(idx))
-        } else {
-            None
+        unsafe {
+            if !self.is_null_unchecked(idx) {
+                Some(self.raw_value_at_unchecked(idx))
+            } else {
+                None
+            }
         }
     }
 
@@ -263,7 +270,7 @@ pub trait Array:
     /// The unchecked version of `is_null`, ignore index out of bound check. It is
     /// the caller's responsibility to ensure the index is valid.
     unsafe fn is_null_unchecked(&self, idx: usize) -> bool {
-        !self.null_bitmap().is_set_unchecked(idx)
+        unsafe { !self.null_bitmap().is_set_unchecked(idx) }
     }
 
     fn set_bitmap(&mut self, bitmap: Bitmap);
@@ -303,15 +310,12 @@ pub trait Array:
     }
 }
 
-/// Implement `compact` on array, which removes element according to `visibility`.
-trait CompactableArray: Array {
+/// Implement `compact_vis` on array, which removes element according to `visibility`.
+#[easy_ext::ext(ArrayCompactVisExt)]
+impl<A: Array> A {
     /// Select some elements from `Array` based on `visibility` bitmap.
     /// `cardinality` is only used to decide capacity of the new `Array`.
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self;
-}
-
-impl<A: Array> CompactableArray for A {
-    fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
+    pub fn compact_vis(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         let mut builder = A::Builder::with_type(cardinality, self.data_type());
         for idx in visibility.iter_ones() {
             // SAFETY(value_at_unchecked): the idx is always in bound.
@@ -382,6 +386,12 @@ impl From<ListArray> for ArrayImpl {
     }
 }
 
+impl From<VectorArray> for ArrayImpl {
+    fn from(arr: VectorArray) -> Self {
+        Self::Vector(arr)
+    }
+}
+
 impl From<BytesArray> for ArrayImpl {
     fn from(arr: BytesArray) -> Self {
         Self::Bytea(arr)
@@ -410,7 +420,7 @@ macro_rules! impl_convert {
                     /// Panics if type mismatches.
                     pub fn [<as_ $suffix_name>](&self) -> &$array {
                         match self {
-                            Self::$variant_name(ref array) => array,
+                            Self::$variant_name(array) => array,
                             other_array => panic!("cannot convert ArrayImpl::{} to concrete type {}", other_array.get_ident(), stringify!($variant_name))
                         }
                     }
@@ -575,9 +585,9 @@ impl ArrayImpl {
     }
 
     /// Select some elements from `Array` based on `visibility` bitmap.
-    pub fn compact(&self, visibility: &Bitmap, cardinality: usize) -> Self {
+    pub fn compact_vis(&self, visibility: &Bitmap, cardinality: usize) -> Self {
         dispatch_array_variants!(self, inner, {
-            inner.compact(visibility, cardinality).into()
+            inner.compact_vis(visibility, cardinality).into()
         })
     }
 
@@ -610,9 +620,11 @@ impl ArrayImpl {
     ///
     /// Unsafe version of getting the enum-wrapped `ScalarRefImpl` out of the `Array`.
     pub unsafe fn value_at_unchecked(&self, idx: usize) -> DatumRef<'_> {
-        dispatch_array_variants!(self, inner, {
-            inner.value_at_unchecked(idx).map(ScalarRefImpl::from)
-        })
+        unsafe {
+            dispatch_array_variants!(self, inner, {
+                inner.value_at_unchecked(idx).map(ScalarRefImpl::from)
+            })
+        }
     }
 
     pub fn set_bitmap(&mut self, bitmap: Bitmap) {
@@ -731,10 +743,10 @@ mod test_util {
     use crate::util::iter_util::ZipEqFast;
 
     pub fn hash_finish<H: Hasher>(hashers: &[H]) -> Vec<u64> {
-        return hashers
+        hashers
             .iter()
             .map(|hasher| hasher.finish())
-            .collect::<Vec<u64>>();
+            .collect::<Vec<u64>>()
     }
 
     pub fn test_hash<H: BuildHasher, A: Array>(arrs: Vec<A>, expects: Vec<u64>, hasher_builder: H) {

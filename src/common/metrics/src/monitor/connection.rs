@@ -31,17 +31,17 @@ use hyper_util::rt::TokioIo;
 use itertools::Itertools;
 use pin_project_lite::pin_project;
 use prometheus::{
-    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry, IntCounter,
-    IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
 };
 use thiserror_ext::AsReport;
 use tokio::io::{AsyncRead, AsyncWrite, ReadBuf};
 use tonic::transport::{Channel, Endpoint};
 use tower_service::Service;
-use tracing::{debug, info, warn};
+use tracing::{trace, warn};
 
 use crate::monitor::GLOBAL_METRICS_REGISTRY;
-use crate::{register_guarded_int_counter_vec_with_registry, LabelGuardedIntCounterVec};
+use crate::{LabelGuardedIntCounterVec, register_guarded_int_counter_vec_with_registry};
 
 #[auto_impl::auto_impl(&mut)]
 pub trait MonitorAsyncReadWrite {
@@ -276,7 +276,7 @@ where
     fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
         let ret = self.inner.poll_ready(cx);
         if let Poll::Ready(Err(_)) = &ret {
-            self.monitor.on_err("<poll_ready>".to_string());
+            self.monitor.on_err("<poll_ready>".to_owned());
         }
         ret
     }
@@ -316,7 +316,7 @@ where
                     let remote_addr = conn.connect_info().remote_addr();
                     let endpoint = remote_addr
                         .map(|remote_addr| format!("{}", remote_addr.ip()))
-                        .unwrap_or("unknown".to_string());
+                        .unwrap_or("unknown".to_owned());
                     MonitoredConnection::new(conn, monitor.new_connection_monitor(endpoint))
                 })
             })
@@ -350,7 +350,7 @@ mod compat {
         fn poll_ready(&mut self, cx: &mut Context<'_>) -> Poll<Result<(), Self::Error>> {
             let ret = self.inner.poll_ready(cx);
             if let Poll::Ready(Err(_)) = &ret {
-                self.monitor.on_err("<poll_ready>".to_string());
+                self.monitor.on_err("<poll_ready>".to_owned());
             }
             ret
         }
@@ -392,7 +392,7 @@ pub struct ConnectionMetrics {
     write_rate: IntCounterVec,
     writer_count: IntGaugeVec,
 
-    io_err_rate: LabelGuardedIntCounterVec<4>,
+    io_err_rate: LabelGuardedIntCounterVec,
 }
 
 pub static GLOBAL_CONNECTION_METRICS: LazyLock<ConnectionMetrics> =
@@ -498,7 +498,7 @@ pub fn monitor_connector<C>(
     connection_type: impl Into<String>,
 ) -> MonitoredConnection<C, MonitorNewConnectionImpl> {
     let connection_type = connection_type.into();
-    info!(
+    trace!(
         "monitoring connector {} with type {}",
         type_name::<C>(),
         connection_type
@@ -548,7 +548,7 @@ impl Future for MonitoredGaiFuture {
         Pin::new(&mut self.inner).poll(cx).map(|res| match res {
             Ok(addrs) => {
                 let addrs: MonitoredGaiAddrs = addrs.into();
-                debug!("resolve {} => {:?}", self.name, addrs.inner);
+                trace!("resolve {} => {:?}", self.name, addrs.inner);
                 Ok(addrs)
             }
             Err(err) => Err(err),

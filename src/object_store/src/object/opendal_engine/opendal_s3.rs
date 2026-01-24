@@ -15,15 +15,15 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use opendal::Operator;
 use opendal::layers::LoggingLayer;
 use opendal::raw::HttpClient;
 use opendal::services::S3;
-use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{MediaType, OpendalObjectStore};
-use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
+use crate::object::object_metrics::ObjectStoreMetrics;
 
 impl OpendalObjectStore {
     /// create opendal s3 engine.
@@ -44,11 +44,11 @@ impl OpendalObjectStore {
         }
 
         let http_client = Self::new_http_client(&config)?;
-        builder = builder.http_client(http_client);
 
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
+        op.update_http_client(|_| http_client);
 
         Ok(Self {
             op,
@@ -78,18 +78,19 @@ impl OpendalObjectStore {
             "http://"
         };
         let (address, bucket) = rest.split_once('/').unwrap();
-
         let builder = S3::default()
             .bucket(bucket)
             .region("custom")
             .access_key_id(access_key_id)
             .secret_access_key(secret_access_key)
             .endpoint(&format!("{}{}", endpoint_prefix, address))
-            .disable_config_load()
-            .http_client(Self::new_http_client(&config)?);
+            .disable_config_load();
+
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
+        let http_client = Self::new_http_client(&config)?;
+        op.update_http_client(|_| http_client);
 
         Ok(Self {
             op,
@@ -109,39 +110,7 @@ impl OpendalObjectStore {
         if let Some(nodelay) = config.s3.nodelay.as_ref() {
             client_builder = client_builder.tcp_nodelay(*nodelay);
         }
-
+        #[allow(deprecated)]
         Ok(HttpClient::build(client_builder)?)
-    }
-
-    /// currently used by snowflake sink,
-    /// especially when sinking to the intermediate s3 bucket.
-    pub fn new_s3_engine_with_credentials(
-        bucket: &str,
-        config: Arc<ObjectStoreConfig>,
-        metrics: Arc<ObjectStoreMetrics>,
-        aws_access_key_id: &str,
-        aws_secret_access_key: &str,
-        aws_region: &str,
-    ) -> ObjectResult<Self> {
-        // Create s3 builder with credentials.
-        let builder = S3::default()
-            // set credentials for s3 sink
-            .bucket(bucket)
-            .access_key_id(aws_access_key_id)
-            .secret_access_key(aws_secret_access_key)
-            .region(aws_region)
-            .disable_config_load()
-            .http_client(Self::new_http_client(config.as_ref())?);
-
-        let op: Operator = Operator::new(builder)?
-            .layer(LoggingLayer::default())
-            .finish();
-
-        Ok(Self {
-            op,
-            media_type: MediaType::S3,
-            config,
-            metrics,
-        })
     }
 }

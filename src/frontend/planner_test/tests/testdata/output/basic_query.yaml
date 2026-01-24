@@ -72,7 +72,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.a] }
     └─LogicalFilter { predicate: t.a }
-      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - name: constant folding for IS NOT TRUE, IS NOT FALSE
   sql: |
     create table t(a Boolean);
@@ -80,7 +80,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.a] }
     └─LogicalFilter { predicate: IsNotTrue(t.a) }
-      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - name: constant folding IS NOT NULL
   sql: |
     create table t(a double precision);
@@ -88,7 +88,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.a] }
     └─LogicalFilter { predicate: IsNotNull(t.a) }
-      └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t (v1 int, v2 int);
     select v1 from t;
@@ -164,7 +164,7 @@
     select * from t;
   logical_plan: |-
     LogicalProject { exprs: [] }
-    └─LogicalScan { table: t, columns: [t._row_id] }
+    └─LogicalScan { table: t, columns: [t._row_id, t._rw_timestamp] }
 - name: disallow subquery in values
   sql: |
     values(1, (select 1));
@@ -216,9 +216,8 @@
     create index idx on t(col);
     select id from idx;
   stream_plan: |-
-    StreamMaterialize { columns: [id], stream_key: [id], pk_columns: [id], pk_conflict: NoCheck }
-    └─StreamExchange { dist: HashShard(idx.id) }
-      └─StreamTableScan { table: idx, columns: [idx.id], stream_scan_type: ArrangementBackfill, stream_key: [idx.id], pk: [col, id], dist: SomeShard }
+    StreamMaterialize { columns: [id, idx.col(hidden)], stream_key: [idx.col, id], pk_columns: [idx.col, id], pk_conflict: NoCheck }
+    └─StreamTableScan { table: idx, columns: [idx.id, idx.col], stream_scan_type: ArrangementBackfill, stream_key: [idx.col, idx.id], pk: [col, id], dist: UpstreamHashShard(idx.col) }
 - sql: |
     select * from generate_series(1, 10000000, 1) where Now() is null;
   batch_plan: 'BatchValues { rows: [] }'

@@ -16,7 +16,7 @@ jobs:
         run: echo "merged=$(echo ${{ github.event.pull_request.merged }} | tr '[:upper:]' '[:lower:]')" >> $GITHUB_OUTPUT
 
       - name: Retrieve PR information
-        uses: 8BitJonny/gh-get-current-pr@2.2.0
+        uses: 8BitJonny/gh-get-current-pr@3.0.0
         id: PR
         with:
           sha: ${{ github.event.pull_request.head.sha }}
@@ -25,7 +25,8 @@ jobs:
         id: check_documentation_update
         if: steps.PR.outputs.pr_found == 'true'
         run: |
-          if [[ $PR_BODY == *"- [x] My PR needs documentation updates."* ]]; then
+          REGEX_PATTERN="-\ \[x\].*My PR needs documentation updates\."
+          if echo "$PR_BODY" | grep -q -- "$REGEX_PATTERN"; then
             echo "documentation_update=true" >> $GITHUB_OUTPUT
           elif [[ $PR_LABEL == *"user-facing-changes"* ]]; then
             echo "documentation_update=true" >> $GITHUB_OUTPUT
@@ -44,7 +45,7 @@ jobs:
           ISSUE_CONTENT="This issue tracks the documentation update needed for the merged PR #$PR_ID.\n\nSource PR URL: $PR_URL\nSource PR Merged At: $PR_MERGED_AT\n\nIf it is a major improvement that deserves a new page or a new section in the documentation, please check if we should label it as an experiment feature."
 
           curl -X POST \
-            -H "Authorization: Bearer ${{ secrets.ACCESS_TOKEN }}" \
+            -H "Authorization: Bearer ${{ secrets.DOC_GITHUB_ACCESS_TOKEN }}" \
             -d "{\"title\": \"Document: $PR_TITLE\",\"body\": \"$ISSUE_CONTENT\"}" \
             "https://api.github.com/repos/risingwavelabs/risingwave-docs/issues"
         env:

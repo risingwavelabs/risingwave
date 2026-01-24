@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,12 +16,12 @@ use std::sync::Arc;
 
 use risingwave_common::catalog::ConflictBehavior;
 use risingwave_common::util::sort_util::ColumnOrder;
-use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_common::util::value_encoding::column_aware_row_encoding::ColumnAwareSerde;
 use risingwave_pb::stream_plan::{ArrangeNode, MaterializeNode};
 
 use super::*;
-use crate::executor::MaterializeExecutor;
+use crate::executor::{MaterializeExecutor, RefreshableMaterializeArgs};
 
 pub struct MaterializeExecutorBuilder;
 
@@ -43,14 +43,54 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
 
         let table = node.get_table()?;
         let versioned = table.version.is_some();
+        let refreshable = table.refreshable;
 
-        let conflict_behavior =
+        let mut conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
-        let version_column_index = table.version_column_index;
+        if params
+            .config
+            .developer
+            .materialize_force_overwrite_on_no_check
+            && conflict_behavior == ConflictBehavior::NoCheck
+        {
+            conflict_behavior = ConflictBehavior::Overwrite;
+        }
+        let version_column_indices: Vec<u32> = table.version_column_indices.clone();
 
-        macro_rules! new_executor {
-            ($SD:ident) => {
-                MaterializeExecutor::<_, $SD>::new(
+        let exec = if refreshable {
+            // Create refresh args for refreshable tables
+            let refresh_args = RefreshableMaterializeArgs::<_, ColumnAwareSerde>::new(
+                store.clone(),
+                table,
+                node.staging_table.as_ref().unwrap(),
+                node.refresh_progress_table.as_ref().unwrap(),
+                params.vnode_bitmap.clone().map(Arc::new),
+            )
+            .await;
+
+            // Use unified MaterializeExecutor with refresh args
+            MaterializeExecutor::<_, ColumnAwareSerde>::new(
+                input,
+                params.info.schema.clone(),
+                store,
+                order_key,
+                params.actor_context,
+                params.vnode_bitmap.map(Arc::new),
+                table,
+                params.watermark_epoch,
+                conflict_behavior,
+                version_column_indices.clone(),
+                params.executor_stats.clone(),
+                Some(refresh_args),
+                node.cleaned_by_ttl_watermark,
+                params.local_barrier_manager.clone(),
+            )
+            .await
+            .boxed()
+        } else {
+            // Use standard MaterializeExecutor for regular tables (no refresh args)
+            if versioned {
+                MaterializeExecutor::<_, ColumnAwareSerde>::new(
                     input,
                     params.info.schema.clone(),
                     store,
@@ -60,18 +100,34 @@ impl ExecutorBuilder for MaterializeExecutorBuilder {
                     table,
                     params.watermark_epoch,
                     conflict_behavior,
-                    version_column_index,
+                    version_column_indices.clone(),
                     params.executor_stats.clone(),
+                    None, // No refresh args for regular tables
+                    node.cleaned_by_ttl_watermark,
+                    params.local_barrier_manager.clone(),
                 )
                 .await
                 .boxed()
-            };
-        }
-
-        let exec = if versioned {
-            new_executor!(ColumnAwareSerde)
-        } else {
-            new_executor!(BasicSerde)
+            } else {
+                MaterializeExecutor::<_, BasicSerde>::new(
+                    input,
+                    params.info.schema.clone(),
+                    store,
+                    order_key,
+                    params.actor_context,
+                    params.vnode_bitmap.map(Arc::new),
+                    table,
+                    params.watermark_epoch,
+                    conflict_behavior,
+                    version_column_indices.clone(),
+                    params.executor_stats.clone(),
+                    None, // No refresh args for regular tables
+                    node.cleaned_by_ttl_watermark,
+                    params.local_barrier_manager.clone(),
+                )
+                .await
+                .boxed()
+            }
         };
 
         Ok((params.info, exec).into())
@@ -104,7 +160,7 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
         let vnodes = params.vnode_bitmap.map(Arc::new);
         let conflict_behavior =
             ConflictBehavior::from_protobuf(&table.handle_pk_conflict_behavior());
-        let version_column_index = table.version_column_index;
+        let version_column_indices: Vec<u32> = table.version_column_indices.clone();
         let exec = MaterializeExecutor::<_, BasicSerde>::new(
             input,
             params.info.schema.clone(),
@@ -115,8 +171,11 @@ impl ExecutorBuilder for ArrangeExecutorBuilder {
             table,
             params.watermark_epoch,
             conflict_behavior,
-            version_column_index,
+            version_column_indices,
             params.executor_stats.clone(),
+            None,  // ArrangeExecutor doesn't support refresh functionality
+            false, // ArrangeExecutor doesn't support TTL watermark
+            params.local_barrier_manager.clone(),
         )
         .await;
 

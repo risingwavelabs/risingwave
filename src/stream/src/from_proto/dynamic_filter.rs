@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::sync::Arc;
 
 use risingwave_common::bail;
@@ -20,7 +21,7 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_pb::stream_plan::DynamicFilterNode;
 
 use super::*;
-use crate::common::table::state_table::{StateTable, WatermarkCacheStateTable};
+use crate::common::table::state_table::StateTableBuilder;
 use crate::executor::DynamicFilterExecutor;
 
 pub struct DynamicFilterExecutorBuilder;
@@ -50,52 +51,35 @@ impl ExecutorBuilder for DynamicFilterExecutorBuilder {
             );
         }
 
-        let state_table_r =
-            StateTable::from_table_catalog(node.get_right_table()?, store.clone(), None).await;
+        let state_table_r = StateTableBuilder::new(node.get_right_table()?, store.clone(), None)
+            .enable_preload_all_rows_by_config(&params.config)
+            .build()
+            .await;
 
         let left_table = node.get_left_table()?;
-        let cleaned_by_watermark = left_table.get_cleaned_by_watermark();
+        let cleaned_by_watermark = node.cleaned_by_watermark
+            || #[expect(deprecated)]
+            left_table.cleaned_by_watermark;
+        let state_table_l = StateTableBuilder::new(node.get_left_table()?, store, vnodes)
+            .enable_preload_all_rows_by_config(&params.config)
+            .build()
+            .await;
 
-        let exec = if cleaned_by_watermark {
-            let state_table_l =
-                WatermarkCacheStateTable::from_table_catalog(node.get_left_table()?, store, vnodes)
-                    .await;
-
-            DynamicFilterExecutor::new(
-                params.actor_context,
-                params.eval_error_report,
-                params.info.schema.clone(),
-                source_l,
-                source_r,
-                key_l,
-                comparator,
-                state_table_l,
-                state_table_r,
-                params.executor_stats,
-                params.env.config().developer.chunk_size,
-                cleaned_by_watermark,
-            )
-            .boxed()
-        } else {
-            let state_table_l =
-                StateTable::from_table_catalog(node.get_left_table()?, store, vnodes).await;
-
-            DynamicFilterExecutor::new(
-                params.actor_context,
-                params.eval_error_report,
-                params.info.schema.clone(),
-                source_l,
-                source_r,
-                key_l,
-                comparator,
-                state_table_l,
-                state_table_r,
-                params.executor_stats,
-                params.env.config().developer.chunk_size,
-                cleaned_by_watermark,
-            )
-            .boxed()
-        };
+        let exec = DynamicFilterExecutor::new(
+            params.actor_context,
+            params.eval_error_report,
+            params.info.schema.clone(),
+            source_l,
+            source_r,
+            key_l,
+            comparator,
+            state_table_l,
+            state_table_r,
+            params.executor_stats,
+            params.config.developer.chunk_size,
+            cleaned_by_watermark,
+        )
+        .boxed();
 
         Ok((params.info, exec).into())
     }

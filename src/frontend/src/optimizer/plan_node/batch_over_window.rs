@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortOverWindowNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::batch::prelude::*;
 use super::generic::PlanWindowFunction;
 use super::utils::impl_distill_by_unit;
 use super::{
-    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch,
-    ToLocalBatch,
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch, ToLocalBatch, generic,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -59,7 +59,7 @@ impl BatchOverWindow {
 
 impl_distill_by_unit!(BatchOverWindow, core, "BatchOverWindow");
 
-impl PlanTreeNodeUnary for BatchOverWindow {
+impl PlanTreeNodeUnary<Batch> for BatchOverWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -71,17 +71,19 @@ impl PlanTreeNodeUnary for BatchOverWindow {
     }
 }
 
-impl_plan_tree_node_for_unary! { BatchOverWindow }
+impl_plan_tree_node_for_unary! { Batch, BatchOverWindow }
 
 impl ToDistributedBatch for BatchOverWindow {
     fn to_distributed(&self) -> Result<PlanRef> {
-        let new_input = self.input().to_distributed_with_required(
-            &self.expected_input_order(),
-            &RequiredDist::shard_by_key(
-                self.input().schema().len(),
-                &self.core.partition_key_indices(),
-            ),
-        )?;
+        let partition_key_indices = self.core.partition_key_indices();
+        let required_dist = if partition_key_indices.is_empty() {
+            RequiredDist::single()
+        } else {
+            RequiredDist::shard_by_key(self.input().schema().len(), &partition_key_indices)
+        };
+        let new_input = self
+            .input()
+            .to_distributed_with_required(&self.expected_input_order(), &required_dist)?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
@@ -90,7 +92,7 @@ impl ToLocalBatch for BatchOverWindow {
     fn to_local(&self) -> Result<PlanRef> {
         let new_input = self.input().to_local()?;
         let new_input = RequiredDist::single()
-            .enforce_if_not_satisfies(new_input, &self.expected_input_order())?;
+            .batch_enforce_if_not_satisfies(new_input, &self.expected_input_order())?;
         Ok(self.clone_with_input(new_input).into())
     }
 }
@@ -113,6 +115,7 @@ impl ToBatchPb for BatchOverWindow {
             .core
             .order_key()
             .iter()
+            .copied()
             .map(ColumnOrder::to_protobuf)
             .collect();
 
@@ -124,6 +127,6 @@ impl ToBatchPb for BatchOverWindow {
     }
 }
 
-impl ExprRewritable for BatchOverWindow {}
+impl ExprRewritable<Batch> for BatchOverWindow {}
 
 impl ExprVisitable for BatchOverWindow {}

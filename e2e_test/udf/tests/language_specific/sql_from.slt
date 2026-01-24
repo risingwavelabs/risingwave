@@ -1,0 +1,97 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+
+# Binding tests.
+statement ok
+create table t as select 42::int v;
+
+# If a function has a parameter with the same name as a column in the referenced table,
+# the column should take precedence.
+statement ok
+create function f1(v int) returns int language sql as $$ select v from t $$;
+
+query I
+select f1(114514);
+----
+42
+
+statement ok
+create function f2(a int) returns int language sql as $$ select a from t $$;
+
+query I
+select f2(114514);
+----
+114514
+
+statement ok
+drop function f1;
+
+statement ok
+drop function f2;
+
+statement ok
+drop table t;
+
+
+# https://github.com/risingwavelabs/risingwave/issues/16578
+statement ok
+create function mycount(x int[]) returns bigint language sql as 'select count(*) from unnest(x)';
+
+query I
+select mycount('{1,2}');
+----
+2
+
+statement ok
+create table t (x int[]);
+
+statement ok
+insert into t values('{1,2,3}'),('{3,4}');
+
+query I rowsort
+select mycount(x) from t;
+----
+2
+3
+
+statement ok
+drop function mycount;
+
+statement ok
+drop table t;
+
+
+# https://github.com/risingwavelabs/risingwave/issues/22743
+statement ok
+create function f() returns bigint language sql as $$select sum(v) from generate_series(1, 10) g(v)$$
+
+query I
+select f();
+----
+55
+
+statement ok
+drop function f;
+
+statement ok
+CREATE FUNCTION jsonb_values_at(data jsonb, grouping_keys TEXT[])
+  RETURNS TEXT[]
+  LANGUAGE SQL
+AS $$
+  SELECT ARRAY_AGG(value ORDER BY value) FROM jsonb_each_text(data) WHERE key = ANY(grouping_keys)
+$$;
+
+statement ok
+create table t as select '{"a": 1, "b": 2, "c": 3}'::jsonb data;
+
+query I
+select jsonb_values_at(data, ARRAY['a', 'c']) from t;
+----
+{1,3}
+
+statement ok
+drop function jsonb_values_at;
+
+statement ok
+drop table t;

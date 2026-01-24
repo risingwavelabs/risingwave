@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,10 +18,14 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_hummock_sdk::key::TableKey;
 
-pub fn serialize_pk(pk: impl Row, serializer: &OrderedRowSerde) -> Bytes {
-    let mut buf = BytesMut::with_capacity(pk.len());
-    pk.memcmp_serialize_into(serializer, &mut buf);
+pub fn serialize_row(row: impl Row, serializer: &OrderedRowSerde) -> Bytes {
+    let mut buf = BytesMut::with_capacity(row.len());
+    row.memcmp_serialize_into(serializer, &mut buf);
     buf.freeze()
+}
+
+pub fn serialize_pk(pk: impl Row, serializer: &OrderedRowSerde) -> Bytes {
+    serialize_row(pk, serializer)
 }
 
 pub fn serialize_pk_with_vnode(

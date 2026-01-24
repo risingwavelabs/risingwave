@@ -1,7 +1,7 @@
 # Contributing to RisingWave
 
-Contributing documentation has moved to the **[RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/)**.
-
+Read the **[RisingWave Developer Guide](https://risingwavelabs.github.io/risingwave/)** for
+how to develop and contribute to RisingWave.
 
 ## Before hacking on RisingWave
 
@@ -13,4 +13,4 @@ Please read [the process] of how to submit your change to RisingWave.
 
 [Community Slack]: https://risingwave.com/slack
 [file an issue]: https://github.com/risingwavelabs/risingwave/issues/new/choose
-[the process]: https://risingwavelabs.github.io/risingwave/contribution
+[the process]: https://risingwavelabs.github.io/risingwave/contributing.html

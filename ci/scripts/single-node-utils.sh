@@ -13,8 +13,8 @@ export RISEDEV=1 # as if we are running in RiseDev
 start_single_node() {
   mkdir -p "$HOME/.risingwave/state_store"
   mkdir -p "$HOME/.risingwave/meta_store"
-  mkdir -p .risingwave/config
-  RUST_BACKTRACE=1 "$PREFIX_BIN"/risingwave >"$1" 2>&1
+  RUST_BACKTRACE=1 \
+  "$PREFIX_BIN"/risingwave --config-path src/config/ci-single-node-standalone.toml >"$1" 2>&1
 }
 
 stop_single_node() {

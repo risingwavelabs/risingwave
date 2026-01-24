@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_attrdef` stores column default values. The main information about columns is
 /// stored in `pg_attribute`. Only columns for which a default value has been explicitly set will
-/// have an entry here. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-attrdef.html`]
+/// have an entry here. Ref: `https://www.postgresql.org/docs/current/catalog-pg-attrdef.html`
 #[system_catalog(view, "pg_catalog.pg_attrdef")]
 #[derive(Fields)]
 struct PgAttrdef {

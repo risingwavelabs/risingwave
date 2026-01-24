@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use regex::Regex;
 use yaml_rust::Yaml;
 
@@ -30,11 +30,11 @@ impl IdExpander {
         for item in yaml {
             if let Some(item) = item.as_hash() {
                 let id = item
-                    .get(&Yaml::String("id".to_string()))
+                    .get(&Yaml::String("id".to_owned()))
                     .ok_or_else(|| anyhow!("Missing id field: {:?}", item))?
                     .as_str()
                     .ok_or_else(|| anyhow!("Id isn't a string: {:?}", item))?;
-                ids.push(id.to_string());
+                ids.push(id.to_owned());
             } else {
                 return Err(anyhow!("Not a hashmap: {:?}", item));
             }
@@ -65,7 +65,7 @@ impl IdExpander {
                             }
                             Yaml::Array(matched_ids)
                         } else {
-                            Yaml::String(v.to_string())
+                            Yaml::String(v.to_owned())
                         }
                     } else {
                         self.visit(v.clone())?

@@ -28,6 +28,7 @@ use super::elasticsearch_opensearch_config::{
 use super::elasticsearch_opensearch_formatter::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
 use crate::sink::Result;
 
+#[expect(clippy::large_enum_variant)]
 pub enum StreamChunkConverter {
     Es(EsStreamChunkConverter),
     Other,
@@ -38,6 +39,7 @@ impl StreamChunkConverter {
         schema: Schema,
         pk_indices: &Vec<usize>,
         properties: &BTreeMap<String, String>,
+        is_append_only: bool,
     ) -> Result<Self> {
         if is_remote_es_sink(sink_name) {
             let index_column = properties
@@ -70,6 +72,7 @@ impl StreamChunkConverter {
                 index_column,
                 index,
                 routing_column,
+                is_append_only,
             )?))
         } else {
             Ok(StreamChunkConverter::Other)
@@ -78,13 +81,14 @@ impl StreamChunkConverter {
 
     pub fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk> {
         match self {
-            StreamChunkConverter::Es(es) => es.convert_chunk(chunk),
+            StreamChunkConverter::Es(es) => es.convert_chunk(chunk, es.is_append_only),
             StreamChunkConverter::Other => Ok(chunk),
         }
     }
 }
 pub struct EsStreamChunkConverter {
     formatter: ElasticSearchOpenSearchFormatter,
+    is_append_only: bool,
 }
 impl EsStreamChunkConverter {
     pub fn new(
@@ -94,6 +98,7 @@ impl EsStreamChunkConverter {
         index_column: Option<usize>,
         index: Option<String>,
         routing_column: Option<usize>,
+        is_append_only: bool,
     ) -> Result<Self> {
         let formatter = ElasticSearchOpenSearchFormatter::new(
             pk_indices,
@@ -103,10 +108,13 @@ impl EsStreamChunkConverter {
             index,
             routing_column,
         )?;
-        Ok(Self { formatter })
+        Ok(Self {
+            formatter,
+            is_append_only,
+        })
     }
 
-    fn convert_chunk(&self, chunk: StreamChunk) -> Result<StreamChunk> {
+    fn convert_chunk(&self, chunk: StreamChunk, is_append_only: bool) -> Result<StreamChunk> {
         let mut ops = Vec::with_capacity(chunk.capacity());
         let mut id_string_builder =
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
@@ -116,7 +124,7 @@ impl EsStreamChunkConverter {
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
         let mut routing_builder =
             <Utf8ArrayBuilder as risingwave_common::array::ArrayBuilder>::new(chunk.capacity());
-        for build_bulk_para in self.formatter.convert_chunk(chunk)? {
+        for build_bulk_para in self.formatter.convert_chunk(chunk, is_append_only)? {
             let BuildBulkPara {
                 key,
                 value,

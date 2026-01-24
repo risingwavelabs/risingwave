@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_sqlparser::ast::{DropMode, ObjectName};
+use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
@@ -25,21 +25,55 @@ pub async fn handle_drop_user(
     handler_args: HandlerArgs,
     user_name: ObjectName,
     if_exists: bool,
-    mode: Option<DropMode>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    if mode.is_some() {
-        return Err(ErrorCode::BindError("Drop user not support drop mode".to_string()).into());
-    }
 
     let user_name = Binder::resolve_user_name(user_name)?;
     let user_info_reader = session.env().user_info_reader();
-    let user_id = user_info_reader
+    let user_info = user_info_reader
         .read_guard()
         .get_user_by_name(&user_name)
-        .map(|u| u.id);
-    match user_id {
-        Some(user_id) => {
+        .map(|u| (u.id, u.is_super, u.is_admin));
+    match user_info {
+        Some((user_id, is_super, is_admin)) => {
+            if session.user_id() == user_id {
+                return Err(ErrorCode::PermissionDenied(
+                    "current user cannot be dropped".to_owned(),
+                )
+                .into());
+            }
+            if let Some(current_user) = user_info_reader
+                .read_guard()
+                .get_user_by_name(&session.user_name())
+            {
+                if !current_user.is_super {
+                    if is_super {
+                        return Err(ErrorCode::PermissionDenied(
+                            "must be superuser to drop superusers".to_owned(),
+                        )
+                        .into());
+                    }
+                    if !current_user.can_create_user {
+                        return Err(ErrorCode::PermissionDenied(
+                            "permission denied to drop user".to_owned(),
+                        )
+                        .into());
+                    }
+                }
+
+                // Only admin users can drop admin users
+                if is_admin && !current_user.is_admin {
+                    return Err(ErrorCode::PermissionDenied(
+                        "only admin users can drop admin users".to_owned(),
+                    )
+                    .into());
+                }
+            } else {
+                return Err(
+                    ErrorCode::PermissionDenied("Session user is invalid".to_owned()).into(),
+                );
+            }
+
             let user_info_writer = session.user_info_writer()?;
             user_info_writer.drop_user(user_id).await?;
         }
@@ -49,7 +83,7 @@ pub async fn handle_drop_user(
                     .notice(format!("user \"{}\" does not exist, skipping", user_name))
                     .into())
             } else {
-                Err(CatalogError::NotFound("user", user_name).into())
+                Err(CatalogError::not_found("user", user_name).into())
             };
         }
     }
@@ -68,15 +102,19 @@ mod tests {
         let user_info_reader = session.env().user_info_reader();
 
         frontend.run_sql("CREATE USER user").await.unwrap();
-        assert!(user_info_reader
-            .read_guard()
-            .get_user_by_name("user")
-            .is_some());
+        assert!(
+            user_info_reader
+                .read_guard()
+                .get_user_by_name("user")
+                .is_some()
+        );
 
         frontend.run_sql("DROP USER user").await.unwrap();
-        assert!(user_info_reader
-            .read_guard()
-            .get_user_by_name("user")
-            .is_none());
+        assert!(
+            user_info_reader
+                .read_guard()
+                .get_user_by_name("user")
+                .is_none()
+        );
     }
 }

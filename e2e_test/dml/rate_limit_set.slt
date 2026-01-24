@@ -1,0 +1,19 @@
+statement ok
+set dml_rate_limit to 2;
+
+statement ok
+create table t(v1 int);
+
+statement ok
+alter table t set parallelism to 1;
+
+include ./inserts.slt.part
+
+
+query II retry 6 backoff 1s
+select case when count(*) between 2 and 10 then 6 else 0 end from t;
+----
+6
+
+statement ok
+drop table t;

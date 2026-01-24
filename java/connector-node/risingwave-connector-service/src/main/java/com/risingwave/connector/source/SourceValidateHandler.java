@@ -1,16 +1,18 @@
-// Copyright 2024 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector.source;
 
@@ -89,6 +91,62 @@ public class SourceValidateHandler {
         }
     }
 
+    /**
+     * Validate queue.memory.ratio if specified. The ratio must be a valid number between
+     * MIN_QUEUE_MAX_MEMORY_RATIO and MAX_QUEUE_MAX_MEMORY_RATIO.
+     */
+    private static void validateQueueMemoryRatio(Map<String, String> props) {
+        String ratioStr = props.get("debezium.queue.memory.ratio");
+        if (ratioStr == null) {
+            return; // Not specified, use default
+        }
+
+        double ratio;
+        try {
+            ratio = Double.parseDouble(ratioStr);
+        } catch (NumberFormatException e) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'debezium.queue.memory.ratio' must be a valid number, got: '%s'",
+                            ratioStr));
+        }
+
+        // Validate ratio is in reasonable range (1% - 80%)
+        if (ratio < DbzConnectorConfig.MIN_QUEUE_MAX_MEMORY_RATIO
+                || ratio > DbzConnectorConfig.MAX_QUEUE_MAX_MEMORY_RATIO) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'debezium.queue.memory.ratio' must be between %s and %s, got: %s",
+                            DbzConnectorConfig.MIN_QUEUE_MAX_MEMORY_RATIO,
+                            DbzConnectorConfig.MAX_QUEUE_MAX_MEMORY_RATIO,
+                            ratio));
+        }
+    }
+
+    /** Validate debezium.heartbeat.interval.ms if specified. If present, it must not be 0. */
+    private static void validateHeartbeatInterval(
+            Map<String, String> props, boolean isCdcSourceJob) {
+        String intervalStr = props.get("debezium.heartbeat.interval.ms");
+        if (intervalStr == null) {
+            return; // Not specified, use default
+        }
+
+        long interval;
+        try {
+            interval = Long.parseLong(intervalStr);
+        } catch (NumberFormatException e) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'debezium.heartbeat.interval.ms' must be a valid number, got: '%s'",
+                            intervalStr));
+        }
+
+        // Validate interval is not 0
+        if (interval == 0) {
+            throw ValidatorUtils.invalidArgument("'debezium.heartbeat.interval.ms' must not be 0");
+        }
+    }
+
     public static void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
             throws Exception {
         var props = request.getPropertiesMap();
@@ -109,6 +167,7 @@ public class SourceValidateHandler {
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SLOT_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_PUB_CREATE);
+                validateQueueMemoryRatio(props);
                 try (var validator = new PostgresValidator(props, tableSchema, isCdcSourceJob)) {
                     validator.validateAll();
                 }
@@ -118,6 +177,7 @@ public class SourceValidateHandler {
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.TABLE_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.PG_SCHEMA_NAME);
+                validateQueueMemoryRatio(props);
                 try (var coordinatorValidator = new CitusValidator(props, tableSchema)) {
                     coordinatorValidator.validateDistributedTable();
                     coordinatorValidator.validateTable();
@@ -146,6 +206,8 @@ public class SourceValidateHandler {
             case MYSQL:
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
+                validateQueueMemoryRatio(props);
+                validateHeartbeatInterval(props, isCdcSourceJob);
                 try (var validator =
                         new MySqlValidator(props, tableSchema, isCdcSourceJob, isBackfillTable)) {
                     validator.validateAll();
@@ -154,12 +216,16 @@ public class SourceValidateHandler {
             case MONGODB:
                 ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_URL);
                 ensurePropNotBlank(props, DbzConnectorConfig.MongoDb.MONGO_COLLECTION_NAME);
-                var validator = new MongoDbValidator(props);
-                validator.validateDbConfig();
+                validateQueueMemoryRatio(props);
+                try (var validator = new MongoDbValidator(props)) {
+                    validator.validateAll();
+                }
                 break;
             case SQL_SERVER:
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.SQL_SERVER_SCHEMA_NAME);
+                validateQueueMemoryRatio(props);
+                validateHeartbeatInterval(props, isCdcSourceJob);
                 try (var sqlServerValidator =
                         new SqlServerValidator(props, tableSchema, isCdcSourceJob)) {
                     sqlServerValidator.validateAll();

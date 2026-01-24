@@ -8,6 +8,12 @@ statement ok
 create subscription sub from t1 with(retention = '1D');
 
 statement ok
+create schema s1;
+
+statement ok
+create subscription s1.sub1 from t1 with(retention = '1D');
+
+statement ok
 declare cur subscription cursor for sub;
 
 statement ok
@@ -28,6 +34,14 @@ declare cur5 subscription cursor for sub since asd;
 statement error
 declare cur6 subscription cursor for sub since 18446744073709551615;
 
+# We should correctly parse the schema for the subscription.
+statement ok
+declare cur7 subscription cursor for s1.sub1;
+
+# However, cursor itself is not schema-bound.
+statement error
+declare s1.cur8 subscription cursor for s1.sub1;
+
 statement error
 declare cur subscription cursor for sub;
 
@@ -42,6 +56,15 @@ close cur2;
 
 statement ok
 close cur3;
+
+statement ok
+close cur7;
+
+statement ok
+drop subscription s1.sub1;
+
+statement ok
+drop schema s1;
 
 statement ok
 drop subscription sub;

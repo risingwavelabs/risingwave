@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use num_traits::{CheckedAdd, CheckedSub};
-use risingwave_expr::{aggregate, ExprError, Result};
+use risingwave_expr::{ExprError, Result, aggregate};
 
 #[aggregate("sum(int2) -> int8")]
 #[aggregate("sum(int4) -> int8")]
@@ -124,25 +124,6 @@ fn max<T: Ord>(state: T, input: T) -> T {
     state.max(input)
 }
 
-#[aggregate("first_value(*) -> auto", state = "ref")]
-fn first_value<T>(state: T, _: T) -> T {
-    state
-}
-
-#[aggregate("last_value(*) -> auto", state = "ref")]
-fn last_value<T>(_: T, input: T) -> T {
-    input
-}
-
-#[aggregate("internal_last_seen_value(*) -> auto", state = "ref", internal)]
-fn internal_last_seen_value<T>(state: T, input: T, retract: bool) -> T {
-    if retract {
-        state
-    } else {
-        input
-    }
-}
-
 /// Note the following corner cases:
 ///
 /// ```slt
@@ -172,20 +153,12 @@ fn internal_last_seen_value<T>(state: T, input: T, retract: bool) -> T {
 /// ```
 #[aggregate("count(*) -> int8", init_state = "0i64")]
 fn count<T>(state: i64, _: T, retract: bool) -> i64 {
-    if retract {
-        state - 1
-    } else {
-        state + 1
-    }
+    if retract { state - 1 } else { state + 1 }
 }
 
 #[aggregate("count() -> int8", init_state = "0i64")]
 fn count_star(state: i64, retract: bool) -> i64 {
-    if retract {
-        state - 1
-    } else {
-        state + 1
-    }
+    if retract { state - 1 } else { state + 1 }
 }
 
 #[cfg(test)]
@@ -198,7 +171,7 @@ mod tests {
     use risingwave_common::array::*;
     use risingwave_common::test_utils::{rand_bitmap, rand_stream_chunk};
     use risingwave_common::types::{Datum, Decimal};
-    use risingwave_expr::aggregate::{build_append_only, AggCall};
+    use risingwave_expr::aggregate::{AggCall, build_append_only};
     use test::Bencher;
 
     fn test_agg(pretty: &str, input: StreamChunk, expected: Datum) {

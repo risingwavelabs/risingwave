@@ -12,6 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering::Relaxed;
+
 use anyhow::Context;
 use notify::Watcher;
 use risingwave_common::system_param::LICENSE_KEY_KEY;
@@ -21,6 +24,9 @@ use tokio::task::JoinHandle;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+
+/// For test purposes, we count the number of times the license key file is reloaded.
+static RELOAD_TIMES: AtomicUsize = AtomicUsize::new(0);
 
 impl MetaSrvEnv {
     /// Spawn background tasks to watch the license key file and update the system parameter,
@@ -36,15 +42,22 @@ impl MetaSrvEnv {
 
         let mut watcher =
             notify::recommended_watcher(move |event: Result<notify::Event, notify::Error>| {
-                if let Err(e) = event {
-                    tracing::warn!(
-                        error = %e.as_report(),
-                        "error occurred while watching license key file"
-                    );
-                    return;
+                match event {
+                    Ok(event) => {
+                        if event.kind.is_access() {
+                            // Ignore access events as they do not indicate changes and will be
+                            // triggered on our own read operations.
+                        } else {
+                            let _ = changed_tx.send(());
+                        }
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            error = %e.as_report(),
+                            "error occurred while watching license key file"
+                        );
+                    }
                 }
-                // We don't check the event type but always notify the updater for simplicity.
-                let _ = changed_tx.send(());
             })
             .context("failed to create license key file watcher")?;
 
@@ -55,7 +68,8 @@ impl MetaSrvEnv {
 
         let updater = {
             let mgr = self.system_params_manager_impl_ref();
-            let path = path.to_path_buf();
+            let path = path.clone();
+
             async move {
                 // Let the watcher live until the end of the updater to prevent dropping (then stopping).
                 let _watcher = watcher;
@@ -65,6 +79,7 @@ impl MetaSrvEnv {
                 // will do the initialization then.
                 while changed_rx.changed().await.is_ok() {
                     tracing::info!(path = %path.display(), "license key file changed, reloading...");
+                    RELOAD_TIMES.fetch_add(1, Relaxed);
 
                     let content = match tokio::fs::read_to_string(&path).await {
                         Ok(v) => v,
@@ -116,11 +131,10 @@ mod tests {
     //     sub: "rw-test",
     //     iss: Test,
     //     tier: Free,              <- difference from the default license in debug build
-    //     cpu_core_limit: None,
+    //     rwu_limit: None,
     //     exp: 9999999999,
     // }
-    const INITIAL_KEY: &str =
-        "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+    const INITIAL_KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
          eyJzdWIiOiJydy10ZXN0IiwidGllciI6ImZyZWUiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
          ALC3Kc9LI6u0S-jeMB1YTxg1k8Azxwvc750ihuSZgjA_e1OJC9moxMvpLrHdLZDzCXHjBYi0XJ_1lowmuO_0iPEuPqN5AFpDV1ywmzJvGmMCMtw3A2wuN7hhem9OsWbwe6lzdwrefZLipyo4GZtIkg5ZdwGuHzm33zsM-X5gl_Ns4P6axHKiorNSR6nTAyA6B32YVET_FAM2YJQrXqpwA61wn1XLfarZqpdIQyJ5cgyiC33BFBlUL3lcRXLMLeYe6TjYGeV4K63qARCjM9yeOlsRbbW5ViWeGtR2Yf18pN8ysPXdbaXm_P_IVhl3jCTDJt9ctPh6pUCbkt36FZqO9A";
 
@@ -135,15 +149,19 @@ mod tests {
         let key_file = tempfile::NamedTempFile::new().unwrap();
         std::fs::write(key_file.path(), INITIAL_KEY).unwrap();
 
-        let srv = MetaSrvEnv::for_test_opts(MetaOpts {
-            license_key_path: Some(key_file.path().to_path_buf()),
-            ..MetaOpts::test(false)
-        })
+        let srv = MetaSrvEnv::for_test_opts(
+            MetaOpts {
+                license_key_path: Some(key_file.path().to_path_buf()),
+                ..MetaOpts::test(false)
+            },
+            |_| (),
+        )
         .await;
         let _updater_handle = srv.may_start_watch_license_key_file().unwrap().unwrap();
 
         // Since we've filled the key file with the initial key, the license should be loaded.
         tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(RELOAD_TIMES.load(Relaxed), 1);
         let license = LicenseManager::get().license().unwrap();
         assert_eq!(license.sub, "rw-test");
         assert_eq!(license.tier, Tier::Free);
@@ -151,7 +169,12 @@ mod tests {
         // Update the key file with an empty content, which should reset the license to the default.
         std::fs::write(key_file.path(), "").unwrap();
         tokio::time::sleep(Duration::from_secs(1)).await;
+        assert_eq!(RELOAD_TIMES.load(Relaxed), 2);
         let license = LicenseManager::get().license().unwrap();
         assert_eq!(license, License::default());
+
+        // Show that our "access" on the key file does not trigger a reload recursively.
+        tokio::time::sleep(Duration::from_secs(3)).await;
+        assert_eq!(RELOAD_TIMES.load(Relaxed), 2);
     }
 }

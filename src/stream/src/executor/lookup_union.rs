@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use async_trait::async_trait;
 use futures::channel::mpsc;
-use futures::future::{join_all, select, Either};
+use futures::future::{Either, join_all, select};
 use futures::{FutureExt, SinkExt};
 use itertools::Itertools;
 

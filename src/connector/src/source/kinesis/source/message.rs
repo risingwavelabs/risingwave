@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,15 +13,24 @@
 // limitations under the License.
 
 use aws_sdk_kinesis::types::Record;
+use aws_smithy_types::DateTime;
 use aws_smithy_types_convert::date_time::DateTimeExt;
+use risingwave_common::types::{DatumRef, ScalarRefImpl};
 
 use crate::source::{SourceMessage, SourceMeta, SplitId};
 
 #[derive(Clone, Debug)]
 pub struct KinesisMeta {
     // from `approximate_arrival_timestamp` of type `Option<aws_smithy_types::DateTime>`
-    #[expect(dead_code)]
-    timestamp: Option<i64>,
+    timestamp: Option<DateTime>,
+}
+
+impl KinesisMeta {
+    pub fn extract_timestamp(&self) -> DatumRef<'_> {
+        Some(ScalarRefImpl::Timestamptz(
+            self.timestamp?.to_chrono_utc().ok()?.into(),
+        ))
+    }
 }
 
 pub fn from_kinesis_record(value: &Record, split_id: SplitId) -> SourceMessage {
@@ -31,9 +40,7 @@ pub fn from_kinesis_record(value: &Record, split_id: SplitId) -> SourceMessage {
         offset: value.sequence_number.clone(),
         split_id,
         meta: SourceMeta::Kinesis(KinesisMeta {
-            timestamp: value
-                .approximate_arrival_timestamp
-                .map(|dt| dt.to_chrono_utc().unwrap().timestamp_millis()),
+            timestamp: value.approximate_arrival_timestamp,
         }),
     }
 }

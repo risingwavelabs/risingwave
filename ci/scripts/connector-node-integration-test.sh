@@ -5,7 +5,7 @@ set -euo pipefail
 
 source ci/scripts/common.sh
 
-VERSION=11
+VERSION=17
 
 while getopts 'p:v:' opt; do
     case ${opt} in
@@ -31,11 +31,12 @@ RISINGWAVE_ROOT=${PWD}
 
 echo "--- install java"
 sudo apt-get update -y
-if [ "$VERSION" = "11" ]; then
-  echo "The test imgae default java version is 11, no need to install"
+if [ "$VERSION" = "17" ] || [ "$VERSION" = "21" ]; then
+  echo "The test image default java version is 11, need to install java $VERSION"
+  sudo apt install openjdk-"$VERSION"-jdk openjdk-"$VERSION"-jre -y
 else
-  echo "The test imgae default java version is 11, need to install java 17"
-  sudo apt install openjdk-17-jdk openjdk-17-jre -y
+  echo "Error: Java version $VERSION is not supported"
+  exit 1
 fi
 java_version=$(java --version 2>&1)
 echo "$java_version"
@@ -44,7 +45,7 @@ echo "$java_version"
 # cd ${RISINGWAVE_ROOT}/java
 # mvn --batch-mode --update-snapshots clean package -DskipTests
 
-echo "--- install postgresql client"
+echo "--- install postgresql server"
 DEBIAN_FRONTEND=noninteractive TZ=America/New_York apt-get -y install tzdata
 sudo apt install postgresql postgresql-contrib libpq-dev -y
 sudo service postgresql start || sudo pg_ctlcluster 14 main start
@@ -55,15 +56,15 @@ sudo -u postgres psql -d test -c "CREATE TABLE test (id serial PRIMARY KEY, name
 
 echo "--- starting minio"
 echo "setting up minio"
-wget https://dl.minio.io/server/minio/release/linux-amd64/minio > /dev/null
+wget --no-verbose https://dl.minio.io/server/minio/release/linux-amd64/minio > /dev/null
 chmod +x minio
 sudo ./minio server /tmp/minio &
 # wait for minio to start
 sleep 3
-wget https://dl.minio.io/client/mc/release/linux-amd64/mc > /dev/null
+wget --no-verbose https://dl.minio.io/client/mc/release/linux-amd64/mc > /dev/null
 chmod +x mc
 MC_PATH=${PWD}/mc
-${MC_PATH} config host add minio http://127.0.0.1:9000 minioadmin minioadmin
+${MC_PATH} alias set minio http://127.0.0.1:9000 minioadmin minioadmin
 
 echo "--- starting connector-node service"
 mkdir -p "${RISINGWAVE_ROOT}"/java/connector-node/assembly/target/

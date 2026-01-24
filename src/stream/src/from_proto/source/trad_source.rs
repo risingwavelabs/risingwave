@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +13,12 @@
 // limitations under the License.
 
 use risingwave_common::catalog::{
-    default_key_column_name_version_mapping, KAFKA_TIMESTAMP_COLUMN_NAME,
+    KAFKA_TIMESTAMP_COLUMN_NAME, default_key_column_name_version_mapping,
 };
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
 use risingwave_connector::source::should_copy_to_format_encode_options;
 use risingwave_connector::{WithOptionsSecResolved, WithPropertiesExt};
+use risingwave_expr::bail;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
@@ -26,20 +27,19 @@ use risingwave_pb::plan_common::{
     PbColumnCatalog, PbEncodeType,
 };
 use risingwave_pb::stream_plan::SourceNode;
-use risingwave_storage::panic_store::PanicStateStore;
 
 use super::*;
-use crate::executor::source::{
-    FsListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
-};
 use crate::executor::TroublemakerExecutor;
+use crate::executor::source::{
+    BatchAdbcSnowflakeListExecutor, BatchIcebergListExecutor, BatchPosixFsListExecutor,
+    DummySourceExecutor, FsListExecutor, IcebergListExecutor, SourceExecutor,
+    SourceStateTableHandler, StreamSourceCore,
+};
+use crate::from_proto::source::is_full_reload_refresh;
 
-const FS_CONNECTORS: &[&str] = &["s3"];
 pub struct SourceExecutorBuilder;
 
 pub fn create_source_desc_builder(
-    source_type: &str, // "source" or "source backfill"
-    source_id: &TableId,
     mut source_columns: Vec<PbColumnCatalog>,
     params: &ExecutorParams,
     source_info: PbStreamSourceInfo,
@@ -110,15 +110,13 @@ pub fn create_source_desc_builder(
         });
     }
 
-    telemetry_source_build(source_type, source_id, &source_info, &with_properties);
-
     SourceDescBuilder::new(
         source_columns.clone(),
         params.env.source_metrics(),
         row_id_index.map(|x| x as _),
         with_properties,
         source_info,
-        params.env.config().developer.connector_message_buffer_size,
+        params.config.developer.connector_message_buffer_size,
         // `pk_indices` is used to ensure that a message will be skipped instead of parsed
         // with null pk when the pk column is missing.
         //
@@ -126,9 +124,9 @@ pub fn create_source_desc_builder(
         // passed via `StreamSource` so null pk may be emitted to downstream.
         //
         // TODO: use the correct information to fill in pk_dicies.
-        // We should consdier add back the "pk_column_ids" field removed by #8841 in
+        // We should consider add back the "pk_column_ids" field removed by #8841 in
         // StreamSource
-        params.info.pk_indices.clone(),
+        params.info.stream_key.clone(),
     )
 }
 
@@ -141,16 +139,17 @@ impl ExecutorBuilder for SourceExecutorBuilder {
         store: impl StateStore,
     ) -> StreamResult<Executor> {
         let barrier_receiver = params
-            .shared_context
             .local_barrier_manager
             .subscribe_barrier(params.actor_context.id);
         let system_params = params.env.system_params_manager_ref().get_params();
 
         if let Some(source) = &node.source_inner {
+            let is_full_reload_refresh = is_full_reload_refresh(&source.refresh_mode);
             let exec = {
-                let source_id = TableId::new(source.source_id);
+                let source_id = source.source_id;
                 let source_name = source.source_name.clone();
                 let mut source_info = source.get_info()?.clone();
+                let associated_table_id = source.associated_table_id;
 
                 if source_info.format_encode_options.is_empty() {
                     // compatible code: quick fix for <https://github.com/risingwavelabs/risingwave/issues/14755>,
@@ -170,8 +169,6 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 );
 
                 let source_desc_builder = create_source_desc_builder(
-                    "source",
-                    &source_id,
                     source.columns.clone(),
                     &params,
                     source_info,
@@ -198,41 +195,111 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     state_table_handler,
                 );
 
-                let connector = get_connector_name(&source.with_properties);
-                let is_fs_connector = FS_CONNECTORS.contains(&connector.as_str());
+                let is_legacy_fs_connector = source.with_properties.is_legacy_fs_connector();
                 let is_fs_v2_connector = source.with_properties.is_new_fs_connector();
 
-                if is_fs_connector {
-                    #[expect(deprecated)]
-                    crate::executor::source::FsSourceExecutor::new(
-                        params.actor_context.clone(),
-                        stream_source_core,
-                        params.executor_stats,
-                        barrier_receiver,
-                        system_params,
-                        source.rate_limit,
-                    )?
-                    .boxed()
+                if is_legacy_fs_connector {
+                    // Changed to default since v2.0 https://github.com/risingwavelabs/risingwave/pull/17963
+                    bail!(
+                        "legacy s3 connector is fully deprecated since v2.4.0, please DROP and recreate the s3 source.\nexecutor: {:?}",
+                        params
+                    );
                 } else if is_fs_v2_connector {
                     FsListExecutor::new(
                         params.actor_context.clone(),
-                        Some(stream_source_core),
+                        stream_source_core,
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
                         source.rate_limit,
                     )
                     .boxed()
+                } else if source.with_properties.is_iceberg_connector() {
+                    if is_full_reload_refresh {
+                        BatchIcebergListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            source
+                                .downstream_columns
+                                .as_ref()
+                                .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            params.local_barrier_manager.clone(),
+                            associated_table_id,
+                        )
+                        .boxed()
+                    } else {
+                        IcebergListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            source
+                                .downstream_columns
+                                .as_ref()
+                                .map(|x| x.columns.clone().into_iter().map(|c| c.into()).collect()),
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            system_params,
+                            source.rate_limit,
+                            params.config.clone(),
+                        )
+                        .boxed()
+                    }
+                } else if source.with_properties.is_batch_connector() {
+                    if source
+                        .with_properties
+                        .get_connector()
+                        .map(|c| {
+                            c.eq_ignore_ascii_case(
+                                risingwave_connector::source::BATCH_POSIX_FS_CONNECTOR,
+                            )
+                        })
+                        .unwrap_or(false)
+                    {
+                        BatchPosixFsListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            system_params,
+                            source.rate_limit,
+                            params.local_barrier_manager.clone(),
+                            associated_table_id,
+                        )
+                        .boxed()
+                    } else if source
+                        .with_properties
+                        .get_connector()
+                        .map(|c| {
+                            c.eq_ignore_ascii_case(
+                                risingwave_connector::source::ADBC_SNOWFLAKE_CONNECTOR,
+                            )
+                        })
+                        .unwrap_or(false)
+                    {
+                        BatchAdbcSnowflakeListExecutor::new(
+                            params.actor_context.clone(),
+                            stream_source_core,
+                            params.executor_stats.clone(),
+                            barrier_receiver,
+                            params.local_barrier_manager.clone(),
+                            associated_table_id,
+                        )
+                        .boxed()
+                    } else {
+                        unreachable!("unknown batch connector");
+                    }
                 } else {
                     let is_shared = source.info.as_ref().is_some_and(|info| info.is_shared());
                     SourceExecutor::new(
                         params.actor_context.clone(),
-                        Some(stream_source_core),
+                        stream_source_core,
                         params.executor_stats.clone(),
                         barrier_receiver,
                         system_params,
                         source.rate_limit,
-                        is_shared,
+                        is_shared && !source.with_properties.is_cdc_connector(),
+                        params.local_barrier_manager.clone(),
                     )
                     .boxed()
                 }
@@ -245,7 +312,7 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     params.info,
                     TroublemakerExecutor::new(
                         (info, exec).into(),
-                        params.env.config().developer.chunk_size,
+                        params.config.developer.chunk_size,
                     ),
                 )
                     .into())
@@ -253,17 +320,9 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 Ok((params.info, exec).into())
             }
         } else {
-            // If there is no external stream source, then no data should be persisted. We pass a
-            // `PanicStateStore` type here for indication.
-            let exec = SourceExecutor::<PanicStateStore>::new(
-                params.actor_context,
-                None,
-                params.executor_stats,
-                barrier_receiver,
-                system_params,
-                None,
-                false,
-            );
+            // If there is no external stream source, then no data should be persisted.
+            // Use DummySourceExecutor which only forwards barrier messages.
+            let exec = DummySourceExecutor::new(params.actor_context, barrier_receiver);
             Ok((params.info, exec).into())
         }
     }

@@ -6,7 +6,7 @@ rpk topic delete 'avro-union' || true; \
 rpk topic create avro-union
 
 system ok
-sr_register avro-union-value '
+sr_register avro-union-value AVRO <<EOF
 {
   "type": "record",
   "name": "Root",
@@ -36,7 +36,7 @@ sr_register avro-union-value '
     }
   ]
 }
-'
+EOF
 
 system ok
 cat<<EOF | rpk topic produce avro-union --schema-id=topic
@@ -107,7 +107,7 @@ rpk topic delete 'avro-union-simple' || true; \
 rpk topic create avro-union-simple
 
 system ok
-sr_register avro-union-simple-value '
+sr_register avro-union-simple-value AVRO <<EOF
 {
   "type": "record",
   "name": "Root",
@@ -118,7 +118,7 @@ sr_register avro-union-simple-value '
     }
   ]
 }
-'
+EOF
 
 system ok
 cat<<EOF | rpk topic produce avro-union-simple --schema-id=topic

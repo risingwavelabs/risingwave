@@ -17,7 +17,7 @@ system ok
 rpk topic create test-rw-sink-append-only-protobuf-csr-a
 
 system ok
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-append-only-protobuf-csr-a-value' src/connector/src/test_data/test-index-array.proto
+sr_register 'test-rw-sink-append-only-protobuf-csr-a-value' PROTOBUF < src/connector/src/test_data/test-index-array.proto
 
 statement ok
 create table from_kafka_csr_trivial with (
@@ -32,7 +32,7 @@ system ok
 rpk topic create test-rw-sink-append-only-protobuf-csr-hi
 
 system ok
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-append-only-protobuf-csr-hi-value' src/connector/src/test_data/test-index-array.proto
+sr_register 'test-rw-sink-append-only-protobuf-csr-hi-value' PROTOBUF < src/connector/src/test_data/test-index-array.proto
 
 statement ok
 create table from_kafka_csr_nested with (
@@ -71,12 +71,13 @@ create table into_kafka (
   nested_message_field struct<id int, name varchar>,
   repeated_int_field int[],
   timestamp_field timestamptz,
+  enum_field varchar,
   oneof_int32 int);
 
 statement ok
 insert into into_kafka values
-  (true, 'Rising', 'a0', 3.5, 4.25, 22, 23, 24, null, 26, 27, row(1, ''), array[4, 0, 4], '2006-01-02 15:04:05-07:00', 42),
-  (false, 'Wave', 'ZDF', 1.5, null, 11, 12, 13, 14, 15, 16, row(4, 'foo'), null, null, null);
+  (true, 'Rising', 'a0', 3.5, 4.25, 22, 23, 24, null, 26, 27, row(1, ''), array[4, 0, 4], '2006-01-02 15:04:05-07:00', null, 42),
+  (false, 'Wave', 'ZDF', 1.5, null, 11, 12, 13, 14, 15, 16, row(4, 'foo'), null, null, 'OPTION2', null);
 
 statement ok
 flush;
@@ -111,6 +112,16 @@ format plain encode protobuf (
   schema.registry = 'http://schemaregistry:8082',
   message = 'test.package.MessageH.MessageI');
 
+statement error message test.package.Message not defined in proto
+create sink sink_invalid_message from into_kafka with (
+  connector = 'kafka',
+  topic = 'test-rw-sink-append-only-protobuf-csr-a',
+  properties.bootstrap.server = 'message_queue:29092')
+format plain encode protobuf (
+  force_append_only = true,
+  schema.registry = 'http://schemaregistry:8082',
+  message = 'test.package.Message');
+
 statement error
 create sink sink_upsert from into_kafka with (
   connector = 'kafka',
@@ -124,7 +135,7 @@ format upsert encode protobuf (
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSink`) failed: Internal error
   2: failed to validate sink
   3: config error
   4: sink format/encode/key_encode unsupported: Upsert Protobuf None
@@ -145,9 +156,8 @@ key encode text;
 statement ok
 delete from into_kafka where bool_field;
 
-sleep 2s
 
-query TTTRRIIIIIITTTI
+query TTTRRIIIIIITTTI retry 4 backoff 1s
 select
   bool_field,
   string_field,
@@ -163,24 +173,25 @@ select
   nested_message_field,
   repeated_int_field,
   timestamp_field,
+  enum_field,
   oneof_int32 from from_kafka order by string_field;
 ----
-t Rising \x6130   3.5 4.25 22 23 24  0 26 27 (1,"")  {4,0,4} (1136239445,0) 42
-f Wave   \x5a4446 1.5 0    11 12 13 14 15 16 (4,foo) {}               (0,0)  0
+t Rising \x6130   3.5 4.25 22 23 24  0 26 27 (1,"")  {4,0,4} (1136239445,0) DEFAULT 42
+f Wave   \x5a4446 1.5 0    11 12 13 14 15 16 (4,foo) {}               NULL  OPTION2 NULL
 
-query T
+query T retry 4 backoff 1s
 select field_a from from_kafka_csr_trivial order by 1;
 ----
 Rising
 Wave
 
-query I
+query I retry 4 backoff 1s
 select field_i from from_kafka_csr_nested order by 1;
 ----
 13
 24
 
-query T
+query T retry 4 backoff 1s
 select convert_from(kafka_key, 'utf-8') from from_kafka_raw where kafka_value is null;
 ----
 Rising

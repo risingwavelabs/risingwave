@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,8 @@
 
 use std::sync::Arc;
 
+use risingwave_common::id::TableId;
+
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::ActorId;
 
@@ -28,7 +30,7 @@ pub struct MetricsInfo {
 impl MetricsInfo {
     pub fn new(
         metrics: Arc<StreamingMetrics>,
-        table_id: u32,
+        table_id: TableId,
         actor_id: ActorId,
         desc: impl Into<String>,
     ) -> Self {
@@ -43,9 +45,9 @@ impl MetricsInfo {
     pub fn for_test() -> Self {
         Self {
             metrics: Arc::new(StreamingMetrics::unused()),
-            table_id: "table_id test".to_string(),
-            actor_id: "actor_id test".to_string(),
-            desc: "desc test".to_string(),
+            table_id: "table_id test".to_owned(),
+            actor_id: "actor_id test".to_owned(),
+            desc: "desc test".to_owned(),
         }
     }
 }

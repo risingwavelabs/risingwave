@@ -19,12 +19,10 @@
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>
-            <version>${jackson.version}</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-core</artifactId>
-            <version>${jackson.version}</version>
         </dependency>
         <dependency>
             <groupId>io.debezium</groupId>
@@ -51,7 +49,10 @@
             <groupId>io.debezium</groupId>
             <artifactId>debezium-connector-sqlserver</artifactId>
         </dependency>
-
+                <dependency>
+            <groupId>com.risingwave</groupId>
+            <artifactId>java-binding</artifactId>
+        </dependency>
         <!-- database dependencies  -->
         <dependency>
             <groupId>com.mysql</groupId>
@@ -61,15 +62,11 @@
             <groupId>com.zendesk</groupId>
             <artifactId>mysql-binlog-connector-java</artifactId>
             <!-- https://central.sonatype.com/artifact/com.zendesk/mysql-binlog-connector-java/versions -->
-            <version>0.29.0</version>
+            <version>0.30.1</version>
         </dependency>
         <dependency>
             <groupId>org.postgresql</groupId>
             <artifactId>postgresql</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>org.mongodb</groupId>
-            <artifactId>mongodb-driver-sync</artifactId>
         </dependency>
     </dependencies>
 </project>

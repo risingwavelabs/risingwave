@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,22 +15,25 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use fail::fail_point;
+use futures::{StreamExt, stream};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{
-    HummockContextId, HummockSstableObjectId, HummockVersionId, LocalSstableInfo,
-    INVALID_VERSION_ID,
+    HummockContextId, HummockSstableObjectId, HummockVersionId, INVALID_VERSION_ID,
+    LocalSstableInfo,
 };
+use risingwave_meta_model::hummock_gc_history;
 use risingwave_pb::hummock::{HummockPinnedVersion, ValidationTask};
+use sea_orm::{DatabaseConnection, EntityTrait};
 
 use crate::controller::SqlMetaStore;
+use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::worker::{HummockManagerEvent, HummockManagerEventSender};
 use crate::hummock::manager::{commit_multi_var, start_measure_real_process_timer};
 use crate::hummock::metrics_utils::trigger_pin_unpin_version_state;
-use crate::hummock::HummockManager;
-use crate::manager::{MetadataManager, META_NODE_ID};
+use crate::manager::{META_NODE_ID, MetadataManager};
 use crate::model::BTreeMapTransaction;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -145,7 +148,7 @@ impl ContextInfo {
         metadata_manager: &MetadataManager,
     ) -> Result<bool> {
         Ok(metadata_manager
-            .get_worker_by_id(context_id as _)
+            .get_worker_by_id(context_id)
             .await
             .map_err(|err| Error::MetaStore(err.into()))?
             .is_some())
@@ -216,23 +219,22 @@ impl HummockManager {
 
         // sanity check on monotonically increasing table committed epoch
         for (table_id, committed_epoch) in tables_to_commit {
-            if let Some(info) = current_version.state_table_info.info().get(table_id) {
-                if *committed_epoch <= info.committed_epoch {
-                    return Err(anyhow::anyhow!(
-                        "table {} Epoch {} <= committed_epoch {}",
-                        table_id,
-                        committed_epoch,
-                        info.committed_epoch,
-                    )
-                    .into());
-                }
+            if let Some(info) = current_version.state_table_info.info().get(table_id)
+                && *committed_epoch <= info.committed_epoch
+            {
+                return Err(anyhow::anyhow!(
+                    "table {} Epoch {} <= committed_epoch {}",
+                    table_id,
+                    committed_epoch,
+                    info.committed_epoch,
+                )
+                .into());
             }
         }
 
         // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
         if !sstables.is_empty() {
             // Sanity check to ensure SSTs to commit have not been full GCed yet.
-            // TODO: since HummockManager::complete_full_gc have already filtered out SSTs by min uncommitted SST id, this sanity check can be removed.
             let now = self.now().await?;
             check_sst_retention(
                 now,
@@ -241,6 +243,10 @@ impl HummockManager {
                     .iter()
                     .map(|s| (s.sst_info.object_id, s.created_at)),
             )?;
+            if self.env.opts.gc_history_retention_time_sec != 0 {
+                let ids = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
+                check_gc_history(&self.meta_store_ref().conn, ids).await?;
+            }
         }
 
         async {
@@ -264,7 +270,10 @@ impl HummockManager {
             if compactor
                 .send_event(ResponseEvent::ValidationTask(ValidationTask {
                     sst_infos: sst_infos.into_iter().map(|sst| sst.into()).collect_vec(),
-                    sst_id_to_worker_id: sst_to_context.clone(),
+                    sst_id_to_worker_id: sst_to_context
+                        .iter()
+                        .map(|(object_id, worker_id)| (object_id.inner(), worker_id.as_raw_id()))
+                        .collect(),
                 }))
                 .is_err()
             {
@@ -292,7 +301,12 @@ impl HummockManager {
             now,
             self.env.opts.min_sst_retention_time_sec,
             object_timestamps.iter().map(|(k, v)| (*k, *v)),
-        )
+        )?;
+        if self.env.opts.gc_history_retention_time_sec != 0 {
+            let ids = object_timestamps.keys().copied().collect_vec();
+            check_gc_history(&self.meta_store_ref().conn, ids).await?;
+        }
+        Ok(())
     }
 }
 
@@ -308,6 +322,34 @@ fn check_sst_retention(
         }
     }
     Ok(())
+}
+
+async fn check_gc_history(
+    db: &DatabaseConnection,
+    // need IntoIterator to work around stream's "implementation of `std::iter::Iterator` is not general enough" error.
+    object_ids: impl IntoIterator<Item = HummockSstableObjectId>,
+) -> Result<()> {
+    let futures = object_ids.into_iter().map(|id| async move {
+        let id: risingwave_meta_model::HummockSstableObjectId = id.inner().try_into().unwrap();
+        hummock_gc_history::Entity::find_by_id(id)
+            .one(db)
+            .await
+            .map_err(Error::from)
+    });
+    let res: Vec<_> = stream::iter(futures).buffer_unordered(10).collect().await;
+    let res: Result<Vec<_>> = res.into_iter().collect();
+    let mut expired_object_ids = res?.into_iter().flatten().peekable();
+    if expired_object_ids.peek().is_none() {
+        return Ok(());
+    }
+    let expired_object_ids: Vec<_> = expired_object_ids.collect();
+    tracing::error!(
+        ?expired_object_ids,
+        "new SSTs are rejected because they have already been GCed"
+    );
+    Err(Error::InvalidSst(
+        (expired_object_ids[0].object_id as u64).into(),
+    ))
 }
 
 // pin and unpin method

@@ -1,0 +1,26 @@
+# ---- External Python UDF ----
+
+system ok
+python3 e2e_test/udf/remote_python/test.py &
+
+# wait for server to start
+sleep 1s
+
+include ./test.slt.part
+include ./determinism.slt.part
+
+system ok
+pkill -f e2e_test/udf/remote_python/test.py
+
+# ---- External Java UDF ----
+
+system ok
+java --add-opens=java.base/java.nio=org.apache.arrow.memory.core,ALL-UNNAMED -jar e2e_test/udf/remote_java/target/udf.jar &
+
+# wait for server to start
+sleep 1s
+
+include ./test.slt.part
+
+system ok
+pkill -f e2e_test/udf/remote_java/target/udf.jar

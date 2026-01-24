@@ -1,10 +1,14 @@
 version: 2
 updates:
+- package-ecosystem: github-actions
+  directory: "/"
+  schedule:
+    interval: "weekly"
 - package-ecosystem: cargo
   directory: /
   schedule:
     interval: "daily"
-  open-pull-requests-limit: 10
+  open-pull-requests-limit: 50
   # Disable auto rebase to reduce cost. Use `@dependabot rebase` manually instead.
   rebase-strategy: "disabled"
   ignore:
@@ -12,17 +16,26 @@ updates:
     - dependency-name: "*"
       update-types: ["version-update:semver-patch"]
     # Ignore arrow crates. It does major releases frequently: https://github.com/apache/arrow-rs/issues/5368
-    # We depend on arrow directly, and also many other crates depending on arrow, including icelake, deltalake, arrow-udf, ...
+    # We depend on arrow directly, and also many other crates depending on arrow, including deltalake, arrow-udf, ...
     # It will always need human intervention, and we'd better be the last one to update arrow.
     - dependency-name: "arrow*"
       update-types: ["version-update:semver-minor", "version-update:semver-major"]
     - dependency-name: "parquet"
       update-types: ["version-update:semver-minor", "version-update:semver-major"]
+    # bump sqllogictest manually together with sqllogictest-bin in CI docker image
+    - dependency-name: "sqllogictest"
+      update-types: ["version-update:semver-minor", "version-update:semver-major"]
   # Create a group of dependencies to be updated together in one pull request
   groups:
     aws:
       patterns:
-        - "aws*"
+        - "aws-*"
+      exclude-patterns:
+        - "aws-lc-*"
+        - "aws-msk-iam-sasl-signer"
+    adbc:
+      patterns:
+        - "adbc_*"
     tonic:
       patterns:
         - "tonic*"
@@ -32,6 +45,7 @@ updates:
         - "opentelemetry"
         - "opentelemetry*"
         - "tracing-opentelemetry"
+        - "fastrace-opentelemetry"
     mysql:
       patterns:
         - "mysql_common"
@@ -39,10 +53,57 @@ updates:
     google-cloud:
       patterns:
         - "google-cloud*"
+    rand:
+      patterns:
+        - "rand"
+        - "rand_chacha"
+    strum:
+      patterns:
+        - "strum"
+        - "strum_macros"
+    serde:
+      patterns:
+        - "serde"
+        - "serde_derive"
+
 # Don't update these directories
 - package-ecosystem: cargo
   directory: /integration_tests/feature-store
   schedule:
     interval: "daily"
+  ignore:
+    - dependency-name: "*"
+
+- package-ecosystem: maven
+  directory: /java
+  schedule:
+    interval: "weekly"
+  open-pull-requests-limit: 5
+  # Disable auto rebase to reduce cost. Use `@dependabot rebase` manually instead.
+  rebase-strategy: "disabled"
+  ignore:
+    # Do not bump Debezium because we have hacked its source code e.g. #18760
+    - dependency-name: "io.debezium:*"
+      update-types:
+        ["version-update:semver-minor", "version-update:semver-major"]
+    # Don't upgrade protobuf to 4.x now. See https://github.com/grpc/grpc-java/issues/11015
+    - dependency-name: "com.google.protobuf:*"
+      update-types:
+        ["version-update:semver-major"]
+    # Let's do major version updates manually
+    - dependency-name: "*"
+      update-types:
+        ["version-update:semver-major"]
+  groups:
+    # Group all dependencies together because Java libraries are quite stable
+    all:
+      patterns:
+        - "*"
+
+# Don't touch risingwave-sink-deltalake-test. It's too complicated and it's only for testing
+- package-ecosystem: maven
+  directory: /java/connector-node/risingwave-sink-deltalake-test/
+  schedule:
+    interval: "weekly"
   ignore:
     - dependency-name: "*"

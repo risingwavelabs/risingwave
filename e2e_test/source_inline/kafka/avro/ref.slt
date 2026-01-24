@@ -1,0 +1,257 @@
+control substitution on
+
+
+system ok
+rpk topic create avro-ref
+
+
+system ok
+sr_register avro-ref-value AVRO <<EOF
+{
+  "type": "record",
+  "name": "Node",
+  "fields": [
+    {
+      "name": "value",
+      "type": "int"
+    },
+    {
+      "name": "next",
+      "type": ["null", "Node"]
+    }
+  ]
+}
+EOF
+
+
+statement error
+create source s WITH (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'avro-ref') FORMAT PLAIN ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+----
+db error: ERROR: Failed to run the query
+
+Caused by these errors (recent errors listed first):
+  1: connector error
+  2: circular reference detected in Avro schema: Node -> Node
+
+
+# Make sure circular reference does not lead to sink panic (stack overflow)
+# It is not necessary to reject such avro schema, because their SQL type is never circular
+statement ok
+create sink sk as select
+  2 as value, row(3, row(7))::struct<value int, next struct<value int>> as next
+WITH (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'avro-ref') FORMAT PLAIN ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+statement ok
+drop sink sk;
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value"
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value?permanent=true"
+
+
+system ok
+rpk topic delete 'avro-ref'
+
+
+system ok
+rpk topic create avro-ref
+
+
+system ok
+sr_register avro-ref-value AVRO <<EOF
+{
+  "type": "record",
+  "name": "Root",
+  "fields": [
+    {
+      "name": "foo",
+      "type": {
+        "type": "record",
+        "name": "Seg",
+        "fields": [
+          {
+            "name": "a",
+            "type": {
+              "type": "record",
+              "name": "Point",
+              "fields": [
+                {
+                  "name": "x",
+                  "type": "int"
+                },
+                {
+                  "name": "y",
+                  "type": "int"
+                }
+              ]
+            }
+          },
+          {
+            "name": "b",
+            "type": "Point"
+          }
+        ]
+      }
+    },
+    {
+      "name": "bar",
+      "type": "Seg"
+    }
+  ]
+}
+EOF
+
+
+statement ok
+create source s WITH (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'avro-ref') FORMAT PLAIN ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+system ok
+rpk topic produce avro-ref --schema-id=topic <<EOF
+{"foo":{"a":{"x":3,"y":4},"b":{"x":5,"y":6}},"bar":{"a":{"x":6,"y":5},"b":{"x":4,"y":3}}}
+EOF
+
+
+statement ok
+create sink sk as select
+  row(row(6, 7), row(8, 9))::struct<a struct<x int, y int>, b struct<x int, y int>> as foo,
+  row(row(9, 8), row(7, 6))::struct<a struct<x int, y int>, b struct<x int, y int>> as bar WITH
+(${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'avro-ref') FORMAT PLAIN ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+
+
+query IIIIIIII rowsort retry 4 backoff 1s
+select
+  (foo).a.x,
+  (foo).a.y,
+  (foo).b.x,
+  (foo).b.y,
+  (bar).a.x,
+  (bar).a.y,
+  (bar).b.x,
+  (bar).b.y
+from s;
+----
+3 4 5 6 6 5 4 3
+6 7 8 9 9 8 7 6
+
+
+statement ok
+drop sink sk;
+
+
+statement ok
+drop source s;
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value"
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value?permanent=true"
+
+
+system ok
+rpk topic delete 'avro-ref'
+
+
+system ok
+rpk topic create avro-ref
+
+
+system ok
+sr_register avro-ref-value AVRO <<EOF
+{
+  "type": "record",
+  "name": "Root",
+  "fields": [
+    {
+      "name": "foo",
+      "type": {
+        "type": "record",
+        "name": "Seg",
+        "fields": [
+          {
+            "name": "a",
+            "type": {
+              "type": "record",
+              "name": "Point",
+              "fields": [
+                {
+                  "name": "x",
+                  "type": {
+                    "type": "bytes",
+                    "logicalType": "decimal",
+                    "precision": 4,
+                    "scale": 2
+                  }
+                },
+                {
+                  "name": "y",
+                  "type": "int"
+                }
+              ]
+            }
+          },
+          {
+            "name": "b",
+            "type": "Point"
+          }
+        ]
+      }
+    },
+    {
+      "name": "bar",
+      "type": "Seg"
+    }
+  ]
+}
+EOF
+
+
+statement ok
+create source s WITH (${RISEDEV_KAFKA_WITH_OPTIONS_COMMON}, topic = 'avro-ref') FORMAT PLAIN ENCODE AVRO (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
+
+
+system ok
+rpk topic produce avro-ref --schema-id=topic <<EOF
+{"foo":{"a":{"x":"\u0001\u002c","y":4},"b":{"x":"\u0001\u00f4","y":6}},"bar":{"a":{"x":"\u0002\u0058","y":5},"b":{"x":"\u0001\u0090","y":3}}}
+EOF
+
+
+query RIRIRIRI
+select
+  (foo).a.x,
+  (foo).a.y,
+  (foo).b.x,
+  (foo).b.y,
+  (bar).a.x,
+  (bar).a.y,
+  (bar).b.x,
+  (bar).b.y
+from s;
+----
+3.00 4 5.00 6 6.00 5 4.00 3
+
+
+statement ok
+drop source s;
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value"
+
+
+system ok
+curl -X DELETE "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/avro-ref-value?permanent=true"
+
+
+system ok
+rpk topic delete 'avro-ref'

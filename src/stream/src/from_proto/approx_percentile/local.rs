@@ -33,7 +33,7 @@ impl ExecutorBuilder for LocalApproxPercentileExecutorBuilder {
             input,
             node.base,
             node.percentile_index as usize,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
         )
         .boxed();
         Ok(Executor::new(params.info, exec))

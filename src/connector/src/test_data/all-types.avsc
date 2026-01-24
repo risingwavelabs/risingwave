@@ -54,12 +54,6 @@
           "name": "Int256",
           "size": 32
         }]},
-        {"name": "decimal_field", "type": ["null", {
-          "type": "bytes",
-          "logicalType": "decimal",
-          "precision": 38,
-          "scale": 10
-        }]},
         {"name": "uuid_field", "type": ["null", {"type": "string", "logicalType": "uuid"}]},
         {"name": "local_micros_field", "type": ["null", {"type": "long", "logicalType": "local-timestamp-micros"}]},
         {"name": "local_millis_field", "type": ["null", {"type": "long", "logicalType": "local-timestamp-millis"}]}

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use risingwave_pb::hummock::compact_task;
 use super::{CompactionSelector, DynamicLevelSelectorCore};
 use crate::hummock::compaction::picker::{EmergencyCompactionPicker, LocalPickerStatistic};
 use crate::hummock::compaction::selector::CompactionSelectorContext;
-use crate::hummock::compaction::{create_compaction_task, CompactionTask};
+use crate::hummock::compaction::{CompactionTask, create_compaction_task};
 
 #[derive(Default)]
 pub struct EmergencySelector {}

@@ -20,6 +20,11 @@ statement ok
 create index tab_idx on tab(num desc);
 
 query T
+select pg_get_indexdef(('"' || current_database() || '".' || 'public.tab_idx')::regclass);
+----
+CREATE INDEX tab_idx ON tab(num DESC)
+
+query T
 select pg_get_indexdef('tab_idx'::regclass);
 ----
 CREATE INDEX tab_idx ON tab(num DESC)
@@ -67,6 +72,16 @@ create materialized view tab_mv as select a.c ac, b.c bc from tab as a join tab 
 
 query T
 select pg_get_viewdef('tab_mv'::regclass);
+----
+SELECT a.c AS ac, b.c AS bc FROM tab AS a JOIN tab AS b ON a.a = b.b
+
+query T
+select pg_get_viewdef('tab_mv'::regclass, false);
+----
+SELECT a.c AS ac, b.c AS bc FROM tab AS a JOIN tab AS b ON a.a = b.b
+
+query T
+select pg_get_viewdef('tab_mv'::regclass, true);
 ----
 SELECT a.c AS ac, b.c AS bc FROM tab AS a JOIN tab AS b ON a.a = b.b
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,15 @@ use fixedbitset::FixedBitSet;
 
 use crate::binder::BoundInsert;
 use crate::error::Result;
-use crate::optimizer::plan_node::{generic, LogicalInsert, LogicalProject, PlanRef};
+use crate::optimizer::plan_node::{
+    LogicalInsert, LogicalPlanRef as PlanRef, LogicalProject, generic,
+};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::optimizer::PlanRoot;
+use crate::optimizer::{LogicalPlanRoot, PlanRoot};
 use crate::planner::Planner;
 
 impl Planner {
-    pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<PlanRoot> {
+    pub(super) fn plan_insert(&mut self, insert: BoundInsert) -> Result<LogicalPlanRoot> {
         let mut input = self.plan_query(insert.source)?.into_unordered_subplan();
         if !insert.cast_exprs.is_empty() {
             input = LogicalProject::create(input, insert.cast_exprs);

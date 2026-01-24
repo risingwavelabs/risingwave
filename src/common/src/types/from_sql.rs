@@ -33,13 +33,29 @@ impl<'a> FromSql<'a> for ScalarImpl {
             Type::TIME => ScalarImpl::from(Time::from_sql(ty, raw)?),
             Type::TIMESTAMP => ScalarImpl::from(Timestamp::from_sql(ty, raw)?),
             Type::TIMESTAMPTZ => ScalarImpl::from(Timestamptz::from_sql(ty, raw)?),
-            Type::JSONB => ScalarImpl::from(JsonbVal::from_sql(ty, raw)?),
+            Type::JSON | Type::JSONB => ScalarImpl::from(JsonbVal::from_sql(ty, raw)?),
             Type::INTERVAL => ScalarImpl::from(Interval::from_sql(ty, raw)?),
             Type::BYTEA => ScalarImpl::from(Vec::<u8>::from_sql(ty, raw)?.into_boxed_slice()),
-            Type::VARCHAR | Type::TEXT => ScalarImpl::from(String::from_sql(ty, raw)?),
+            Type::VARCHAR | Type::TEXT | Type::BPCHAR => {
+                ScalarImpl::from(String::from_sql(ty, raw)?)
+            }
+            ref ty
+                if (ty.name() == "citext"
+                    || ty.name() == "ltree"
+                    || ty.name() == "lquery"
+                    || ty.name() == "ltxtquery") =>
+            {
+                ScalarImpl::from(String::from_sql(ty, raw)?)
+            }
+            // PostGIS geometry type: read as EWKB bytes
+            ref ty if ty.name() == "geometry" => {
+                ScalarImpl::from(Vec::<u8>::from_sql(ty, raw)?.into_boxed_slice())
+            }
             // Serial, Int256, Struct, List and Decimal are not supported here
             // Note: The Decimal type is specially handled in the `ScalarAdapter`.
-            _ => bail_not_implemented!("the postgres decoding for {ty} is unsupported"),
+            _ => {
+                bail_not_implemented!("the postgres decoding for {ty} is unsupported")
+            }
         })
     }
 
@@ -56,11 +72,17 @@ impl<'a> FromSql<'a> for ScalarImpl {
                 | Type::TIME
                 | Type::TIMESTAMP
                 | Type::TIMESTAMPTZ
+                | Type::JSON
                 | Type::JSONB
                 | Type::INTERVAL
                 | Type::BYTEA
                 | Type::VARCHAR
                 | Type::TEXT
-        )
+                | Type::BPCHAR
+        ) || (ty.name() == "citext"
+            || ty.name() == "ltree"
+            || ty.name() == "lquery"
+            || ty.name() == "ltxtquery"
+            || ty.name() == "geometry")
     }
 }

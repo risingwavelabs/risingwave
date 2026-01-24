@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
+
 use either::Either;
 use pgwire::pg_response::StatementType;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
@@ -21,9 +23,14 @@ use risingwave_sqlparser::ast::{ColumnDef, ObjectName, OnConflict, Query, Statem
 use super::{HandlerArgs, RwPgResponse};
 use crate::binder::BoundStatement;
 use crate::error::{ErrorCode, Result};
-use crate::handler::create_table::{gen_create_table_plan_without_source, ColumnIdGenerator};
+use crate::handler::create_table::{
+    ColumnIdGenerator, CreateTableProps, gen_create_table_plan_without_source,
+};
 use crate::handler::query::handle_query;
-use crate::{build_graph, Binder, OptimizerContext};
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
+use crate::stream_fragmenter::GraphJobType;
+use crate::{Binder, OptimizerContext, build_graph};
+
 pub async fn handle_create_as(
     handler_args: HandlerArgs,
     table_name: ObjectName,
@@ -32,7 +39,8 @@ pub async fn handle_create_as(
     column_defs: Vec<ColumnDef>,
     append_only: bool,
     on_conflict: Option<OnConflict>,
-    with_version_column: Option<String>,
+    with_version_columns: Vec<String>,
+    ast_engine: risingwave_sqlparser::ast::Engine,
 ) -> Result<RwPgResponse> {
     if column_defs.iter().any(|column| column.data_type.is_some()) {
         return Err(ErrorCode::InvalidInputSyntax(
@@ -40,6 +48,11 @@ pub async fn handle_create_as(
         )
         .into());
     }
+    let engine = match ast_engine {
+        risingwave_sqlparser::ast::Engine::Hummock => risingwave_common::catalog::Engine::Hummock,
+        risingwave_sqlparser::ast::Engine::Iceberg => risingwave_common::catalog::Engine::Iceberg,
+    };
+
     let session = handler_args.session.clone();
 
     if let Either::Right(resp) = session.check_relation_name_duplicated(
@@ -54,7 +67,7 @@ pub async fn handle_create_as(
 
     // Generate catalog descs from query
     let mut columns: Vec<_> = {
-        let mut binder = Binder::new(&session);
+        let mut binder = Binder::new_for_batch(&session);
         let bound = binder.bind(Statement::Query(query.clone()))?;
         if let BoundStatement::Query(query) = bound {
             // Create ColumnCatelog by Field
@@ -62,12 +75,9 @@ pub async fn handle_create_as(
                 .schema()
                 .fields()
                 .iter()
-                .map(|field| {
-                    let id = col_id_gen.generate(&field.name);
-                    ColumnCatalog {
-                        column_desc: ColumnDesc::from_field_with_column_id(field, id.get_id()),
-                        is_hidden: false,
-                    }
+                .map(|field| ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_without_column_id(field),
+                    is_hidden: false,
                 })
                 .collect()
         } else {
@@ -75,24 +85,29 @@ pub async fn handle_create_as(
         }
     };
 
+    // Generate column id.
+    for c in &mut columns {
+        col_id_gen.generate(c)?;
+    }
+
     if column_defs.len() > columns.len() {
         return Err(ErrorCode::InvalidInputSyntax(
-            "too many column names were specified".to_string(),
+            "too many column names were specified".to_owned(),
         )
         .into());
     }
 
-    // Override column name if it specified in creaet statement.
+    // Override column name if it specified in create statement.
     column_defs.iter().enumerate().for_each(|(idx, column)| {
         columns[idx].column_desc.name = column.name.real_value();
     });
 
     let (graph, source, table) = {
         let context = OptimizerContext::from_handler_args(handler_args.clone());
-        let (_, secret_refs) = context.with_options().clone().into_parts();
-        if !secret_refs.is_empty() {
+        let (_, secret_refs, connection_refs) = context.with_options().clone().into_parts();
+        if !secret_refs.is_empty() || !connection_refs.is_empty() {
             return Err(crate::error::ErrorCode::InvalidParameterValue(
-                "Secret reference is not allowed in options for CREATE TABLE AS".to_string(),
+                "Secret reference and Connection reference are not allowed in options for CREATE TABLE AS".to_owned(),
             )
             .into());
         }
@@ -102,14 +117,20 @@ pub async fn handle_create_as(
             columns,
             vec![],
             vec![],
-            "".to_owned(), // TODO: support `SHOW CREATE TABLE` for `CREATE TABLE AS`
-            vec![],        // No watermark should be defined in for `CREATE TABLE AS`
-            append_only,
-            on_conflict,
-            with_version_column,
-            Some(col_id_gen.into_version()),
+            vec![], // No watermark should be defined in for `CREATE TABLE AS`
+            col_id_gen.into_version(),
+            CreateTableProps {
+                // Note: by providing and persisting an empty definition, querying the definition of the table
+                // will hit the purification logic, which will construct it based on the catalog.
+                definition: "".to_owned(),
+                append_only,
+                on_conflict: on_conflict.into(),
+                with_version_columns,
+                webhook_info: None,
+                engine,
+            },
         )?;
-        let graph = build_graph(plan)?;
+        let graph = build_graph(plan, Some(GraphJobType::Table))?;
 
         (graph, None, table)
     };
@@ -121,9 +142,20 @@ pub async fn handle_create_as(
     );
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_table(source, table, graph, TableJobType::Unspecified)
-        .await?;
+    execute_with_long_running_notification(
+        catalog_writer.create_table(
+            source,
+            table.to_prost(),
+            graph,
+            TableJobType::Unspecified,
+            if_not_exists,
+            HashSet::default(),
+        ),
+        &session,
+        "CREATE TABLE AS",
+        LongRunningNotificationAction::DiagnoseBarrierLatency,
+    )
+    .await?;
 
     // Generate insert
     let insert = Statement::Insert {

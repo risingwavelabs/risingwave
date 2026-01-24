@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::plan_common::JoinType;
 
-use super::Rule;
+use super::prelude::{PlanRef, *};
 use crate::expr::{ExprRewriter, InputRef};
 use crate::optimizer::plan_node::{LogicalJoin, LogicalProject};
 use crate::utils::IndexRewriter;
@@ -31,8 +31,8 @@ use crate::utils::IndexRewriter;
 /// columns that are output in the original `join`.
 pub struct JoinProjectTransposeRule {}
 
-impl Rule for JoinProjectTransposeRule {
-    fn apply(&self, plan: crate::PlanRef) -> Option<crate::PlanRef> {
+impl Rule<Logical> for JoinProjectTransposeRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_join()?;
 
         let (left, right, on, join_type, _) = join.clone().decompose();
@@ -162,7 +162,7 @@ impl Rule for JoinProjectTransposeRule {
 }
 
 impl JoinProjectTransposeRule {
-    pub fn create() -> Box<dyn Rule> {
+    pub fn create() -> BoxedRule {
         Box::new(JoinProjectTransposeRule {})
     }
 }

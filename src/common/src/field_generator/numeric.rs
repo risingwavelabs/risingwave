@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@ use std::fmt::Debug;
 use std::str::FromStr;
 
 use anyhow::Result;
-use rand::distributions::uniform::SampleUniform;
+use rand::distr::uniform::SampleUniform;
 use rand::rngs::StdRng;
 use rand::{Rng, SeedableRng};
 use serde_json::json;
 
 use crate::field_generator::{NumericFieldRandomGenerator, NumericFieldSequenceGenerator};
-use crate::types::{Datum, Scalar, F32, F64};
+use crate::types::{Datum, F32, F64, Scalar};
 
 trait NumericType
 where
@@ -88,13 +88,13 @@ where
 
     fn generate(&mut self, offset: u64) -> serde_json::Value {
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
-        let result = rng.gen_range(self.min..=self.max);
+        let result = rng.random_range(self.min..=self.max);
         json!(result)
     }
 
     fn generate_datum(&mut self, offset: u64) -> Datum {
         let mut rng = StdRng::seed_from_u64(offset ^ self.seed);
-        let result = rng.gen_range(self.min..=self.max);
+        let result = rng.random_range(self.min..=self.max);
         Some(result.to_scalar_value())
     }
 }
@@ -203,7 +203,7 @@ mod tests {
     #[test]
     fn test_sequence_field_generator() {
         let mut i16_field =
-            I16SequenceField::new(Some("5".to_string()), Some("10".to_string()), 0, 1, 0).unwrap();
+            I16SequenceField::new(Some("5".to_owned()), Some("10".to_owned()), 0, 1, 0).unwrap();
         for i in 5..=10 {
             assert_eq!(i16_field.generate(), json!(i));
         }
@@ -211,7 +211,7 @@ mod tests {
     #[test]
     fn test_random_field_generator() {
         let mut i64_field =
-            I64RandomField::new(Some("5".to_string()), Some("10".to_string()), 114).unwrap();
+            I64RandomField::new(Some("5".to_owned()), Some("10".to_owned()), 114).unwrap();
         for i in 0..100 {
             let res = i64_field.generate(i as u64);
             assert!(res.is_number());
@@ -231,7 +231,7 @@ mod tests {
     #[test]
     fn test_sequence_datum_generator() {
         let mut f32_field =
-            F32SequenceField::new(Some("5.0".to_string()), Some("10.0".to_string()), 0, 1, 0)
+            F32SequenceField::new(Some("5.0".to_owned()), Some("10.0".to_owned()), 0, 1, 0)
                 .unwrap();
 
         for i in 5..=10 {
@@ -244,7 +244,7 @@ mod tests {
     #[test]
     fn test_random_datum_generator() {
         let mut i32_field =
-            I32RandomField::new(Some("-5".to_string()), Some("5".to_string()), 123).unwrap();
+            I32RandomField::new(Some("-5".to_owned()), Some("5".to_owned()), 123).unwrap();
         let (lower, upper) = ((-5).to_scalar_value(), 5.to_scalar_value());
         for i in 0..100 {
             let res = i32_field.generate_datum(i as u64);
@@ -257,13 +257,13 @@ mod tests {
     #[test]
     fn test_sequence_field_generator_float() {
         let mut f64_field =
-            F64SequenceField::new(Some("0".to_string()), Some("10".to_string()), 0, 1, 0).unwrap();
+            F64SequenceField::new(Some("0".to_owned()), Some("10".to_owned()), 0, 1, 0).unwrap();
         for i in 0..=10 {
             assert_eq!(f64_field.generate(), json!(i as f64));
         }
 
         let mut f32_field =
-            F32SequenceField::new(Some("-5".to_string()), Some("5".to_string()), 0, 1, 0).unwrap();
+            F32SequenceField::new(Some("-5".to_owned()), Some("5".to_owned()), 0, 1, 0).unwrap();
         for i in -5..=5 {
             assert_eq!(f32_field.generate(), json!(i as f32));
         }
@@ -272,7 +272,7 @@ mod tests {
     #[test]
     fn test_random_field_generator_float() {
         let mut f64_field =
-            F64RandomField::new(Some("5".to_string()), Some("10".to_string()), 114).unwrap();
+            F64RandomField::new(Some("5".to_owned()), Some("10".to_owned()), 114).unwrap();
         for i in 0..100 {
             let res = f64_field.generate(i as u64);
             assert!(res.is_number());
@@ -290,7 +290,7 @@ mod tests {
         }
 
         let mut f32_field =
-            F32RandomField::new(Some("5".to_string()), Some("10".to_string()), 114).unwrap();
+            F32RandomField::new(Some("5".to_owned()), Some("10".to_owned()), 114).unwrap();
         for i in 0..100 {
             let res = f32_field.generate(i as u64);
             assert!(res.is_number());

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,9 +20,9 @@ use risingwave_common::util::sort_util::ColumnOrder;
 use super::generic::{GenericPlanRef, TopNLimit};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ExprRewritable, Logical,
-    PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamProject,
-    ToBatch, ToStream,
+    BatchGroupTopN, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
+    PlanTreeNodeUnary, PredicatePushdown, StreamGroupTopN, StreamPlanRef, StreamProject, ToBatch,
+    ToStream, gen_filter_and_pushdown, generic, try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -103,7 +103,7 @@ impl LogicalTopN {
         self.core.decompose()
     }
 
-    fn gen_dist_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
+    fn gen_dist_stream_top_n_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
         use super::stream::prelude::*;
 
         let input_dist = stream_input.distribution().clone();
@@ -124,19 +124,18 @@ impl LogicalTopN {
         }
     }
 
-    fn gen_single_stream_top_n_plan(&self, stream_input: PlanRef) -> Result<PlanRef> {
-        let input = RequiredDist::single().enforce_if_not_satisfies(stream_input, &Order::any())?;
-        let mut core = self.core.clone();
-        core.input = input;
-        Ok(StreamTopN::new(core).into())
+    fn gen_single_stream_top_n_plan(&self, stream_input: StreamPlanRef) -> Result<StreamPlanRef> {
+        let input = RequiredDist::single().streaming_enforce_if_not_satisfies(stream_input)?;
+        let core = self.core.clone_with_input(input);
+        Ok(StreamTopN::new(core)?.into())
     }
 
     fn gen_vnode_two_phase_stream_top_n_plan(
         &self,
-        stream_input: PlanRef,
+        stream_input: StreamPlanRef,
         dist_key: &[usize],
-    ) -> Result<PlanRef> {
-        // use projectiton to add a column for vnode, and use this column as group key.
+    ) -> Result<StreamPlanRef> {
+        // use projection to add a column for vnode, and use this column as group key.
         let project = StreamProject::new(generic::Project::with_vnode_col(stream_input, dist_key));
         let vnode_col_idx = project.base.schema().len() - 1;
 
@@ -151,10 +150,10 @@ impl LogicalTopN {
             self.topn_order().clone(),
             vec![vnode_col_idx],
         );
-        let local_top_n = StreamGroupTopN::new(local_top_n, Some(vnode_col_idx));
+        let local_top_n = StreamGroupTopN::new(local_top_n, Some(vnode_col_idx))?;
 
         let exchange =
-            RequiredDist::single().enforce_if_not_satisfies(local_top_n.into(), &Order::any())?;
+            RequiredDist::single().streaming_enforce_if_not_satisfies(local_top_n.into())?;
 
         let global_top_n = generic::TopN::without_group(
             exchange,
@@ -162,7 +161,7 @@ impl LogicalTopN {
             self.offset(),
             self.topn_order().clone(),
         );
-        let global_top_n = StreamTopN::new(global_top_n);
+        let global_top_n = StreamTopN::new(global_top_n)?;
 
         // use another projection to remove the column we added before.
         assert_eq!(vnode_col_idx, global_top_n.base.schema().len() - 1);
@@ -172,9 +171,16 @@ impl LogicalTopN {
         ));
         Ok(project.into())
     }
+
+    pub fn clone_with_input_and_prefix(&self, input: PlanRef, prefix: Order) -> Self {
+        let mut core = self.core.clone();
+        core.input = input;
+        core.order = prefix.concat(core.order);
+        core.into()
+    }
 }
 
-impl PlanTreeNodeUnary for LogicalTopN {
+impl PlanTreeNodeUnary<Logical> for LogicalTopN {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -185,7 +191,6 @@ impl PlanTreeNodeUnary for LogicalTopN {
         core.into()
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,
@@ -202,7 +207,7 @@ impl PlanTreeNodeUnary for LogicalTopN {
         (core.into(), input_col_change)
     }
 }
-impl_plan_tree_node_for_unary! {LogicalTopN}
+impl_plan_tree_node_for_unary! { Logical, LogicalTopN}
 impl_distill_by_unit!(LogicalTopN, core, "LogicalTopN");
 
 impl ColPrunable for LogicalTopN {
@@ -275,7 +280,7 @@ impl ColPrunable for LogicalTopN {
     }
 }
 
-impl ExprRewritable for LogicalTopN {}
+impl ExprRewritable<Logical> for LogicalTopN {}
 
 impl ExprVisitable for LogicalTopN {}
 
@@ -291,37 +296,39 @@ impl PredicatePushdown for LogicalTopN {
 }
 
 impl ToBatch for LogicalTopN {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
+        let core = self.core.clone_with_input(new_input);
         if self.group_key().is_empty() {
-            Ok(BatchTopN::new(new_logical).into())
+            Ok(BatchTopN::new(core).into())
         } else {
-            Ok(BatchGroupTopN::new(new_logical).into())
+            Ok(BatchGroupTopN::new(core).into())
         }
     }
 }
 
 impl ToStream for LogicalTopN {
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         if self.offset() != 0 && self.limit_attr().limit() == LIMIT_ALL_COUNT {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "OFFSET without LIMIT in streaming mode".to_string(),
+                "OFFSET without LIMIT in streaming mode".to_owned(),
             )));
         }
         if self.limit_attr().limit() == 0 {
             return Err(RwError::from(ErrorCode::InvalidInputSyntax(
-                "LIMIT 0 in streaming mode".to_string(),
+                "LIMIT 0 in streaming mode".to_owned(),
             )));
         }
         Ok(if !self.group_key().is_empty() {
-            let input = self.input().to_stream(ctx)?;
-            let input = RequiredDist::hash_shard(self.group_key())
-                .enforce_if_not_satisfies(input, &Order::any())?;
-            let mut core = self.core.clone();
-            core.input = input;
-            StreamGroupTopN::new(core, None).into()
+            let logical_input = try_enforce_locality_requirement(self.input(), self.group_key());
+            let input = logical_input.to_stream(ctx)?;
+            let input = RequiredDist::shard_by_key(self.input().schema().len(), self.group_key())
+                .streaming_enforce_if_not_satisfies(input)?;
+            let core = self.core.clone_with_input(input);
+            StreamGroupTopN::new(core, None)?.into()
         } else {
             self.gen_dist_stream_top_n_plan(self.input().to_stream(ctx)?)?
         })
@@ -333,7 +340,20 @@ impl ToStream for LogicalTopN {
     ) -> Result<(PlanRef, ColIndexMapping)> {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (top_n, out_col_change) = self.rewrite_with_input(input, input_col_change);
-        Ok((top_n.into(), out_col_change))
+
+        if self.limit_attr().max_one_row() {
+            // We can use the group key as the stream key when there is at most one record for each
+            // value of the group key. In this case, we can strip the stream key added by the input.
+            // TODO: support `output_indices` in `StreamTopN` or `StreamGroupTopN`.
+            let inv = out_col_change.inverse().unwrap();
+            let project = LogicalProject::with_mapping(top_n.into(), inv);
+            Ok((
+                project.into(),
+                ColIndexMapping::identity(self.schema().len()),
+            ))
+        } else {
+            Ok((top_n.into(), out_col_change))
+        }
     }
 }
 
@@ -343,10 +363,12 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::LogicalTopN;
-    use crate::optimizer::optimizer_context::OptimizerContext;
-    use crate::optimizer::plan_node::{ColPrunable, ColumnPruningContext, LogicalValues};
-    use crate::optimizer::property::Order;
     use crate::PlanRef;
+    use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::{
+        ColPrunable, ColumnPruningContext, LogicalPlanRef, LogicalValues,
+    };
+    use crate::optimizer::property::Order;
 
     #[tokio::test]
     async fn test_prune_col() {
@@ -362,7 +384,7 @@ mod tests {
 
         let original_logical = LogicalTopN::new(input, 1, 0, false, Order::default(), vec![1]);
         assert_eq!(original_logical.group_key(), &[1]);
-        let original_logical: PlanRef = original_logical.into();
+        let original_logical: LogicalPlanRef = original_logical.into();
         let pruned_node = original_logical.prune_col(
             &[0, 1, 2],
             &mut ColumnPruningContext::new(original_logical.clone()),

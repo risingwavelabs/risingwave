@@ -52,9 +52,10 @@ impl<S: StateStore> GlobalApproxPercentileExecutor<S> {
         // Initialize state
         let mut input_stream = self.input.execute();
         let first_barrier = expect_first_barrier(&mut input_stream).await?;
-        let mut state = self.state;
-        state.init(first_barrier.epoch).await?;
+        let first_epoch = first_barrier.epoch;
         yield Message::Barrier(first_barrier);
+        let mut state = self.state;
+        state.init(first_epoch).await?;
 
         // Get row count state, and row_count.
         #[for_await]

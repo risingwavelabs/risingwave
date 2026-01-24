@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,23 +21,23 @@ use std::sync::{Arc, LazyLock};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::INVALID_EPOCH;
-use risingwave_pb::hummock::group_delta::PbDeltaType;
+use risingwave_pb::hummock::group_delta::{DeltaType, PbDeltaType};
 use risingwave_pb::hummock::hummock_version_delta::PbGroupDeltas;
-use risingwave_pb::hummock::{
-    CompactionConfig, PbGroupConstruct, PbGroupDelta, PbGroupDestroy, PbGroupMerge,
-    PbHummockVersion, PbHummockVersionDelta, PbIntraLevelDelta, PbSstableInfo, PbStateTableInfo,
-    StateTableInfo, StateTableInfoDelta,
-};
+use risingwave_pb::hummock::*;
 use tracing::warn;
 
-use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
-use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
+use crate::change_log::{
+    ChangeLogDeltaCommon, EpochNewChangeLogCommon, TableChangeLog, TableChangeLogCommon,
+};
 use crate::compaction_group::StaticCompactionGroupId;
+use crate::compaction_group::hummock_version_ext::build_initial_compaction_group_levels;
 use crate::level::LevelsCommon;
 use crate::sstable_info::SstableInfo;
 use crate::table_watermark::TableWatermarks;
+use crate::vector_index::{VectorIndex, VectorIndexDelta};
 use crate::{
-    CompactionGroupId, HummockEpoch, HummockSstableObjectId, HummockVersionId, FIRST_VERSION_ID,
+    CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockObjectId, HummockSstableId,
+    HummockSstableObjectId, HummockVersionId,
 };
 
 #[derive(Debug, Clone, PartialEq)]
@@ -61,10 +61,11 @@ impl HummockVersionStateTableInfo {
     ) -> HashMap<CompactionGroupId, BTreeSet<TableId>> {
         let mut ret: HashMap<_, BTreeSet<_>> = HashMap::new();
         for (table_id, info) in state_table_info {
-            assert!(ret
-                .entry(info.compaction_group_id)
-                .or_default()
-                .insert(*table_id));
+            assert!(
+                ret.entry(info.compaction_group_id)
+                    .or_default()
+                    .insert(*table_id)
+            );
         }
         ret
     }
@@ -76,10 +77,10 @@ impl HummockVersionStateTableInfo {
             .collect()
     }
 
-    pub fn from_protobuf(state_table_info: &HashMap<u32, PbStateTableInfo>) -> Self {
+    pub fn from_protobuf(state_table_info: &HashMap<TableId, PbStateTableInfo>) -> Self {
         let state_table_info = state_table_info
             .iter()
-            .map(|(table_id, info)| (TableId::new(*table_id), *info))
+            .map(|(table_id, info)| (*table_id, *info))
             .collect();
         let compaction_group_member_tables =
             Self::build_compaction_group_member_tables(&state_table_info);
@@ -87,13 +88,6 @@ impl HummockVersionStateTableInfo {
             state_table_info,
             compaction_group_member_tables,
         }
-    }
-
-    pub fn to_protobuf(&self) -> HashMap<u32, PbStateTableInfo> {
-        self.state_table_info
-            .iter()
-            .map(|(table_id, info)| (table_id.table_id, *info))
-            .collect()
     }
 
     pub fn apply_delta(
@@ -113,9 +107,11 @@ impl HummockVersionStateTableInfo {
                 .expect("should exist");
             assert!(member_tables.remove(&table_id));
             if member_tables.is_empty() {
-                assert!(compaction_group_member_tables
-                    .remove(&compaction_group_id)
-                    .is_some());
+                assert!(
+                    compaction_group_member_tables
+                        .remove(&compaction_group_id)
+                        .is_some()
+                );
             }
         }
         for table_id in removed_table_id {
@@ -128,7 +124,7 @@ impl HummockVersionStateTableInfo {
                 assert!(changed_table.insert(*table_id, Some(prev_info)).is_none());
             } else {
                 warn!(
-                    table_id = table_id.table_id,
+                    %table_id,
                     "table to remove does not exist"
                 );
             }
@@ -147,7 +143,7 @@ impl HummockVersionStateTableInfo {
                     assert!(
                         new_info.committed_epoch >= prev_info.committed_epoch,
                         "state table info regress. table id: {}, prev_info: {:?}, new_info: {:?}",
-                        table_id.table_id,
+                        table_id,
                         prev_info,
                         new_info
                     );
@@ -161,21 +157,23 @@ impl HummockVersionStateTableInfo {
                             prev_info.compaction_group_id,
                             *table_id,
                         );
-                        assert!(self
-                            .compaction_group_member_tables
-                            .entry(new_info.compaction_group_id)
-                            .or_default()
-                            .insert(*table_id));
+                        assert!(
+                            self.compaction_group_member_tables
+                                .entry(new_info.compaction_group_id)
+                                .or_default()
+                                .insert(*table_id)
+                        );
                     }
                     let prev_info = replace(prev_info, new_info);
                     changed_table.insert(*table_id, Some(prev_info));
                 }
                 Entry::Vacant(entry) => {
-                    assert!(self
-                        .compaction_group_member_tables
-                        .entry(new_info.compaction_group_id)
-                        .or_default()
-                        .insert(*table_id));
+                    assert!(
+                        self.compaction_group_member_tables
+                            .entry(new_info.compaction_group_id)
+                            .or_default()
+                            .insert(*table_id)
+                    );
                     has_bumped_committed_epoch = true;
                     entry.insert(new_info);
                     changed_table.insert(*table_id, None);
@@ -216,17 +214,20 @@ impl HummockVersionStateTableInfo {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct HummockVersionCommon<T> {
+pub struct HummockVersionCommon<T, L = T> {
     pub id: HummockVersionId,
     pub levels: HashMap<CompactionGroupId, LevelsCommon<T>>,
     #[deprecated]
     pub(crate) max_committed_epoch: u64,
     pub table_watermarks: HashMap<TableId, Arc<TableWatermarks>>,
-    pub table_change_log: HashMap<TableId, TableChangeLogCommon<T>>,
+    pub table_change_log: HashMap<TableId, TableChangeLogCommon<L>>,
     pub state_table_info: HummockVersionStateTableInfo,
+    pub vector_indexes: HashMap<TableId, VectorIndex>,
 }
 
 pub type HummockVersion = HummockVersionCommon<SstableInfo>;
+
+pub type LocalHummockVersion = HummockVersionCommon<SstableInfo, ()>;
 
 impl Default for HummockVersion {
     fn default() -> Self {
@@ -270,6 +271,21 @@ impl HummockVersion {
                 .values()
                 .map(|table_watermark| table_watermark.estimated_encode_len())
                 .sum::<usize>()
+            + self
+                .table_change_log
+                .values()
+                .map(|c| {
+                    c.iter()
+                        .map(|l| {
+                            l.old_value
+                                .iter()
+                                .chain(l.new_value.iter())
+                                .map(|s| s.estimated_encode_len())
+                                .sum::<usize>()
+                        })
+                        .sum::<usize>()
+                })
+                .sum::<usize>()
     }
 }
 
@@ -293,25 +309,24 @@ where
                 .table_watermarks
                 .iter()
                 .map(|(table_id, table_watermark)| {
-                    (
-                        TableId::new(*table_id),
-                        Arc::new(TableWatermarks::from(table_watermark)),
-                    )
+                    (*table_id, Arc::new(TableWatermarks::from(table_watermark)))
                 })
                 .collect(),
             table_change_log: pb_version
                 .table_change_logs
                 .iter()
                 .map(|(table_id, change_log)| {
-                    (
-                        TableId::new(*table_id),
-                        TableChangeLogCommon::from_protobuf(change_log),
-                    )
+                    (*table_id, TableChangeLogCommon::from_protobuf(change_log))
                 })
                 .collect(),
             state_table_info: HummockVersionStateTableInfo::from_protobuf(
                 &pb_version.state_table_info,
             ),
+            vector_indexes: pb_version
+                .vector_indexes
+                .iter()
+                .map(|(table_id, index)| (*table_id, index.clone().into()))
+                .collect(),
         }
     }
 }
@@ -333,14 +348,19 @@ where
             table_watermarks: version
                 .table_watermarks
                 .iter()
-                .map(|(table_id, watermark)| (table_id.table_id, watermark.as_ref().into()))
+                .map(|(table_id, watermark)| (*table_id, watermark.as_ref().into()))
                 .collect(),
             table_change_logs: version
                 .table_change_log
                 .iter()
-                .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
+                .map(|(table_id, change_log)| (*table_id, change_log.to_protobuf()))
                 .collect(),
-            state_table_info: version.state_table_info.to_protobuf(),
+            state_table_info: version.state_table_info.state_table_info.clone(),
+            vector_indexes: version
+                .vector_indexes
+                .iter()
+                .map(|(table_id, index)| (*table_id, index.clone().into()))
+                .collect(),
         }
     }
 }
@@ -363,14 +383,19 @@ where
             table_watermarks: version
                 .table_watermarks
                 .into_iter()
-                .map(|(table_id, watermark)| (table_id.table_id, watermark.as_ref().into()))
+                .map(|(table_id, watermark)| (table_id, watermark.as_ref().into()))
                 .collect(),
             table_change_logs: version
                 .table_change_log
                 .into_iter()
-                .map(|(table_id, change_log)| (table_id.table_id, change_log.to_protobuf()))
+                .map(|(table_id, change_log)| (table_id, change_log.to_protobuf()))
                 .collect(),
-            state_table_info: version.state_table_info.to_protobuf(),
+            state_table_info: version.state_table_info.state_table_info.clone(),
+            vector_indexes: version
+                .vector_indexes
+                .into_iter()
+                .map(|(table_id, index)| (table_id, index.into()))
+                .collect(),
         }
     }
 }
@@ -402,7 +427,7 @@ impl HummockVersion {
                     delta
                         .state_table_info_delta
                         .insert(
-                            TableId::new(*table_id),
+                            (*table_id).into(),
                             StateTableInfoDelta {
                                 committed_epoch: self.max_committed_epoch,
                                 compaction_group_id: *cg_id,
@@ -417,13 +442,6 @@ impl HummockVersion {
         }
     }
 
-    pub fn table_committed_epoch(&self, table_id: TableId) -> Option<u64> {
-        self.state_table_info
-            .info()
-            .get(&table_id)
-            .map(|info| info.committed_epoch)
-    }
-
     pub fn create_init_version(default_compaction_config: Arc<CompactionConfig>) -> HummockVersion {
         #[expect(deprecated)]
         let mut init_version = HummockVersion {
@@ -433,6 +451,7 @@ impl HummockVersion {
             table_watermarks: HashMap::new(),
             table_change_log: HashMap::new(),
             state_table_info: HummockVersionStateTableInfo::empty(),
+            vector_indexes: Default::default(),
         };
         for group_id in [
             StaticCompactionGroupId::StateDefault as CompactionGroupId,
@@ -458,12 +477,45 @@ impl HummockVersion {
             removed_table_ids: HashSet::new(),
             change_log_delta: HashMap::new(),
             state_table_info_delta: Default::default(),
+            vector_index_delta: Default::default(),
         }
+    }
+
+    pub fn split_change_log(mut self) -> (LocalHummockVersion, HashMap<TableId, TableChangeLog>) {
+        let table_change_log = {
+            let mut table_change_log = HashMap::new();
+            for (table_id, log) in &mut self.table_change_log {
+                let change_log_iter =
+                    log.change_log_iter_mut()
+                        .map(|item| EpochNewChangeLogCommon {
+                            new_value: std::mem::take(&mut item.new_value),
+                            old_value: std::mem::take(&mut item.old_value),
+                            non_checkpoint_epochs: item.non_checkpoint_epochs.clone(),
+                            checkpoint_epoch: item.checkpoint_epoch,
+                        });
+                table_change_log.insert(*table_id, TableChangeLogCommon::new(change_log_iter));
+            }
+
+            table_change_log
+        };
+
+        let local_version = LocalHummockVersion::from(self);
+
+        (local_version, table_change_log)
+    }
+}
+
+impl<T, L> HummockVersionCommon<T, L> {
+    pub fn table_committed_epoch(&self, table_id: TableId) -> Option<u64> {
+        self.state_table_info
+            .info()
+            .get(&table_id)
+            .map(|info| info.committed_epoch)
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
-pub struct HummockVersionDeltaCommon<T> {
+pub struct HummockVersionDeltaCommon<T, L = T> {
     pub id: HummockVersionId,
     pub prev_id: HummockVersionId,
     pub group_deltas: HashMap<CompactionGroupId, GroupDeltasCommon<T>>,
@@ -472,11 +524,14 @@ pub struct HummockVersionDeltaCommon<T> {
     pub trivial_move: bool,
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub removed_table_ids: HashSet<TableId>,
-    pub change_log_delta: HashMap<TableId, ChangeLogDeltaCommon<T>>,
+    pub change_log_delta: HashMap<TableId, ChangeLogDeltaCommon<L>>,
     pub state_table_info_delta: HashMap<TableId, StateTableInfoDelta>,
+    pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
 }
 
 pub type HummockVersionDelta = HummockVersionDeltaCommon<SstableInfo>;
+
+pub type LocalHummockVersionDelta = HummockVersionDeltaCommon<SstableInfo, ()>;
 
 impl Default for HummockVersionDelta {
     fn default() -> Self {
@@ -506,91 +561,98 @@ where
     }
 }
 
-impl HummockVersionDelta {
+pub trait SstableIdReader {
+    fn sst_id(&self) -> HummockSstableId;
+}
+
+pub trait ObjectIdReader {
+    fn object_id(&self) -> HummockSstableObjectId;
+}
+
+impl<T> HummockVersionDeltaCommon<T>
+where
+    T: SstableIdReader + ObjectIdReader,
+{
     /// Get the newly added object ids from the version delta.
     ///
     /// Note: the result can be false positive because we only collect the set of sst object ids in the `inserted_table_infos`,
     /// but it is possible that the object is moved or split from other compaction groups or levels.
-    pub fn newly_added_object_ids(&self) -> HashSet<HummockSstableObjectId> {
+    pub fn newly_added_object_ids(
+        &self,
+        exclude_table_change_log: bool,
+    ) -> HashSet<HummockObjectId> {
+        // DO NOT REMOVE THIS LINE
+        // This is to ensure that when adding new variant to `HummockObjectId`,
+        // the compiler will warn us if we forget to handle it here.
+        match HummockObjectId::Sstable(0.into()) {
+            HummockObjectId::Sstable(_) => {}
+            HummockObjectId::VectorFile(_) => {}
+            HummockObjectId::HnswGraphFile(_) => {}
+        };
+        self.newly_added_sst_infos(exclude_table_change_log)
+            .map(|sst| HummockObjectId::Sstable(sst.object_id()))
+            .chain(
+                self.vector_index_delta
+                    .values()
+                    .flat_map(|vector_index_delta| {
+                        vector_index_delta
+                            .newly_added_objects()
+                            .map(|(object_id, _)| object_id)
+                    }),
+            )
+            .collect()
+    }
+
+    pub fn newly_added_sst_ids(&self, exclude_table_change_log: bool) -> HashSet<HummockSstableId> {
+        self.newly_added_sst_infos(exclude_table_change_log)
+            .map(|sst| sst.sst_id())
+            .collect()
+    }
+}
+
+impl<T> HummockVersionDeltaCommon<T> {
+    pub fn newly_added_sst_infos(
+        &self,
+        exclude_table_change_log: bool,
+    ) -> impl Iterator<Item = &'_ T> {
+        let may_table_change_delta = if exclude_table_change_log {
+            None
+        } else {
+            Some(self.change_log_delta.values())
+        };
         self.group_deltas
             .values()
             .flat_map(|group_deltas| {
                 group_deltas.group_deltas.iter().flat_map(|group_delta| {
-                    static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                    let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
-                        &level_delta.inserted_table_infos
-                    } else {
-                        &EMPTY_VEC
+                    let sst_slice = match &group_delta {
+                        GroupDeltaCommon::NewL0SubLevel(inserted_table_infos)
+                        | GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon {
+                            inserted_table_infos,
+                            ..
+                        }) => Some(inserted_table_infos.iter()),
+                        GroupDeltaCommon::GroupConstruct(_)
+                        | GroupDeltaCommon::GroupDestroy(_)
+                        | GroupDeltaCommon::GroupMerge(_)
+                        | GroupDeltaCommon::TruncateTables(_) => None,
                     };
-                    sst_slice.iter().map(|sst| sst.object_id)
+                    sst_slice.into_iter().flatten()
                 })
             })
-            .chain(self.change_log_delta.values().flat_map(|delta| {
-                let new_log = delta.new_log.as_ref().unwrap();
-                new_log
-                    .new_value
-                    .iter()
-                    .map(|sst| sst.object_id)
-                    .chain(new_log.old_value.iter().map(|sst| sst.object_id))
-            }))
-            .collect()
+            .chain(
+                may_table_change_delta
+                    .map(|v| {
+                        v.flat_map(|delta| {
+                            let new_log = &delta.new_log;
+                            new_log.new_value.iter().chain(new_log.old_value.iter())
+                        })
+                    })
+                    .into_iter()
+                    .flatten(),
+            )
     }
+}
 
-    pub fn newly_added_sst_ids(&self) -> HashSet<HummockSstableObjectId> {
-        let ssts_from_group_deltas = self.group_deltas.values().flat_map(|group_deltas| {
-            group_deltas.group_deltas.iter().flat_map(|group_delta| {
-                static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
-                    &level_delta.inserted_table_infos
-                } else {
-                    &EMPTY_VEC
-                };
-                sst_slice.iter()
-            })
-        });
-
-        let ssts_from_change_log = self.change_log_delta.values().flat_map(|delta| {
-            let new_log = delta.new_log.as_ref().unwrap();
-            new_log.new_value.iter().chain(new_log.old_value.iter())
-        });
-
-        ssts_from_group_deltas
-            .chain(ssts_from_change_log)
-            .map(|sst| sst.object_id)
-            .collect()
-    }
-
-    pub fn newly_added_sst_infos<'a>(
-        &'a self,
-        select_group: &'a HashSet<CompactionGroupId>,
-    ) -> impl Iterator<Item = &SstableInfo> + 'a {
-        self.group_deltas
-            .iter()
-            .filter_map(|(cg_id, group_deltas)| {
-                if select_group.contains(cg_id) {
-                    Some(group_deltas)
-                } else {
-                    None
-                }
-            })
-            .flat_map(|group_deltas| {
-                group_deltas.group_deltas.iter().flat_map(|group_delta| {
-                    static EMPTY_VEC: Vec<SstableInfo> = Vec::new();
-                    let sst_slice = if let GroupDelta::IntraLevel(level_delta) = &group_delta {
-                        &level_delta.inserted_table_infos
-                    } else {
-                        &EMPTY_VEC
-                    };
-                    sst_slice.iter()
-                })
-            })
-            .chain(self.change_log_delta.values().flat_map(|delta| {
-                // TODO: optimization: strip table change log
-                let new_log = delta.new_log.as_ref().unwrap();
-                new_log.new_value.iter().chain(new_log.old_value.iter())
-            }))
-    }
-
+impl HummockVersionDelta {
     #[expect(deprecated)]
     pub fn max_committed_epoch_for_migration(&self) -> HummockEpoch {
         self.max_committed_epoch
@@ -621,24 +683,18 @@ where
             new_table_watermarks: pb_version_delta
                 .new_table_watermarks
                 .iter()
-                .map(|(table_id, watermarks)| {
-                    (TableId::new(*table_id), TableWatermarks::from(watermarks))
-                })
+                .map(|(table_id, watermarks)| (*table_id, TableWatermarks::from(watermarks)))
                 .collect(),
-            removed_table_ids: pb_version_delta
-                .removed_table_ids
-                .iter()
-                .map(|table_id| TableId::new(*table_id))
-                .collect(),
+            removed_table_ids: pb_version_delta.removed_table_ids.iter().copied().collect(),
             change_log_delta: pb_version_delta
                 .change_log_delta
                 .iter()
                 .map(|(table_id, log_delta)| {
                     (
-                        TableId::new(*table_id),
+                        *table_id,
                         ChangeLogDeltaCommon {
-                            new_log: log_delta.new_log.as_ref().map(Into::into),
                             truncate_epoch: log_delta.truncate_epoch,
+                            new_log: log_delta.new_log.as_ref().unwrap().into(),
                         },
                     )
                 })
@@ -647,7 +703,12 @@ where
             state_table_info_delta: pb_version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (TableId::new(*table_id), *delta))
+                .map(|(table_id, delta)| (*table_id, *delta))
+                .collect(),
+            vector_index_delta: pb_version_delta
+                .vector_index_delta
+                .iter()
+                .map(|(table_id, delta)| (*table_id, delta.clone().into()))
                 .collect(),
         }
     }
@@ -672,22 +733,19 @@ where
             new_table_watermarks: version_delta
                 .new_table_watermarks
                 .iter()
-                .map(|(table_id, watermarks)| (table_id.table_id, watermarks.into()))
+                .map(|(table_id, watermarks)| (*table_id, watermarks.into()))
                 .collect(),
-            removed_table_ids: version_delta
-                .removed_table_ids
-                .iter()
-                .map(|table_id| table_id.table_id)
-                .collect(),
+            removed_table_ids: version_delta.removed_table_ids.iter().copied().collect(),
             change_log_delta: version_delta
                 .change_log_delta
                 .iter()
-                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.into()))
+                .map(|(table_id, log_delta)| (*table_id, log_delta.into()))
                 .collect(),
-            state_table_info_delta: version_delta
-                .state_table_info_delta
+            state_table_info_delta: version_delta.state_table_info_delta.clone(),
+            vector_index_delta: version_delta
+                .vector_index_delta
                 .iter()
-                .map(|(table_id, delta)| (table_id.table_id, *delta))
+                .map(|(table_id, delta)| (*table_id, delta.clone().into()))
                 .collect(),
         }
     }
@@ -712,22 +770,19 @@ where
             new_table_watermarks: version_delta
                 .new_table_watermarks
                 .into_iter()
-                .map(|(table_id, watermarks)| (table_id.table_id, watermarks.into()))
+                .map(|(table_id, watermarks)| (table_id, watermarks.into()))
                 .collect(),
-            removed_table_ids: version_delta
-                .removed_table_ids
-                .into_iter()
-                .map(|table_id| table_id.table_id)
-                .collect(),
+            removed_table_ids: version_delta.removed_table_ids.into_iter().collect(),
             change_log_delta: version_delta
                 .change_log_delta
                 .into_iter()
-                .map(|(table_id, log_delta)| (table_id.table_id, log_delta.into()))
+                .map(|(table_id, log_delta)| (table_id, log_delta.into()))
                 .collect(),
-            state_table_info_delta: version_delta
-                .state_table_info_delta
+            state_table_info_delta: version_delta.state_table_info_delta.clone(),
+            vector_index_delta: version_delta
+                .vector_index_delta
                 .into_iter()
-                .map(|(table_id, delta)| (table_id.table_id, delta))
+                .map(|(table_id, delta)| (table_id, delta.into()))
                 .collect(),
         }
     }
@@ -752,21 +807,17 @@ where
             new_table_watermarks: pb_version_delta
                 .new_table_watermarks
                 .into_iter()
-                .map(|(table_id, watermarks)| (TableId::new(table_id), watermarks.into()))
+                .map(|(table_id, watermarks)| (table_id, watermarks.into()))
                 .collect(),
-            removed_table_ids: pb_version_delta
-                .removed_table_ids
-                .into_iter()
-                .map(TableId::new)
-                .collect(),
+            removed_table_ids: pb_version_delta.removed_table_ids.into_iter().collect(),
             change_log_delta: pb_version_delta
                 .change_log_delta
                 .iter()
                 .map(|(table_id, log_delta)| {
                     (
-                        TableId::new(*table_id),
+                        *table_id,
                         ChangeLogDeltaCommon {
-                            new_log: log_delta.new_log.clone().map(Into::into),
+                            new_log: log_delta.new_log.clone().unwrap().into(),
                             truncate_epoch: log_delta.truncate_epoch,
                         },
                     )
@@ -775,7 +826,12 @@ where
             state_table_info_delta: pb_version_delta
                 .state_table_info_delta
                 .iter()
-                .map(|(table_id, delta)| (TableId::new(*table_id), *delta))
+                .map(|(table_id, delta)| (*table_id, *delta))
+                .collect(),
+            vector_index_delta: pb_version_delta
+                .vector_index_delta
+                .into_iter()
+                .map(|(table_id, delta)| (table_id, delta.into()))
                 .collect(),
         }
     }
@@ -785,9 +841,10 @@ where
 pub struct IntraLevelDeltaCommon<T> {
     pub level_idx: u32,
     pub l0_sub_level_id: u64,
-    pub removed_table_ids: Vec<u64>,
+    pub removed_table_ids: HashSet<HummockSstableId>,
     pub inserted_table_infos: Vec<T>,
     pub vnode_partition_count: u32,
+    pub compaction_group_version_id: u64,
 }
 
 pub type IntraLevelDelta = IntraLevelDeltaCommon<SstableInfo>;
@@ -814,13 +871,19 @@ where
         Self {
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
-            removed_table_ids: pb_intra_level_delta.removed_table_ids,
+            removed_table_ids: HashSet::from_iter(
+                pb_intra_level_delta
+                    .removed_table_ids
+                    .iter()
+                    .map(|sst_id| (*sst_id).into()),
+            ),
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
                 .into_iter()
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: pb_intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: pb_intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -833,13 +896,18 @@ where
         Self {
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
-            removed_table_ids: intra_level_delta.removed_table_ids,
+            removed_table_ids: intra_level_delta
+                .removed_table_ids
+                .into_iter()
+                .map(|sst_id| sst_id.inner())
+                .collect(),
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
                 .into_iter()
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -852,13 +920,18 @@ where
         Self {
             level_idx: intra_level_delta.level_idx,
             l0_sub_level_id: intra_level_delta.l0_sub_level_id,
-            removed_table_ids: intra_level_delta.removed_table_ids.clone(),
+            removed_table_ids: intra_level_delta
+                .removed_table_ids
+                .iter()
+                .map(|sst_id| sst_id.inner())
+                .collect(),
             inserted_table_infos: intra_level_delta
                 .inserted_table_infos
                 .iter()
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -871,13 +944,19 @@ where
         Self {
             level_idx: pb_intra_level_delta.level_idx,
             l0_sub_level_id: pb_intra_level_delta.l0_sub_level_id,
-            removed_table_ids: pb_intra_level_delta.removed_table_ids.clone(),
+            removed_table_ids: HashSet::from_iter(
+                pb_intra_level_delta
+                    .removed_table_ids
+                    .iter()
+                    .map(|sst_id| (*sst_id).into()),
+            ),
             inserted_table_infos: pb_intra_level_delta
                 .inserted_table_infos
                 .iter()
                 .map(Into::into)
                 .collect_vec(),
             vnode_partition_count: pb_intra_level_delta.vnode_partition_count,
+            compaction_group_version_id: pb_intra_level_delta.compaction_group_version_id,
         }
     }
 }
@@ -886,9 +965,10 @@ impl IntraLevelDelta {
     pub fn new(
         level_idx: u32,
         l0_sub_level_id: u64,
-        removed_table_ids: Vec<u64>,
+        removed_table_ids: HashSet<HummockSstableId>,
         inserted_table_infos: Vec<SstableInfo>,
         vnode_partition_count: u32,
+        compaction_group_version_id: u64,
     ) -> Self {
         Self {
             level_idx,
@@ -896,16 +976,19 @@ impl IntraLevelDelta {
             removed_table_ids,
             inserted_table_infos,
             vnode_partition_count,
+            compaction_group_version_id,
         }
     }
 }
 
 #[derive(Debug, PartialEq, Clone)]
 pub enum GroupDeltaCommon<T> {
+    NewL0SubLevel(Vec<T>),
     IntraLevel(IntraLevelDeltaCommon<T>),
-    GroupConstruct(PbGroupConstruct),
+    GroupConstruct(Box<PbGroupConstruct>),
     GroupDestroy(PbGroupDestroy),
     GroupMerge(PbGroupMerge),
+    TruncateTables(HashSet<TableId>),
 }
 
 pub type GroupDelta = GroupDeltaCommon<SstableInfo>;
@@ -920,7 +1003,7 @@ where
                 GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon::from(pb_intra_level_delta))
             }
             Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
-                GroupDeltaCommon::GroupConstruct(pb_group_construct)
+                GroupDeltaCommon::GroupConstruct(Box::new(pb_group_construct))
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(pb_group_destroy)
@@ -928,6 +1011,17 @@ where
             Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
                 GroupDeltaCommon::GroupMerge(pb_group_merge)
             }
+            Some(DeltaType::NewL0SubLevel(pb_new_sub_level)) => GroupDeltaCommon::NewL0SubLevel(
+                pb_new_sub_level
+                    .inserted_table_infos
+                    .into_iter()
+                    .map(T::from)
+                    .collect(),
+            ),
+            Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
+                GroupDeltaCommon::TruncateTables(pb_truncate_tables.table_ids.into_iter().collect())
+            }
+
             None => panic!("delta_type is not set"),
         }
     }
@@ -943,13 +1037,26 @@ where
                 delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
             },
             GroupDeltaCommon::GroupConstruct(pb_group_construct) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct)),
+                delta_type: Some(PbDeltaType::GroupConstruct(*pb_group_construct)),
             },
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(pb_group_destroy)),
             },
             GroupDeltaCommon::GroupMerge(pb_group_merge) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMerge(pb_group_merge)),
+            },
+            GroupDeltaCommon::NewL0SubLevel(new_sub_level) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::NewL0SubLevel(PbNewL0SubLevel {
+                    inserted_table_infos: new_sub_level
+                        .into_iter()
+                        .map(PbSstableInfo::from)
+                        .collect(),
+                })),
+            },
+            GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
+                    table_ids: table_ids.iter().copied().collect(),
+                })),
             },
         }
     }
@@ -965,13 +1072,23 @@ where
                 delta_type: Some(PbDeltaType::IntraLevel(intra_level_delta.into())),
             },
             GroupDeltaCommon::GroupConstruct(pb_group_construct) => PbGroupDelta {
-                delta_type: Some(PbDeltaType::GroupConstruct(pb_group_construct.clone())),
+                delta_type: Some(PbDeltaType::GroupConstruct(*pb_group_construct.clone())),
             },
             GroupDeltaCommon::GroupDestroy(pb_group_destroy) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupDestroy(*pb_group_destroy)),
             },
             GroupDeltaCommon::GroupMerge(pb_group_merge) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::GroupMerge(*pb_group_merge)),
+            },
+            GroupDeltaCommon::NewL0SubLevel(new_sub_level) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::NewL0SubLevel(PbNewL0SubLevel {
+                    inserted_table_infos: new_sub_level.iter().map(PbSstableInfo::from).collect(),
+                })),
+            },
+            GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
+                delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
+                    table_ids: table_ids.iter().copied().collect(),
+                })),
             },
         }
     }
@@ -987,7 +1104,7 @@ where
                 GroupDeltaCommon::IntraLevel(IntraLevelDeltaCommon::from(pb_intra_level_delta))
             }
             Some(PbDeltaType::GroupConstruct(pb_group_construct)) => {
-                GroupDeltaCommon::GroupConstruct(pb_group_construct.clone())
+                GroupDeltaCommon::GroupConstruct(Box::new(pb_group_construct.clone()))
             }
             Some(PbDeltaType::GroupDestroy(pb_group_destroy)) => {
                 GroupDeltaCommon::GroupDestroy(*pb_group_destroy)
@@ -995,14 +1112,34 @@ where
             Some(PbDeltaType::GroupMerge(pb_group_merge)) => {
                 GroupDeltaCommon::GroupMerge(*pb_group_merge)
             }
+            Some(DeltaType::NewL0SubLevel(pb_new_sub_level)) => GroupDeltaCommon::NewL0SubLevel(
+                pb_new_sub_level
+                    .inserted_table_infos
+                    .iter()
+                    .map(T::from)
+                    .collect(),
+            ),
+            Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
+                GroupDeltaCommon::TruncateTables(
+                    pb_truncate_tables.table_ids.iter().copied().collect(),
+                )
+            }
             None => panic!("delta_type is not set"),
         }
     }
 }
 
-#[derive(Debug, PartialEq, Clone, Default)]
+#[derive(Debug, PartialEq, Clone)]
 pub struct GroupDeltasCommon<T> {
     pub group_deltas: Vec<GroupDeltaCommon<T>>,
+}
+
+impl<T> Default for GroupDeltasCommon<T> {
+    fn default() -> Self {
+        Self {
+            group_deltas: vec![],
+        }
+    }
 }
 
 pub type GroupDeltas = GroupDeltasCommon<SstableInfo>;
@@ -1073,5 +1210,70 @@ where
 {
     pub fn to_protobuf(&self) -> PbGroupDeltas {
         self.into()
+    }
+}
+
+impl From<HummockVersionDelta> for LocalHummockVersionDelta {
+    #[expect(deprecated)]
+    fn from(delta: HummockVersionDelta) -> Self {
+        Self {
+            id: delta.id,
+            prev_id: delta.prev_id,
+            group_deltas: delta.group_deltas,
+            max_committed_epoch: delta.max_committed_epoch,
+            trivial_move: delta.trivial_move,
+            new_table_watermarks: delta.new_table_watermarks,
+            removed_table_ids: delta.removed_table_ids,
+            change_log_delta: delta
+                .change_log_delta
+                .into_iter()
+                .map(|(k, v)| {
+                    (
+                        k,
+                        ChangeLogDeltaCommon {
+                            truncate_epoch: v.truncate_epoch,
+                            new_log: EpochNewChangeLogCommon {
+                                new_value: Vec::new(),
+                                old_value: Vec::new(),
+                                non_checkpoint_epochs: v.new_log.non_checkpoint_epochs,
+                                checkpoint_epoch: v.new_log.checkpoint_epoch,
+                            },
+                        },
+                    )
+                })
+                .collect(),
+            state_table_info_delta: delta.state_table_info_delta,
+            vector_index_delta: delta.vector_index_delta,
+        }
+    }
+}
+
+impl From<HummockVersion> for LocalHummockVersion {
+    #[expect(deprecated)]
+    fn from(version: HummockVersion) -> Self {
+        Self {
+            id: version.id,
+            levels: version.levels,
+            max_committed_epoch: version.max_committed_epoch,
+            table_watermarks: version.table_watermarks,
+            table_change_log: version
+                .table_change_log
+                .into_iter()
+                .map(|(k, v)| {
+                    let epoch_new_change_logs: Vec<EpochNewChangeLogCommon<()>> = v
+                        .change_log_into_iter()
+                        .map(|epoch_new_change_log| EpochNewChangeLogCommon {
+                            new_value: Vec::new(),
+                            old_value: Vec::new(),
+                            non_checkpoint_epochs: epoch_new_change_log.non_checkpoint_epochs,
+                            checkpoint_epoch: epoch_new_change_log.checkpoint_epoch,
+                        })
+                        .collect();
+                    (k, TableChangeLogCommon::new(epoch_new_change_logs))
+                })
+                .collect(),
+            state_table_info: version.state_table_info,
+            vector_indexes: version.vector_indexes,
+        }
     }
 }

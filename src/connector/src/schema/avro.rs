@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,9 @@
 
 use apache_avro::Schema as AvroSchema;
 
+use super::SchemaFetchError;
 use super::loader::LoadedSchema;
 use super::schema_registry::Subject;
-use super::SchemaFetchError;
 
 impl LoadedSchema for AvroSchema {
     fn compile(primary: Subject, _: Vec<Subject>) -> Result<Self, SchemaFetchError> {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,29 @@ mod rpc;
 pub mod server;
 mod telemetry;
 
-use clap::Parser;
-use risingwave_common::config::{
-    AsyncStackTraceOption, CompactorMode, MetricLevel, OverrideConfig,
-};
+use clap::{Parser, ValueEnum};
+use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConfig};
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 
 use crate::server::{compactor_serve, shared_compactor_serve};
+
+#[derive(Debug, Default, Clone, Copy, ValueEnum)]
+pub enum CompactorMode {
+    #[default]
+    #[clap(alias = "dedicated")]
+    Dedicated,
+
+    #[clap(alias = "shared")]
+    Shared,
+
+    #[clap(alias = "dedicated_iceberg")]
+    DedicatedIceberg,
+
+    #[clap(alias = "shared_iceberg")]
+    SharedIceberg,
+}
 
 /// Command-line arguments for compactor-node.
 #[derive(Parser, Clone, Debug, OverrideConfig)]
@@ -92,6 +107,19 @@ pub struct CompactorOpts {
 
     #[clap(long, hide = true, env = "RW_PROXY_RPC_ENDPOINT", default_value = "")]
     pub proxy_rpc_endpoint: String,
+
+    /// Total available memory for the frontend node in bytes. Used by compactor.
+    #[clap(long, env = "RW_COMPACTOR_TOTAL_MEMORY_BYTES", default_value_t = default_compactor_total_memory_bytes())]
+    pub compactor_total_memory_bytes: usize,
+
+    #[clap(long, env = "RW_COMPACTOR_META_CACHE_MEMORY_BYTES", default_value_t = default_compactor_meta_cache_memory_bytes())]
+    pub compactor_meta_cache_memory_bytes: usize,
+
+    #[clap(long, env = "RW_COMPACTOR_RPC_MAX_DECODING_MESSAGE_SIZE_BYTES")]
+    pub rpc_max_decoding_message_size_bytes: Option<usize>,
+
+    #[clap(long, env = "RW_COMPACTOR_RPC_MAX_ENCODING_MESSAGE_SIZE_BYTES")]
+    pub rpc_max_encoding_message_size_bytes: Option<usize>,
 }
 
 impl risingwave_common::opts::Opts for CompactorOpts {
@@ -139,7 +167,60 @@ pub fn start(
                 .unwrap();
             tracing::info!(" address is {}", advertise_addr);
 
-            compactor_serve(listen_addr, advertise_addr, opts, shutdown).await;
+            compactor_serve(
+                listen_addr,
+                advertise_addr,
+                opts,
+                shutdown,
+                CompactorMode::Dedicated,
+            )
+            .await;
         }),
+
+        Some(CompactorMode::DedicatedIceberg) => Box::pin(async move {
+            tracing::info!("Iceberg Compactor node options: {:?}", opts);
+            tracing::info!("meta address: {}", opts.meta_address.clone());
+
+            let listen_addr = opts.listen_addr.parse().unwrap();
+
+            let advertise_addr = opts
+                .advertise_addr
+                .as_ref()
+                .unwrap_or_else(|| {
+                    tracing::warn!("advertise addr is not specified, defaulting to listen address");
+                    &opts.listen_addr
+                })
+                .parse()
+                .unwrap();
+            tracing::info!(" address is {}", advertise_addr);
+
+            compactor_serve(
+                listen_addr,
+                advertise_addr,
+                opts,
+                shutdown,
+                CompactorMode::DedicatedIceberg,
+            )
+            .await;
+        }),
+        Some(CompactorMode::SharedIceberg) => {
+            unimplemented!("Shared iceberg compactor is not supported yet");
+        }
     }
+}
+
+pub fn default_compactor_total_memory_bytes() -> usize {
+    system_memory_available_bytes()
+}
+
+pub fn default_compactor_meta_cache_memory_bytes() -> usize {
+    128 * 1024 * 1024 // 128MB
+}
+
+pub fn default_rpc_max_decoding_message_size_bytes() -> usize {
+    4 * 1024 * 1024 // 4MB
+}
+
+pub fn default_rpc_max_encoding_message_size_bytes() -> usize {
+    4 * 1024 * 1024 // 4MB
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,6 @@
 //! environment variables.
 
 #![feature(panic_update_hook)]
-#![feature(let_chains)]
 #![feature(exitcode_exit_method)]
 
 use std::pin::pin;
@@ -74,11 +73,18 @@ where
 {
     set_panic_hook();
 
+    rustls::crypto::ring::default_provider()
+        .install_default()
+        .inspect_err(|e| {
+            tracing::error!(?e, "Failed to install default crypto provider.");
+        })
+        .unwrap();
     risingwave_variables::init_server_start_time();
 
     // `TOKIO` will be read by tokio. Duplicate `RW` for compatibility.
     if let Some(worker_threads) = std::env::var_os("RW_WORKER_THREADS") {
-        std::env::set_var("TOKIO_WORKER_THREADS", worker_threads);
+        // safety: single-threaded now.
+        unsafe { std::env::set_var("TOKIO_WORKER_THREADS", worker_threads) };
     }
 
     // Set the default number of worker threads to be at least `MIN_WORKER_THREADS`, in production.
@@ -93,8 +99,11 @@ where
             Err(_) => panic!("Failed to parse TOKIO_WORKER_THREADS"),
         };
         if worker_threads < MIN_WORKER_THREADS {
-            tracing::warn!("the default number of worker threads ({worker_threads}) is too small, which may lead to issues, increasing to {MIN_WORKER_THREADS}");
-            std::env::set_var("TOKIO_WORKER_THREADS", MIN_WORKER_THREADS.to_string());
+            tracing::warn!(
+                "the default number of worker threads ({worker_threads}) is too small, which may lead to issues, increasing to {MIN_WORKER_THREADS}"
+            );
+            // safety: single-threaded now.
+            unsafe { std::env::set_var("TOKIO_WORKER_THREADS", MIN_WORKER_THREADS.to_string()) };
         }
     }
 

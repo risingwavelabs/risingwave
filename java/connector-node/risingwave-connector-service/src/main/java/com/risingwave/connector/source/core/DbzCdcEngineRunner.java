@@ -1,22 +1,24 @@
-// Copyright 2024 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.connector.source.core;
 
 import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.connector.source.common.DbzSourceUtils;
-import com.risingwave.java.binding.Binding;
+import com.risingwave.java.binding.CdcSourceChannel;
 import com.risingwave.proto.ConnectorServiceProto.GetEventStreamResponse;
 import io.debezium.config.CommonConnectorConfig;
 import io.grpc.stub.StreamObserver;
@@ -69,7 +71,7 @@ public class DbzCdcEngineRunner {
         return runner;
     }
 
-    public static DbzCdcEngineRunner create(DbzConnectorConfig config, long channelPtr) {
+    public static DbzCdcEngineRunner create(DbzConnectorConfig config, CdcSourceChannel channel) {
         DbzCdcEngineRunner runner = new DbzCdcEngineRunner(config);
         try {
             var sourceId = config.getSourceId();
@@ -90,8 +92,7 @@ public class DbzCdcEngineRunner {
                                             (error != null && error.getMessage() != null
                                                     ? error.getMessage()
                                                     : message);
-                                    if (!Binding.sendCdcSourceErrorToChannel(
-                                            channelPtr, errorMsg)) {
+                                    if (!channel.sendError(errorMsg)) {
                                         LOG.warn(
                                                 "engine#{} unable to send error message: {}",
                                                 sourceId,

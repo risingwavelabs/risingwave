@@ -14,23 +14,26 @@
 
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
-use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::mqttbytes::QoS;
+use rumqttc::v5::mqttbytes::v5::Filter;
 use rumqttc::v5::{ConnectionError, Event, Incoming};
 use thiserror_ext::AsReport;
 
-use super::message::MqttMessage;
 use super::MqttSplit;
+use super::message::MqttMessage;
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::common::into_chunk_stream;
 use crate::source::mqtt::MqttProperties;
-use crate::source::{BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitReader};
+use crate::source::{BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitReader};
 
 pub struct MqttSplitReader {
     eventloop: rumqttc::v5::EventLoop,
+    #[expect(dead_code)]
     client: rumqttc::v5::AsyncClient,
+    #[expect(dead_code)]
     qos: QoS,
+    #[expect(dead_code)]
     splits: Vec<MqttSplit>,
     #[expect(dead_code)]
     properties: MqttProperties,
@@ -52,7 +55,8 @@ impl SplitReader for MqttSplitReader {
     ) -> Result<Self> {
         let (client, eventloop) = properties
             .common
-            .build_client(source_ctx.actor_id, source_ctx.fragment_id as u64)?;
+            .build_client(source_ctx.actor_id, source_ctx.source_id.as_raw_id())
+            .inspect_err(|e| tracing::error!("Failed to build mqtt client: {}", e.as_report()))?;
 
         let qos = properties.common.qos();
 
@@ -60,8 +64,8 @@ impl SplitReader for MqttSplitReader {
             .subscribe_many(
                 splits
                     .iter()
-                    .cloned()
-                    .map(|split| Filter::new(split.topic, qos)),
+                    .flat_map(|split| split.topic.split(","))
+                    .map(|topic| Filter::new(topic.to_owned(), qos)),
             )
             .await?;
 
@@ -76,7 +80,7 @@ impl SplitReader for MqttSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self.into_data_stream(), parser_config, source_context)
@@ -87,9 +91,6 @@ impl MqttSplitReader {
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
     async fn into_data_stream(self) {
         let mut eventloop = self.eventloop;
-        let client = self.client;
-        let qos = self.qos;
-        let splits = self.splits;
         loop {
             match eventloop.poll().await {
                 Ok(Event::Incoming(Incoming::Publish(p))) => {
@@ -97,20 +98,10 @@ impl MqttSplitReader {
                     yield vec![SourceMessage::from(msg)];
                 }
                 Ok(_) => (),
-                Err(e) => {
-                    if let ConnectionError::Timeout(_) = e {
-                        continue;
-                    }
-                    tracing::error!("Failed to poll mqtt eventloop: {}", e.as_report());
-                    client
-                        .subscribe_many(
-                            splits
-                                .iter()
-                                .cloned()
-                                .map(|split| Filter::new(split.topic, qos)),
-                        )
-                        .await?;
+                Err(ConnectionError::Timeout(_) | ConnectionError::RequestsDone) => {
+                    continue;
                 }
+                Err(e) => return Err(e.into()),
             }
         }
     }

@@ -1,0 +1,40 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+create table s (v1 int, v2 int) APPEND ONLY;
+
+statement ok
+insert into s values (1, 11);
+
+statement ok
+create table t (v1 int, v2 int);
+
+statement ok
+create sink s1 into t from s with (type = 'append-only');
+
+statement ok
+create sink s2 into t from s with (type = 'append-only', snapshot = 'false');
+
+statement ok
+insert into s values (2, 22);
+
+
+query II rowsort
+select * from t;
+----
+1	11
+2	22
+2	22
+
+statement ok
+drop sink s1;
+
+statement ok
+drop sink s2;
+
+statement ok
+drop table t;
+
+statement ok
+drop table s;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::catalog::Field;
 
+use crate::sink::redis::REDIS_VALUE_TYPE_STREAM;
 use crate::sink::{Result, SinkError};
 
 mod append_only;
@@ -28,13 +30,18 @@ use risingwave_common::types::DataType;
 pub use upsert::UpsertFormatter;
 
 use super::catalog::{SinkEncode, SinkFormat, SinkFormatDesc};
+use super::encoder::bytes::BytesEncoder;
 use super::encoder::template::TemplateEncoder;
 use super::encoder::text::TextEncoder;
 use super::encoder::{
     DateHandlingMode, JsonbHandlingMode, KafkaConnectParams, TimeHandlingMode,
     TimestamptzHandlingMode,
 };
-use super::redis::{KEY_FORMAT, VALUE_FORMAT};
+use super::redis::{
+    CHANNEL, CHANNEL_COLUMN, KEY_FORMAT, LAT_NAME, LON_NAME, MEMBER_NAME, REDIS_VALUE_TYPE,
+    REDIS_VALUE_TYPE_GEO, REDIS_VALUE_TYPE_PUBSUB, REDIS_VALUE_TYPE_STRING, STREAM, STREAM_COLUMN,
+    VALUE_FORMAT,
+};
 use crate::sink::encoder::{
     AvroEncoder, AvroHeader, JsonEncoder, ProtoEncoder, ProtoHeader, TimestampHandlingMode,
 };
@@ -49,6 +56,7 @@ pub trait SinkFormatter {
     ///   For example append-only without `primary_key` (aka `downstream_pk`) set.
     /// * Value may be None so that messages with same key are removed during log compaction.
     ///   For example debezium tombstone event.
+    #[expect(clippy::type_complexity)]
     fn format_chunk(
         &self,
         chunk: &StreamChunk,
@@ -74,23 +82,32 @@ pub enum SinkFormatterImpl {
     // append-only
     AppendOnlyJson(AppendOnlyFormatter<JsonEncoder, JsonEncoder>),
     AppendOnlyTextJson(AppendOnlyFormatter<TextEncoder, JsonEncoder>),
+    AppendOnlyBytesJson(AppendOnlyFormatter<BytesEncoder, JsonEncoder>),
     AppendOnlyAvro(AppendOnlyFormatter<AvroEncoder, AvroEncoder>),
     AppendOnlyTextAvro(AppendOnlyFormatter<TextEncoder, AvroEncoder>),
+    AppendOnlyBytesAvro(AppendOnlyFormatter<BytesEncoder, AvroEncoder>),
     AppendOnlyProto(AppendOnlyFormatter<JsonEncoder, ProtoEncoder>),
     AppendOnlyTextProto(AppendOnlyFormatter<TextEncoder, ProtoEncoder>),
+    AppendOnlyBytesProto(AppendOnlyFormatter<BytesEncoder, ProtoEncoder>),
     AppendOnlyTemplate(AppendOnlyFormatter<TemplateEncoder, TemplateEncoder>),
     AppendOnlyTextTemplate(AppendOnlyFormatter<TextEncoder, TemplateEncoder>),
+    AppendOnlyBytesTemplate(AppendOnlyFormatter<BytesEncoder, TemplateEncoder>),
+    AppendOnlyBytes(AppendOnlyFormatter<BytesEncoder, BytesEncoder>),
     // upsert
     UpsertJson(UpsertFormatter<JsonEncoder, JsonEncoder>),
     UpsertTextJson(UpsertFormatter<TextEncoder, JsonEncoder>),
+    UpsertBytesJson(UpsertFormatter<BytesEncoder, JsonEncoder>),
     UpsertAvro(UpsertFormatter<AvroEncoder, AvroEncoder>),
     UpsertTextAvro(UpsertFormatter<TextEncoder, AvroEncoder>),
+    UpsertBytesAvro(UpsertFormatter<BytesEncoder, AvroEncoder>),
     // `UpsertFormatter<ProtoEncoder, ProtoEncoder>` is intentionally left out
     // to avoid using `ProtoEncoder` as key:
     // <https://docs.confluent.io/platform/7.7/control-center/topics/schema.html#c3-schemas-best-practices-key-value-pairs>
     UpsertTextProto(UpsertFormatter<TextEncoder, ProtoEncoder>),
+    UpsertBytesProto(UpsertFormatter<BytesEncoder, ProtoEncoder>),
     UpsertTemplate(UpsertFormatter<TemplateEncoder, TemplateEncoder>),
     UpsertTextTemplate(UpsertFormatter<TextEncoder, TemplateEncoder>),
+    UpsertBytesTemplate(UpsertFormatter<BytesEncoder, TemplateEncoder>),
     // debezium
     DebeziumJson(DebeziumJsonFormatter),
 }
@@ -167,27 +184,79 @@ impl EncoderBuild for ProtoEncoder {
     }
 }
 
+fn ensure_only_one_pk<'a>(
+    data_type_name: &'a str,
+    params: &'a EncoderParams<'_>,
+    pk_indices: &'a Option<Vec<usize>>,
+) -> Result<(usize, &'a Field)> {
+    let Some(pk_indices) = pk_indices else {
+        return Err(SinkError::Config(anyhow!(
+            "{}Encoder requires primary key columns to be specified",
+            data_type_name
+        )));
+    };
+    if pk_indices.len() != 1 {
+        return Err(SinkError::Config(anyhow!(
+            "KEY ENCODE {} expects only one primary key, but got {}",
+            data_type_name,
+            pk_indices.len(),
+        )));
+    }
+
+    let schema_ref = params.schema.fields().get(pk_indices[0]).ok_or_else(|| {
+        SinkError::Config(anyhow!(
+            "The primary key column index {} is out of bounds in schema {:?}",
+            pk_indices[0],
+            params.schema
+        ))
+    })?;
+
+    Ok((pk_indices[0], schema_ref))
+}
+
+impl EncoderBuild for BytesEncoder {
+    async fn build(params: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
+        match pk_indices {
+            // This is being used as a key encoder
+            Some(_) => {
+                let (pk_index, schema_ref) = ensure_only_one_pk("BYTES", &params, &pk_indices)?;
+                if let DataType::Bytea = schema_ref.data_type() {
+                    Ok(BytesEncoder::new(params.schema, pk_index))
+                } else {
+                    Err(SinkError::Config(anyhow!(
+                        "The key encode is BYTES, but the primary key column {} has type {}",
+                        schema_ref.name,
+                        schema_ref.data_type
+                    )))
+                }
+            }
+            // This is being used as a value encoder
+            None => {
+                // Ensure the schema has exactly one column and it's of type BYTEA
+                if params.schema.len() != 1 {
+                    return Err(SinkError::Config(anyhow!(
+                        "ENCODE BYTES requires exactly one column, got {} columns",
+                        params.schema.len()
+                    )));
+                }
+
+                let field = &params.schema.fields[0];
+                if let DataType::Bytea = field.data_type {
+                    Ok(BytesEncoder::new(params.schema, 0))
+                } else {
+                    Err(SinkError::Config(anyhow!(
+                        "ENCODE BYTES requires the column to be of type BYTEA, but got type {}",
+                        field.data_type
+                    )))
+                }
+            }
+        }
+    }
+}
+
 impl EncoderBuild for TextEncoder {
     async fn build(params: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
-        let Some(pk_indices) = pk_indices else {
-            return Err(SinkError::Config(anyhow!(
-                "TextEncoder requires primary key columns to be specified"
-            )));
-        };
-        if pk_indices.len() != 1 {
-            return Err(SinkError::Config(anyhow!(
-                    "The key encode is TEXT, but the primary key has {} columns. The key encode TEXT requires the primary key to be a single column",
-                    pk_indices.len()
-                )));
-        }
-
-        let schema_ref = params.schema.fields().get(pk_indices[0]).ok_or_else(|| {
-            SinkError::Config(anyhow!(
-                "The primary key column index {} is out of bounds in schema {:?}",
-                pk_indices[0],
-                params.schema
-            ))
-        })?;
+        let (pk_index, schema_ref) = ensure_only_one_pk("TEXT", &params, &pk_indices)?;
         match &schema_ref.data_type() {
             DataType::Varchar
             | DataType::Boolean
@@ -198,27 +267,27 @@ impl EncoderBuild for TextEncoder {
             | DataType::Serial => {}
             _ => {
                 // why we don't allow float as text for key encode: https://github.com/risingwavelabs/risingwave/pull/16377#discussion_r1591864960
-                return Err(SinkError::Config(
-                    anyhow!(
-                            "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, big int, serial or rw_int256.",
-                            schema_ref.name,
-                            schema_ref.data_type
-                        ),
-                ));
+                return Err(SinkError::Config(anyhow!(
+                    "The key encode is TEXT, but the primary key column {} has type {}. The key encode TEXT requires the primary key column to be of type varchar, bool, small int, int, big int, serial or rw_int256.",
+                    schema_ref.name,
+                    schema_ref.data_type
+                )));
             }
         }
 
-        Ok(Self::new(params.schema, pk_indices[0]))
+        Ok(Self::new(params.schema, pk_index))
     }
 }
 
 impl EncoderBuild for AvroEncoder {
     async fn build(b: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
-        let loader =
-            crate::schema::SchemaLoader::from_format_options(b.topic, &b.format_desc.options)
-                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        use crate::schema::{SchemaLoader, SchemaVersion};
 
-        let (schema_id, avro) = match pk_indices {
+        let loader = SchemaLoader::from_format_options(b.topic, &b.format_desc.options)
+            .await
+            .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
+        let (schema_version, avro) = match pk_indices {
             Some(_) => loader
                 .load_key_schema()
                 .await
@@ -232,23 +301,132 @@ impl EncoderBuild for AvroEncoder {
             b.schema,
             pk_indices,
             std::sync::Arc::new(avro),
-            AvroHeader::ConfluentSchemaRegistry(schema_id),
+            match schema_version {
+                SchemaVersion::Confluent(x) => AvroHeader::ConfluentSchemaRegistry(x),
+                SchemaVersion::Glue(x) => AvroHeader::GlueSchemaRegistry(x),
+            },
         )
     }
 }
 
 impl EncoderBuild for TemplateEncoder {
     async fn build(b: EncoderParams<'_>, pk_indices: Option<Vec<usize>>) -> Result<Self> {
-        let option_name = match pk_indices {
-            Some(_) => KEY_FORMAT,
-            None => VALUE_FORMAT,
-        };
-        let template = b.format_desc.options.get(option_name).ok_or_else(|| {
-            SinkError::Config(anyhow!(
-                "Cannot find '{option_name}',please set it or use JSON"
-            ))
-        })?;
-        Ok(TemplateEncoder::new(b.schema, pk_indices, template.clone()))
+        let redis_value_type = b
+            .format_desc
+            .options
+            .get(REDIS_VALUE_TYPE)
+            .map_or(REDIS_VALUE_TYPE_STRING, |s| s.as_str());
+        match redis_value_type {
+            REDIS_VALUE_TYPE_STRING => {
+                let option_name = match pk_indices {
+                    Some(_) => KEY_FORMAT,
+                    None => VALUE_FORMAT,
+                };
+                let template = b.format_desc.options.get(option_name).ok_or_else(|| {
+                    SinkError::Config(anyhow!("Cannot find '{option_name}',please set it."))
+                })?;
+                Ok(TemplateEncoder::new_string(
+                    b.schema,
+                    pk_indices,
+                    template.clone(),
+                ))
+            }
+            REDIS_VALUE_TYPE_GEO => match pk_indices {
+                Some(_) => {
+                    let member_name = b.format_desc.options.get(MEMBER_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{MEMBER_NAME}`,please set it."))
+                    })?;
+                    let template = b.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{KEY_FORMAT}`,please set it."))
+                    })?;
+                    TemplateEncoder::new_geo_key(
+                        b.schema,
+                        pk_indices,
+                        member_name,
+                        template.clone(),
+                    )
+                }
+                None => {
+                    let lat_name = b.format_desc.options.get(LAT_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{LAT_NAME}`, please set it."))
+                    })?;
+                    let lon_name = b.format_desc.options.get(LON_NAME).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find `{LON_NAME}`,please set it."))
+                    })?;
+                    TemplateEncoder::new_geo_value(b.schema, pk_indices, lat_name, lon_name)
+                }
+            },
+            REDIS_VALUE_TYPE_PUBSUB => match pk_indices {
+                Some(_) => {
+                    let channel = b.format_desc.options.get(CHANNEL).cloned();
+                    let channel_column = b.format_desc.options.get(CHANNEL_COLUMN).cloned();
+                    if (channel.is_none() && channel_column.is_none())
+                        || (channel.is_some() && channel_column.is_some())
+                    {
+                        return Err(SinkError::Config(anyhow!(
+                            "`{CHANNEL}` and `{CHANNEL_COLUMN}` only one can be set"
+                        )));
+                    }
+                    TemplateEncoder::new_pubsub_stream_key(
+                        b.schema,
+                        pk_indices,
+                        channel,
+                        channel_column,
+                    )
+                }
+                None => {
+                    let template = b.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find '{VALUE_FORMAT}',please set it."))
+                    })?;
+                    Ok(TemplateEncoder::new_string(
+                        b.schema,
+                        pk_indices,
+                        template.clone(),
+                    ))
+                }
+            },
+            REDIS_VALUE_TYPE_STREAM => match pk_indices {
+                Some(_) => {
+                    let stream = b.format_desc.options.get(STREAM).cloned();
+                    let stream_column = b.format_desc.options.get(STREAM_COLUMN).cloned();
+                    if (stream.is_none() && stream_column.is_none())
+                        || (stream.is_some() && stream_column.is_some())
+                    {
+                        return Err(SinkError::Config(anyhow!(
+                            "`{STREAM}` and `{STREAM_COLUMN}` only one can be set"
+                        )));
+                    }
+                    TemplateEncoder::new_pubsub_stream_key(
+                        b.schema,
+                        pk_indices,
+                        stream,
+                        stream_column,
+                    )
+                }
+                None => {
+                    let value_template =
+                        b.format_desc.options.get(VALUE_FORMAT).ok_or_else(|| {
+                            SinkError::Config(anyhow!(
+                                "Cannot find '{VALUE_FORMAT}',please set it."
+                            ))
+                        })?;
+                    let key_template = b.format_desc.options.get(KEY_FORMAT).ok_or_else(|| {
+                        SinkError::Config(anyhow!("Cannot find '{KEY_FORMAT}',please set it."))
+                    })?;
+
+                    Ok(TemplateEncoder::new_stream_value(
+                        b.schema,
+                        pk_indices,
+                        key_template.clone(),
+                        value_template.clone(),
+                    ))
+                }
+            },
+            _ => Err(SinkError::Config(anyhow!(
+                "The value type {} is not supported",
+                redis_value_type
+            ))),
+        }
     }
 }
 
@@ -347,26 +525,51 @@ impl SinkFormatterImpl {
                 (F::AppendOnly, E::Json, Some(E::Text)) => {
                     Impl::AppendOnlyTextJson(build(p).await?)
                 }
+                (F::AppendOnly, E::Json, Some(E::Bytes)) => {
+                    Impl::AppendOnlyBytesJson(build(p).await?)
+                }
                 (F::AppendOnly, E::Json, None) => Impl::AppendOnlyJson(build(p).await?),
                 (F::AppendOnly, E::Avro, Some(E::Text)) => {
                     Impl::AppendOnlyTextAvro(build(p).await?)
+                }
+                (F::AppendOnly, E::Avro, Some(E::Bytes)) => {
+                    Impl::AppendOnlyBytesAvro(build(p).await?)
                 }
                 (F::AppendOnly, E::Avro, None) => Impl::AppendOnlyAvro(build(p).await?),
                 (F::AppendOnly, E::Protobuf, Some(E::Text)) => {
                     Impl::AppendOnlyTextProto(build(p).await?)
                 }
+                (F::AppendOnly, E::Protobuf, Some(E::Bytes)) => {
+                    Impl::AppendOnlyBytesProto(build(p).await?)
+                }
                 (F::AppendOnly, E::Protobuf, None) => Impl::AppendOnlyProto(build(p).await?),
                 (F::AppendOnly, E::Template, Some(E::Text)) => {
                     Impl::AppendOnlyTextTemplate(build(p).await?)
                 }
+                (F::AppendOnly, E::Template, Some(E::Bytes)) => {
+                    Impl::AppendOnlyBytesTemplate(build(p).await?)
+                }
                 (F::AppendOnly, E::Template, None) => Impl::AppendOnlyTemplate(build(p).await?),
+                (F::AppendOnly, E::Bytes, None) => Impl::AppendOnlyBytes(build(p).await?),
                 (F::Upsert, E::Json, Some(E::Text)) => Impl::UpsertTextJson(build(p).await?),
+                (F::Upsert, E::Json, Some(E::Bytes)) => {
+                    Impl::UpsertBytesJson(build(p).await?)
+                }
                 (F::Upsert, E::Json, None) => Impl::UpsertJson(build(p).await?),
                 (F::Upsert, E::Avro, Some(E::Text)) => Impl::UpsertTextAvro(build(p).await?),
+                (F::Upsert, E::Avro, Some(E::Bytes)) => {
+                    Impl::UpsertBytesAvro(build(p).await?)
+                }
                 (F::Upsert, E::Avro, None) => Impl::UpsertAvro(build(p).await?),
                 (F::Upsert, E::Protobuf, Some(E::Text)) => Impl::UpsertTextProto(build(p).await?),
+                (F::Upsert, E::Protobuf, Some(E::Bytes)) => {
+                    Impl::UpsertBytesProto(build(p).await?)
+                }
                 (F::Upsert, E::Template, Some(E::Text)) => {
                     Impl::UpsertTextTemplate(build(p).await?)
+                }
+                (F::Upsert, E::Template, Some(E::Bytes)) => {
+                    Impl::UpsertBytesTemplate(build(p).await?)
                 }
                 (F::Upsert, E::Template, None) => Impl::UpsertTemplate(build(p).await?),
                 (F::Debezium, E::Json, None) => Impl::DebeziumJson(build(p).await?),
@@ -377,10 +580,12 @@ impl SinkFormatterImpl {
                 }
                 (F::AppendOnly, E::Avro, _)
                 | (F::Upsert, E::Protobuf, _)
+                | (F::Upsert, E::Bytes, _)
                 | (F::Debezium, E::Json, Some(_))
-                | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text, _)
+                | (F::Debezium, E::Avro | E::Protobuf | E::Template | E::Text | E::Bytes, _)
                 | (_, E::Parquet, _)
                 | (_, _, Some(E::Parquet))
+                | (F::AppendOnly, E::Bytes, Some(_))
                 | (F::AppendOnly | F::Upsert, _, Some(E::Template) | Some(E::Json) | Some(E::Avro) | Some(E::Protobuf)) // reject other encode as key encode
                 => {
                     return Err(SinkError::Config(anyhow!(
@@ -395,52 +600,83 @@ impl SinkFormatterImpl {
     }
 }
 
+/// Macro to dispatch formatting implementation for all supported sink formatter types.
+/// Used when the message key can be either bytes or string.
+///
+/// Takes a formatter implementation ($impl), binds it to a name ($name),
+/// and executes the provided code block ($body) with that binding.
 #[macro_export]
 macro_rules! dispatch_sink_formatter_impl {
     ($impl:expr, $name:ident, $body:expr) => {
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
             SinkFormatterImpl::AppendOnlyAvro($name) => $body,
             SinkFormatterImpl::AppendOnlyTextAvro($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesAvro($name) => $body,
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
             SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesProto($name) => $body,
 
             SinkFormatterImpl::UpsertJson($name) => $body,
+            SinkFormatterImpl::UpsertBytesJson($name) => $body,
             SinkFormatterImpl::UpsertTextJson($name) => $body,
             SinkFormatterImpl::UpsertAvro($name) => $body,
             SinkFormatterImpl::UpsertTextAvro($name) => $body,
+            SinkFormatterImpl::UpsertBytesAvro($name) => $body,
             SinkFormatterImpl::UpsertTextProto($name) => $body,
+            SinkFormatterImpl::UpsertBytesProto($name) => $body,
             SinkFormatterImpl::DebeziumJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
             SinkFormatterImpl::UpsertTextTemplate($name) => $body,
             SinkFormatterImpl::UpsertTemplate($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesTemplate($name) => $body,
+            SinkFormatterImpl::UpsertBytesTemplate($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytes($name) => $body,
         }
     };
 }
 
+/// Macro to dispatch formatting implementation for sink formatters that require string keys.
+/// Used when the message key must be a string (excludes some Avro and bytes implementations).
+///
+/// Similar to `dispatch_sink_formatter_impl`, but excludes certain formatter types
+/// that don't support string keys (e.g., `AppendOnlyAvro`, `UpsertAvro`).
+/// These cases are marked as unreachable!() since they should never occur
+/// in contexts requiring string keys.
 #[macro_export]
 macro_rules! dispatch_sink_formatter_str_key_impl {
-    ($impl:expr, $name:ident, $body:expr) => {
+    ($impl:expr, $name:ident, $body:expr $(,$attr:meta)?) => {
+        $(#[$attr])?
         match $impl {
             SinkFormatterImpl::AppendOnlyJson($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesJson(_) => unreachable!(),
             SinkFormatterImpl::AppendOnlyTextJson($name) => $body,
             SinkFormatterImpl::AppendOnlyAvro(_) => unreachable!(),
             SinkFormatterImpl::AppendOnlyTextAvro($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesAvro(_) => unreachable!(),
             SinkFormatterImpl::AppendOnlyProto($name) => $body,
             SinkFormatterImpl::AppendOnlyTextProto($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesProto(_) => unreachable!(),
 
             SinkFormatterImpl::UpsertJson($name) => $body,
             SinkFormatterImpl::UpsertTextJson($name) => $body,
             SinkFormatterImpl::UpsertAvro(_) => unreachable!(),
             SinkFormatterImpl::UpsertTextAvro($name) => $body,
+            SinkFormatterImpl::UpsertBytesAvro(_) => unreachable!(),
             SinkFormatterImpl::UpsertTextProto($name) => $body,
+            SinkFormatterImpl::UpsertBytesProto(_) => unreachable!(),
             SinkFormatterImpl::DebeziumJson($name) => $body,
             SinkFormatterImpl::AppendOnlyTextTemplate($name) => $body,
             SinkFormatterImpl::AppendOnlyTemplate($name) => $body,
             SinkFormatterImpl::UpsertTextTemplate($name) => $body,
+            SinkFormatterImpl::UpsertBytesJson(_) => unreachable!(),
             SinkFormatterImpl::UpsertTemplate($name) => $body,
+            SinkFormatterImpl::AppendOnlyBytesTemplate(_) => unreachable!(),
+            SinkFormatterImpl::UpsertBytesTemplate(_) => unreachable!(),
+            SinkFormatterImpl::AppendOnlyBytes(_) => unreachable!(),
         }
     };
 }

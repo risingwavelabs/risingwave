@@ -2,7 +2,13 @@ CREATE SOURCE ad_impression (
     bid_id BIGINT,
     ad_id BIGINT,
     impression_timestamp TIMESTAMPTZ
-) WITH (
+)
+INCLUDE key
+INCLUDE partition
+INCLUDE offset
+INCLUDE timestamp
+INCLUDE payload
+WITH (
     connector = 'kinesis',
     stream = 'ad-impression',
     aws.region='us-east-1',

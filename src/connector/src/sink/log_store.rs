@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,18 +15,25 @@
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::Debug;
-use std::future::{poll_fn, Future};
+use std::future::{Future, pending, poll_fn};
+use std::pin::pin;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
 
 use await_tree::InstrumentAwait;
+use futures::future::BoxFuture;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
+use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_rate_limit::{RateLimit, RateLimiter};
+use risingwave_pb::stream_plan::PbSinkSchemaChange;
+use tokio::select;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 pub type LogStoreResult<T> = Result<T, anyhow::Error>;
 pub type ChunkId = usize;
@@ -113,8 +120,34 @@ pub enum LogStoreReadItem {
     },
     Barrier {
         is_checkpoint: bool,
+        new_vnode_bitmap: Option<Arc<Bitmap>>,
+        is_stop: bool,
+        schema_change: Option<PbSinkSchemaChange>,
     },
-    UpdateVnodeBitmap(Arc<Bitmap>),
+}
+
+pub trait LogWriterPostFlushCurrentEpochFn<'a> = FnOnce() -> BoxFuture<'a, LogStoreResult<()>>;
+
+#[must_use]
+pub struct LogWriterPostFlushCurrentEpoch<'a>(
+    Box<dyn LogWriterPostFlushCurrentEpochFn<'a> + Send + 'a>,
+);
+
+impl<'a> LogWriterPostFlushCurrentEpoch<'a> {
+    pub fn new(f: impl LogWriterPostFlushCurrentEpochFn<'a> + Send + 'a) -> Self {
+        Self(Box::new(f))
+    }
+
+    pub async fn post_yield_barrier(self) -> LogStoreResult<()> {
+        self.0().await
+    }
+}
+
+pub struct FlushCurrentEpochOptions {
+    pub is_checkpoint: bool,
+    pub new_vnode_bitmap: Option<Arc<Bitmap>>,
+    pub is_stop: bool,
+    pub schema_change: Option<PbSinkSchemaChange>,
 }
 
 pub trait LogWriter: Send {
@@ -135,14 +168,8 @@ pub trait LogWriter: Send {
     fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
-        is_checkpoint: bool,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
-
-    /// Update the vnode bitmap of the log writer
-    fn update_vnode_bitmap(
-        &mut self,
-        new_vnodes: Arc<Bitmap>,
-    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+        options: FlushCurrentEpochOptions,
+    ) -> impl Future<Output = LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>>> + Send + '_;
 
     fn pause(&mut self) -> LogStoreResult<()>;
 
@@ -152,6 +179,12 @@ pub trait LogWriter: Send {
 pub trait LogReader: Send + Sized + 'static {
     /// Initialize the log reader. Usually function as waiting for log writer to be initialized.
     fn init(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
+
+    /// Consume log store from given `start_offset` or aligned start offset recorded previously.
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     /// Emit the next item.
     ///
@@ -167,12 +200,12 @@ pub trait LogReader: Send + Sized + 'static {
     /// Reset the log reader to after the latest truncate offset
     ///
     /// The return flag means whether the log store support rewind
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_;
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 }
 
 pub trait LogStoreFactory: Send + 'static {
+    const ALLOW_REWIND: bool;
+    const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool;
     type Reader: LogReader;
     type Writer: LogWriter;
 
@@ -207,10 +240,15 @@ impl<F: Fn(StreamChunk) -> StreamChunk + Send + 'static, R: LogReader> LogReader
         self.inner.truncate(offset)
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind()
+    }
+
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.start_from(start_offset)
     }
 }
 
@@ -218,11 +256,11 @@ pub struct BackpressureMonitoredLogReader<R: LogReader> {
     inner: R,
     /// Start time to wait for new future after poll ready
     wait_new_future_start_time: Option<Instant>,
-    wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
+    wait_new_future_duration_ns: LabelGuardedIntCounter,
 }
 
 impl<R: LogReader> BackpressureMonitoredLogReader<R> {
-    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter<4>) -> Self {
+    fn new(inner: R, wait_new_future_duration_ns: LabelGuardedIntCounter) -> Self {
         Self {
             inner,
             wait_new_future_start_time: None,
@@ -254,12 +292,17 @@ impl<R: LogReader> LogReader for BackpressureMonitoredLogReader<R> {
         self.inner.truncate(offset)
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind().inspect_ok(|_| {
             self.wait_new_future_start_time = None;
         })
+    }
+
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.start_from(start_offset)
     }
 }
 
@@ -270,9 +313,10 @@ pub struct MonitoredLogReader<R: LogReader> {
 }
 
 pub struct LogReaderMetrics {
-    pub log_store_latest_read_epoch: LabelGuardedIntGauge<4>,
-    pub log_store_read_rows: LabelGuardedIntCounter<4>,
-    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter<4>,
+    pub log_store_latest_read_epoch: LabelGuardedIntGauge,
+    pub log_store_read_rows: LabelGuardedIntCounter,
+    pub log_store_read_bytes: LabelGuardedIntCounter,
+    pub log_store_reader_wait_new_future_duration_ns: LabelGuardedIntCounter,
 }
 
 impl<R: LogReader> MonitoredLogReader<R> {
@@ -304,6 +348,9 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
                     self.metrics
                         .log_store_read_rows
                         .inc_by(chunk.cardinality() as _);
+                    self.metrics
+                        .log_store_read_bytes
+                        .inc_by(chunk.estimated_size() as u64);
                 }
             })
     }
@@ -312,10 +359,253 @@ impl<R: LogReader> LogReader for MonitoredLogReader<R> {
         self.inner.truncate(offset)
     }
 
-    fn rewind(
-        &mut self,
-    ) -> impl Future<Output = LogStoreResult<(bool, Option<Bitmap>)>> + Send + '_ {
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
         self.inner.rewind().instrument_await("log_reader_rewind")
+    }
+
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.inner.start_from(start_offset)
+    }
+}
+
+#[derive(Copy, Clone, PartialOrd, PartialEq, Debug)]
+struct UpstreamChunkOffset(TruncateOffset);
+#[derive(Copy, Clone, PartialOrd, PartialEq)]
+struct DownstreamChunkOffset(TruncateOffset);
+
+struct RateLimitedLogReaderCore<R: LogReader> {
+    inner: R,
+    consuming_chunk: Option<(
+        UpstreamChunkOffset,
+        // Newer items at the front, push_front, pop_back
+        VecDeque<DownstreamChunkOffset>,
+        Vec<StreamChunk>, // split chunks
+    )>,
+    // Newer items at the front, push_front, pop_back
+    consumed_offset_queue: VecDeque<(UpstreamChunkOffset, VecDeque<DownstreamChunkOffset>)>,
+    next_chunk_id: usize,
+    rate_limiter: RateLimiter,
+}
+
+pub struct RateLimitedLogReader<R: LogReader> {
+    core: RateLimitedLogReaderCore<R>,
+    control_rx: UnboundedReceiver<RateLimit>,
+}
+
+impl<R: LogReader> RateLimitedLogReader<R> {
+    pub fn new(inner: R, control_rx: UnboundedReceiver<RateLimit>) -> Self {
+        Self {
+            core: RateLimitedLogReaderCore {
+                inner,
+                consuming_chunk: None,
+                consumed_offset_queue: VecDeque::new(),
+                next_chunk_id: 0,
+                rate_limiter: RateLimiter::new(RateLimit::Disabled),
+            },
+            control_rx,
+        }
+    }
+}
+
+impl<R: LogReader> RateLimitedLogReaderCore<R> {
+    fn peek_next_pending_chunk(&self) -> Option<&StreamChunk> {
+        self.consuming_chunk
+            .as_ref()
+            .and_then(|(_, _, chunk)| chunk.last())
+    }
+
+    fn consume_next_pending_chunk(&mut self) -> Option<(u64, StreamChunk, ChunkId)> {
+        let Some((upstream_offset, consumed_offsets, pending_chunk)) = &mut self.consuming_chunk
+        else {
+            return None;
+        };
+        let epoch = upstream_offset.0.epoch();
+
+        let item = pending_chunk.pop().map(|chunk| {
+            let chunk_id = self.next_chunk_id;
+            self.next_chunk_id += 1;
+            consumed_offsets.push_front(DownstreamChunkOffset(TruncateOffset::Chunk {
+                epoch,
+                chunk_id,
+            }));
+            (epoch, chunk, chunk_id)
+        });
+        if pending_chunk.is_empty() {
+            let (upstream_offset, consumed_offsets, _) =
+                self.consuming_chunk.take().expect("checked some");
+            self.consumed_offset_queue
+                .push_front((upstream_offset, consumed_offsets));
+        }
+        item
+    }
+
+    fn consume_single_upstream_item(
+        &mut self,
+        epoch: u64,
+        mut item: LogStoreReadItem,
+    ) -> (u64, LogStoreReadItem) {
+        assert!(self.consuming_chunk.is_none());
+        let (upstream_offset, downstream_offset) = match &mut item {
+            LogStoreReadItem::StreamChunk { chunk_id, .. } => {
+                let upstream_chunk_id = *chunk_id;
+                let downstream_chunk_id = self.next_chunk_id;
+                self.next_chunk_id += 1;
+                *chunk_id = downstream_chunk_id;
+                (
+                    UpstreamChunkOffset(TruncateOffset::Chunk {
+                        epoch,
+                        chunk_id: upstream_chunk_id,
+                    }),
+                    DownstreamChunkOffset(TruncateOffset::Chunk {
+                        epoch,
+                        chunk_id: downstream_chunk_id,
+                    }),
+                )
+            }
+            LogStoreReadItem::Barrier { .. } => (
+                UpstreamChunkOffset(TruncateOffset::Barrier { epoch }),
+                DownstreamChunkOffset(TruncateOffset::Barrier { epoch }),
+            ),
+        };
+        self.consumed_offset_queue
+            .push_front((upstream_offset, VecDeque::from_iter([downstream_offset])));
+        (epoch, item)
+    }
+
+    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        match self.rate_limiter.rate_limit() {
+            RateLimit::Pause => pending().await,
+            RateLimit::Disabled => {
+                if let Some((epoch, chunk, chunk_id)) = self.consume_next_pending_chunk() {
+                    Ok((epoch, LogStoreReadItem::StreamChunk { chunk, chunk_id }))
+                } else {
+                    let (epoch, item) = self.inner.next_item().await?;
+                    Ok(self.consume_single_upstream_item(epoch, item))
+                }
+            }
+            RateLimit::Fixed(limit) => {
+                if self.peek_next_pending_chunk().is_none() {
+                    let (epoch, item) = self.inner.next_item().await?;
+                    match item {
+                        LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
+                            let chunks = if chunk.rate_limit_permits() < limit.get() {
+                                vec![chunk]
+                            } else {
+                                let mut chunks = chunk.split(limit.get() as _);
+                                // reverse to make the first chunk to be popped first
+                                chunks.reverse();
+                                chunks
+                            };
+                            assert!(!chunks.is_empty());
+
+                            assert!(
+                                self.consuming_chunk
+                                    .replace((
+                                        UpstreamChunkOffset(TruncateOffset::Chunk {
+                                            epoch,
+                                            chunk_id
+                                        }),
+                                        VecDeque::new(),
+                                        chunks,
+                                    ))
+                                    .is_none()
+                            );
+                        }
+                        item @ LogStoreReadItem::Barrier { .. } => {
+                            return Ok(self.consume_single_upstream_item(epoch, item));
+                        }
+                    };
+                }
+                let chunk = self.peek_next_pending_chunk().expect("must Some");
+                self.rate_limiter.wait_chunk(chunk).await;
+                let (epoch, chunk, chunk_id) =
+                    self.consume_next_pending_chunk().expect("must Some");
+                Ok((epoch, LogStoreReadItem::StreamChunk { chunk, chunk_id }))
+            }
+        }
+    }
+}
+
+impl<R: LogReader> LogReader for RateLimitedLogReader<R> {
+    async fn init(&mut self) -> LogStoreResult<()> {
+        self.core.inner.init().await
+    }
+
+    async fn next_item(&mut self) -> LogStoreResult<(u64, LogStoreReadItem)> {
+        loop {
+            select! {
+                biased;
+                recv = pin!(self.control_rx.recv()) => {
+                    let new_rate_limit = match recv {
+                        Some(limit) => limit,
+                        None => bail!("rate limit control channel closed"),
+                    };
+                    let old_rate_limit = self.core.rate_limiter.update(new_rate_limit);
+                    let paused = matches!(new_rate_limit, RateLimit::Pause);
+                    tracing::info!("rate limit changed from {:?} to {:?}, paused = {paused}", old_rate_limit, new_rate_limit);
+                },
+                item = self.core.next_item() => {
+                    return item;
+                }
+            }
+        }
+    }
+
+    fn truncate(&mut self, offset: TruncateOffset) -> LogStoreResult<()> {
+        let downstream_offset = DownstreamChunkOffset(offset);
+        let mut truncate_offset = None;
+        let mut stop = false;
+        'outer: while let Some((upstream_offset, downstream_offsets)) =
+            self.core.consumed_offset_queue.back_mut()
+        {
+            while let Some(prev_downstream_offset) = downstream_offsets.back() {
+                if *prev_downstream_offset <= downstream_offset {
+                    downstream_offsets.pop_back();
+                } else {
+                    stop = true;
+                    break 'outer;
+                }
+            }
+            truncate_offset = Some(*upstream_offset);
+            self.core.consumed_offset_queue.pop_back();
+        }
+        if !stop && let Some((_, downstream_offsets, _)) = &mut self.core.consuming_chunk {
+            while let Some(prev_downstream_offset) = downstream_offsets.back() {
+                if *prev_downstream_offset <= downstream_offset {
+                    downstream_offsets.pop_back();
+                } else {
+                    // stop = true;
+                    break;
+                }
+            }
+        }
+        tracing::trace!(
+            "rate limited log store reader truncate offset {:?}, downstream offset {:?}",
+            truncate_offset,
+            offset
+        );
+        if let Some(offset) = truncate_offset {
+            self.core.inner.truncate(offset.0)
+        } else {
+            Ok(())
+        }
+    }
+
+    fn rewind(&mut self) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.core.consuming_chunk = None;
+        self.core.consumed_offset_queue.clear();
+        self.core.next_chunk_id = 0;
+        self.core.inner.rewind()
+    }
+
+    fn start_from(
+        &mut self,
+        start_offset: Option<u64>,
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_ {
+        self.core.inner.start_from(start_offset)
     }
 }
 
@@ -339,6 +629,10 @@ where
             wait_new_future_duration,
         )
     }
+
+    pub fn rate_limited(self, control_rx: UnboundedReceiver<RateLimit>) -> impl LogReader {
+        RateLimitedLogReader::new(self, control_rx)
+    }
 }
 
 pub struct MonitoredLogWriter<W: LogWriter> {
@@ -348,9 +642,9 @@ pub struct MonitoredLogWriter<W: LogWriter> {
 
 pub struct LogWriterMetrics {
     // Labels: [actor_id, sink_id, sink_name]
-    pub log_store_first_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_latest_write_epoch: LabelGuardedIntGauge<3>,
-    pub log_store_write_rows: LabelGuardedIntCounter<3>,
+    pub log_store_first_write_epoch: LabelGuardedIntGauge,
+    pub log_store_latest_write_epoch: LabelGuardedIntGauge,
+    pub log_store_write_rows: LabelGuardedIntCounter,
 }
 
 impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
@@ -378,19 +672,13 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
     async fn flush_current_epoch(
         &mut self,
         next_epoch: u64,
-        is_checkpoint: bool,
-    ) -> LogStoreResult<()> {
-        self.inner
-            .flush_current_epoch(next_epoch, is_checkpoint)
-            .await?;
+        options: FlushCurrentEpochOptions,
+    ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
+        let post_flush = self.inner.flush_current_epoch(next_epoch, options).await?;
         self.metrics
             .log_store_latest_write_epoch
             .set(next_epoch as _);
-        Ok(())
-    }
-
-    async fn update_vnode_bitmap(&mut self, new_vnodes: Arc<Bitmap>) -> LogStoreResult<()> {
-        self.inner.update_vnode_bitmap(new_vnodes).await
+        Ok(post_flush)
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {
@@ -502,7 +790,7 @@ impl<F> DeliveryFutureManager<F> {
 
 pub struct DeliveryFutureManagerAddFuture<'a, F>(&'a mut DeliveryFutureManager<F>);
 
-impl<'a, F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture<'a, F> {
+impl<F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManagerAddFuture<'_, F> {
     /// Add a new future to the latest started written chunk.
     /// The returned bool value indicate whether we have awaited on any previous futures.
     pub async fn add_future_may_await(&mut self, future: F) -> Result<bool, F::Error> {
@@ -598,7 +886,7 @@ impl<F: TryFuture<Ok = ()> + Unpin + 'static> DeliveryFutureManager<F> {
 
 #[cfg(test)]
 mod tests {
-    use std::future::{poll_fn, Future};
+    use std::future::{Future, poll_fn};
     use std::pin::pin;
     use std::task::Poll;
 
@@ -661,6 +949,8 @@ mod tests {
     }
 
     type TestFuture = impl TryFuture<Ok = (), Error = anyhow::Error> + Unpin + 'static;
+
+    #[define_opaque(TestFuture)]
     fn to_test_future(rx: Receiver<LogStoreResult<()>>) -> TestFuture {
         async move { rx.await.unwrap() }.boxed()
     }
@@ -669,9 +959,11 @@ mod tests {
     async fn test_empty() {
         let mut manager = DeliveryFutureManager::<TestFuture>::new(2);
         let mut future = pin!(manager.next_truncate_offset());
-        assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
-            .await
-            .is_pending());
+        assert!(
+            poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                .await
+                .is_pending()
+        );
     }
 
     #[tokio::test]
@@ -681,10 +973,12 @@ mod tests {
         let chunk_id1 = 1;
         let (tx1_1, rx1_1) = oneshot::channel();
         let mut write_chunk = manager.start_write_chunk(epoch1, chunk_id1);
-        assert!(!write_chunk
-            .add_future_may_await(to_test_future(rx1_1))
-            .await
-            .unwrap());
+        assert!(
+            !write_chunk
+                .add_future_may_await(to_test_future(rx1_1))
+                .await
+                .unwrap()
+        );
         assert_eq!(manager.future_count, 1);
         {
             let mut next_truncate_offset = pin!(manager.next_truncate_offset());
@@ -722,27 +1016,35 @@ mod tests {
         let (tx1_3, rx1_3) = oneshot::channel();
         let epoch2 = test_epoch(234);
         let (tx2_1, rx2_1) = oneshot::channel();
-        assert!(!manager
-            .start_write_chunk(epoch1, chunk_id1)
-            .add_future_may_await(to_test_future(rx1_1))
-            .await
-            .unwrap());
-        assert!(!manager
-            .start_write_chunk(epoch1, chunk_id2)
-            .add_future_may_await(to_test_future(rx1_2))
-            .await
-            .unwrap());
-        assert!(!manager
-            .start_write_chunk(epoch1, chunk_id3)
-            .add_future_may_await(to_test_future(rx1_3))
-            .await
-            .unwrap());
+        assert!(
+            !manager
+                .start_write_chunk(epoch1, chunk_id1)
+                .add_future_may_await(to_test_future(rx1_1))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !manager
+                .start_write_chunk(epoch1, chunk_id2)
+                .add_future_may_await(to_test_future(rx1_2))
+                .await
+                .unwrap()
+        );
+        assert!(
+            !manager
+                .start_write_chunk(epoch1, chunk_id3)
+                .add_future_may_await(to_test_future(rx1_3))
+                .await
+                .unwrap()
+        );
         manager.add_barrier(epoch1);
-        assert!(!manager
-            .start_write_chunk(epoch2, chunk_id1)
-            .add_future_may_await(to_test_future(rx2_1))
-            .await
-            .unwrap());
+        assert!(
+            !manager
+                .start_write_chunk(epoch2, chunk_id1)
+                .add_future_may_await(to_test_future(rx2_1))
+                .await
+                .unwrap()
+        );
         assert_eq!(manager.future_count, 4);
         {
             let mut next_truncate_offset = pin!(manager.next_truncate_offset());
@@ -806,14 +1108,18 @@ mod tests {
 
         {
             let mut write_chunk = manager.start_write_chunk(epoch, chunk_id1);
-            assert!(!write_chunk
-                .add_future_may_await(to_test_future(rx1_1))
-                .await
-                .unwrap());
-            assert!(!write_chunk
-                .add_future_may_await(to_test_future(rx1_2))
-                .await
-                .unwrap());
+            assert!(
+                !write_chunk
+                    .add_future_may_await(to_test_future(rx1_1))
+                    .await
+                    .unwrap()
+            );
+            assert!(
+                !write_chunk
+                    .add_future_may_await(to_test_future(rx1_2))
+                    .await
+                    .unwrap()
+            );
             assert_eq!(manager.future_count, 2);
         }
 
@@ -821,27 +1127,33 @@ mod tests {
             let mut write_chunk = manager.start_write_chunk(epoch, chunk_id2);
             {
                 let mut future1 = pin!(write_chunk.add_future_may_await(to_test_future(rx2_1)));
-                assert!(poll_fn(|cx| Poll::Ready(future1.as_mut().poll(cx)))
-                    .await
-                    .is_pending());
+                assert!(
+                    poll_fn(|cx| Poll::Ready(future1.as_mut().poll(cx)))
+                        .await
+                        .is_pending()
+                );
                 tx1_1.send(Ok(())).unwrap();
                 assert!(future1.await.unwrap());
             }
             assert_eq!(2, write_chunk.future_count());
             {
                 let mut future2 = pin!(write_chunk.add_future_may_await(to_test_future(rx2_2)));
-                assert!(poll_fn(|cx| Poll::Ready(future2.as_mut().poll(cx)))
-                    .await
-                    .is_pending());
+                assert!(
+                    poll_fn(|cx| Poll::Ready(future2.as_mut().poll(cx)))
+                        .await
+                        .is_pending()
+                );
                 tx1_2.send(Ok(())).unwrap();
                 assert!(future2.await.unwrap());
             }
             assert_eq!(2, write_chunk.future_count());
             {
                 let mut future3 = pin!(write_chunk.await_one_delivery());
-                assert!(poll_fn(|cx| Poll::Ready(future3.as_mut().poll(cx)))
-                    .await
-                    .is_pending());
+                assert!(
+                    poll_fn(|cx| Poll::Ready(future3.as_mut().poll(cx)))
+                        .await
+                        .is_pending()
+                );
                 tx2_1.send(Ok(())).unwrap();
                 future3.await.unwrap();
             }
@@ -860,9 +1172,11 @@ mod tests {
 
         {
             let mut future = pin!(manager.next_truncate_offset());
-            assert!(poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
-                .await
-                .is_pending());
+            assert!(
+                poll_fn(|cx| Poll::Ready(future.as_mut().poll(cx)))
+                    .await
+                    .is_pending()
+            );
             tx2_2.send(Ok(())).unwrap();
             assert_eq!(
                 future.await.unwrap(),

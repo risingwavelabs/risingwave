@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,6 +33,7 @@ const TYPE_MATRIX: &str = "
     varchar     Varchar     Utf8Array           Box<str>        &str                _
     bytea       Bytea       BytesArray          Box<[u8]>       &[u8]               _
     jsonb       Jsonb       JsonbArray          JsonbVal        JsonbRef<'_>        _
+    vector      Vector      VectorArray         VectorVal       VectorRef<'_>       _
     anyarray    List        ListArray           ListValue       ListRef<'_>         _
     struct      Struct      StructArray         StructValue     StructRef<'_>       _
     anymap      Map         MapArray            MapValue        MapRef<'_>          _

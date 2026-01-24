@@ -3,6 +3,9 @@ auto-retry: &auto-retry
     # Agent terminated because the AWS EC2 spot instance killed by AWS.
     - signal_reason: agent_stop
       limit: 3
+    - exit_status: -1
+      signal_reason: none
+      limit: 3
 
 steps:
   - label: "docker-build-push: amd64"
@@ -10,7 +13,7 @@ steps:
     command: "ci/scripts/docker.sh"
     key: "build-amd64"
     plugins:
-      - seek-oss/aws-sm#v2.3.1:
+      - seek-oss/aws-sm#v2.3.2:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
@@ -23,7 +26,7 @@ steps:
     command: "ci/scripts/docker.sh"
     key: "build-aarch64"
     plugins:
-      - seek-oss/aws-sm#v2.3.1:
+      - seek-oss/aws-sm#v2.3.2:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
@@ -38,8 +41,9 @@ steps:
     depends_on:
       - "build-amd64"
       - "build-aarch64"
+    key: "multi-arch-image-create-push"
     plugins:
-      - seek-oss/aws-sm#v2.3.1:
+      - seek-oss/aws-sm#v2.3.2:
           env:
             GHCR_USERNAME: ghcr-username
             GHCR_TOKEN: ghcr-token
@@ -50,10 +54,10 @@ steps:
     if: build.env("SKIP_TARGET_AMD64") != "true"
     command: "ci/scripts/release.sh"
     plugins:
-      - seek-oss/aws-sm#v2.3.1:
+      - seek-oss/aws-sm#v2.3.2:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v5.1.0:
+      - docker-compose#v5.5.0:
           run: release-env-x86
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -67,10 +71,10 @@ steps:
     if: build.env("SKIP_TARGET_AARCH64") != "true"
     command: "ci/scripts/release.sh"
     plugins:
-      - seek-oss/aws-sm#v2.3.1:
+      - seek-oss/aws-sm#v2.3.2:
           env:
             GITHUB_TOKEN: github-token
-      - docker-compose#v5.1.0:
+      - docker-compose#v5.5.0:
           run: release-env-arm
           config: ci/docker-compose.yml
           mount-buildkite-agent: true
@@ -81,3 +85,23 @@ steps:
     agents:
       queue: "linux-arm64"
     retry: *auto-retry
+
+  - label: "docker scout"
+    if: build.env("ENABLE_DOCKER_SCOUT") == "true"
+    key: docker-scout
+    command: "ci/scripts/docker-scout.sh"
+    depends_on:
+      - "multi-arch-image-create-push"
+    plugins:
+      - seek-oss/aws-sm#v2.3.2:
+          env:
+            GHCR_USERNAME: ghcr-username
+            GHCR_TOKEN: ghcr-token
+            DOCKER_TOKEN: docker-token
+    retry: *auto-retry
+
+  - label: "generate notification step"
+    if: build.env("ENABLE_DOCKER_SCOUT") == "true"
+    depends_on:
+      - "docker-scout"
+    command: ci/scripts/docker-scout-notify.sh

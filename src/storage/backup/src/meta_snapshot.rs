@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use bytes::{Buf, BufMut};
 use risingwave_hummock_sdk::version::HummockVersion;
 
 use crate::error::BackupResult;
-use crate::{xxhash64_checksum, xxhash64_verify, MetaSnapshotId};
+use crate::{MetaSnapshotId, xxhash64_checksum, xxhash64_verify};
 
 pub trait Metadata: Display + Send + Sync {
     fn encode_to(&self, buf: &mut Vec<u8>) -> BackupResult<()>;
@@ -30,6 +30,10 @@ pub trait Metadata: Display + Send + Sync {
     fn hummock_version_ref(&self) -> &HummockVersion;
 
     fn hummock_version(self) -> HummockVersion;
+
+    fn storage_url(&self) -> BackupResult<String>;
+
+    fn storage_directory(&self) -> BackupResult<String>;
 }
 
 #[derive(Debug, Default, Clone, PartialEq)]

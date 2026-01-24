@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,8 +22,8 @@ use risingwave_connector_codec::common::protobuf::compile_pb;
 use super::loader::{LoadedSchema, SchemaLoader};
 use super::schema_registry::Subject;
 use super::{
-    invalid_option_error, InvalidOptionError, SchemaFetchError, MESSAGE_NAME_KEY,
-    SCHEMA_LOCATION_KEY, SCHEMA_REGISTRY_KEY,
+    InvalidOptionError, MESSAGE_NAME_KEY, SCHEMA_LOCATION_KEY, SCHEMA_REGISTRY_KEY,
+    SchemaFetchError, invalid_option_error,
 };
 use crate::connector_common::AwsAuthProps;
 use crate::parser::{EncodingProperties, ProtobufParserConfig, ProtobufProperties};
@@ -45,13 +45,13 @@ pub async fn fetch_descriptor(
             return Err(invalid_option_error!(
                 "cannot use {SCHEMA_LOCATION_KEY} and {SCHEMA_REGISTRY_KEY} together"
             )
-            .into())
+            .into());
         }
         (None, None) => {
             return Err(invalid_option_error!(
                 "requires one of {SCHEMA_LOCATION_KEY} or {SCHEMA_REGISTRY_KEY}"
             )
-            .into())
+            .into());
         }
         (None, Some(_)) => {
             let (md, sid) = fetch_from_registry(&message_name, format_options, topic).await?;
@@ -65,10 +65,11 @@ pub async fn fetch_descriptor(
     }
 
     let enc = EncodingProperties::Protobuf(ProtobufProperties {
-        use_schema_registry: false,
-        row_schema_location,
+        schema_location: crate::parser::SchemaLocation::File {
+            url: row_schema_location,
+            aws_auth_props: aws_auth_props.cloned(),
+        },
         message_name,
-        aws_auth_props: aws_auth_props.cloned(),
         // name_strategy, topic, key_message_name, enable_upsert, client_config
         ..Default::default()
     });
@@ -87,14 +88,23 @@ pub async fn fetch_from_registry(
     format_options: &BTreeMap<String, String>,
     topic: &str,
 ) -> Result<(MessageDescriptor, i32), SchemaFetchError> {
-    let loader = SchemaLoader::from_format_options(topic, format_options)?;
+    let loader = SchemaLoader::from_format_options(topic, format_options).await?;
 
     let (vid, vpb) = loader.load_val_schema::<FileDescriptor>().await?;
+    let vid = match vid {
+        super::SchemaVersion::Confluent(vid) => vid,
+        super::SchemaVersion::Glue(_) => {
+            return Err(
+                invalid_option_error!("Protobuf with Glue Schema Registry unsupported").into(),
+            );
+        }
+    };
+    let message_descriptor = vpb
+        .parent_pool()
+        .get_message_by_name(message_name)
+        .ok_or_else(|| invalid_option_error!("message {message_name} not defined in proto"))?;
 
-    Ok((
-        vpb.parent_pool().get_message_by_name(message_name).unwrap(),
-        vid,
-    ))
+    Ok((message_descriptor, vid))
 }
 
 impl LoadedSchema for FileDescriptor {
@@ -121,13 +131,10 @@ fn compile_pb_subject(
     dependency_subjects: Vec<Subject>,
 ) -> Result<FileDescriptorSet, SchemaFetchError> {
     compile_pb(
-        (
-            primary_subject.name.clone(),
-            primary_subject.schema.content.clone(),
-        ),
+        (primary_subject.name.clone(), primary_subject.schema.content),
         dependency_subjects
             .into_iter()
-            .map(|s| (s.name.clone(), s.schema.content.clone())),
+            .map(|s| (s.name.clone(), s.schema.content)),
     )
     .map_err(|e| SchemaFetchError::SchemaCompile(e.into()))
 }

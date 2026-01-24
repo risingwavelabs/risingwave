@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::telemetry::telemetry_cluster_type_from_env_var;
 use risingwave_meta::controller::SqlMetaStore;
-use risingwave_meta_model_v2::prelude::Cluster;
+use risingwave_meta_model::prelude::Cluster;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoService;
 use risingwave_pb::meta::{GetTelemetryInfoRequest, TelemetryInfoResponse};
 use sea_orm::EntityTrait;
 use tonic::{Request, Response, Status};
 
-use crate::model::ClusterId;
 use crate::MetaResult;
+use crate::model::ClusterId;
 
 pub struct TelemetryInfoServiceImpl {
     meta_store_impl: SqlMetaStore,
@@ -44,6 +45,9 @@ impl TelemetryInfoService for TelemetryInfoServiceImpl {
         &self,
         _request: Request<GetTelemetryInfoRequest>,
     ) -> Result<Response<TelemetryInfoResponse>, Status> {
+        if telemetry_cluster_type_from_env_var().is_err() {
+            return Ok(Response::new(TelemetryInfoResponse { tracking_id: None }));
+        }
         match self.get_tracking_id().await? {
             Some(tracking_id) => Ok(Response::new(TelemetryInfoResponse {
                 tracking_id: Some(tracking_id.into()),

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use itertools::Itertools;
 use risingwave_common::acl;
 use risingwave_common::acl::{AclMode, AclModeSet};
 use risingwave_common::catalog::DEFAULT_SUPER_USER_ID;
-use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbAction, PbObject};
-use risingwave_pb::user::PbGrantPrivilege;
+use risingwave_pb::user::grant_privilege::{ActionWithGrantOption, PbObject};
+use risingwave_pb::user::{PbAction, PbGrantPrivilege};
 use risingwave_sqlparser::ast::{Action, GrantObjects, Privileges};
 
 use crate::error::{ErrorCode, Result};
@@ -33,7 +33,7 @@ pub fn check_privilege_type(privilege: &Privileges, objects: &GrantObjects) -> R
                 .all(|action| acl_sets.has_mode(action.into()));
             if !valid {
                 return Err(ErrorCode::BindError(
-                    "Invalid privilege type for the given object.".to_string(),
+                    "Invalid privilege type for the given object.".to_owned(),
                 )
                 .into());
             }
@@ -56,9 +56,26 @@ fn get_all_available_modes(object: &GrantObjects) -> Result<&AclModeSet> {
         GrantObjects::Tables(_) | GrantObjects::AllTablesInSchema { .. } => {
             Ok(&acl::ALL_AVAILABLE_TABLE_MODES)
         }
-        GrantObjects::Sinks(_) => Ok(&acl::ALL_AVAILABLE_SINK_MODES),
+        GrantObjects::Sinks(_) | GrantObjects::AllSinksInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_SINK_MODES)
+        }
+        GrantObjects::Views(_) | GrantObjects::AllViewsInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_VIEW_MODES)
+        }
+        GrantObjects::Functions(_) | GrantObjects::AllFunctionsInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_FUNCTION_MODES)
+        }
+        GrantObjects::Secrets(_) | GrantObjects::AllSecretsInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_SECRET_MODES)
+        }
+        GrantObjects::Subscriptions(_) | GrantObjects::AllSubscriptionsInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_SUBSCRIPTION_MODES)
+        }
+        GrantObjects::Connections(_) | GrantObjects::AllConnectionsInSchema { .. } => {
+            Ok(&acl::ALL_AVAILABLE_CONNECTION_MODES)
+        }
         _ => Err(
-            ErrorCode::BindError("Invalid privilege type for the given object.".to_string()).into(),
+            ErrorCode::BindError("Invalid privilege type for the given object.".to_owned()).into(),
         ),
     }
 }
@@ -74,10 +91,11 @@ pub fn get_prost_action(action: &Action) -> PbAction {
         Action::Select { .. } => PbAction::Select,
         Action::Insert { .. } => PbAction::Insert,
         Action::Update { .. } => PbAction::Update,
-        Action::Delete { .. } => PbAction::Delete,
+        Action::Delete => PbAction::Delete,
         Action::Connect => PbAction::Connect,
         Action::Create => PbAction::Create,
         Action::Usage => PbAction::Usage,
+        Action::Execute => PbAction::Execute,
         _ => unreachable!(),
     }
 }
@@ -94,11 +112,12 @@ pub fn available_prost_privilege(object: PbObject, for_dml_table: bool) -> PbGra
                 &acl::ALL_AVAILABLE_MVIEW_MODES
             }
         }
-        PbObject::ViewId(_) => &acl::ALL_AVAILABLE_TABLE_MODES,
+        PbObject::ViewId(_) => &acl::ALL_AVAILABLE_VIEW_MODES,
         PbObject::SinkId(_) => &acl::ALL_AVAILABLE_SINK_MODES,
         PbObject::SubscriptionId(_) => &acl::ALL_AVAILABLE_SUBSCRIPTION_MODES,
         PbObject::FunctionId(_) => &acl::ALL_AVAILABLE_FUNCTION_MODES,
-        _ => unreachable!("Invalid object type"),
+        PbObject::ConnectionId(_) => &acl::ALL_AVAILABLE_CONNECTION_MODES,
+        PbObject::SecretId(_) => &acl::ALL_AVAILABLE_SECRET_MODES,
     };
     let actions = acl_set
         .iter()

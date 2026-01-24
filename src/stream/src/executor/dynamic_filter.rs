@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,11 +18,11 @@ use futures::stream;
 use risingwave_common::array::{Array, ArrayImpl, Op};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::row::{self, once, OwnedRow as RowData};
+use risingwave_common::row::once;
 use risingwave_common::types::{DefaultOrd, ToDatumRef, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::{
-    build_func_non_strict, InputRefExpression, LiteralExpression, NonStrictExpression,
+    InputRefExpression, LiteralExpression, NonStrictExpression, build_func_non_strict,
 };
 use risingwave_pb::expr::expr_node::Type as PbExprNodeType;
 use risingwave_pb::expr::expr_node::Type::{
@@ -31,12 +31,12 @@ use risingwave_pb::expr::expr_node::Type::{
 use risingwave_storage::store::PrefetchOptions;
 
 use super::barrier_align::*;
-use crate::common::table::state_table::WatermarkCacheParameterizedStateTable;
+use crate::common::table::state_table::StateTable;
 use crate::consistency::consistency_panic;
 use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
 
-pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool> {
+pub struct DynamicFilterExecutor<S: StateStore> {
     ctx: ActorContextRef,
 
     eval_error_report: ActorEvalErrorReport,
@@ -46,7 +46,7 @@ pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool>
     source_r: Option<Executor>,
     key_l: usize,
     comparator: PbExprNodeType,
-    left_table: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
+    left_table: StateTable<S>,
     right_table: StateTable<S>,
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time.
@@ -54,7 +54,7 @@ pub struct DynamicFilterExecutor<S: StateStore, const USE_WATERMARK_CACHE: bool>
     cleaned_by_watermark: bool,
 }
 
-impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, USE_WATERMARK_CACHE> {
+impl<S: StateStore> DynamicFilterExecutor<S> {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -64,7 +64,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         source_r: Executor,
         key_l: usize,
         comparator: PbExprNodeType,
-        state_table_l: WatermarkCacheParameterizedStateTable<S, USE_WATERMARK_CACHE>,
+        state_table_l: StateTable<S>,
         state_table_r: StateTable<S>,
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
@@ -257,24 +257,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         }
     }
 
-    async fn recover_rhs(&mut self) -> Result<Option<RowData>, StreamExecutorError> {
-        // Recover value for RHS if available
-        let sub_range: &(Bound<OwnedRow>, Bound<OwnedRow>) = &(Unbounded, Unbounded);
-        let rhs_stream = self
-            .right_table
-            .iter_with_prefix(row::empty(), sub_range, Default::default())
-            .await?;
-        pin_mut!(rhs_stream);
-
-        if let Some(res) = rhs_stream.next().await {
-            let value = res?.into_owned_row();
-            assert!(rhs_stream.next().await.is_none());
-            Ok(Some(value))
-        } else {
-            Ok(None)
-        }
-    }
-
     fn to_row_bound(bound: Bound<ScalarImpl>) -> Bound<impl Row> {
         bound.map(|s| once(Some(s)))
     }
@@ -321,10 +303,13 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         pin_mut!(aligned_stream);
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
-        self.right_table.init_epoch(barrier.epoch);
-        self.left_table.init_epoch(barrier.epoch);
+        let first_epoch = barrier.epoch;
+        // The first barrier message should be propagated.
+        yield Message::Barrier(barrier);
+        self.right_table.init_epoch(first_epoch).await?;
+        self.left_table.init_epoch(first_epoch).await?;
 
-        let recovered_rhs = self.recover_rhs().await?;
+        let recovered_rhs = self.right_table.get_from_one_row_table().await?;
         let recovered_rhs_value = recovered_rhs.as_ref().map(|r| r[0].clone());
         // At the beginning of an epoch, the `committed_rhs_value` == `staging_rhs_value`
         let mut committed_rhs_value: Option<Datum> = recovered_rhs_value.clone();
@@ -332,9 +317,6 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
         // This is only required to be some if the row arrived during this epoch.
         let mut committed_rhs_row = recovered_rhs.clone();
         let mut staging_rhs_row = recovered_rhs;
-
-        // The first barrier message should be propagated.
-        yield Message::Barrier(barrier);
 
         let mut stream_chunk_builder =
             StreamChunkBuilder::new(self.chunk_size, self.schema.data_types());
@@ -348,7 +330,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
             match msg? {
                 AlignedMessage::Left(chunk) => {
                     // Reuse the logic from `FilterExecutor`
-                    let chunk = chunk.compact(); // Is this unnecessary work?
+                    let chunk = chunk.compact_vis(); // Is this unnecessary work?
 
                     // The condition is `None` if it is always false by virtue of a NULL right
                     // input, so we save evaluating it on the datachunk.
@@ -379,7 +361,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                 }
                 AlignedMessage::Right(chunk) => {
                     // Record the latest update to the right value
-                    let chunk = chunk.compact(); // Is this unnecessary work?
+                    let chunk = chunk.compact_vis(); // Is this unnecessary work?
                     let (data_chunk, ops) = chunk.into_parts();
 
                     for (row, op) in data_chunk.rows().zip_eq_debug(ops.iter()) {
@@ -465,7 +447,7 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                     }
 
                     if let Some(watermark) = staging_state_watermark.take() {
-                        self.left_table.update_watermark(watermark.clone());
+                        self.left_table.update_watermark(watermark);
                     };
 
                     if let Some(watermark) = watermark_to_propagate.take() {
@@ -488,29 +470,29 @@ impl<S: StateStore, const USE_WATERMARK_CACHE: bool> DynamicFilterExecutor<S, US
                         }
                     }
 
-                    self.left_table.commit(barrier.epoch).await?;
-                    self.right_table.commit(barrier.epoch).await?;
+                    let left_post_commit = self.left_table.commit(barrier.epoch).await?;
+                    self.right_table
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                        .await?;
 
                     // Update the last committed RHS row and value.
                     committed_rhs_row.clone_from(&staging_rhs_row);
                     committed_rhs_value = Some(curr);
 
-                    // Update the vnode bitmap for the left state table if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let (_previous_vnode_bitmap, _cache_may_stale) =
-                            self.left_table.update_vnode_bitmap(vnode_bitmap);
-                    }
-
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
                     yield Message::Barrier(barrier);
+
+                    // Update the vnode bitmap for the left state table if asked.
+                    left_post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?;
                 }
             }
         }
     }
 }
 
-impl<S: StateStore, const USE_WATERMARK_CACHE: bool> Execute
-    for DynamicFilterExecutor<S, USE_WATERMARK_CACHE>
-{
+impl<S: StateStore> Execute for DynamicFilterExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.execute_inner().boxed()
     }
@@ -524,7 +506,7 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
     use risingwave_storage::memory::MemoryStateStore;
-    use risingwave_storage::table::batch_table::storage_table::StorageTable;
+    use risingwave_storage::table::batch_table::BatchTable;
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
@@ -550,7 +532,7 @@ mod tests {
         )
         .await;
         let state_table_r = StateTable::from_table_catalog(
-            &gen_pbtable(TableId::new(1), column_descs, order_types, pk_indices, 0),
+            &gen_pbtable(TableId::new(1), column_descs, vec![], vec![], 0),
             mem_state,
             None,
         )
@@ -577,7 +559,7 @@ mod tests {
             actor_context: ctx.clone(),
             identity: "DynamicFilterExecutor".into(),
         };
-        let executor = DynamicFilterExecutor::<MemoryStateStore, false>::new(
+        let executor = DynamicFilterExecutor::<MemoryStateStore>::new(
             ctx,
             eval_error_report,
             source_l.schema().clone(),
@@ -667,7 +649,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(3), false);
         tx_r.push_barrier(test_epoch(3), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -677,7 +659,7 @@ mod tests {
             )
         );
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -707,7 +689,7 @@ mod tests {
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -724,7 +706,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(4), false);
         tx_r.push_barrier(test_epoch(4), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -743,7 +725,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(5), false);
         tx_r.push_barrier(test_epoch(5), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -800,7 +782,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(2), false);
         tx_r.push_barrier(test_epoch(2), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -814,7 +796,7 @@ mod tests {
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -831,7 +813,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(3), false);
         tx_r.push_barrier(test_epoch(3), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -850,7 +832,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(4), false);
         tx_r.push_barrier(test_epoch(4), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -907,7 +889,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(2), false);
         tx_r.push_barrier(test_epoch(2), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -921,7 +903,7 @@ mod tests {
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -938,7 +920,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(3), false);
         tx_r.push_barrier(test_epoch(3), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -957,7 +939,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(4), false);
         tx_r.push_barrier(test_epoch(4), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1014,7 +996,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(2), false);
         tx_r.push_barrier(test_epoch(2), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1028,7 +1010,7 @@ mod tests {
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1045,7 +1027,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(3), false);
         tx_r.push_barrier(test_epoch(3), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1064,7 +1046,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(4), false);
         tx_r.push_barrier(test_epoch(4), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1121,7 +1103,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(2), false);
         tx_r.push_barrier(test_epoch(2), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1135,7 +1117,7 @@ mod tests {
 
         // push the 2nd left chunk
         tx_l.push_chunk(chunk_l2);
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1152,7 +1134,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(3), false);
         tx_r.push_barrier(test_epoch(3), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1171,7 +1153,7 @@ mod tests {
         tx_l.push_barrier(test_epoch(4), false);
         tx_r.push_barrier(test_epoch(4), false);
 
-        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact();
+        let chunk = dynamic_filter.next_unwrap_ready_chunk()?.compact_vis();
         assert_eq!(
             chunk,
             StreamChunk::from_pretty(
@@ -1184,7 +1166,7 @@ mod tests {
         Ok(())
     }
 
-    async fn in_table(table: &StorageTable<MemoryStateStore>, x: i64) -> bool {
+    async fn in_table(table: &BatchTable<MemoryStateStore>, x: i64) -> bool {
         let row = table
             .get_row(
                 &OwnedRow::new(vec![Some(x.into())]),
@@ -1226,7 +1208,7 @@ mod tests {
         let (mut tx_l, mut tx_r, mut dynamic_filter) =
             create_executor(PbExprNodeType::LessThanOrEqual, mem_store.clone(), true).await;
         let column_descs = ColumnDesc::unnamed(ColumnId::new(0), DataType::Int64);
-        let table = StorageTable::for_test(
+        let table = BatchTable::for_test(
             mem_store.clone(),
             TableId::new(0),
             vec![column_descs],
@@ -1249,7 +1231,7 @@ mod tests {
 
         let chunk = dynamic_filter.expect_chunk().await;
         assert_eq!(
-            chunk.compact(),
+            chunk.compact_vis(),
             StreamChunk::from_pretty(
                 " I
                 + 1
@@ -1273,7 +1255,7 @@ mod tests {
 
         let chunk = dynamic_filter.expect_chunk().await;
         assert_eq!(
-            chunk.compact(),
+            chunk.compact_vis(),
             StreamChunk::from_pretty(
                 // the two rows are directly sent to the output cuz they satisfy the condition of previously committed rhs
                 " I

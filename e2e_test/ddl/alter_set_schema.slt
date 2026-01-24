@@ -1,3 +1,5 @@
+# ALTER CONNECTION SET SCHEMA is covered in `e2e_test/source_inline/connection/ddl.slt`
+
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
@@ -24,10 +26,19 @@ statement ok
 CREATE INDEX test_index2 ON test_table(v);
 
 statement ok
+CREATE MATERIALIZED VIEW test_mv AS SELECT u FROM test_table;
+
+statement ok
+CREATE INDEX test_mv_index ON test_mv(u);
+
+statement ok
 ALTER TABLE test_table SET SCHEMA public;
 
 statement ok
 ALTER TABLE test_table SET SCHEMA test_schema;
+
+statement ok
+ALTER MATERIALIZED VIEW test_mv SET SCHEMA test_schema;
 
 query TT
 SELECT tablename, schemaname FROM pg_tables WHERE schemaname = 'test_schema';
@@ -39,6 +50,7 @@ SELECT indexname, schemaname FROM pg_indexes WHERE schemaname = 'test_schema';
 ----
 test_index1 test_schema
 test_index2 test_schema
+test_mv_index test_schema
 
 statement ok
 CREATE SOURCE test_source (v INT) WITH (
@@ -95,23 +107,6 @@ WHERE nspname = 'test_schema';
 test_subscription test_schema
 
 statement ok
-CREATE CONNECTION test_conn WITH (type = 'privatelink', provider = 'mock');
-
-statement ok
-ALTER CONNECTION test_conn SET SCHEMA test_schema;
-
-query TT
-SELECT name AS connname, nspname AS schemaname
-FROM rw_connections
-JOIN pg_namespace ON pg_namespace.oid = rw_connections.schema_id
-WHERE nspname = 'test_schema';
-----
-test_conn test_schema
-
-statement ok
-DROP CONNECTION test_schema.test_conn;
-
-statement ok
 DROP SINK test_schema.test_sink;
 
 statement ok
@@ -121,7 +116,7 @@ statement ok
 DROP SOURCE test_schema.test_source;
 
 statement ok
-DROP TABLE test_schema.test_table;
+DROP TABLE test_schema.test_table cascade;
 
 statement ok
 DROP SCHEMA test_schema;

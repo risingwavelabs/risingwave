@@ -2,7 +2,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+// http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -11,23 +11,21 @@
 // limitations under the License.
 
 //! This module defines
-//! 1) a list of constants for every keyword that
+//! 1. a list of constants for every keyword that
 //!    can appear in [crate::tokenizer::Word::keyword]:
-//!    pub const KEYWORD = "KEYWORD"
-//! 2) an `ALL_KEYWORDS` array with every keyword in it
-//!     This is not a list of *reserved* keywords: some of these can be
-//!     parsed as identifiers if the parser decides so. This means that
-//!     new keywords can be added here without affecting the parse result.
 //!
-//!     As a matter of fact, most of these keywords are not used at all
-//!     and could be removed.
-//! 3) a `RESERVED_FOR_TABLE_ALIAS` array with keywords reserved in a
+//!    pub const KEYWORD = "KEYWORD"
+//! 2. an `ALL_KEYWORDS` array with every keyword in it
+//!    This is not a list of *reserved* keywords: some of these can be
+//!    parsed as identifiers if the parser decides so. This means that
+//!    new keywords can be added here without affecting the parse result.
+//!
+//!    As a matter of fact, most of these keywords are not used at all
+//!    and could be removed.
+//! 3. a `RESERVED_FOR_TABLE_ALIAS` array with keywords reserved in a
 //!    "table alias" context.
 
-use core::fmt;
-
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
+use std::fmt;
 
 /// Defines a string constant for a single keyword: `kw_def!(SELECT);`
 /// expands to `pub const SELECT = "SELECT";`
@@ -47,7 +45,6 @@ macro_rules! define_keywords {
         $ident:ident $(= $string_keyword:expr)?
     ),*) => {
         #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash)]
-        #[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
         #[expect(non_camel_case_types, clippy::enum_variant_names)]
         pub enum Keyword {
             NoKeyword,
@@ -90,7 +87,6 @@ define_keywords!(
     ASENSITIVE,
     ASOF,
     ASYMMETRIC,
-    ASYNC,
     AT,
     ATOMIC,
     AUTHORIZATION,
@@ -142,11 +138,13 @@ define_keywords!(
     COMMITTED,
     CONCURRENTLY,
     CONDITION,
+    CONFIG,
     CONFLICT,
     CONFLUENT,
     CONNECT,
     CONNECTION,
     CONNECTIONS,
+    CONNECTOR,
     CONSTRAINT,
     CONTAINS,
     CONVERT,
@@ -157,8 +155,6 @@ define_keywords!(
     COVAR_POP,
     COVAR_SAMP,
     CREATE,
-    CREATEDB,
-    CREATEUSER,
     CROSS,
     CUBE,
     CUME_DIST,
@@ -201,8 +197,8 @@ define_keywords!(
     DISCONNECT,
     DISTINCT,
     DISTRIBUTED,
-    DISTSQL,
     DO,
+    DOT,
     DOUBLE,
     DROP,
     DYNAMIC,
@@ -211,11 +207,11 @@ define_keywords!(
     ELSE,
     EMIT,
     ENCODE,
-    ENCRYPTED,
     END,
     END_EXEC = "END-EXEC",
     END_FRAME,
     END_PARTITION,
+    ENGINE,
     EQUALS,
     ERROR,
     ESCAPE,
@@ -243,6 +239,8 @@ define_keywords!(
     FOR,
     FOREIGN,
     FORMAT,
+    FRAGMENT,
+    FRAGMENTS,
     FRAME_ROW,
     FREE,
     FREEZE,
@@ -252,7 +250,6 @@ define_keywords!(
     FUNCTIONS,
     FUSION,
     GAP,
-    GENERATOR,
     GET,
     GLOBAL,
     GRANT,
@@ -312,8 +309,6 @@ define_keywords!(
     LOCALTIME,
     LOCALTIMESTAMP,
     LOCATION,
-    LOGICAL,
-    LOGIN,
     LOWER,
     MAP,
     MATCH,
@@ -338,13 +333,9 @@ define_keywords!(
     NEW,
     NEXT,
     NO,
-    NOCREATEDB,
-    NOCREATEUSER,
-    NOLOGIN,
     NONE,
     NORMALIZE,
     NOSCAN,
-    NOSUPERUSER,
     NOT,
     NOTHING,
     NOTNULL,
@@ -354,7 +345,6 @@ define_keywords!(
     NULLIF,
     NULLS,
     NUMERIC,
-    OAUTH,
     OBJECT,
     OCCURRENCES_REGEX,
     OCTET_LENGTH,
@@ -384,14 +374,13 @@ define_keywords!(
     PARTITION,
     PARTITIONED,
     PARTITIONS,
-    PASSWORD,
     PERCENT,
     PERCENTILE_CONT,
     PERCENTILE_DISC,
     PERCENT_RANK,
     PERIOD,
-    PHYSICAL,
     PLACING,
+    PLAN,
     PORTION,
     POSITION,
     POSITION_REGEX,
@@ -432,6 +421,8 @@ define_keywords!(
     REPAIR,
     REPEATABLE,
     REPLACE,
+    RESET,
+    RESOURCE_GROUP,
     RESTRICT,
     RESULT,
     RETURN,
@@ -492,6 +483,7 @@ define_keywords!(
     STDDEV_POP,
     STDDEV_SAMP,
     STDIN,
+    STDOUT,
     STORED,
     STRING,
     STRUCT,
@@ -502,7 +494,7 @@ define_keywords!(
     SUBSTRING_REGEX,
     SUCCEEDS,
     SUM,
-    SUPERUSER,
+    SWAP,
     SYMMETRIC,
     SYNC,
     SYSTEM,
@@ -526,7 +518,6 @@ define_keywords!(
     TINYINT,
     TO,
     TOP,
-    TRACE,
     TRAILING,
     TRANSACTION,
     TRANSLATE,
@@ -539,6 +530,7 @@ define_keywords!(
     TRUE,
     TRUNCATE,
     TRY_CAST,
+    TTL,
     TYPE,
     UESCAPE,
     UNBOUNDED,
@@ -550,9 +542,12 @@ define_keywords!(
     UPDATE,
     UPPER,
     USAGE,
+    USE,
     USER,
     USING,
     UUID,
+    VACUUM,
+    VALIDATE,
     VALUE,
     VALUES,
     VALUE_OF,
@@ -581,7 +576,9 @@ define_keywords!(
     WITHOUT,
     WORK,
     WRITE,
+    XML,
     XOR,
+    YAML,
     YEAR,
     ZONE
 );
@@ -625,6 +622,7 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     Keyword::SET,
     Keyword::RETURNING,
     Keyword::EMIT,
+    Keyword::WINDOW,
 ];
 
 /// Can't be used as a column alias, so that `SELECT <expr> alias`

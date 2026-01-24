@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::time::Duration;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use aws_config::timeout::TimeoutConfig;
 use aws_sdk_s3::{client as s3_client, config as s3_config};
 use url::Url;
@@ -119,7 +119,7 @@ pub async fn load_file_descriptor_from_s3(
     let s3_client = s3_client(&sdk_config, Some(default_conn_config()));
     let response = s3_client
         .get_object()
-        .bucket(bucket.to_string())
+        .bucket(bucket.to_owned())
         .key(key)
         .send()
         .await

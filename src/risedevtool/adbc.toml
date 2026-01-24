@@ -1,0 +1,55 @@
+extend = "common.toml"
+
+[env]
+ADBC_VERSION = { value = "21", condition = { env_not_set = [
+    "ADBC_VERSION",
+] } }
+# Driver version in wheel filename (e.g., 1.9.0 for ADBC release 21)
+ADBC_DRIVER_VERSION = { value = "1.9.0", condition = { env_not_set = [
+    "ADBC_DRIVER_VERSION",
+] } }
+ADBC_LIB_SUFFIX = { source = "${OS}", mapping = { linux = "so", darwin = "dylib" } }
+ADBC_SNOWFLAKE_DRIVER_NAME = "libadbc_driver_snowflake.${ADBC_LIB_SUFFIX}"
+
+[tasks.download-adbc-snowflake]
+private = true
+category = "RiseDev - Components"
+dependencies = ["prepare"]
+condition = { env_set = [
+    "ENABLE_ADBC",
+], files_not_exist = [
+    "${PREFIX_BIN}/adbc/${ADBC_SNOWFLAKE_DRIVER_NAME}",
+] }
+description = "Download ADBC Snowflake driver shared library"
+script = '''
+#!/usr/bin/env bash
+set -e
+
+if [ -f "${PREFIX_BIN}/adbc/${ADBC_SNOWFLAKE_DRIVER_NAME}" ]; then
+    exit 0
+fi
+
+# Reuse the shared download script (also used by Docker builds).
+# Note: cargo-make runs task scripts from a temp dir (e.g. /tmp/scripts),
+# so we must not rely on `${BASH_SOURCE[0]}` to locate repo files.
+SCRIPT_PATH="${CARGO_MAKE_WORKING_DIRECTORY:-$(pwd)}/src/risedevtool/scripts/download_adbc_snowflake_driver.sh"
+ADBC_VERSION="${ADBC_VERSION}" \
+ADBC_DRIVER_VERSION="${ADBC_DRIVER_VERSION}" \
+DEST_DIR="${PREFIX_BIN}/adbc" \
+TMP_DIR="${PREFIX_TMP}" \
+  bash "${SCRIPT_PATH}"
+'''
+
+[tasks.remove-adbc-snowflake]
+private = true
+dependencies = ["prepare"]
+condition = { env_set = ["ENABLE_ADBC"], files_exist = ["${PREFIX_BIN}/adbc"] }
+script = '''
+#!/usr/bin/env bash
+set -e
+rm -rf "${PREFIX_BIN}/adbc"
+'''
+
+[tasks.update-adbc-snowflake]
+dependencies = ["prepare", "remove-adbc-snowflake", "download-adbc-snowflake"]
+condition = { env_set = ["ENABLE_ADBC"] }

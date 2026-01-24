@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::util::recursive::{tracker, Recurse};
+use risingwave_common::util::recursive::{Recurse, tracker};
 
 use super::{
-    AggCall, CorrelatedInputRef, ExprImpl, FunctionCall, FunctionCallWithLambda, InputRef, Literal,
-    Now, Parameter, Subquery, TableFunction, UserDefinedFunction, WindowFunction,
-    EXPR_DEPTH_THRESHOLD, EXPR_TOO_DEEP_NOTICE,
+    AggCall, CorrelatedInputRef, EXPR_DEPTH_THRESHOLD, EXPR_TOO_DEEP_NOTICE, ExprImpl,
+    FunctionCall, FunctionCallWithLambda, InputRef, Literal, Now, Parameter, Subquery,
+    TableFunction, UserDefinedFunction, WindowFunction,
 };
 use crate::session::current::notice_to_user;
 

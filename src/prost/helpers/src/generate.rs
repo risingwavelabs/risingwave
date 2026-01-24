@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use quote::quote;
 use syn::ext::IdentExt;
 use syn::spanned::Spanned;
 use syn::{
-    Error, Expr, ExprLit, Field, GenericArgument, Lit, Meta, PathArguments, PathSegment, Result,
-    Type,
+    AttrStyle, Attribute, Error, Expr, ExprLit, Field, GenericArgument, Lit, Meta, Path,
+    PathArguments, PathSegment, Result, Type,
 };
 
 fn extract_type_from_option(option_segment: &PathSegment) -> Type {
@@ -40,8 +40,8 @@ fn extract_type_from_option(option_segment: &PathSegment) -> Type {
 ///
 /// Returns `data_type::TypeName`.
 fn extract_enum_type_from_field(field: &Field) -> Option<Type> {
-    use syn::punctuated::Punctuated;
     use syn::Token;
+    use syn::punctuated::Punctuated;
 
     // The type must be i32.
     match &field.ty {
@@ -83,6 +83,13 @@ fn extract_enum_type_from_field(field: &Field) -> Option<Type> {
     Some(syn::parse_str::<Type>(&enum_type.value()).unwrap())
 }
 
+fn is_deprecated(field: &Field) -> bool {
+    field.attrs.iter().any(|attr| match &attr.meta {
+        Meta::Path(path) => path.is_ident("deprecated"),
+        _ => false,
+    })
+}
+
 pub fn implement(field: &Field) -> Result<TokenStream2> {
     let field_name = field
         .clone()
@@ -90,9 +97,22 @@ pub fn implement(field: &Field) -> Result<TokenStream2> {
         .ok_or_else(|| Error::new(field.span(), "Expected the field to have a name"))?;
 
     let getter_fn_name = Ident::new(&format!("get_{}", field_name.unraw()), Span::call_site());
+    let is_deprecated = is_deprecated(field);
+
+    let attr_list: Vec<Attribute> = if is_deprecated {
+        vec![Attribute {
+            pound_token: Default::default(),
+            style: AttrStyle::Outer,
+            bracket_token: Default::default(),
+            meta: Meta::from(Path::from(Ident::new("deprecated", Span::call_site()))),
+        }]
+    } else {
+        vec![]
+    };
 
     if let Some(enum_type) = extract_enum_type_from_field(field) {
         return Ok(quote! {
+            #(#attr_list)*
             #[inline(always)]
             pub fn #getter_fn_name(&self) -> std::result::Result<#enum_type, crate::PbFieldNotFound> {
                 if self.#field_name.eq(&0) {
@@ -110,6 +130,7 @@ pub fn implement(field: &Field) -> Result<TokenStream2> {
             // ::core::option::Option<Foo>
             let ty = extract_type_from_option(data_type);
             return Ok(quote! {
+                #(#attr_list)*
                 #[inline(always)]
                 pub fn #getter_fn_name(&self) -> std::result::Result<&#ty, crate::PbFieldNotFound> {
                     self.#field_name.as_ref().ok_or_else(|| crate::PbFieldNotFound(stringify!(#field_name)))
@@ -117,9 +138,12 @@ pub fn implement(field: &Field) -> Result<TokenStream2> {
             });
         } else if ["u32", "u64", "f32", "f64", "i32", "i64", "bool"]
             .contains(&data_type.ident.to_string().as_str())
+            || (type_path.path.segments[0].ident.to_string().as_str() == "crate"
+                && type_path.path.segments[1].ident.to_string().as_str() == "id")
         {
             // Primitive types. Return value instead of reference.
             return Ok(quote! {
+                #(#attr_list)*
                 #[inline(always)]
                 pub fn #getter_fn_name(&self) -> #ty {
                     self.#field_name
@@ -129,6 +153,7 @@ pub fn implement(field: &Field) -> Result<TokenStream2> {
     }
 
     Ok(quote! {
+        #(#attr_list)*
         #[inline(always)]
         pub fn #getter_fn_name(&self) -> &#ty {
             &self.#field_name

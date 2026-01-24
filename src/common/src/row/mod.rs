@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,12 +22,12 @@ use itertools::Itertools;
 
 use self::empty::EMPTY;
 use crate::hash::HashCode;
-use crate::types::{hash_datum, DatumRef, ToDatumRef, ToOwnedDatum, ToText};
+use crate::types::{DatumRef, ToDatumRef, ToOwnedDatum, ToText, hash_datum};
 use crate::util::row_serde::OrderedRowSerde;
 use crate::util::value_encoding;
 
 /// The trait for abstracting over a Row-like type.
-pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
+pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq + Send + Sync {
     /// Returns the [`DatumRef`] at the given `index`.
     fn datum_at(&self, index: usize) -> DatumRef<'_>;
 
@@ -141,7 +141,8 @@ pub trait Row: Sized + std::fmt::Debug + PartialEq + Eq {
         }
         for i in (0..this.len()).rev() {
             // compare from the end to the start, as it's more likely to have same prefix
-            if this.datum_at(i) != other.datum_at(i) {
+            // SAFETY: index is in bounds as we are iterating from 0 to len.
+            if unsafe { this.datum_at_unchecked(i) != other.datum_at_unchecked(i) } {
                 return false;
             }
         }
@@ -185,17 +186,18 @@ pub trait RowExt: Row {
         assert_row(Slice::new(self, range))
     }
 
+    /// Returns a displayable wrapper for the row.
     fn display(&self) -> impl Display + '_ {
         struct D<'a, T: Row>(&'a T);
-        impl<'a, T: Row> Display for D<'a, T> {
+        impl<T: Row> Display for D<'_, T> {
             fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
                 write!(
                     f,
-                    "{}",
-                    self.0.iter().format_with(" | ", |datum, f| {
+                    "[{}]",
+                    self.0.iter().format_with(", ", |datum, f| {
                         match datum {
                             None => f(&"NULL"),
-                            Some(scalar) => f(&format_args!("{}", scalar.to_text())),
+                            Some(scalar) => f(&scalar.text_display()),
                         }
                     })
                 )
@@ -219,7 +221,7 @@ macro_rules! deref_forward_row {
         }
 
         unsafe fn datum_at_unchecked(&self, index: usize) -> crate::types::DatumRef<'_> {
-            (**self).datum_at_unchecked(index)
+            unsafe { (**self).datum_at_unchecked(index) }
         }
 
         fn len(&self) -> usize {
@@ -305,17 +307,19 @@ macro_rules! impl_slice_row {
 
         #[inline]
         unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-            self.get_unchecked(index).to_datum_ref()
+            unsafe { self.get_unchecked(index).to_datum_ref() }
         }
 
         #[inline]
         fn len(&self) -> usize {
-            self.as_ref().len()
+            AsRef::<[D]>::as_ref(self).len()
         }
 
         #[inline]
         fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
-            self.as_ref().iter().map(ToDatumRef::to_datum_ref)
+            AsRef::<[D]>::as_ref(self)
+                .iter()
+                .map(ToDatumRef::to_datum_ref)
         }
     };
 }
@@ -342,9 +346,11 @@ impl<R: Row> Row for Option<R> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        match self {
-            Some(row) => row.datum_at_unchecked(index),
-            None => EMPTY.datum_at_unchecked(index),
+        unsafe {
+            match self {
+                Some(row) => row.datum_at_unchecked(index),
+                None => EMPTY.datum_at_unchecked(index),
+            }
         }
     }
 
@@ -396,7 +402,7 @@ impl<R1: Row, R2: Row> Row for either::Either<R1, R2> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        either::for_both!(self, row => row.datum_at_unchecked(index))
+        unsafe { either::for_both!(self, row => row.datum_at_unchecked(index)) }
     }
 
     fn len(&self) -> usize {
@@ -464,9 +470,9 @@ mod slice;
 pub use ::tinyvec::ArrayVec;
 pub use chain::Chain;
 pub use compacted_row::CompactedRow;
-pub use empty::{empty, Empty};
-pub use once::{once, Once};
+pub use empty::{Empty, empty};
+pub use once::{Once, once};
 pub use owned_row::{OwnedRow, RowDeserializer};
 pub use project::Project;
-pub use repeat_n::{repeat_n, RepeatN};
+pub use repeat_n::{RepeatN, repeat_n};
 pub use slice::Slice;

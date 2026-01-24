@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -20,7 +20,6 @@ use futures::future::Either;
 use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
@@ -31,11 +30,15 @@ use tokio::task::JoinHandle;
 use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
+use crate::backup_restore::BackupManagerRef;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
 use crate::hummock::{HummockManager, TASK_NORMAL};
 
 impl HummockManager {
-    pub fn hummock_timer_task(hummock_manager: Arc<Self>) -> (JoinHandle<()>, Sender<()>) {
+    pub fn hummock_timer_task(
+        hummock_manager: Arc<Self>,
+        backup_manager: Option<BackupManagerRef>,
+    ) -> (JoinHandle<()>, Sender<()>) {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let join_handle = tokio::spawn(async move {
             const CHECK_PENDING_TASK_PERIOD_SEC: u64 = 300;
@@ -43,7 +46,7 @@ impl HummockManager {
             const COMPACTION_HEARTBEAT_PERIOD_SEC: u64 = 1;
 
             pub enum HummockTimerEvent {
-                GroupSchedule,
+                GroupScheduleSplit,
                 CheckDeadTask,
                 Report,
                 CompactionHeartBeatExpiredCheck,
@@ -54,6 +57,8 @@ impl HummockManager {
                 TombstoneCompactionTrigger,
 
                 FullGc,
+
+                GroupScheduleMerge,
             }
             let mut check_compact_trigger_interval =
                 tokio::time::interval(Duration::from_secs(CHECK_PENDING_TASK_PERIOD_SEC));
@@ -145,22 +150,40 @@ impl HummockManager {
                 Box::pin(tombstone_reclaim_trigger),
             ];
 
-            let periodic_scheduling_compaction_group_interval_sec = hummock_manager
+            let periodic_scheduling_compaction_group_split_interval_sec = hummock_manager
                 .env
                 .opts
-                .periodic_scheduling_compaction_group_interval_sec;
+                .periodic_scheduling_compaction_group_split_interval_sec;
 
-            if periodic_scheduling_compaction_group_interval_sec > 0 {
+            if periodic_scheduling_compaction_group_split_interval_sec > 0 {
                 let mut scheduling_compaction_group_trigger_interval = tokio::time::interval(
-                    Duration::from_secs(periodic_scheduling_compaction_group_interval_sec),
+                    Duration::from_secs(periodic_scheduling_compaction_group_split_interval_sec),
                 );
                 scheduling_compaction_group_trigger_interval
                     .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
-
-                let group_scheduling_trigger =
+                scheduling_compaction_group_trigger_interval.reset();
+                let group_scheduling_split_trigger =
                     IntervalStream::new(scheduling_compaction_group_trigger_interval)
-                        .map(|_| HummockTimerEvent::GroupSchedule);
-                triggers.push(Box::pin(group_scheduling_trigger));
+                        .map(|_| HummockTimerEvent::GroupScheduleSplit);
+                triggers.push(Box::pin(group_scheduling_split_trigger));
+            }
+
+            let periodic_scheduling_compaction_group_merge_interval_sec = hummock_manager
+                .env
+                .opts
+                .periodic_scheduling_compaction_group_merge_interval_sec;
+
+            if periodic_scheduling_compaction_group_merge_interval_sec > 0 {
+                let mut scheduling_compaction_group_merge_trigger_interval = tokio::time::interval(
+                    Duration::from_secs(periodic_scheduling_compaction_group_merge_interval_sec),
+                );
+                scheduling_compaction_group_merge_trigger_interval
+                    .set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+                scheduling_compaction_group_merge_trigger_interval.reset();
+                let group_scheduling_merge_trigger =
+                    IntervalStream::new(scheduling_compaction_group_merge_trigger_interval)
+                        .map(|_| HummockTimerEvent::GroupScheduleMerge);
+                triggers.push(Box::pin(group_scheduling_merge_trigger));
             }
 
             let event_stream = select_all(triggers);
@@ -170,8 +193,12 @@ impl HummockManager {
             let shutdown_rx_shared = shutdown_rx.shared();
 
             tracing::info!(
-                "Hummock timer task [GroupScheduling interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
-                periodic_scheduling_compaction_group_interval_sec, CHECK_PENDING_TASK_PERIOD_SEC, STAT_REPORT_PERIOD_SEC, COMPACTION_HEARTBEAT_PERIOD_SEC
+                "Hummock timer task [GroupSchedulingSplit interval {} sec] [GroupSchedulingMerge interval {} sec] [CheckDeadTask interval {} sec] [Report interval {} sec] [CompactionHeartBeat interval {} sec]",
+                periodic_scheduling_compaction_group_split_interval_sec,
+                periodic_scheduling_compaction_group_merge_interval_sec,
+                CHECK_PENDING_TASK_PERIOD_SEC,
+                STAT_REPORT_PERIOD_SEC,
+                COMPACTION_HEARTBEAT_PERIOD_SEC
             );
 
             loop {
@@ -190,12 +217,20 @@ impl HummockManager {
                                     hummock_manager.check_dead_task().await;
                                 }
 
-                                HummockTimerEvent::GroupSchedule => {
+                                HummockTimerEvent::GroupScheduleSplit => {
                                     if hummock_manager.env.opts.compaction_deterministic_test {
                                         continue;
                                     }
 
-                                    hummock_manager.on_handle_schedule_group().await;
+                                    hummock_manager.on_handle_schedule_group_split().await;
+                                }
+
+                                HummockTimerEvent::GroupScheduleMerge => {
+                                    if hummock_manager.env.opts.compaction_deterministic_test {
+                                        continue;
+                                    }
+
+                                    hummock_manager.on_handle_schedule_group_merge().await;
                                 }
 
                                 HummockTimerEvent::Report => {
@@ -242,6 +277,82 @@ impl HummockManager {
                                             group_levels,
                                             compaction_group_config.group_id(),
                                         )
+                                    }
+
+                                    {
+                                        let group_infos = hummock_manager
+                                            .calculate_compaction_group_statistic()
+                                            .await;
+                                        let compaction_group_count = group_infos.len();
+                                        hummock_manager
+                                            .metrics
+                                            .compaction_group_count
+                                            .set(compaction_group_count as i64);
+
+                                        let table_write_throughput_statistic_manager =
+                                            hummock_manager
+                                                .table_write_throughput_statistic_manager
+                                                .read()
+                                                .clone();
+
+                                        let current_version_levels = &hummock_manager
+                                            .versioning
+                                            .read()
+                                            .await
+                                            .current_version
+                                            .levels;
+
+                                        for group_info in group_infos {
+                                            hummock_manager
+                                                .metrics
+                                                .compaction_group_size
+                                                .with_label_values(&[&group_info
+                                                    .group_id
+                                                    .to_string()])
+                                                .set(group_info.group_size as _);
+                                            // accumulate the throughput of all tables in the group
+                                            let mut avg_throuput = 0;
+                                            let max_statistic_expired_time = std::cmp::max(
+                                                hummock_manager
+                                                    .env
+                                                    .opts
+                                                    .table_stat_throuput_window_seconds_for_split,
+                                                hummock_manager
+                                                    .env
+                                                    .opts
+                                                    .table_stat_throuput_window_seconds_for_merge,
+                                            );
+                                            for table_id in group_info.table_statistic.keys() {
+                                                avg_throuput +=
+                                                    table_write_throughput_statistic_manager
+                                                        .avg_write_throughput(
+                                                            *table_id,
+                                                            max_statistic_expired_time as i64,
+                                                        )
+                                                        as u64;
+                                            }
+
+                                            hummock_manager
+                                                .metrics
+                                                .compaction_group_throughput
+                                                .with_label_values(&[&group_info
+                                                    .group_id
+                                                    .to_string()])
+                                                .set(avg_throuput as _);
+
+                                            if let Some(group_levels) =
+                                                current_version_levels.get(&group_info.group_id)
+                                            {
+                                                let file_count = group_levels.count_ssts();
+                                                hummock_manager
+                                                    .metrics
+                                                    .compaction_group_file_count
+                                                    .with_label_values(&[&group_info
+                                                        .group_id
+                                                        .to_string()])
+                                                    .set(file_count as _);
+                                            }
+                                        }
                                     }
                                 }
 
@@ -342,13 +453,21 @@ impl HummockManager {
                                 HummockTimerEvent::FullGc => {
                                     let retention_sec =
                                         hummock_manager.env.opts.min_sst_retention_time_sec;
-                                    if hummock_manager
-                                        .start_full_gc(Duration::from_secs(retention_sec), None)
-                                        .await
-                                        .is_ok()
-                                    {
-                                        tracing::info!("Start full GC from meta node.");
-                                    }
+                                    let backup_manager_2 = backup_manager.clone();
+                                    let hummock_manager_2 = hummock_manager.clone();
+                                    tokio::task::spawn(async move {
+                                        use thiserror_ext::AsReport;
+                                        let _ = hummock_manager_2
+                                            .start_full_gc(
+                                                Duration::from_secs(retention_sec),
+                                                None,
+                                                backup_manager_2,
+                                            )
+                                            .await
+                                            .inspect_err(|e| {
+                                                warn!(error = %e.as_report(), "Failed to start GC.")
+                                            });
+                                    });
                                 }
                             }
                         }
@@ -411,7 +530,7 @@ impl HummockManager {
             for group_id in slowdown_groups.keys() {
                 if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
                     for (idx, level_handler) in status.level_handlers.iter().enumerate() {
-                        let tasks = level_handler.get_pending_tasks().to_vec();
+                        let tasks = level_handler.pending_tasks().to_vec();
                         if tasks.is_empty() {
                             continue;
                         }
@@ -432,66 +551,109 @@ impl HummockManager {
             }
             if let Some((group_id, level_id, task)) = pending_tasks.get(&task_id) {
                 let group_size = *slowdown_groups.get(group_id).unwrap();
-                warn!("COMPACTION SLOW: the task-{} of group-{}(size: {}MB) level-{} has not finished after {:?}, {}, it may cause pending sstable files({:?}) blocking other task.",
-                    task_id, *group_id,group_size / 1024 / 1024,*level_id, compact_time, status, task.ssts);
+                warn!(
+                    "COMPACTION SLOW: the task-{} of group-{}(size: {}MB) level-{} has not finished after {:?}, {}, it may cause pending sstable files({:?}) blocking other task.",
+                    task_id,
+                    *group_id,
+                    group_size / 1024 / 1024,
+                    *level_id,
+                    compact_time,
+                    status,
+                    task.ssts
+                );
             }
         }
     }
 
-    /// * For compaction group with only one single state-table, do not change it again.
-    /// * For state-table which only write less than `HISTORY_TABLE_INFO_WINDOW_SIZE` times, do not
-    ///   change it. Because we need more statistic data to decide split strategy.
-    /// * For state-table with low throughput which write no more than
-    ///   `min_table_split_write_throughput` data, never split it.
-    /// * For state-table whose size less than `min_table_split_size`, do not split it unless its
-    ///   throughput keep larger than `table_write_throughput_threshold` for a long time.
-    /// * For state-table whose throughput less than `min_table_split_write_throughput`, do not
-    ///   increase it size of base-level.
-    async fn on_handle_schedule_group(&self) {
-        let params = self.env.system_params_reader().await;
-        let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let checkpoint_secs = std::cmp::max(
-            1,
-            params.checkpoint_frequency() * barrier_interval_ms / 1000,
-        );
-        let created_tables = match self.metadata_manager.get_created_table_ids().await {
-            Ok(created_tables) => created_tables,
-            Err(err) => {
-                tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
-                return;
-            }
-        };
-        let created_tables: HashSet<u32> = HashSet::from_iter(created_tables);
-        let table_write_throughput = self.history_table_throughput.read().clone();
+    /// Try to schedule a compaction `split` for the given compaction groups.
+    /// The `split` will be triggered if the following conditions are met:
+    /// 1. `state table throughput`: If the table is in a high throughput state and it belongs to a multi table group, then an attempt will be made to split the table into separate compaction groups to increase its throughput and reduce the impact on write amplification.
+    /// 2. `group size`: If the group size has exceeded the set upper limit, e.g. `max_group_size` * `split_group_size_ratio`
+    async fn on_handle_schedule_group_split(&self) {
+        let table_write_throughput = self.table_write_throughput_statistic_manager.read().clone();
         let mut group_infos = self.calculate_compaction_group_statistic().await;
         group_infos.sort_by_key(|group| group.group_size);
         group_infos.reverse();
 
-        for group in &group_infos {
+        for group in group_infos {
             if group.table_statistic.len() == 1 {
                 // no need to handle the separate compaciton group
                 continue;
             }
 
-            self.try_split_compaction_group(
-                &table_write_throughput,
-                checkpoint_secs,
-                group,
-                &created_tables,
-            )
-            .await;
+            self.try_split_compaction_group(&table_write_throughput, group)
+                .await;
         }
     }
 
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
         for cg_id in self.compaction_group_ids().await {
             if let Err(e) = self.compaction_state.try_sched_compaction(cg_id, task_type) {
-                tracing::warn!(
+                tracing::error!(
                     error = %e.as_report(),
                     "Failed to schedule {:?} compaction for compaction group {}",
                     task_type,
                     cg_id,
                 );
+            }
+        }
+    }
+
+    /// Try to schedule a compaction merge for the given compaction groups.
+    /// The merge will be triggered if the following conditions are met:
+    /// 1. The compaction group is not contains creating table.
+    /// 2. The compaction group is a small group.
+    /// 3. All tables in compaction group is in a low throughput state.
+    async fn on_handle_schedule_group_merge(&self) {
+        let created_tables = match self.metadata_manager.get_created_table_ids().await {
+            Ok(created_tables) => HashSet::from_iter(created_tables),
+            Err(err) => {
+                tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
+                return;
+            }
+        };
+        let table_write_throughput_statistic_manager =
+            self.table_write_throughput_statistic_manager.read().clone();
+        let mut group_infos = self.calculate_compaction_group_statistic().await;
+        // sort by first table id for deterministic merge order
+        group_infos.sort_by_key(|group| {
+            let table_ids = group
+                .table_statistic
+                .keys()
+                .cloned()
+                .collect::<BTreeSet<_>>();
+            table_ids.iter().next().cloned()
+        });
+
+        let group_count = group_infos.len();
+        if group_count < 2 {
+            return;
+        }
+
+        let mut left = 0;
+        let mut right = left + 1;
+
+        while left < right && right < group_count {
+            let group = &group_infos[left];
+            let next_group = &group_infos[right];
+            match self
+                .try_merge_compaction_group(
+                    &table_write_throughput_statistic_manager,
+                    group,
+                    next_group,
+                    &created_tables,
+                )
+                .await
+            {
+                Ok(_) => right += 1,
+                Err(e) => {
+                    tracing::debug!(
+                        error = %e.as_report(),
+                        "Failed to merge compaction group",
+                    );
+                    left = right;
+                    right = left + 1;
+                }
             }
         }
     }

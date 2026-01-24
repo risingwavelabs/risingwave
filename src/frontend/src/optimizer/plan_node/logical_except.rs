@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,15 @@ use risingwave_common::catalog::Schema;
 
 use super::utils::impl_distill_by_unit;
 use super::{
-    ColPrunable, ExprRewritable, Logical, PlanBase, PlanRef, PredicatePushdown, ToBatch, ToStream,
+    BatchPlanRef, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase,
+    PredicatePushdown, StreamPlanRef, ToBatch, ToStream,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{
-    generic, ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
-    ToStreamContext,
+    ColumnPruningContext, PlanTreeNode, PredicatePushdownContext, RewriteStreamContext,
+    ToStreamContext, generic,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -53,12 +54,12 @@ impl LogicalExcept {
     }
 }
 
-impl PlanTreeNode for LogicalExcept {
-    fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+impl PlanTreeNode<Logical> for LogicalExcept {
+    fn inputs(&self) -> smallvec::SmallVec<[PlanRef; 2]> {
         self.core.inputs.clone().into_iter().collect()
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
         Self::new(self.all(), inputs.to_vec()).into()
     }
 }
@@ -76,7 +77,7 @@ impl ColPrunable for LogicalExcept {
     }
 }
 
-impl ExprRewritable for LogicalExcept {}
+impl ExprRewritable<Logical> for LogicalExcept {}
 
 impl ExprVisitable for LogicalExcept {}
 
@@ -96,13 +97,13 @@ impl PredicatePushdown for LogicalExcept {
 }
 
 impl ToBatch for LogicalExcept {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         unimplemented!()
     }
 }
 
 impl ToStream for LogicalExcept {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         unimplemented!()
     }
 

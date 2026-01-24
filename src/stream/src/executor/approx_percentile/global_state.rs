@@ -20,11 +20,11 @@ use risingwave_common::bail;
 use risingwave_common::row::Row;
 use risingwave_common::types::{Datum, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
 
-use crate::executor::prelude::*;
 use crate::executor::StreamExecutorResult;
+use crate::executor::prelude::*;
 
 /// The global approx percentile state.
 pub struct GlobalApproxPercentileState<S: StateStore> {
@@ -60,8 +60,8 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 
     pub async fn init(&mut self, init_epoch: EpochPair) -> StreamExecutorResult<()> {
         // Init state tables.
-        self.count_state_table.init_epoch(init_epoch);
-        self.bucket_state_table.init_epoch(init_epoch);
+        self.count_state_table.init_epoch(init_epoch).await?;
+        self.bucket_state_table.init_epoch(init_epoch).await?;
 
         // Refill row_count
         let row_count_state = self.get_row_count_state().await?;
@@ -236,8 +236,12 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
                 .count_state_table
                 .update(last_row_count_state, row_count_row),
         }
-        self.count_state_table.commit(epoch).await?;
-        self.bucket_state_table.commit(epoch).await?;
+        self.count_state_table
+            .commit_assert_no_update_vnode_bitmap(epoch)
+            .await?;
+        self.bucket_state_table
+            .commit_assert_no_update_vnode_bitmap(epoch)
+            .await?;
         Ok(())
     }
 }
@@ -246,9 +250,15 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
 impl<S: StateStore> GlobalApproxPercentileState<S> {
     pub fn get_output(&mut self) -> StreamChunk {
         let last_output = mem::take(&mut self.last_output);
-        let new_output = if !self.output_changed {
-            tracing::debug!("last_output: {:#?}", last_output);
-            last_output.clone().flatten()
+        let new_output = if let Some(last_output) = &last_output
+            && !self.output_changed
+        {
+            debug_assert_eq!(
+                *last_output,
+                self.cache
+                    .get_output(self.row_count, self.quantile, self.base)
+            );
+            last_output.clone()
         } else {
             self.cache
                 .get_output(self.row_count, self.quantile, self.base)
@@ -256,17 +266,10 @@ impl<S: StateStore> GlobalApproxPercentileState<S> {
         self.last_output = Some(new_output.clone());
         let output_chunk = match last_output {
             None => StreamChunk::from_rows(&[(Op::Insert, &[new_output])], &[DataType::Float64]),
-            Some(last_output) if !self.output_changed => StreamChunk::from_rows(
-                &[
-                    (Op::UpdateDelete, &[last_output.clone()]),
-                    (Op::UpdateInsert, &[last_output]),
-                ],
-                &[DataType::Float64],
-            ),
             Some(last_output) => StreamChunk::from_rows(
                 &[
-                    (Op::UpdateDelete, &[last_output.clone()]),
-                    (Op::UpdateInsert, &[new_output.clone()]),
+                    (Op::UpdateDelete, std::slice::from_ref(&last_output)),
+                    (Op::UpdateInsert, std::slice::from_ref(&new_output)),
                 ],
                 &[DataType::Float64],
             ),

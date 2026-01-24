@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,25 +14,25 @@
 
 use std::cmp::Ordering;
 
-use chrono::offset::Utc;
 use chrono::DateTime;
+use chrono::offset::Utc;
 use itertools::Itertools;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{version_archive_dir, HummockSstableObjectId, HummockVersionId};
+use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId, version_archive_dir};
 use risingwave_object_store::object::ObjectStoreRef;
-use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_pb::hummock::HummockVersionArchive;
+use risingwave_pb::hummock::group_delta::DeltaType;
 use risingwave_rpc_client::HummockMetaClient;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{Block, BlockHolder, BlockIterator, SstableStoreRef};
 use risingwave_storage::monitor::StoreLocalStatistic;
 
-use crate::common::HummockServiceOpts;
 use crate::CtlContext;
+use crate::common::HummockServiceOpts;
 
 pub async fn validate_version(context: &CtlContext) -> anyhow::Result<()> {
     let meta_client = context.meta_client().await?;
@@ -171,9 +171,10 @@ pub async fn print_version_delta_in_archive(
     context: &CtlContext,
     archive_ids: impl IntoIterator<Item = HummockVersionId>,
     data_dir: String,
-    sst_id: HummockSstableObjectId,
+    sst_id: impl Into<HummockSstableObjectId>,
     use_new_object_prefix_strategy: bool,
 ) -> anyhow::Result<()> {
+    let sst_id = sst_id.into();
     let hummock_opts =
         HummockServiceOpts::from_env(Some(data_dir.clone()), use_new_object_prefix_strategy)?;
     let hummock = context.hummock_store(hummock_opts).await?;
@@ -206,14 +207,23 @@ pub async fn print_version_delta_in_archive(
 }
 
 fn match_delta(delta: &DeltaType, sst_id: HummockSstableObjectId) -> bool {
-    let DeltaType::IntraLevel(delta) = delta else {
-        return false;
-    };
-    delta
-        .inserted_table_infos
-        .iter()
-        .any(|sst| sst.sst_id == sst_id)
-        || delta.removed_table_ids.iter().any(|sst| *sst == sst_id)
+    match delta {
+        DeltaType::GroupConstruct(_)
+        | DeltaType::GroupDestroy(_)
+        | DeltaType::GroupMerge(_)
+        | DeltaType::TruncateTables(_) => false,
+        DeltaType::IntraLevel(delta) => {
+            delta
+                .inserted_table_infos
+                .iter()
+                .any(|sst| sst.sst_id == sst_id)
+                || delta.removed_table_ids.contains(&sst_id.inner())
+        }
+        DeltaType::NewL0SubLevel(delta) => delta
+            .inserted_table_infos
+            .iter()
+            .any(|sst| sst.sst_id == sst_id),
+    }
 }
 
 fn print_delta(delta: &DeltaType) {

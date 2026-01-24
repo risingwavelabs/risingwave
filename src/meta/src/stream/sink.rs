@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,12 @@
 use anyhow::Context;
 use risingwave_connector::dispatch_sink;
 use risingwave_connector::sink::catalog::SinkCatalog;
-use risingwave_connector::sink::{build_sink, Sink, SinkParam};
+use risingwave_connector::sink::{Sink, SinkParam, build_sink};
 use risingwave_pb::catalog::PbSink;
 
 use crate::MetaResult;
 
+#[await_tree::instrument(boxed)]
 pub async fn validate_sink(prost_sink_catalog: &PbSink) -> MetaResult<()> {
     let sink_catalog = SinkCatalog::from(prost_sink_catalog);
     let param = SinkParam::try_from_sink_catalog(sink_catalog)?;

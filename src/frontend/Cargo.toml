@@ -6,60 +6,71 @@ homepage = { workspace = true }
 keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
-# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
+[features]
+default = []
+datafusion = ["dep:datafusion", "dep:datafusion-common"]
+all-sources = ["source-adbc_snowflake"]
+source-adbc_snowflake = ["risingwave_connector/source-adbc_snowflake"]
 
 [dependencies]
 anyhow = "1"
-arc-swap = "1"
+arc-swap = { workspace = true }
 async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
+axum = { workspace = true }
 base64 = "0.22"
 bk-tree = "0.5.0"
 bytes = "1"
-chrono = { version = "0.4", default-features = false }
+chrono = { workspace = true }
 clap = { workspace = true }
-downcast-rs = "1.2"
+datafusion = { version = "50", optional = true, features = ["backtrace"] }
+datafusion-common = { version = "50", optional = true, features = [
+    "backtrace",
+] }
+downcast-rs = "2.0"
 dyn-clone = "1.0.14"
 easy-ext = "1"
 educe = "0.6"
 either = "1"
 enum-as-inner = "0.6"
-fancy-regex = "0.13.0"
+fancy-regex = "0.17.0"
 fixedbitset = "0.5"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 iana-time-zone = "0.1"
 iceberg = { workspace = true }
-icelake = { workspace = true }
 itertools = { workspace = true }
 jsonbb = { workspace = true }
-linkme = { version = "0.3", features = ["used_linker"] }
+linkme = { workspace = true }
 maplit = "1"
-md5 = "0.7.0"
+md5 = { package = "md-5", version = "0.10.6" }
 memcomparable = "0.2"
+mysql_async = { workspace = true }
+mysql_common = { version = "0.35", default-features = false, features = [
+    "chrono",
+] }
 num-integer = "0.1"
 parking_lot = { workspace = true }
 parse-display = "0.10"
 paste = "1"
-petgraph = "0.6"
+percent-encoding = "2.3.1"
+petgraph = "0.8"
 pgwire = { path = "../utils/pgwire" }
-pin-project-lite = "0.2"
+pin-project-lite = { workspace = true }
 postgres-types = { version = "0.2.6" }
 pretty-xmlish = "0.1.13"
 pretty_assertions = "1"
-prometheus = { version = "0.13", features = ["process"] }
+prometheus = { version = "0.14", features = ["process"] }
+prometheus-http-query = "0.8"
 prost = { workspace = true }
-rand = { version = "0.8", features = ["small_rng"] }
+quick-xml = { version = "0.39", features = ["serialize"] }
+rand = { version = "0.9", features = ["small_rng"] }
 risingwave_batch = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_common_estimate_size = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }
 risingwave_connector = { workspace = true }
@@ -67,20 +78,22 @@ risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
 risingwave_frontend_macro = { path = "macro" }
 risingwave_hummock_sdk = { workspace = true }
-risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_variables = { workspace = true }
 rw_futures_util = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+scopeguard = "1.2.0"
+serde = { workspace = true }
 serde_json = "1"
+serde_yaml = "0.9"
 sha2 = "0.10.7"
-smallvec = { version = "1.13.1", features = ["serde"] }
-speedate = "0.14.0"
+smallvec = { workspace = true, features = ["serde"] }
+speedate = "0.15.0"
+static_assertions = "1"
 tempfile = "3"
-thiserror = "1"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -93,10 +106,17 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-postgres = "0.7"
 tokio-stream = { workspace = true }
+toml = { workspace = true }
 tonic = { workspace = true }
+tower = { version = "0.5", features = ["util", "load-shed"] }
+tower-http = { version = "0.6", features = [
+    "add-extension",
+    "cors",
+    "compression-gzip",
+] }
 tracing = "0.1"
+url = "2.5.0"
 uuid = "1"
-zstd = { version = "0.13", default-features = false }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -104,6 +124,7 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 assert_matches = "1"
 expect-test = "1"
+risingwave_batch_executors = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 tempfile = "3"
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use risingwave_frontend_macro::system_catalog;
 /// The view `columns` contains information about all table columns (or view columns) in the
 /// database. System columns (ctid, etc.) are not included. Only those columns are shown that the
 /// current user has access to (by way of being the owner or having some privilege).
-/// Ref: [`https://www.postgresql.org/docs/current/infoschema-columns.html`]
+/// Ref: `https://www.postgresql.org/docs/current/infoschema-columns.html`
 ///
 /// In RisingWave, `columns` also contains all materialized views' columns.
 #[system_catalog(
@@ -35,7 +35,10 @@ use risingwave_frontend_macro::system_catalog;
         NULL::integer AS numeric_scale,
         NULL::integer AS datetime_precision,
         c.position AS ordinal_position,
-        'YES' AS is_nullable,
+        CASE
+            WHEN c.is_nullable THEN 'YES'
+            ELSE 'NO'
+        END AS is_nullable,
         CASE
             WHEN c.data_type = 'varchar' THEN 'character varying'
             ELSE c.data_type

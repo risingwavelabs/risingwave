@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,17 @@
 
 use std::collections::HashSet;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanWindowFunction};
 use super::stream::prelude::*;
-use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::MonotonicityMap;
-use crate::stream_fragmenter::BuildFragmentGraphState;
+use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
 use crate::TableCatalog;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::{MonotonicityMap, StreamKind, WatermarkColumns};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamEowcOverWindow {
@@ -51,12 +50,12 @@ impl StreamEowcOverWindow {
 
         // `EowcOverWindowExecutor` cannot produce any watermark columns, because there may be some
         // ancient rows in some rarely updated partitions that are emitted at the end of time.
-        let watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        let watermark_columns = WatermarkColumns::new();
 
         let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
-            true,
+            StreamKind::AppendOnly,
             true,
             watermark_columns,
             // we cannot derive monotonicity for any column for the same reason as watermark columns
@@ -118,7 +117,7 @@ impl StreamEowcOverWindow {
 
 impl_distill_by_unit!(StreamEowcOverWindow, core, "StreamEowcOverWindow");
 
-impl PlanTreeNodeUnary for StreamEowcOverWindow {
+impl PlanTreeNodeUnary<Stream> for StreamEowcOverWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -129,7 +128,7 @@ impl PlanTreeNodeUnary for StreamEowcOverWindow {
         Self::new(core)
     }
 }
-impl_plan_tree_node_for_unary! { StreamEowcOverWindow }
+impl_plan_tree_node_for_unary! { Stream, StreamEowcOverWindow }
 
 impl StreamNode for StreamEowcOverWindow {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -155,15 +154,15 @@ impl StreamNode for StreamEowcOverWindow {
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
 
-        PbNodeBody::EowcOverWindow(EowcOverWindowNode {
+        PbNodeBody::EowcOverWindow(Box::new(EowcOverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
-        })
+        }))
     }
 }
 
-impl ExprRewritable for StreamEowcOverWindow {}
+impl ExprRewritable<Stream> for StreamEowcOverWindow {}
 
 impl ExprVisitable for StreamEowcOverWindow {}

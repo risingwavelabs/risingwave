@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,22 +16,19 @@
 #![feature(trait_alias)]
 #![feature(type_alias_impl_trait)]
 #![feature(map_try_insert)]
-#![feature(extract_if)]
-#![feature(hash_extract_if)]
-#![feature(btree_extract_if)]
-#![feature(let_chains)]
 #![feature(error_generic_member_access)]
 #![feature(assert_matches)]
 #![feature(try_blocks)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(stmt_expr_attributes)]
+#![feature(proc_macro_hygiene)]
 #![feature(custom_test_frameworks)]
 #![test_runner(risingwave_test_runner::test_runner::run_failpont_tests)]
-#![feature(is_sorted)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(const_option)]
 #![feature(anonymous_lifetime_in_impl_trait)]
 #![feature(duration_millis_float)]
-#![feature(option_get_or_insert_default)]
+#![feature(iterator_try_reduce)]
+#![feature(iterator_try_collect)]
+#![feature(vec_deque_pop_if)]
 
 pub mod backup_restore;
 pub mod barrier;
@@ -44,17 +41,20 @@ pub mod manager;
 pub mod model;
 pub mod rpc;
 pub mod serving;
-pub mod storage;
 pub mod stream;
 pub mod telemetry;
 
 pub use error::{MetaError, MetaResult};
+use risingwave_common::config::MetaStoreConfig;
 pub use rpc::{ElectionClient, ElectionMember};
 
 use crate::manager::MetaOpts;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum MetaStoreBackend {
     Mem,
-    Sql { endpoint: String },
+    Sql {
+        endpoint: String,
+        config: MetaStoreConfig,
+    },
 }

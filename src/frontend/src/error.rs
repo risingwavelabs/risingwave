@@ -15,6 +15,7 @@
 use risingwave_batch::error::BatchError;
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NoFunction, NotImplemented};
+use risingwave_common::license::FeatureNotAvailable;
 use risingwave_common::secret::SecretError;
 use risingwave_common::session_config::SessionConfigError;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
@@ -22,9 +23,12 @@ use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
 use risingwave_expr::ExprError;
 use risingwave_pb::PbFieldNotFound;
-use risingwave_rpc_client::error::{RpcError, TonicStatusWrapper};
+use risingwave_rpc_client::error::{RpcError, ToTonicStatus, TonicStatusWrapper};
 use thiserror::Error;
+use thiserror_ext::AsReport;
 use tokio::task::JoinError;
+
+use crate::expr::CastError;
 
 /// The error type for the frontend crate, acting as the top-level error type for the
 /// entire RisingWave project.
@@ -33,8 +37,8 @@ use tokio::task::JoinError;
 // - Some variants are never constructed.
 // - Some variants store a type-erased `BoxedError` to resolve the reverse dependency.
 //   It's not necessary anymore as the error type is now defined at the top-level.
-#[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box)]
-#[thiserror_ext(newtype(name = RwError, backtrace))]
+#[derive(Error, thiserror_ext::ReportDebug, thiserror_ext::Box, thiserror_ext::Macro)]
+#[thiserror_ext(newtype(name = RwError, backtrace), macro(path = "crate::error"))]
 pub enum ErrorCode {
     #[error("internal error: {0}")]
     InternalError(String),
@@ -87,6 +91,13 @@ pub enum ErrorCode {
         #[backtrace]
         ArrayError,
     ),
+    #[cfg(feature = "datafusion")]
+    #[error("DataFusion error: {0}")]
+    DataFusionError(
+        #[from]
+        #[backtrace]
+        datafusion_common::DataFusionError,
+    ),
     #[error("Stream error: {0}")]
     StreamError(
         #[backtrace]
@@ -105,7 +116,7 @@ pub enum ErrorCode {
     // TODO: use a new type for bind error
     // TODO(error-handling): should prefer use error types than strings.
     #[error("Bind error: {0}")]
-    BindError(String),
+    BindError(#[message] String),
     // TODO: only keep this one
     #[error("Failed to bind expression: {expr}: {error}")]
     BindErrorRoot {
@@ -114,14 +125,21 @@ pub enum ErrorCode {
         #[backtrace]
         error: BoxedError,
     },
+    #[error(transparent)]
+    CastError(
+        #[from]
+        #[backtrace]
+        CastError,
+    ),
     #[error("Catalog error: {0}")]
     CatalogError(
         #[source]
         #[backtrace]
+        #[message]
         BoxedError,
     ),
     #[error("Protocol error: {0}")]
-    ProtocolError(String),
+    ProtocolError(#[message] String),
     #[error("Scheduler error: {0}")]
     SchedulerError(
         #[source]
@@ -135,7 +153,7 @@ pub enum ErrorCode {
     #[error("Item not found: {0}")]
     ItemNotFound(String),
     #[error("Invalid input syntax: {0}")]
-    InvalidInputSyntax(String),
+    InvalidInputSyntax(#[message] String),
     #[error("Can not compare in memory: {0}")]
     MemComparableError(#[from] memcomparable::Error),
     #[error("Error while de/se values: {0}")]
@@ -158,7 +176,7 @@ pub enum ErrorCode {
         BoxedError,
     ),
     #[error("Permission denied: {0}")]
-    PermissionDenied(String),
+    PermissionDenied(#[message] String),
     #[error("Failed to get/set session config: {0}")]
     SessionConfig(
         #[from]
@@ -173,6 +191,12 @@ pub enum ErrorCode {
     ),
     #[error("{0} has been deprecated, please use {1} instead.")]
     Deprecated(String, String),
+    #[error(transparent)]
+    FeatureNotAvailable(
+        #[from]
+        #[backtrace]
+        FeatureNotAvailable,
+    ),
 }
 
 /// The result type for the frontend crate.
@@ -186,9 +210,9 @@ impl From<TonicStatusWrapper> for RwError {
 
         // TODO(error-handling): `message` loses the source chain.
         match status.inner().code() {
-            Code::InvalidArgument => ErrorCode::InvalidParameterValue(message.to_string()),
+            Code::InvalidArgument => ErrorCode::InvalidParameterValue(message.to_owned()),
             Code::NotFound | Code::AlreadyExists => ErrorCode::CatalogError(status.into()),
-            Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_string()),
+            Code::PermissionDenied => ErrorCode::PermissionDenied(message.to_owned()),
             Code::Cancelled => ErrorCode::SchedulerError(status.into()),
             _ => ErrorCode::RpcError(status.into()),
         }
@@ -252,5 +276,17 @@ impl From<BoxedError> for RwError {
         // This is essentially expanded from `anyhow::anyhow!(e)`.
         let e = anyhow::__private::kind::BoxedKind::anyhow_kind(&e).new(e);
         ErrorCode::Uncategorized(e).into()
+    }
+}
+
+impl From<risingwave_sqlparser::parser::ParserError> for ErrorCode {
+    fn from(e: risingwave_sqlparser::parser::ParserError) -> Self {
+        ErrorCode::InvalidInputSyntax(e.to_report_string())
+    }
+}
+
+impl From<RwError> for tonic::Status {
+    fn from(err: RwError) -> Self {
+        err.to_status(tonic::Code::Internal, "RwError")
     }
 }

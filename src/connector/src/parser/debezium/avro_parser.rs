@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,49 +15,47 @@
 use std::fmt::Debug;
 use std::sync::Arc;
 
+use anyhow::Context;
 use apache_avro::types::Value;
-use apache_avro::{from_avro_datum, Schema};
+use apache_avro::{Schema, from_avro_datum};
+use risingwave_common::catalog::Field;
 use risingwave_common::try_match_expand;
 use risingwave_connector_codec::decoder::avro::{
-    avro_extract_field_schema, avro_schema_skip_nullable_union, avro_schema_to_column_descs,
-    AvroAccess, AvroParseOptions, ResolvedAvroSchema,
+    AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_fields,
+    get_nullable_union_inner,
 };
-use risingwave_pb::plan_common::ColumnDesc;
 
 use crate::error::ConnectorResult;
 use crate::parser::avro::ConfluentSchemaCache;
 use crate::parser::unified::AccessImpl;
 use crate::parser::{AccessBuilder, EncodingProperties, EncodingType, SchemaLocation};
 use crate::schema::schema_registry::{
-    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+    Client, extract_schema_id, get_subject_by_strategy, handle_sr_list,
 };
 
 #[derive(Debug)]
 pub struct DebeziumAvroAccessBuilder {
-    schema: ResolvedAvroSchema,
+    reader_schema: ResolvedAvroSchema,
     schema_resolver: Arc<ConfluentSchemaCache>,
-    key_schema: Option<Arc<Schema>>,
     value: Option<Value>,
-    encoding_type: EncodingType,
 }
 
-// TODO: reduce encodingtype match
 impl AccessBuilder for DebeziumAvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
+    async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        _: &crate::source::SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
         let (schema_id, mut raw_payload) = extract_schema_id(&payload)?;
-        let schema = self.schema_resolver.get_by_id(schema_id).await?;
-        self.value = Some(from_avro_datum(schema.as_ref(), &mut raw_payload, None)?);
-        self.key_schema = match self.encoding_type {
-            EncodingType::Key => Some(schema),
-            EncodingType::Value => None,
-        };
+        let writer_schema = self.schema_resolver.get_by_id(schema_id).await?;
+        self.value = Some(from_avro_datum(
+            writer_schema.as_ref(),
+            &mut raw_payload,
+            Some(&self.reader_schema.original_schema),
+        )?);
         Ok(AccessImpl::Avro(AvroAccess::new(
-            self.value.as_mut().unwrap(),
-            // Assumption: Key will not contain reference, so unresolved schema can work here.
-            AvroParseOptions::create(match self.encoding_type {
-                EncodingType::Key => self.key_schema.as_mut().unwrap(),
-                EncodingType::Value => &self.schema.resolved_schema,
-            }),
+            self.value.as_ref().unwrap(),
+            AvroParseOptions::create(&self.reader_schema.original_schema),
         )))
     }
 }
@@ -68,17 +66,18 @@ impl DebeziumAvroAccessBuilder {
         encoding_type: EncodingType,
     ) -> ConnectorResult<Self> {
         let DebeziumAvroParserConfig {
+            key_schema,
             outer_schema,
             schema_resolver,
-            ..
         } = config;
 
         Ok(Self {
-            schema: ResolvedAvroSchema::create(outer_schema)?,
+            reader_schema: ResolvedAvroSchema::create(match encoding_type {
+                EncodingType::Key => key_schema,
+                EncodingType::Value => outer_schema,
+            })?,
             schema_resolver,
-            key_schema: None,
             value: None,
-            encoding_type,
         })
     }
 }
@@ -119,8 +118,8 @@ impl DebeziumAvroParserConfig {
         })
     }
 
-    pub fn extract_pks(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(
+    pub fn extract_pks(&self) -> ConnectorResult<Vec<Field>> {
+        avro_schema_to_fields(
             &self.key_schema,
             // TODO: do we need to support map type here?
             None,
@@ -128,7 +127,7 @@ impl DebeziumAvroParserConfig {
         .map_err(Into::into)
     }
 
-    pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
+    pub fn map_to_columns(&self) -> ConnectorResult<Vec<Field>> {
         // Refer to debezium_avro_msg_schema.avsc for how the schema looks like:
 
         // "fields": [
@@ -161,19 +160,32 @@ impl DebeziumAvroParserConfig {
         // - transaction
         // See <https://debezium.io/documentation/reference/stable/connectors/mysql.html#mysql-events>
 
-        avro_schema_to_column_descs(
-            avro_schema_skip_nullable_union(avro_extract_field_schema(
-                // FIXME: use resolved schema here.
-                // Currently it works because "after" refers to a subtree in "before",
-                // but in theory, inside "before" there could also be a reference.
-                &self.outer_schema,
-                Some("before"),
-            )?)?,
+        avro_schema_to_fields(
+            // This assumes no external `Ref`s (e.g. "before" referring to "after" or "source").
+            // Internal `Ref`s inside the "before" tree are allowed.
+            extract_debezium_table_schema(&self.outer_schema)?,
             // TODO: do we need to support map type here?
             None,
         )
         .map_err(Into::into)
     }
+}
+
+fn extract_debezium_table_schema(root: &Schema) -> anyhow::Result<&Schema> {
+    let Schema::Record(root_record) = root else {
+        anyhow::bail!("Root schema of debezium shall be a record but got: {root:?}");
+    };
+    let idx = (root_record.lookup.get("before"))
+        .context("Root schema of debezium shall contain \"before\" field.")?;
+    let schema = &root_record.fields[*idx].schema;
+    // It is wrapped inside a union to allow null, so we look inside.
+    let Schema::Union(union_schema) = schema else {
+        return Ok(schema);
+    };
+    get_nullable_union_inner(union_schema).context(format!(
+        "illegal avro union schema, expected [null, T], got {:?}",
+        union_schema
+    ))
 }
 
 #[cfg(test)]
@@ -188,13 +200,12 @@ mod tests {
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_pb::catalog::StreamSourceInfo;
-    use risingwave_pb::data::data_type::TypeName;
     use risingwave_pb::plan_common::{PbEncodeType, PbFormatType};
 
     use super::*;
-    use crate::parser::{DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig};
-    use crate::source::{SourceColumnDesc, SourceContext};
     use crate::WithOptionsSecResolved;
+    use crate::parser::{DebeziumParser, SourceStreamChunkBuilder, SpecificParserConfig};
+    use crate::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 
     const DEBEZIUM_AVRO_DATA: &[u8] = b"\x00\x00\x00\x00\x06\x00\x02\xd2\x0f\x0a\x53\x61\x6c\x6c\x79\x0c\x54\x68\x6f\x6d\x61\x73\x2a\x73\x61\x6c\x6c\x79\x2e\x74\x68\x6f\x6d\x61\x73\x40\x61\x63\x6d\x65\x2e\x63\x6f\x6d\x16\x32\x2e\x31\x2e\x32\x2e\x46\x69\x6e\x61\x6c\x0a\x6d\x79\x73\x71\x6c\x12\x64\x62\x73\x65\x72\x76\x65\x72\x31\xc0\xb4\xe8\xb7\xc9\x61\x00\x30\x66\x69\x72\x73\x74\x5f\x69\x6e\x5f\x64\x61\x74\x61\x5f\x63\x6f\x6c\x6c\x65\x63\x74\x69\x6f\x6e\x12\x69\x6e\x76\x65\x6e\x74\x6f\x72\x79\x00\x02\x12\x63\x75\x73\x74\x6f\x6d\x65\x72\x73\x00\x00\x20\x6d\x79\x73\x71\x6c\x2d\x62\x69\x6e\x2e\x30\x30\x30\x30\x30\x33\x8c\x06\x00\x00\x00\x02\x72\x02\x92\xc3\xe8\xb7\xc9\x61\x00";
 
@@ -211,15 +222,13 @@ mod tests {
         columns: Vec<SourceColumnDesc>,
         payload: Vec<u8>,
     ) -> Vec<(Op, OwnedRow)> {
-        let mut builder = SourceStreamChunkBuilder::with_capacity(columns, 2);
-        {
-            let writer = builder.row_writer();
-            parser
-                .parse_inner(None, Some(payload), writer)
-                .await
-                .unwrap();
-        }
-        let chunk = builder.finish();
+        let mut builder = SourceStreamChunkBuilder::new(columns, SourceCtrlOpts::for_test());
+        parser
+            .parse_inner(None, Some(payload), builder.row_writer())
+            .await
+            .unwrap();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
         chunk
             .rows()
             .map(|(op, row_ref)| (op, row_ref.into_owned_row()))
@@ -238,7 +247,7 @@ mod tests {
 
     #[test]
     fn test_extract_inner_schema() {
-        let inner_shema_str = r#"{
+        let inner_schema_str = r#"{
     "type": "record",
     "name": "Value",
     "namespace": "dbserver1.inventory.customers",
@@ -263,11 +272,8 @@ mod tests {
 }"#;
 
         let outer_schema = get_outer_schema();
-        let expected_inner_schema = Schema::parse_str(inner_shema_str).unwrap();
-        let extracted_inner_schema = avro_schema_skip_nullable_union(
-            avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
-        )
-        .unwrap();
+        let expected_inner_schema = Schema::parse_str(inner_schema_str).unwrap();
+        let extracted_inner_schema = extract_debezium_table_schema(&outer_schema).unwrap();
         assert_eq!(&expected_inner_schema, extracted_inner_schema);
     }
 
@@ -285,7 +291,7 @@ mod tests {
 }
 "#;
         let key_schema = Schema::parse_str(key_schema_str).unwrap();
-        let names: Vec<String> = avro_schema_to_column_descs(&key_schema, None)
+        let names: Vec<String> = avro_schema_to_fields(&key_schema, None)
             .unwrap()
             .drain(..)
             .map(|d| d.name)
@@ -341,12 +347,11 @@ mod tests {
 }
 "#;
         let schema = Schema::parse_str(test_schema_str).unwrap();
-        let columns = avro_schema_to_column_descs(&schema, None).unwrap();
+        let columns = avro_schema_to_fields(&schema, None).unwrap();
         for col in &columns {
-            let dtype = col.column_type.as_ref().unwrap();
-            println!("name = {}, type = {:?}", col.name, dtype.type_name);
+            println!("name = {}, type = {}", col.name, col.data_type);
             if col.name.contains("unconstrained") {
-                assert_eq!(dtype.type_name, TypeName::Decimal as i32);
+                assert_eq!(col.data_type, DataType::Decimal);
             }
         }
     }
@@ -354,38 +359,18 @@ mod tests {
     #[test]
     fn test_map_to_columns() {
         let outer_schema = get_outer_schema();
-        let columns = avro_schema_to_column_descs(
-            avro_schema_skip_nullable_union(
-                avro_extract_field_schema(&outer_schema, Some("before")).unwrap(),
-            )
-            .unwrap(),
-            None,
-        )
-        .unwrap()
-        .into_iter()
-        .map(CatColumnDesc::from)
-        .collect_vec();
+        let columns =
+            avro_schema_to_fields(extract_debezium_table_schema(&outer_schema).unwrap(), None)
+                .unwrap();
 
         assert_eq!(columns.len(), 4);
-        assert_eq!(
-            CatColumnDesc::new_atomic(DataType::Int32, "id", 1),
-            columns[0]
-        );
+        assert_eq!(Field::new("id", DataType::Int32), columns[0]);
 
-        assert_eq!(
-            CatColumnDesc::new_atomic(DataType::Varchar, "first_name", 2),
-            columns[1]
-        );
+        assert_eq!(Field::new("first_name", DataType::Varchar), columns[1]);
 
-        assert_eq!(
-            CatColumnDesc::new_atomic(DataType::Varchar, "last_name", 3),
-            columns[2]
-        );
+        assert_eq!(Field::new("last_name", DataType::Varchar), columns[2]);
 
-        assert_eq!(
-            CatColumnDesc::new_atomic(DataType::Varchar, "email", 4),
-            columns[3]
-        );
+        assert_eq!(Field::new("email", DataType::Varchar), columns[3]);
     }
 
     #[ignore]
@@ -405,8 +390,8 @@ mod tests {
         let config = DebeziumAvroParserConfig::new(parser_config.clone().encoding_config).await?;
         let columns = config
             .map_to_columns()?
-            .into_iter()
-            .map(CatColumnDesc::from)
+            .iter()
+            .map(CatColumnDesc::from_field_without_column_id)
             .map(|c| SourceColumnDesc::from(&c))
             .collect_vec();
         let parser = DebeziumParser::new(

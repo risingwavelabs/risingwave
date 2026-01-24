@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
-#![cfg_attr(coverage, feature(coverage_attribute))]
+#![feature(coverage_attribute)]
 
 mod server;
 
@@ -78,6 +77,11 @@ pub struct MetaNodeOpts {
     /// Database of sql backend, required when meta backend set to MySQL or PostgreSQL.
     #[clap(long, hide = true, env = "RW_SQL_DATABASE", default_value = "")]
     pub sql_database: String,
+
+    /// Params for the URL connection, such as `sslmode=disable`.
+    /// Example: `param1=value1&param2=value2`
+    #[clap(long, hide = true, env = "RW_SQL_URL_PARAMS")]
+    pub sql_url_params: Option<String>,
 
     /// The HTTP REST-API address of the Prometheus instance associated to this cluster.
     /// This address is used to serve `PromQL` queries to Prometheus.
@@ -211,8 +215,9 @@ impl risingwave_common::opts::Opts for MetaNodeOpts {
 
 use std::future::Future;
 use std::pin::Pin;
+use std::sync::Arc;
 
-use risingwave_common::config::{load_config, MetaBackend, RwConfig};
+use risingwave_common::config::{MetaBackend, RwConfig, load_config};
 use tracing::info;
 
 /// Start meta node
@@ -231,14 +236,21 @@ pub fn start(
         let listen_addr = opts.listen_addr.parse().unwrap();
         let dashboard_addr = opts.dashboard_host.map(|x| x.parse().unwrap());
         let prometheus_addr = opts.prometheus_listener_addr.map(|x| x.parse().unwrap());
+        let meta_store_config = config.meta.meta_store_config.clone();
         let backend = match config.meta.backend {
-            MetaBackend::Mem => MetaStoreBackend::Mem,
+            MetaBackend::Mem => {
+                if opts.sql_endpoint.is_some() {
+                    tracing::warn!("`--sql-endpoint` is ignored when using `mem` backend");
+                }
+                MetaStoreBackend::Mem
+            }
             MetaBackend::Sql => MetaStoreBackend::Sql {
                 endpoint: opts
                     .sql_endpoint
                     .expect("sql endpoint is required")
                     .expose_secret()
-                    .to_string(),
+                    .clone(),
+                config: meta_store_config,
             },
             MetaBackend::Sqlite => MetaStoreBackend::Sql {
                 endpoint: format!(
@@ -247,28 +259,45 @@ pub fn start(
                         .expect("sql endpoint is required")
                         .expose_secret()
                 ),
+                config: meta_store_config,
             },
             MetaBackend::Postgres => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "postgres://{}:{}@{}/{}",
+                    "postgres://{}:{}@{}/{}{}",
                     opts.sql_username,
                     opts.sql_password.expose_secret(),
                     opts.sql_endpoint
                         .expect("sql endpoint is required")
                         .expose_secret(),
-                    opts.sql_database
+                    opts.sql_database,
+                    if let Some(params) = &opts.sql_url_params
+                        && !params.is_empty()
+                    {
+                        format!("?{}", params)
+                    } else {
+                        "".to_owned()
+                    }
                 ),
+                config: meta_store_config,
             },
             MetaBackend::Mysql => MetaStoreBackend::Sql {
                 endpoint: format!(
-                    "mysql://{}:{}@{}/{}",
+                    "mysql://{}:{}@{}/{}{}",
                     opts.sql_username,
                     opts.sql_password.expose_secret(),
                     opts.sql_endpoint
                         .expect("sql endpoint is required")
                         .expose_secret(),
-                    opts.sql_database
+                    opts.sql_database,
+                    if let Some(params) = &opts.sql_url_params
+                        && !params.is_empty()
+                    {
+                        format!("?{}", params)
+                    } else {
+                        "".to_owned()
+                    }
                 ),
+                config: meta_store_config,
             },
         };
         validate_config(&config);
@@ -291,13 +320,13 @@ pub fn start(
                 tags.split(',')
                     .map(|s| {
                         let key_val = s.split_once('=').unwrap();
-                        (key_val.0.to_string(), key_val.1.to_string())
+                        (key_val.0.to_owned(), key_val.1.to_owned())
                     })
                     .collect()
             });
 
         let add_info = AddressInfo {
-            advertise_addr: opts.advertise_addr.to_owned(),
+            advertise_addr: opts.advertise_addr.clone(),
             listen_addr,
             prometheus_addr,
             dashboard_addr,
@@ -306,7 +335,7 @@ pub fn start(
         const MIN_TIMEOUT_INTERVAL_SEC: u64 = 20;
         let compaction_task_max_progress_interval_secs = {
             let retry_config = &config.storage.object_store.retry;
-            let max_streming_read_timeout_ms = (retry_config.streaming_read_attempt_timeout_ms
+            let max_streaming_read_timeout_ms = (retry_config.streaming_read_attempt_timeout_ms
                 + retry_config.req_backoff_max_delay_ms)
                 * retry_config.streaming_read_retry_attempts as u64;
             let max_streaming_upload_timeout_ms = (retry_config
@@ -319,7 +348,7 @@ pub fn start(
             let max_read_timeout_ms = (retry_config.read_attempt_timeout_ms
                 + retry_config.req_backoff_max_delay_ms)
                 * retry_config.read_retry_attempts as u64;
-            let max_timeout_ms = max_streming_read_timeout_ms
+            let max_timeout_ms = max_streaming_read_timeout_ms
                 .max(max_upload_timeout_ms)
                 .max(max_streaming_upload_timeout_ms)
                 .max(max_read_timeout_ms)
@@ -332,6 +361,7 @@ pub fn start(
             backend,
             max_heartbeat_interval,
             config.meta.meta_leader_lease_secs,
+            config.server.clone(),
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
                 disable_automatic_parallelism_control: config
@@ -349,7 +379,12 @@ pub fn start(
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 default_parallelism: config.meta.default_parallelism,
                 vacuum_interval_sec: config.meta.vacuum_interval_sec,
+                time_travel_vacuum_interval_sec: config
+                    .meta
+                    .developer
+                    .time_travel_vacuum_interval_sec,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
+                iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
@@ -361,16 +396,48 @@ pub fn start(
                     .meta
                     .developer
                     .hummock_time_travel_sst_info_fetch_batch_size,
+                hummock_time_travel_sst_info_insert_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_sst_info_insert_batch_size,
+                hummock_time_travel_epoch_version_insert_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_epoch_version_insert_batch_size,
+                hummock_gc_history_insert_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_gc_history_insert_batch_size,
+                hummock_time_travel_filter_out_objects_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_batch_size,
+                hummock_time_travel_filter_out_objects_v1: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_v1,
+                hummock_time_travel_filter_out_objects_list_version_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_list_version_batch_size,
+                hummock_time_travel_filter_out_objects_list_delta_batch_size: config
+                    .meta
+                    .developer
+                    .hummock_time_travel_filter_out_objects_list_delta_batch_size,
                 min_delta_log_num_for_hummock_version_checkpoint: config
                     .meta
                     .min_delta_log_num_for_hummock_version_checkpoint,
                 min_sst_retention_time_sec: config.meta.min_sst_retention_time_sec,
                 full_gc_interval_sec: config.meta.full_gc_interval_sec,
                 full_gc_object_limit: config.meta.full_gc_object_limit,
+                gc_history_retention_time_sec: config.meta.gc_history_retention_time_sec,
                 max_inflight_time_travel_query: config.meta.max_inflight_time_travel_query,
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
+                protect_drop_table_with_incoming_sink: config
+                    .meta
+                    .protect_drop_table_with_incoming_sink,
                 prometheus_endpoint: opts.prometheus_endpoint,
                 prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
@@ -386,13 +453,21 @@ pub fn start(
                 periodic_tombstone_reclaim_compaction_interval_sec: config
                     .meta
                     .periodic_tombstone_reclaim_compaction_interval_sec,
-                periodic_scheduling_compaction_group_interval_sec: config
+                periodic_scheduling_compaction_group_split_interval_sec: config
                     .meta
-                    .periodic_scheduling_compaction_group_interval_sec,
-                split_group_size_limit: config.meta.split_group_size_limit,
-                min_table_split_size: config.meta.move_table_size_limit,
-                table_write_throughput_threshold: config.meta.table_write_throughput_threshold,
-                min_table_split_write_throughput: config.meta.min_table_split_write_throughput,
+                    .periodic_scheduling_compaction_group_split_interval_sec,
+                periodic_scheduling_compaction_group_merge_interval_sec: config
+                    .meta
+                    .periodic_scheduling_compaction_group_merge_interval_sec,
+                compaction_group_merge_dimension_threshold: config
+                    .meta
+                    .compaction_group_merge_dimension_threshold,
+                table_high_write_throughput_threshold: config
+                    .meta
+                    .table_high_write_throughput_threshold,
+                table_low_write_throughput_threshold: config
+                    .meta
+                    .table_low_write_throughput_threshold,
                 partition_vnode_count: config.meta.partition_vnode_count,
                 compact_task_table_size_partition_threshold_low: config
                     .meta
@@ -423,6 +498,23 @@ pub fn start(
                     .developer
                     .enable_check_task_level_overlap,
                 enable_dropped_column_reclaim: config.meta.enable_dropped_column_reclaim,
+                split_group_size_ratio: config.meta.split_group_size_ratio,
+                refresh_scheduler_interval_sec: config
+                    .streaming
+                    .developer
+                    .refresh_scheduler_interval_sec,
+                table_stat_high_write_throughput_ratio_for_split: config
+                    .meta
+                    .table_stat_high_write_throughput_ratio_for_split,
+                table_stat_low_write_throughput_ratio_for_merge: config
+                    .meta
+                    .table_stat_low_write_throughput_ratio_for_merge,
+                table_stat_throuput_window_seconds_for_split: config
+                    .meta
+                    .table_stat_throuput_window_seconds_for_split,
+                table_stat_throuput_window_seconds_for_merge: config
+                    .meta
+                    .table_stat_throuput_window_seconds_for_merge,
                 object_store_config: config.storage.object_store,
                 max_trivial_move_task_count_per_loop: config
                     .meta
@@ -431,9 +523,6 @@ pub fn start(
                 max_get_task_probe_times: config.meta.developer.max_get_task_probe_times,
                 secret_store_private_key,
                 temp_secret_file_dir: opts.temp_secret_file_dir,
-                table_info_statistic_history_times: config
-                    .storage
-                    .table_info_statistic_history_times,
                 actor_cnt_per_worker_parallelism_hard_limit: config
                     .meta
                     .developer
@@ -443,6 +532,28 @@ pub fn start(
                     .developer
                     .actor_cnt_per_worker_parallelism_soft_limit,
                 license_key_path: opts.license_key_path,
+                compute_client_config: config.meta.developer.compute_client_config.clone(),
+                stream_client_config: config.meta.developer.stream_client_config.clone(),
+                frontend_client_config: config.meta.developer.frontend_client_config.clone(),
+                redact_sql_option_keywords: Arc::new(
+                    config
+                        .batch
+                        .redact_sql_option_keywords
+                        .into_iter()
+                        .collect(),
+                ),
+                cdc_table_split_init_sleep_interval_splits: config
+                    .meta
+                    .cdc_table_split_init_sleep_interval_splits,
+                cdc_table_split_init_sleep_duration_millis: config
+                    .meta
+                    .cdc_table_split_init_sleep_duration_millis,
+                cdc_table_split_init_insert_batch_size: config
+                    .meta
+                    .cdc_table_split_init_insert_batch_size,
+
+                enable_legacy_table_migration: config.meta.enable_legacy_table_migration,
+                pause_on_next_bootstrap_offline: config.meta.pause_on_next_bootstrap_offline,
             },
             config.system.into_init_system_params(),
             Default::default(),
@@ -456,6 +567,12 @@ pub fn start(
 fn validate_config(config: &RwConfig) {
     if config.meta.meta_leader_lease_secs <= 2 {
         let error_msg = "meta leader lease secs should be larger than 2";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.parallelism_control_batch_size == 0 {
+        let error_msg = "parallelism control batch size should be larger than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

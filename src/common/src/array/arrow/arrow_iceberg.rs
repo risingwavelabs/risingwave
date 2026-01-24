@@ -4,7 +4,7 @@
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -14,19 +14,33 @@
 
 use std::cell::RefCell;
 use std::collections::HashMap;
-use std::ops::{Div, Mul};
-use std::sync::Arc;
+use std::ops::Div;
+use std::sync::{Arc, LazyLock};
 
 use arrow_array::ArrayRef;
 use num_traits::abs;
 
-pub use super::arrow_53::{
-    arrow_array, arrow_buffer, arrow_cast, arrow_schema, FromArrow, ToArrow,
+pub use super::arrow_56::{
+    FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
+    is_parquet_schema_match_source_schema,
 };
-use crate::array::{Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray};
+use crate::array::{
+    Array, ArrayError, ArrayImpl, DataChunk, DataType, DecimalArray, IntervalArray,
+};
 use crate::types::StructType;
 
 pub struct IcebergArrowConvert;
+
+// Arrow Decimal128 supports up to 38 decimal digits. We use precision=38, scale=10:
+// - Integer range: up to 10^28 - 1 (28 digits)
+// - Fractional precision: 10 digits
+// - Covers all RisingWave decimal values (MAX_PRECISION=28)
+//
+// Note: When reading Arrow decimals that exceed RisingWave's 96-bit / 28-digit
+// storage limit, the conversion code in arrow_impl.rs will reduce scale and
+// truncate the mantissa (via truncated_i128_and_scale) to make them fit.
+pub const ICEBERG_DECIMAL_PRECISION: u8 = 38;
+pub const ICEBERG_DECIMAL_SCALE: i8 = 10;
 
 impl IcebergArrowConvert {
     pub fn to_record_batch(
@@ -44,16 +58,16 @@ impl IcebergArrowConvert {
         FromArrow::from_record_batch(self, batch)
     }
 
+    pub fn type_from_field(&self, field: &arrow_schema::Field) -> Result<DataType, ArrayError> {
+        FromArrow::from_field(self, field)
+    }
+
     pub fn to_arrow_field(
         &self,
         name: &str,
         data_type: &DataType,
     ) -> Result<arrow_schema::Field, ArrayError> {
         ToArrow::to_arrow_field(self, name, data_type)
-    }
-
-    pub fn type_from_field(&self, field: &arrow_schema::Field) -> Result<DataType, ArrayError> {
-        FromArrow::from_field(self, field)
     }
 
     pub fn struct_from_fields(
@@ -78,13 +92,63 @@ impl IcebergArrowConvert {
     ) -> Result<ArrayImpl, ArrayError> {
         FromArrow::from_array(self, field, array)
     }
+
+    /// A helper function to convert an Arrow array to RisingWave array without knowing the field.
+    /// It will use the datatype from arrow array to infer the RisingWave data type.
+    ///
+    /// The difference between this function and `array_from_arrow_array` is that `array_from_arrow_array` will try using `ARROW:extension:name` field metadata to determine the RisingWave data type for extension types.
+    pub fn array_from_arrow_array_raw(
+        &self,
+        array: &arrow_array::ArrayRef,
+    ) -> Result<ArrayImpl, ArrayError> {
+        static FIELD_DUMMY: LazyLock<arrow_schema::Field> =
+            LazyLock::new(|| arrow_schema::Field::new("dummy", arrow_schema::DataType::Null, true));
+        FromArrow::from_array(self, &FIELD_DUMMY, array)
+    }
 }
 
 impl ToArrow for IcebergArrowConvert {
+    fn to_arrow_field(
+        &self,
+        name: &str,
+        data_type: &DataType,
+    ) -> Result<arrow_schema::Field, ArrayError> {
+        let data_type = match data_type {
+            DataType::Boolean => self.bool_type_to_arrow(),
+            DataType::Int16 => self.int32_type_to_arrow(),
+            DataType::Int32 => self.int32_type_to_arrow(),
+            DataType::Int64 => self.int64_type_to_arrow(),
+            DataType::Int256 => self.int256_type_to_arrow(),
+            DataType::Float32 => self.float32_type_to_arrow(),
+            DataType::Float64 => self.float64_type_to_arrow(),
+            DataType::Date => self.date_type_to_arrow(),
+            DataType::Time => self.time_type_to_arrow(),
+            DataType::Timestamp => self.timestamp_type_to_arrow(),
+            DataType::Timestamptz => self.timestamptz_type_to_arrow(),
+            DataType::Interval => self.interval_type_to_arrow(),
+            DataType::Varchar => self.varchar_type_to_arrow(),
+            DataType::Bytea => self.bytea_type_to_arrow(),
+            DataType::Serial => self.serial_type_to_arrow(),
+            DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
+            DataType::Jsonb => self.varchar_type_to_arrow(),
+            DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
+            DataType::List(list) => self.list_type_to_arrow(list)?,
+            DataType::Map(map) => self.map_type_to_arrow(map)?,
+            DataType::Vector(_) => self.vector_type_to_arrow()?,
+        };
+        Ok(arrow_schema::Field::new(name, data_type, true))
+    }
+
+    #[inline]
+    fn interval_type_to_arrow(&self) -> arrow_schema::DataType {
+        arrow_schema::DataType::Utf8
+    }
+
     #[inline]
     fn decimal_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
+        // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be less than 38.
         let data_type =
-            arrow_schema::DataType::Decimal128(arrow_schema::DECIMAL128_MAX_PRECISION, 0);
+            arrow_schema::DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
         arrow_schema::Field::new(name, data_type, true)
     }
 
@@ -99,6 +163,7 @@ impl ToArrow for IcebergArrowConvert {
         };
 
         // Convert Decimal to i128:
+        let max_value = 10_i128.pow(precision as u32) - 1;
         let values: Vec<Option<i128>> = array
             .iter()
             .map(|e| {
@@ -108,7 +173,16 @@ impl ToArrow for IcebergArrowConvert {
                         let scale = e.scale() as i8;
                         let diff_scale = abs(max_scale - scale);
                         let value = match scale {
-                            _ if scale < max_scale => value.mul(10_i128.pow(diff_scale as u32)),
+                            _ if scale < max_scale => value
+                                .checked_mul(10_i128.pow(diff_scale as u32))
+                                .and_then(|v| if abs(v) <= max_value { Some(v) } else { None })
+                                .unwrap_or_else(|| {
+                                    tracing::warn!(
+                                        "Decimal overflow when converting to arrow decimal with precision {} and scale {}. It will be replaced with inf/-inf.",
+                                        precision, max_scale
+                                    );
+                                    if value >= 0 { max_value } else { -max_value }
+                                }),
                             _ if scale > max_scale => value.div(10_i128.pow(diff_scale as u32)),
                             _ => value,
                         };
@@ -116,11 +190,9 @@ impl ToArrow for IcebergArrowConvert {
                     }
                     // For Inf, we replace them with the max/min value within the precision.
                     crate::array::Decimal::PositiveInf => {
-                        let max_value = 10_i128.pow(precision as u32) - 1;
                         Some(max_value)
                     }
                     crate::array::Decimal::NegativeInf => {
-                        let max_value = 10_i128.pow(precision as u32) - 1;
                         Some(-max_value)
                     }
                     crate::array::Decimal::NaN => None,
@@ -133,13 +205,21 @@ impl ToArrow for IcebergArrowConvert {
             .map_err(ArrayError::from_arrow)?;
         Ok(Arc::new(array) as ArrayRef)
     }
+
+    fn interval_to_arrow(
+        &self,
+        array: &IntervalArray,
+    ) -> Result<arrow_array::ArrayRef, ArrayError> {
+        Ok(Arc::new(arrow_array::StringArray::from(array)))
+    }
 }
 
 impl FromArrow for IcebergArrowConvert {}
 
 /// Iceberg sink with `create_table_if_not_exists` option will use this struct to convert the
-/// iceberg data type to arrow data type. Specifically, it will add the field id to the
-/// arrow field metadata, because iceberg-rust and icelake need the field id to be set.
+/// iceberg data type to arrow data type.
+///
+/// Specifically, it will add the field id to the arrow field metadata, because iceberg-rust need the field id to be set.
 ///
 /// Note: this is different from [`IcebergArrowConvert`], which is used to read from/write to
 /// an _existing_ iceberg table. In that case, we just need to make sure the data is compatible to the existing schema.
@@ -164,9 +244,7 @@ impl IcebergCreateTableArrowConvert {
 
         let mut metadata = HashMap::new();
         // for iceberg-rust
-        metadata.insert("PARQUET:field_id".to_string(), field_id.to_string());
-        // for icelake
-        metadata.insert("column_id".to_string(), field_id.to_string());
+        metadata.insert("PARQUET:field_id".to_owned(), field_id.to_string());
         arrow_field.set_metadata(metadata);
     }
 }
@@ -178,8 +256,22 @@ impl ToArrow for IcebergCreateTableArrowConvert {
         // We choose 28 here
         // The decimal type finally will be converted to an iceberg decimal type.
         // Iceberg decimal(P,S)
-        // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be 38 or less.
-        let data_type = arrow_schema::DataType::Decimal128(28, 10);
+        // Fixed-point decimal; precision P, scale S Scale is fixed, precision must be less than 38.
+        let data_type =
+            arrow_schema::DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
+
+        let mut arrow_field = arrow_schema::Field::new(name, data_type, true);
+        self.add_field_id(&mut arrow_field);
+        arrow_field
+    }
+
+    #[inline]
+    fn interval_type_to_arrow(&self) -> arrow_schema::DataType {
+        arrow_schema::DataType::Utf8
+    }
+
+    fn jsonb_type_to_arrow(&self, name: &str) -> arrow_schema::Field {
+        let data_type = arrow_schema::DataType::Utf8;
 
         let mut arrow_field = arrow_schema::Field::new(name, data_type, true);
         self.add_field_id(&mut arrow_field);
@@ -198,10 +290,10 @@ impl ToArrow for IcebergCreateTableArrowConvert {
         let data_type = match value {
             // using the inline function
             DataType::Boolean => self.bool_type_to_arrow(),
-            DataType::Int16 => self.int16_type_to_arrow(),
+            DataType::Int16 => self.int32_type_to_arrow(),
             DataType::Int32 => self.int32_type_to_arrow(),
             DataType::Int64 => self.int64_type_to_arrow(),
-            DataType::Int256 => self.int256_type_to_arrow(),
+            DataType::Int256 => self.varchar_type_to_arrow(),
             DataType::Float32 => self.float32_type_to_arrow(),
             DataType::Float64 => self.float64_type_to_arrow(),
             DataType::Date => self.date_type_to_arrow(),
@@ -213,10 +305,11 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Bytea => self.bytea_type_to_arrow(),
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
-            DataType::Jsonb => return Ok(self.jsonb_type_to_arrow(name)),
+            DataType::Jsonb => self.varchar_type_to_arrow(),
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
-            DataType::List(datatype) => self.list_type_to_arrow(datatype)?,
-            DataType::Map(datatype) => self.map_type_to_arrow(datatype)?,
+            DataType::List(list) => self.list_type_to_arrow(list)?,
+            DataType::Map(map) => self.map_type_to_arrow(map)?,
+            DataType::Vector(_) => self.vector_type_to_arrow()?,
         };
 
         let mut arrow_field = arrow_schema::Field::new(name, data_type, true);
@@ -270,19 +363,129 @@ mod test {
             Some(Decimal::Normalized("123.4".parse().unwrap())),
             Some(Decimal::Normalized("123.456".parse().unwrap())),
         ]);
-        let ty = DataType::Decimal128(28, 10);
+        let ty = DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
         let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
         let expect_array = Arc::new(
             Decimal128Array::from(vec![
                 None,
                 None,
-                Some(9999999999999999999999999999),
-                Some(-9999999999999999999999999999),
+                // With precision=38, max value is 10^38 - 1
+                Some(99999999999999999999999999999999999999),
+                Some(-99999999999999999999999999999999999999),
                 Some(1234000000000),
                 Some(1234560000000),
             ])
             .with_data_type(ty),
         ) as ArrayRef;
         assert_eq!(&arrow_array, &expect_array);
+    }
+
+    #[test]
+    fn decimal_edge_cases_risingwave_precision() {
+        // Test edge cases between RisingWave decimal precision (28 digits) and Arrow Decimal128(38,10)
+        let array = DecimalArray::from_iter([
+            // Large 27-digit integer (previously would overflow with precision=28, scale=10)
+            Some(Decimal::Normalized(
+                "999999999999999999999999999".parse().unwrap(),
+            )),
+            // RisingWave MAX_PRECISION: 28-digit integer
+            Some(Decimal::Normalized(
+                "9999999999999999999999999999".parse().unwrap(),
+            )),
+            // Large integer with fractional part
+            Some(Decimal::Normalized(
+                "999999999999999999.9999999999".parse().unwrap(),
+            )),
+            // Small value with maximum fractional digits
+            Some(Decimal::Normalized(
+                "0.9999999999999999999999999999".parse().unwrap(),
+            )),
+            // Negative large integer
+            Some(Decimal::Normalized(
+                "-999999999999999999999999999".parse().unwrap(),
+            )),
+            // Edge case: exactly 10^18 (18 digits) - boundary for old precision=28,scale=10
+            Some(Decimal::Normalized("1000000000000000000".parse().unwrap())),
+            // Very small decimal
+            Some(Decimal::Normalized("0.0000000001".parse().unwrap())),
+            // Zero with fractional representation
+            Some(Decimal::Normalized("0.0000000000".parse().unwrap())),
+        ]);
+
+        let ty = DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
+        let arrow_array = IcebergArrowConvert.decimal_to_arrow(&ty, &array).unwrap();
+
+        let expect_array = Arc::new(
+            Decimal128Array::from(vec![
+                // 999999999999999999999999999 * 10^10 (scale 0 → 10)
+                Some(9999999999999999999999999990000000000),
+                // 9999999999999999999999999999 * 10^10
+                Some(99999999999999999999999999990000000000),
+                // 999999999999999999.9999999999 already at scale 10
+                Some(9999999999999999999999999999),
+                // 0.9999999999999999999999999999: scale 28 → 10, truncates to 0.9999999999
+                Some(9999999999),
+                // -999999999999999999999999999 * 10^10
+                Some(-9999999999999999999999999990000000000),
+                // 1000000000000000000 * 10^10
+                Some(10000000000000000000000000000),
+                // 0.0000000001 already at scale 10
+                Some(1),
+                // 0.0000000000 (scale 10)
+                Some(0),
+            ])
+            .with_data_type(ty),
+        ) as ArrayRef;
+
+        assert_eq!(&arrow_array, &expect_array);
+    }
+
+    #[test]
+    fn decimal_special_values_roundtrip() {
+        // Test that special decimal values (inf, -inf, nan) can be written and read back correctly
+        use crate::array::Array;
+
+        let original_array = DecimalArray::from_iter([
+            Some(Decimal::PositiveInf),
+            Some(Decimal::NegativeInf),
+            Some(Decimal::NaN),
+            Some(Decimal::Normalized("123.45".parse().unwrap())),
+            None,
+        ]);
+
+        // Convert to Arrow
+        let ty = DataType::Decimal128(ICEBERG_DECIMAL_PRECISION, ICEBERG_DECIMAL_SCALE);
+        let arrow_array = IcebergArrowConvert
+            .decimal_to_arrow(&ty, &original_array)
+            .unwrap();
+
+        // Convert back to RisingWave
+        let arrow_decimal: &arrow_array::Decimal128Array = arrow_array
+            .as_any()
+            .downcast_ref()
+            .expect("should be Decimal128Array");
+
+        let roundtrip_array: DecimalArray = arrow_decimal.try_into().unwrap();
+
+        // Verify special values roundtrip correctly
+        assert_eq!(original_array.len(), roundtrip_array.len());
+
+        // PositiveInf -> max value -> PositiveInf
+        assert_eq!(roundtrip_array.value_at(0), Some(Decimal::PositiveInf));
+
+        // NegativeInf -> min value -> NegativeInf
+        assert_eq!(roundtrip_array.value_at(1), Some(Decimal::NegativeInf));
+
+        // NaN -> NULL -> None (NaN cannot roundtrip, becomes NULL in Arrow)
+        assert_eq!(roundtrip_array.value_at(2), None);
+
+        // Normal value roundtrips correctly (scale may be adjusted)
+        assert!(matches!(
+            roundtrip_array.value_at(3),
+            Some(Decimal::Normalized(_))
+        ));
+
+        // NULL -> NULL -> None
+        assert_eq!(roundtrip_array.value_at(4), None);
     }
 }

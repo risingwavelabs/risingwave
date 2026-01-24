@@ -1,45 +1,45 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
-query I
-select {1,2,3}::double[];
+query T
+select array[1,2,3]::double[];
 ----
 {1,2,3}
 
-query I
-select {1.4,2.5,3.6}::int[];
+query T
+select array[1.4,2.5,3.6]::int[];
 ----
 {1,3,4}
 
-query I
-select {'1','2','3'}::int[];
+query T
+select array['1','2','3']::int[];
 ----
 {1,2,3}
 
-statement error
-select {'1','2','a'}::int[];
+statement error invalid digit
+select array['1','2','a']::int[];
 
-query I
-select {{1,2.4},{3,4.7},null,{null}::int[]}::int[][];
+query T
+select array[array[1,2.4],array[3,4.7],null,array[null]::int[]]::int[][];
 ----
 {{1,2},{3,5},NULL,{NULL}}
 
 statement ok
 create table t (a double[]);
 
-statement error
-insert into t values ({null});
+statement error cannot cast
+insert into t values (array[null]);
 
 statement ok
-insert into t values ({null::double});
+insert into t values (array[null::double]);
 
 statement ok
-insert into t values ({null}::double[]);
+insert into t values (array[null]::double[]);
 
 statement ok
 insert into t values (null);
 
-query I
+query T
 select * from t order by 1;
 ----
 {NULL}
@@ -47,9 +47,9 @@ select * from t order by 1;
 NULL
 
 statement ok
-insert into t values ({3.4, 4.3});
+insert into t values (array[3.4, 4.3]);
 
-query I
+query T
 select a::int[] from t order by 1;
 ----
 {3,4}

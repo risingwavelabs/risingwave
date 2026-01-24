@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,23 +17,24 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use apache_avro::types::Value;
-use apache_avro::{from_avro_datum, Reader, Schema};
+use apache_avro::{Reader, Schema, from_avro_datum};
+use risingwave_common::catalog::Field;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector_codec::decoder::avro::{
-    avro_schema_to_column_descs, AvroAccess, AvroParseOptions, ResolvedAvroSchema,
+    AvroAccess, AvroParseOptions, ResolvedAvroSchema, avro_schema_to_fields,
 };
-use risingwave_pb::plan_common::ColumnDesc;
 
 use super::{ConfluentSchemaCache, GlueSchemaCache as _, GlueSchemaCacheImpl};
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
-use crate::parser::util::bytes_from_url;
+use crate::parser::utils::bytes_from_url;
 use crate::parser::{
     AccessBuilder, AvroProperties, EncodingProperties, MapHandling, SchemaLocation,
 };
 use crate::schema::schema_registry::{
-    extract_schema_id, get_subject_by_strategy, handle_sr_list, Client,
+    Client, extract_schema_id, get_subject_by_strategy, handle_sr_list,
 };
+use crate::source::SourceMeta;
 
 // Default avro access builder
 #[derive(Debug)]
@@ -45,11 +46,15 @@ pub struct AvroAccessBuilder {
 }
 
 impl AccessBuilder for AvroAccessBuilder {
-    async fn generate_accessor(&mut self, payload: Vec<u8>) -> ConnectorResult<AccessImpl<'_>> {
-        self.value = self.parse_avro_value(&payload).await?;
+    async fn generate_accessor(
+        &mut self,
+        payload: Vec<u8>,
+        source_meta: &SourceMeta,
+    ) -> ConnectorResult<AccessImpl<'_>> {
+        self.value = self.parse_avro_value(&payload, source_meta).await?;
         Ok(AccessImpl::Avro(AvroAccess::new(
             self.value.as_ref().unwrap(),
-            AvroParseOptions::create(&self.schema.resolved_schema),
+            AvroParseOptions::create(&self.schema.original_schema),
         )))
     }
 }
@@ -88,7 +93,11 @@ impl AvroAccessBuilder {
     ///
     /// - In Kafka ([Confluent schema registry wire format](https://docs.confluent.io/platform/7.6/schema-registry/fundamentals/serdes-develop/index.html#wire-format)):
     ///   starts with 5 bytes`0x00{schema_id:08x}` followed by Avro binary encoding.
-    async fn parse_avro_value(&self, payload: &[u8]) -> ConnectorResult<Option<Value>> {
+    async fn parse_avro_value(
+        &self,
+        payload: &[u8],
+        _source_meta: &SourceMeta,
+    ) -> ConnectorResult<Option<Value>> {
         // parse payload to avro value
         // if use confluent schema, get writer schema from confluent schema registry
         match &self.writer_schema_cache {
@@ -228,9 +237,8 @@ impl AvroParserConfig {
         }
     }
 
-    pub fn map_to_columns(&self) -> ConnectorResult<Vec<ColumnDesc>> {
-        avro_schema_to_column_descs(&self.schema.resolved_schema, self.map_handling)
-            .map_err(Into::into)
+    pub fn map_to_columns(&self) -> ConnectorResult<Vec<Field>> {
+        avro_schema_to_fields(&self.schema.original_schema, self.map_handling).map_err(Into::into)
     }
 }
 
@@ -251,7 +259,7 @@ mod test {
     #[tokio::test]
     #[ignore]
     async fn test_load_schema_from_s3() {
-        let schema_location = "s3://mingchao-schemas/complex-schema.avsc".to_string();
+        let schema_location = "s3://mingchao-schemas/complex-schema.avsc".to_owned();
         let url = Url::parse(&schema_location).unwrap();
         let aws_auth_config: AwsAuthProps =
             serde_json::from_str(r#"region":"ap-southeast-1"#).unwrap();

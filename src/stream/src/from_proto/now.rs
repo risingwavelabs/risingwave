@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumFromProtoExt;
 use risingwave_pb::stream_plan::now_node::PbMode as PbNowMode;
@@ -20,7 +21,7 @@ use risingwave_pb::stream_plan::{NowNode, PbNowModeGenerateSeries};
 use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Executor, NowExecutor, NowMode};
 use crate::task::ExecutorParams;
@@ -36,7 +37,6 @@ impl ExecutorBuilder for NowExecutorBuilder {
         store: impl StateStore,
     ) -> StreamResult<Executor> {
         let barrier_receiver = params
-            .shared_context
             .local_barrier_manager
             .subscribe_barrier(params.actor_context.id);
 
@@ -70,15 +70,25 @@ impl ExecutorBuilder for NowExecutorBuilder {
             NowMode::UpdateCurrent
         };
 
-        let state_table =
-            StateTable::from_table_catalog(node.get_state_table()?, store, None).await;
-
+        let state_table = StateTableBuilder::new(node.get_state_table()?, store, None)
+            .enable_preload_all_rows_by_config(&params.config)
+            .build()
+            .await;
+        let barrier_interval_ms = params
+            .env
+            .system_params_manager_ref()
+            .get_params()
+            .load()
+            .barrier_interval_ms();
+        let progress_ratio = params.config.developer.now_progress_ratio;
         let exec = NowExecutor::new(
             params.info.schema.data_types(),
             mode,
             params.eval_error_report,
             barrier_receiver,
             state_table,
+            progress_ratio,
+            barrier_interval_ms,
         );
         Ok((params.info, exec).into())
     }

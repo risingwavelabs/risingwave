@@ -16,34 +16,78 @@ use std::num::NonZeroU64;
 use std::sync::{LazyLock, RwLock};
 
 use jsonwebtoken::{Algorithm, DecodingKey, Validation};
-use serde::Deserialize;
+use risingwave_pb::common::ClusterResource;
+use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use thiserror_ext::AsReport;
 
-use crate::LicenseKeyRef;
+use crate::{Feature, LicenseKeyRef};
+
+/// A feature that's specified in the custom tier.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum MaybeFeature {
+    /// A known feature that exists in the [`Feature`] enum.
+    Feature(Feature),
+    /// An unknown feature. It could be features introduced in future release. We still allow it to
+    /// be here for compatibility purposes.
+    Unknown(String),
+}
 
 /// License tier.
 ///
-/// Each enterprise [`Feature`](super::Feature) is available for a specific tier and above.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+/// Each enterprise [`Feature`] is available for a specific tier and above.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Tier {
-    /// Free tier.
-    ///
-    /// This is more like a placeholder. If a feature is available for the free tier, there's no
-    /// need to add it to the [`Feature`](super::Feature) enum at all.
+    /// Free tier. No feature is available. This is more like a placeholder.
     Free,
 
-    /// Paid tier.
-    // TODO(license): Add more tiers if needed.
-    Paid,
+    /// All features available as of 2.5.
+    #[serde(rename = "paid")]
+    AllAsOf2_5,
+
+    /// All features available currently and in the future.
+    All,
+
+    /// Custom tier, with a list of available features.
+    #[serde(untagged)]
+    Custom {
+        name: String,
+        features: Vec<MaybeFeature>,
+    },
+}
+
+impl Tier {
+    /// Get all available features based on the license tier.
+    #[auto_enums::auto_enum(Iterator)]
+    pub fn available_features(&self) -> impl Iterator<Item = Feature> {
+        match self {
+            Tier::Free => std::iter::empty(),
+            Tier::AllAsOf2_5 => Feature::all_as_of_2_5().iter().copied(),
+            Tier::All => Feature::all().iter().copied(),
+            Tier::Custom { features, .. } => features.iter().filter_map(|feature| match feature {
+                MaybeFeature::Feature(feature) => Some(*feature),
+                MaybeFeature::Unknown(_) => None,
+            }),
+        }
+    }
+
+    pub fn name(&self) -> &str {
+        match self {
+            Tier::Free => "free",
+            Tier::AllAsOf2_5 => "paid",
+            Tier::All => "all",
+            Tier::Custom { name, .. } => name,
+        }
+    }
 }
 
 /// Issuer of the license.
 ///
 /// The issuer must be `prod.risingwave.com` in production, and can be `test.risingwave.com` in
 /// development. This will be validated when refreshing the license key.
-#[derive(Debug, Clone, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Issuer {
     #[serde(rename = "prod.risingwave.com")]
     Prod,
@@ -62,7 +106,7 @@ pub enum Issuer {
 /// Prefer calling [`crate::Feature::check_available`] to check the availability of a feature,
 /// other than directly checking the content of the license.
 // TODO(license): Shall we add a version field?
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub struct License {
     /// Subject of the license.
@@ -80,13 +124,63 @@ pub struct License {
     /// Tier of the license.
     pub tier: Tier,
 
-    /// Maximum number of compute-node CPU cores allowed to use. Typically used for the paid tier.
-    pub cpu_core_limit: Option<NonZeroU64>,
+    /// Maximum number of RWU allowed to use.
+    ///
+    /// 1 RWU corresponds to 4 GiB memory and 1 CPU core.
+    /// See <https://docs.risingwave.com/cloud/pricing#risingwave-unit-rwu> for more details.
+    #[serde(alias = "cpu_core_limit")]
+    pub rwu_limit: Option<NonZeroU64>,
 
     /// Expiration time in seconds since UNIX epoch.
     ///
     /// See <https://tools.ietf.org/html/rfc7519#section-4.1.4>.
     pub exp: u64,
+}
+
+impl License {
+    /// Return the CPU core limit based on the RWU limit in the license.
+    pub fn cpu_core_limit(&self) -> Option<u64> {
+        self.rwu_limit.map(|limit| limit.get())
+    }
+
+    /// Return the memory limit (in bytes) based on the RWU limit in the license.
+    pub fn memory_limit(&self) -> Option<u64> {
+        // 4GB per RWU
+        const MEMORY_PER_RWU: u64 = 4 * 1024 * 1024 * 1024;
+
+        self.rwu_limit.map(
+            |limit| (limit.get() + 1) * MEMORY_PER_RWU - 1, // allow some margin
+        )
+    }
+
+    /// Check whether the given cluster resource exceeds the limit in the license.
+    pub fn check_cluster_resource(&self, resource: ClusterResource) -> Result<(), LicenseError> {
+        let ClusterResource {
+            total_memory_bytes,
+            total_cpu_cores,
+        } = resource;
+
+        if let Some(limit) = self.cpu_core_limit()
+            && total_cpu_cores > limit
+        {
+            return Err(LicenseError::CpuLimitExceeded {
+                limit,
+                actual: total_cpu_cores,
+            });
+        }
+
+        #[cfg(not(madsim))] // skip checking memory limit in simulation tests
+        if let Some(limit) = self.memory_limit()
+            && total_memory_bytes > limit
+        {
+            return Err(LicenseError::MemoryLimitExceeded {
+                limit,
+                actual: total_memory_bytes,
+            });
+        }
+
+        Ok(())
+    }
 }
 
 impl Default for License {
@@ -98,7 +192,7 @@ impl Default for License {
             sub: "default".to_owned(),
             tier: Tier::Free,
             iss: Issuer::Prod,
-            cpu_core_limit: None,
+            rwu_limit: None,
             exp: u64::MAX,
         }
     }
@@ -106,11 +200,31 @@ impl Default for License {
 
 /// The error type for invalid license key when verifying as JWT.
 #[derive(Debug, Clone, Error)]
-#[error("invalid license key")]
-pub struct LicenseKeyError(#[source] jsonwebtoken::errors::Error);
+pub enum LicenseError {
+    #[error("invalid license key")]
+    InvalidKey(#[source] jsonwebtoken::errors::Error),
+
+    #[error(
+        "a valid license key is set, but it is currently not effective because the CPU core in the cluster \
+        ({actual}) exceeds the maximum allowed by the license key ({limit}); \
+        consider removing some nodes or acquiring a new license key with a higher limit"
+    )]
+    CpuLimitExceeded { limit: u64, actual: u64 },
+
+    #[error(
+        "a valid license key is set, but it is currently not effective because the memory in the cluster \
+        ({actual}) exceeds the maximum allowed by the license key ({limit}); \
+        consider removing some nodes or acquiring a new license key with a higher limit",
+        actual = humansize::format_size(*actual, humansize::BINARY),
+        limit = humansize::format_size(*limit, humansize::BINARY),
+    )]
+    MemoryLimitExceeded { limit: u64, actual: u64 },
+}
 
 struct Inner {
-    license: Result<License, LicenseKeyError>,
+    license: Result<License, LicenseError>,
+    cached_cluster_resource: ClusterResource,
+    ignore_resource_limit: bool,
 }
 
 /// The singleton license manager.
@@ -129,6 +243,11 @@ impl LicenseManager {
         Self {
             inner: RwLock::new(Inner {
                 license: Ok(License::default()),
+                cached_cluster_resource: ClusterResource {
+                    total_cpu_cores: 0,
+                    total_memory_bytes: 0,
+                },
+                ignore_resource_limit: false,
             }),
         }
     }
@@ -162,7 +281,7 @@ impl LicenseManager {
 
         inner.license = match jsonwebtoken::decode(license_key, &PUBLIC_KEY, &validation) {
             Ok(data) => Ok(data.claims),
-            Err(error) => Err(LicenseKeyError(error)),
+            Err(error) => Err(LicenseError::InvalidKey(error)),
         };
 
         match &inner.license {
@@ -171,20 +290,41 @@ impl LicenseManager {
         }
     }
 
+    /// Update the cached cluster resource.
+    pub fn update_cluster_resource(&self, resource: ClusterResource) {
+        let mut inner = self.inner.write().unwrap();
+        inner.cached_cluster_resource = resource;
+    }
+
+    /// Set whether to ignore cluster resource limits when validating the license.
+    pub fn set_ignore_resource_limit(&self, ignore: bool) {
+        let mut inner = self.inner.write().unwrap();
+        inner.ignore_resource_limit = ignore;
+    }
+
     /// Get the current license if it is valid.
     ///
     /// Since the license can expire, the returned license should not be cached by the caller.
     ///
     /// Prefer calling [`crate::Feature::check_available`] to check the availability of a feature,
     /// other than directly calling this method and checking the content of the license.
-    pub fn license(&self) -> Result<License, LicenseKeyError> {
-        let license = self.inner.read().unwrap().license.clone()?;
+    pub fn license(&self) -> Result<License, LicenseError> {
+        let inner = self.inner.read().unwrap();
+        let mut license = inner.license.clone()?;
 
         // Check the expiration time additionally.
         if license.exp < jsonwebtoken::get_current_timestamp() {
-            return Err(LicenseKeyError(
+            return Err(LicenseError::InvalidKey(
                 jsonwebtoken::errors::ErrorKind::ExpiredSignature.into(),
             ));
+        }
+
+        // Check the resource limit.
+        if !inner.ignore_resource_limit {
+            license.check_cluster_resource(inner.cached_cluster_resource)?;
+        } else {
+            // For ignored resource limits, pretend the license is unlimited for consistency.
+            license.rwu_limit = None;
         }
 
         Ok(license)
@@ -198,9 +338,9 @@ mod tests {
     use expect_test::expect;
 
     use super::*;
-    use crate::{LicenseKey, TEST_PAID_LICENSE_KEY_CONTENT};
+    use crate::{LicenseKey, PROD_ALL_4_CORE_LICENSE_KEY_CONTENT, TEST_ALL_LICENSE_KEY_CONTENT};
 
-    fn do_test(key: &str, expect: expect_test::Expect) {
+    fn do_test(key: &str, expect: expect_test::Expect) -> LicenseManager {
         let manager = LicenseManager::new();
         manager.refresh(LicenseKey(key));
 
@@ -208,19 +348,39 @@ mod tests {
             Ok(license) => expect.assert_debug_eq(&license),
             Err(error) => expect.assert_eq(&error.to_report_string()),
         }
+
+        manager
     }
 
     #[test]
-    fn test_paid_license_key() {
+    fn test_all_license_key() {
         do_test(
-            TEST_PAID_LICENSE_KEY_CONTENT,
+            TEST_ALL_LICENSE_KEY_CONTENT,
             expect![[r#"
                 License {
-                    sub: "rw-test",
+                    sub: "rw-test-all",
                     iss: Test,
-                    tier: Paid,
-                    cpu_core_limit: None,
-                    exp: 9999999999,
+                    tier: All,
+                    rwu_limit: None,
+                    exp: 10000627200,
+                }
+            "#]],
+        );
+    }
+
+    #[test]
+    fn test_prod_all_4_core_license_key() {
+        do_test(
+            PROD_ALL_4_CORE_LICENSE_KEY_CONTENT,
+            expect![[r#"
+                License {
+                    sub: "rw-default-all-4-core",
+                    iss: Prod,
+                    tier: All,
+                    rwu_limit: Some(
+                        4,
+                    ),
+                    exp: 10000627200,
                 }
             "#]],
         );
@@ -228,8 +388,7 @@ mod tests {
 
     #[test]
     fn test_free_license_key() {
-        const KEY: &str =
-         "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+        const KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
           eyJzdWIiOiJydy10ZXN0IiwidGllciI6ImZyZWUiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
           ALC3Kc9LI6u0S-jeMB1YTxg1k8Azxwvc750ihuSZgjA_e1OJC9moxMvpLrHdLZDzCXHjBYi0XJ_1lowmuO_0iPEuPqN5AFpDV1ywmzJvGmMCMtw3A2wuN7hhem9OsWbwe6lzdwrefZLipyo4GZtIkg5ZdwGuHzm33zsM-X5gl_Ns4P6axHKiorNSR6nTAyA6B32YVET_FAM2YJQrXqpwA61wn1XLfarZqpdIQyJ5cgyiC33BFBlUL3lcRXLMLeYe6TjYGeV4K63qARCjM9yeOlsRbbW5ViWeGtR2Yf18pN8ysPXdbaXm_P_IVhl3jCTDJt9ctPh6pUCbkt36FZqO9A";
 
@@ -240,7 +399,7 @@ mod tests {
                     sub: "rw-test",
                     iss: Test,
                     tier: Free,
-                    cpu_core_limit: None,
+                    rwu_limit: None,
                     exp: 9999999999,
                 }
             "#]],
@@ -257,10 +416,53 @@ mod tests {
                     sub: "default",
                     iss: Prod,
                     tier: Free,
-                    cpu_core_limit: None,
+                    rwu_limit: None,
                     exp: 18446744073709551615,
                 }
             "#]],
+        );
+    }
+
+    #[test]
+    fn test_custom_tier_license_key() {
+        const KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+          eyJzdWIiOiJydy11bml0LXRlc3QiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjoxMDAwMDYyNzIwMCwiaWF0IjoxNzUxODY5OTI3LCJ0aWVyIjp7Im5hbWUiOiJzZWNyZXQtb25seSIsImZlYXR1cmVzIjpbIlNlY3JldE1hbmFnZW1lbnQiXX19.\
+          iZKNyAHxz1l24Qh4F9wauuQEtDPLAeOmW2m_ttlew2ENmP_XcGWCx_O8r50NXRDaKv66z-ibteWVL5XOUqaVgJw9EnCyfVuFNoKtFQu18Vt0l52Yw2zNh3iHNQFKwHuCUki5FlOHw-K57a5f414-gzfwAwQkO1bAYoyAFhtoX6QQ2jdbxctFg0NxTQqpjnP-h0k2myZ_IhxA8fKrQIAqBj5Y8tGljuxjTLJpoK7X0ESXNh7bhA8njEf2Hm4QCymI1uo8OYRaR1Siw87r0aZykw9wW15Q8VK58VxIQLS7b7gQOmDToBjJt9yIF3MT6YMfqMX_l3Dtn9bOS_htVd1bjQ";
+
+        let manager = do_test(
+            KEY,
+            expect![[r#"
+                License {
+                    sub: "rw-unit-test",
+                    iss: Test,
+                    tier: Custom {
+                        name: "secret-only",
+                        features: [
+                            Feature(
+                                SecretManagement,
+                            ),
+                        ],
+                    },
+                    rwu_limit: None,
+                    exp: 10000627200,
+                }
+            "#]],
+        );
+
+        let tier = manager.license().unwrap().tier;
+        assert_eq!(
+            tier.available_features().collect::<Vec<_>>(),
+            vec![Feature::SecretManagement]
+        );
+        assert!(
+            Feature::SecretManagement
+                .check_available_with(&manager)
+                .is_ok()
+        );
+        assert!(
+            Feature::BigQuerySink
+                .check_available_with(&manager)
+                .is_err()
         );
     }
 
@@ -274,8 +476,7 @@ mod tests {
     #[test]
     fn test_expired_license_key() {
         // "exp": 0
-        const KEY: &str =
-         "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+        const KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
           eyJzdWIiOiJydy10ZXN0IiwidGllciI6InBhaWQiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjowfQ.\
           TyYmoT5Gw9-FN7DWDbeg3myW8g_3Xlc90i4M9bGuPf2WLv9zRMJy2r9J7sl1BO7t6F1uGgyrvNxsVRVZ2XF_WAs6uNlluYBnd4Cqvsj6Xny1XJCCo8II3RIea-ZlRjp6tc1saaoe-_eTtqDH8NIIWe73vVtBeBTBU4zAiN2vCtU_Si2XuoTLBKJMIjtn0HjLNhb6-DX2P3SCzp75tMyWzr49qcsBgratyKdu_v2kqBM1qw_dTaRg2ZeNNO6scSOBwu4YHHJTL4nUaZO2yEodI_OKUztIPLYuO2A33Fb5OE57S7LTgSzmxZLf7e23Vrck7Os14AfBQr7p9ncUeyIXhA";
 
@@ -285,8 +486,7 @@ mod tests {
     #[test]
     fn test_invalid_issuer() {
         // "iss": "bad.risingwave.com"
-        const KEY: &str =
-         "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+        const KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
           eyJzdWIiOiJydy10ZXN0IiwidGllciI6ImZyZWUiLCJpc3MiOiJiYWQucmlzaW5nd2F2ZS5jb20iLCJleHAiOjk5OTk5OTk5OTl9.\
           SUbDJTri902FbGgIoe5L3LG4edTXoR42BQCIu_KLyW41OK47bMnD2aK7JggyJmWyGtN7b_596hxM9HjU58oQtHePUo_zHi5li5IcRaMi8gqHae7CJGqOGAUo9vYOWCP5OjEuDfozJhpgcHBLzDRnSwYnWhLKtsrzb3UcpOXEqRVK7EDShBNx6kNqfYs2LlFI7ASsgFRLhoRuOTR5LeVDjj6NZfkZGsdMe1VyrODWoGT9kcAF--hBpUd1ZJ5mZ67A0_948VPFBYDbDPcTRnw1-5MvdibO-jKX49rJ0rlPXcAbqKPE_yYUaqUaORUzb3PaPgCT_quO9PWPuAFIgAb_fg";
 
@@ -295,8 +495,7 @@ mod tests {
 
     #[test]
     fn test_invalid_signature() {
-        const KEY: &str =
-        "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
+        const KEY: &str = "eyJhbGciOiJSUzUxMiIsInR5cCI6IkpXVCJ9.\
          eyJzdWIiOiJydy10ZXN0IiwidGllciI6ImZyZWUiLCJpc3MiOiJ0ZXN0LnJpc2luZ3dhdmUuY29tIiwiZXhwIjo5OTk5OTk5OTk5fQ.\
          InvalidSignatureoe5L3LG4edTXoR42BQCIu_KLyW41OK47bMnD2aK7JggyJmWyGtN7b_596hxM9HjU58oQtHePUo_zHi5li5IcRaMi8gqHae7CJGqOGAUo9vYOWCP5OjEuDfozJhpgcHBLzDRnSwYnWhLKtsrzb3UcpOXEqRVK7EDShBNx6kNqfYs2LlFI7ASsgFRLhoRuOTR5LeVDjj6NZfkZGsdMe1VyrODWoGT9kcAF--hBpUd1ZJ5mZ67A0_948VPFBYDbDPcTRnw1-5MvdibO-jKX49rJ0rlPXcAbqKPE_yYUaqUaORUzb3PaPgCT_quO9PWPuAFIgAb_fg";
 

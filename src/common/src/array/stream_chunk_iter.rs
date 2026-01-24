@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,10 +14,11 @@
 
 use std::ops::Range;
 
+use super::RowRef;
 use super::data_chunk_iter::DataChunkRefIter;
 use super::stream_record::Record;
-use super::RowRef;
 use crate::array::{Op, StreamChunk};
+use crate::row::RowExt;
 
 impl StreamChunk {
     /// Return an iterator on stream records of this stream chunk.
@@ -53,7 +54,7 @@ impl StreamChunk {
         (op, row, visible)
     }
 
-    pub fn rows_with_holes(&self) -> impl Iterator<Item = Option<(Op, RowRef<'_>)>> {
+    pub fn rows_with_holes(&self) -> impl ExactSizeIterator<Item = Option<(Op, RowRef<'_>)>> {
         self.data_chunk().rows_with_holes().map(|row| {
             row.map(|row| {
                 (
@@ -84,17 +85,26 @@ impl<'a> Iterator for StreamChunkRefIter<'a> {
             Op::Insert => Some(Record::Insert { new_row: row }),
             Op::Delete => Some(Record::Delete { old_row: row }),
             Op::UpdateDelete => {
-                let insert_row = self.inner.next().expect("expect a row after U-");
+                let next_row = self
+                    .inner
+                    .next()
+                    .unwrap_or_else(|| panic!("expect a row after U-\nU- row: {}", row.display()));
                 // SAFETY: index is checked since `insert_row` is `Some`.
-                let op = unsafe { *self.chunk.ops().get_unchecked(insert_row.index()) };
-                debug_assert_eq!(op, Op::UpdateInsert, "expect a U+ after U-");
+                let op = unsafe { *self.chunk.ops().get_unchecked(next_row.index()) };
+                debug_assert_eq!(
+                    op,
+                    Op::UpdateInsert,
+                    "expect a U+ after U-\nU- row: {}\nrow after U-: {}",
+                    row.display(),
+                    next_row.display()
+                );
 
                 Some(Record::Update {
                     old_row: row,
-                    new_row: insert_row,
+                    new_row: next_row,
                 })
             }
-            Op::UpdateInsert => panic!("expect a U- before U+"),
+            Op::UpdateInsert => panic!("expect a U- before U+\nU+ row: {}", row.display()),
         }
     }
 

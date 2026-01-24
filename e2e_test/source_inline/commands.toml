@@ -27,7 +27,7 @@ fi
 '''
 
 [tasks.clean-kafka]
-category = "RiseDev - Test - Source Test - Kafka"
+category = "RiseDev - External Systems"
 description = "Delete all kafka topics."
 dependencies = ["check-and-load-risedev-env-file"]
 script = '''
@@ -35,6 +35,11 @@ script = '''
 set -e
 
 if [ -n "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" ]; then
+    echo "Deleting all Kafka consumer groups..."
+    rpk group list | tail -n +2 | awk '{print $2}' | while read -r group; do
+        echo "Deleting Kafka consumer group: $group"
+        rpk group delete "$group"
+    done
     echo "Deleting all Kafka topics..."
     rpk topic delete -r "*"
     echo "Deleting all schema registry subjects"
@@ -50,7 +55,7 @@ fi
 
 # rpk tools
 [tasks.rpk]
-category = "RiseDev - Test - Source Test - Kafka"
+category = "RiseDev - External Systems"
 dependencies = ["check-kafka"]
 # check https://docs.redpanda.com/current/reference/rpk/rpk-x-options/ or rpk -X help/list for options
 script = """
@@ -66,7 +71,7 @@ rpk "$@"
 """
 
 [tasks.redpanda-console]
-category = "RiseDev - Test - Source Test - Kafka"
+category = "RiseDev - External Systems"
 description = "Start Redpanda console (Kafka GUI) at localhost:8080."
 dependencies = ["check-kafka"]
 script = '''

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,7 +55,8 @@ impl MaxwellParser {
         payload: Vec<u8>,
         mut writer: SourceStreamChunkRowWriter<'_>,
     ) -> ConnectorResult<()> {
-        let payload_accessor = self.payload_builder.generate_accessor(payload).await?;
+        let m = writer.source_meta();
+        let payload_accessor = self.payload_builder.generate_accessor(payload, m).await?;
         let row_op = MaxwellChangeEvent::new(payload_accessor);
 
         apply_row_operation_on_stream_chunk_writer(row_op, &mut writer).map_err(Into::into)

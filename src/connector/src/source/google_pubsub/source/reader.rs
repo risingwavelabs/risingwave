@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,17 +14,17 @@
 
 use async_trait::async_trait;
 use futures_async_stream::try_stream;
+use google_cloud_gax::grpc::Code;
 use google_cloud_pubsub::subscription::Subscription;
 use risingwave_common::{bail, ensure};
-use tonic::Code;
 
 use super::TaggedReceivedMessage;
 use crate::error::{ConnectorError, ConnectorResult as Result};
 use crate::parser::ParserConfig;
 use crate::source::google_pubsub::{PubsubProperties, PubsubSplit};
 use crate::source::{
-    into_chunk_stream, BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SplitId,
-    SplitMetaData, SplitReader,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitMetaData,
+    SplitReader, into_chunk_stream,
 };
 
 const PUBSUB_MAX_FETCH_MESSAGES: usize = 1024;
@@ -105,7 +105,7 @@ impl SplitReader for PubsubSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
         into_chunk_stream(self.into_data_stream(), parser_config, source_context)

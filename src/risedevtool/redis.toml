@@ -10,7 +10,11 @@ REDIS_DOWNLOAD_URL = "https://github.com/redis/redis/archive/${REDIS_VERSION}.ta
 private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_REDIS" ] }
+condition = { env_set = [
+    "ENABLE_REDIS",
+], files_not_exist = [
+    "${PREFIX_BIN}/redis",
+] }
 description = "Download and extract Redis"
 script = '''
 #!/usr/bin/env bash

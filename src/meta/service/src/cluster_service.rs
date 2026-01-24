@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
 use risingwave_meta::barrier::BarrierManagerRef;
 use risingwave_meta::manager::MetadataManager;
-use risingwave_meta_model_v2::WorkerId;
-use risingwave_pb::common::worker_node::State;
 use risingwave_pb::common::HostAddress;
+use risingwave_pb::common::worker_node::State;
 use risingwave_pb::meta::cluster_service_server::ClusterService;
 use risingwave_pb::meta::{
     ActivateWorkerNodeRequest, ActivateWorkerNodeResponse, AddWorkerNodeRequest,
     AddWorkerNodeResponse, DeleteWorkerNodeRequest, DeleteWorkerNodeResponse,
-    GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse, ListAllNodesRequest,
-    ListAllNodesResponse, UpdateWorkerNodeSchedulabilityRequest,
-    UpdateWorkerNodeSchedulabilityResponse,
+    GetClusterRecoveryStatusRequest, GetClusterRecoveryStatusResponse, GetMetaStoreInfoRequest,
+    GetMetaStoreInfoResponse, ListAllNodesRequest, ListAllNodesResponse,
+    UpdateWorkerNodeSchedulabilityRequest, UpdateWorkerNodeSchedulabilityResponse,
 };
 use tonic::{Request, Response, Status};
 
@@ -64,7 +64,7 @@ impl ClusterService for ClusterServiceImpl {
         let cluster_id = self.metadata_manager.cluster_id().to_string();
 
         Ok(Response::new(AddWorkerNodeResponse {
-            node_id: Some(worker_id as _),
+            node_id: Some(worker_id),
             cluster_id,
         }))
     }
@@ -81,10 +81,7 @@ impl ClusterService for ClusterServiceImpl {
 
         self.metadata_manager
             .cluster_controller
-            .update_schedulability(
-                worker_ids.into_iter().map(|id| id as WorkerId).collect(),
-                schedulability,
-            )
+            .update_schedulability(worker_ids.into_iter().map_into().collect(), schedulability)
             .await?;
 
         Ok(Response::new(UpdateWorkerNodeSchedulabilityResponse {
@@ -110,7 +107,7 @@ impl ClusterService for ClusterServiceImpl {
         }
         self.metadata_manager
             .cluster_controller
-            .activate_worker(req.node_id as _)
+            .activate_worker(req.node_id)
             .await?;
         Ok(Response::new(ActivateWorkerNodeResponse { status: None }))
     }
@@ -129,7 +126,7 @@ impl ClusterService for ClusterServiceImpl {
             .await?;
         tracing::info!(
             host = ?worker_node.host,
-            id = worker_node.id,
+            id = %worker_node.id,
             r#type = ?worker_node.r#type(),
             "deleted worker node",
         );
@@ -165,6 +162,18 @@ impl ClusterService for ClusterServiceImpl {
     ) -> Result<Response<GetClusterRecoveryStatusResponse>, Status> {
         Ok(Response::new(GetClusterRecoveryStatusResponse {
             status: self.barrier_manager.get_recovery_status() as _,
+        }))
+    }
+
+    async fn get_meta_store_info(
+        &self,
+        _request: Request<GetMetaStoreInfoRequest>,
+    ) -> Result<Response<GetMetaStoreInfoResponse>, Status> {
+        Ok(Response::new(GetMetaStoreInfoResponse {
+            meta_store_endpoint: self
+                .metadata_manager
+                .cluster_controller
+                .meta_store_endpoint(),
         }))
     }
 }

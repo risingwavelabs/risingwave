@@ -1,0 +1,7 @@
+[udf]
+enable_embedded_python_udf = true
+enable_embedded_javascript_udf = true
+enable_embedded_wasm_udf = true
+
+[storage]
+share_buffers_sync_parallelism = 4

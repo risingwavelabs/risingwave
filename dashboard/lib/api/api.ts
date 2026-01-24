@@ -12,7 +12,6 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
 
 const PROD_API_ENDPOINT = "/api"
@@ -26,7 +25,9 @@ export const PREDEFINED_API_ENDPOINTS = [
 ]
 
 export const DEFAULT_API_ENDPOINT: string =
-  process.env.NODE_ENV === "production" ? PROD_API_ENDPOINT : MOCK_API_ENDPOINT // EXTERNAL_META_NODE_API_ENDPOINT to debug with RisingWave servers
+  process.env.NODE_ENV === "production"
+    ? PROD_API_ENDPOINT
+    : EXTERNAL_META_NODE_API_ENDPOINT // EXTERNAL_META_NODE_API_ENDPOINT to debug with RisingWave servers
 
 export const API_ENDPOINT_KEY = "risingwave.dashboard.api.endpoint"
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,13 +19,13 @@ use std::path::Path;
 use std::process::Stdio;
 use std::sync::Arc;
 
-use anyhow::{anyhow, bail, Context};
+use anyhow::{Context, anyhow, bail};
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 use tracing::{debug, error, info};
 
 use crate::schedule::TestResult::{Different, Same};
-use crate::{init_env, DatabaseMode, FileManager, Opts, Psql};
+use crate::{DatabaseMode, FileManager, Opts, Psql, init_env};
 
 /// Result of each test case.
 #[derive(PartialEq)]
@@ -172,7 +172,7 @@ impl Schedule {
                 .await
                 .with_context(|| format!("Running test case {} panicked!", test_name))??;
 
-            result.insert(test_name.to_string(), ret);
+            result.insert(test_name.to_owned(), ret);
         }
 
         Ok(result)
@@ -180,7 +180,7 @@ impl Schedule {
 
     fn create_test_case(&self, test_name: &str) -> TestCase {
         TestCase {
-            test_name: test_name.to_string(),
+            test_name: test_name.to_owned(),
             opts: self.opts.clone(),
             psql: self.psql.clone(),
             file_manager: self.file_manager.clone(),
@@ -444,7 +444,7 @@ fn format_diff(expected_output: &String, actual_output: &String) -> String {
     use similar::{ChangeTag, TextDiff};
     let diff = TextDiff::from_lines(expected_output, actual_output);
 
-    let mut diff_str = "".to_string();
+    let mut diff_str = "".to_owned();
     for change in diff.iter_all_changes() {
         let sign = match change.tag() {
             ChangeTag::Delete => "-",

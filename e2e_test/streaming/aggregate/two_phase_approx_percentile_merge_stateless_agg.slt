@@ -39,9 +39,8 @@ statement ok
 recover;
 
 onlyif can-use-recover
-sleep 10s
 
-query I
+query I retry 11 backoff 1s
 select * from m1;
 ----
 -982.5779489474152 0 0 2983.5779489474152
@@ -57,9 +56,9 @@ statement ok
 flush;
 
 query I
-select * from m1;
+select p01, round(s::numeric, 4), p50, p99 from m1;
 ----
--963.1209598593477 0.5501000000000007 0.00009999833511933609 3965.1209598593477
+-963.1209598593477 0.5501 0.00009999833511933609 3965.1209598593477
 
 query I
 select
@@ -101,12 +100,16 @@ insert into t select 0.0001, 1 from generate_series(1, 501);
 statement ok
 flush;
 
-query I
+# NOTE: `s` is `sum(double)` and can vary slightly across two-phase/parallel aggregation due to
+# floating-point non-associativity. When cast to `numeric`, the inferred scale may differ, and
+# `round(numeric, 6)` does not pad trailing zeros. Adding a `numeric` literal with scale=6 forces a
+# stable scale/printout so the SLT doesn't flake on `0.050100` vs `0.0501`.
+query ????
 select
- round(p01::numeric, 6),
- round(s::numeric, 6),
- round(p50::numeric, 6),
- round(p99::numeric, 6) as p99_plus_sum
+ round(p01::numeric, 6) + 0.000000::numeric,
+ round(s::numeric, 6) + 0.000000::numeric,
+ round(p50::numeric, 6) + 0.000000::numeric,
+ round(p99::numeric, 6) + 0.000000::numeric as p99_plus_sum
  from m1;
 ----
 0.000100 0.050100 0.000100 501.000100

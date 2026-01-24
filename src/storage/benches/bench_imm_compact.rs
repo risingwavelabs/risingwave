@@ -14,7 +14,7 @@
 
 use bytes::Bytes;
 use criterion::async_executor::FuturesExecutor;
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion};
+use criterion::{BenchmarkId, Criterion, criterion_group, criterion_main};
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_storage::hummock::compactor::merge_imms_in_memory;
@@ -52,7 +52,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         &batches,
         |b, batches| {
             b.to_async(FuturesExecutor).iter(|| async {
-                let imm = merge_imms_in_memory(TableId::default(), batches.clone(), None).await;
+                let imm = merge_imms_in_memory(TableId::default(), batches.clone()).await;
                 assert_eq!(imm.key_count(), 10000 * 100);
                 assert_eq!(imm.value_count(), 10000 * 100);
             })
@@ -72,7 +72,7 @@ fn criterion_benchmark(c: &mut Criterion) {
         &later_batches,
         |b, batches| {
             b.to_async(FuturesExecutor).iter(|| async {
-                let imm = merge_imms_in_memory(TableId::default(), batches.clone(), None).await;
+                let imm = merge_imms_in_memory(TableId::default(), batches.clone()).await;
                 assert_eq!(imm.key_count(), 2000 * 100);
                 assert_eq!(imm.value_count(), 2000 * 100 * 5);
             })

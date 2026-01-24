@@ -1,6 +1,13 @@
+# Test user DDL statements.
+statement error unexpected user option
+CREATE USER user1 WITH "LOGIn";
+
+statement error unexpected user option
+CREATE USER user1 WITH "LOGIN";
+
 # Create a user.
 statement ok
-CREATE USER user WITH SUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b';
+CREATE USER user WITH "login" SUPERUSER NOCREATEDB PASSWORD 'md5827ccb0eea8a706c4c34a16891f84e7b';
 
 # Create another user with duplicate name.
 statement error
@@ -25,6 +32,18 @@ DROP USER ddl_user;
 # Drop it again with if exists.
 statement ok
 DROP USER IF EXISTS ddl_user;
+
+statement error Permission denied
+ALTER USER rwadmin RENAME TO rwa;
+
+statement error Permission denied
+ALTER USER rwadmin WITH NOLOGIN NOSUPERUSER;
+
+statement error Permission denied
+ALTER USER rwadmin WITH PASSWORD '';
+
+statement error Permission denied
+DROP USER rwadmin;
 
 # Test quoting
 statement ok

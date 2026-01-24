@@ -30,6 +30,7 @@ DECLARE
     test_cursor CURSOR FOR
         SELECT * FROM test where a > 2 ORDER BY a;
 
+# Cursor with name `test_cursor` is already declared.
 statement error
 DECLARE
     test_cursor CURSOR FOR
@@ -87,6 +88,18 @@ FETCH NEXT from test_cursor;
 
 statement ok
 COMMIT;
+
+# Cursor is not schema-bound.
+statement error sql parser error: expected CURSOR, found: \.
+DECLARE
+    test_schema.test_cursor CURSOR FOR
+        SELECT * FROM test where a > 2 ORDER BY a;
+
+# Cannot use reserved keyword as cursor name.
+statement error sql parser error: syntax error at or near all
+DECLARE
+    all CURSOR FOR
+        SELECT * FROM test where a > 2 ORDER BY a;
 
 statement ok
 drop table test;

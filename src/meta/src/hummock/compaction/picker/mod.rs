@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,6 +17,7 @@ mod emergency_compaction_picker;
 mod intra_compaction_picker;
 mod manual_compaction_picker;
 mod min_overlap_compaction_picker;
+mod non_overlap_sub_level_picker;
 mod space_reclaim_compaction_picker;
 mod tier_compaction_picker;
 mod tombstone_reclaim_compaction_picker;
@@ -32,6 +33,7 @@ pub use emergency_compaction_picker::EmergencyCompactionPicker;
 pub use intra_compaction_picker::IntraCompactionPicker;
 pub use manual_compaction_picker::ManualCompactionPicker;
 pub use min_overlap_compaction_picker::MinOverlappingPicker;
+pub use non_overlap_sub_level_picker::NonOverlapSubLevelPicker;
 use risingwave_hummock_sdk::level::{InputLevel, Levels};
 pub use space_reclaim_compaction_picker::{SpaceReclaimCompactionPicker, SpaceReclaimPickerState};
 pub use tier_compaction_picker::TierCompactionPicker;

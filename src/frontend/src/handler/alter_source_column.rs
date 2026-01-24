@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::max_column_id;
-use risingwave_connector::source::{extract_source_struct, SourceEncode, SourceStruct};
-use risingwave_sqlparser::ast::{
-    AlterSourceOperation, ColumnDef, CreateSourceStatement, ObjectName, Statement,
-};
-use risingwave_sqlparser::parser::Parser;
+use risingwave_connector::source::{SourceEncode, SourceStruct, extract_source_struct};
+use risingwave_sqlparser::ast::{AlterSourceOperation, ObjectName};
 
+use super::create_source::generate_stream_graph_for_source;
 use super::create_table::bind_sql_columns;
 use super::{HandlerArgs, RwPgResponse};
+use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result, RwError};
-use crate::Binder;
 
 // Note for future drop column:
 // 1. Dependencies of generated columns
@@ -38,52 +34,46 @@ pub async fn handle_alter_source_column(
     operation: AlterSourceOperation,
 ) -> Result<RwPgResponse> {
     // Get original definition
-    let session = handler_args.session;
-    let db_name = session.database();
+    let session = handler_args.session.clone();
+    let db_name = &session.database();
     let (schema_name, real_source_name) =
-        Binder::resolve_schema_qualified_name(db_name, source_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &source_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let (db_id, schema_id, mut catalog) = {
+    let mut catalog = {
         let reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
-        let db = reader.get_database_by_name(db_name)?;
-        let schema = db.get_schema_by_name(schema_name).unwrap();
-
         session.check_privilege_for_drop_alter(schema_name, &**source)?;
 
-        (db.id(), schema.id(), (**source).clone())
+        (**source).clone()
     };
 
     if catalog.associated_table_id.is_some() {
         return Err(ErrorCode::NotSupported(
-            "alter table with connector with ALTER SOURCE statement".to_string(),
-            "try to use ALTER TABLE instead".to_string(),
+            "alter table with connector with ALTER SOURCE statement".to_owned(),
+            "try to use ALTER TABLE instead".to_owned(),
         )
         .into());
     };
-    if catalog.info.is_shared() {
-        bail_not_implemented!(issue = 16003, "alter shared source");
-    }
 
     // Currently only allow source without schema registry
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;
     match encode {
         SourceEncode::Avro | SourceEncode::Protobuf => {
             return Err(ErrorCode::NotSupported(
-                "alter source with schema registry".to_string(),
-                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+                "alter source with schema registry".to_owned(),
+                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
             )
             .into());
         }
         SourceEncode::Json if catalog.info.use_schema_registry => {
             return Err(ErrorCode::NotSupported(
-                "alter source with schema registry".to_string(),
-                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_string(),
+                "alter source with schema registry".to_owned(),
+                "try `ALTER SOURCE .. FORMAT .. ENCODE .. (...)` instead".to_owned(),
             )
             .into());
         }
@@ -108,53 +98,38 @@ pub async fn handle_alter_source_column(
                     "column \"{new_column_name}\" of source \"{source_name}\" already exists"
                 )))?
             }
-            catalog.definition =
-                alter_definition_add_column(&catalog.definition, column_def.clone())?;
-            let mut bound_column = bind_sql_columns(&[column_def])?.remove(0);
+
+            // add column name is from user, so we still have check for reserved column name
+            let mut bound_column = bind_sql_columns(&[column_def], false)?.remove(0);
             bound_column.column_desc.column_id = max_column_id(columns).next();
             columns.push(bound_column);
+            // No need to update the definition here. It will be done by purification later.
         }
         _ => unreachable!(),
     }
 
     // update version
     catalog.version += 1;
+    catalog.fill_purified_create_sql();
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .alter_source(catalog.to_prost(schema_id, db_id))
-        .await?;
+    if catalog.info.is_shared() {
+        let graph = generate_stream_graph_for_source(handler_args, catalog.clone())?;
+        catalog_writer
+            .replace_source(catalog.to_prost(), graph)
+            .await?
+    } else {
+        catalog_writer.alter_source(catalog.to_prost()).await?
+    };
 
     Ok(PgResponse::empty_result(StatementType::ALTER_SOURCE))
 }
 
-/// `alter_definition_add_column` adds a new column to the definition of the relation.
-#[inline(always)]
-pub fn alter_definition_add_column(definition: &str, column: ColumnDef) -> Result<String> {
-    let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
-    let mut stmt = ast
-        .into_iter()
-        .exactly_one()
-        .expect("should contains only one statement");
-
-    match &mut stmt {
-        Statement::CreateSource {
-            stmt: CreateSourceStatement { columns, .. },
-        } => {
-            columns.push(column);
-        }
-        _ => unreachable!(),
-    }
-
-    Ok(stmt.to_string())
-}
-
 #[cfg(test)]
 pub mod tests {
-    use std::collections::HashMap;
+    use std::collections::BTreeMap;
 
     use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
-    use risingwave_common::types::DataType;
 
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::LocalFrontend;
@@ -165,53 +140,129 @@ pub mod tests {
         let session = frontend.session_ref();
         let schema_path = SchemaPath::Name(DEFAULT_SCHEMA_NAME);
 
+        let sql = r#"create source s_shared (v1 int) with (
+            connector = 'kafka',
+            topic = 'abc',
+            properties.bootstrap.server = 'localhost:29092',
+        ) FORMAT PLAIN ENCODE JSON;"#;
+
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
+
+        frontend
+            .run_sql_with_session(session.clone(), "SET streaming_use_shared_source TO false;")
+            .await
+            .unwrap();
         let sql = r#"create source s (v1 int) with (
             connector = 'kafka',
             topic = 'abc',
             properties.bootstrap.server = 'localhost:29092',
           ) FORMAT PLAIN ENCODE JSON;"#;
 
-        frontend.run_sql(sql).await.unwrap();
+        frontend
+            .run_sql_with_session(session.clone(), sql)
+            .await
+            .unwrap();
 
-        let get_source = || {
+        let get_source = |name: &str| {
             let catalog_reader = session.env().catalog_reader().read_guard();
             catalog_reader
-                .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, "s")
+                .get_source_by_name(DEFAULT_DATABASE_NAME, schema_path, name)
                 .unwrap()
                 .0
                 .clone()
         };
 
-        let source = get_source();
-        let columns: HashMap<_, _> = source
-            .columns
-            .iter()
-            .map(|col| (col.name(), (col.data_type().clone(), col.column_id())))
-            .collect();
+        let source = get_source("s");
 
-        let sql = "alter source s add column v2 varchar;";
+        let sql = "alter source s_shared add column v2 varchar;";
         frontend.run_sql(sql).await.unwrap();
 
-        let altered_source = get_source();
-
-        let altered_columns: HashMap<_, _> = altered_source
+        let altered_source = get_source("s_shared");
+        let altered_columns: BTreeMap<_, _> = altered_source
             .columns
             .iter()
             .map(|col| (col.name(), (col.data_type().clone(), col.column_id())))
             .collect();
 
-        // Check the new column.
-        assert_eq!(columns.len() + 1, altered_columns.len());
-        assert_eq!(altered_columns["v2"].0, DataType::Varchar);
-
+        // Check the new column is added.
         // Check the old columns and IDs are not changed.
-        assert_eq!(columns["v1"], altered_columns["v1"]);
+        expect_test::expect![[r#"
+            {
+                "_row_id": (
+                    Serial,
+                    #0,
+                ),
+                "_rw_kafka_offset": (
+                    Varchar,
+                    #4,
+                ),
+                "_rw_kafka_partition": (
+                    Varchar,
+                    #3,
+                ),
+                "_rw_kafka_timestamp": (
+                    Timestamptz,
+                    #2,
+                ),
+                "v1": (
+                    Int32,
+                    #1,
+                ),
+                "v2": (
+                    Varchar,
+                    #5,
+                ),
+            }
+        "#]]
+        .assert_debug_eq(&altered_columns);
 
         // Check version
         assert_eq!(source.version + 1, altered_source.version);
 
         // Check definition
-        let altered_sql = r#"CREATE SOURCE s (v1 INT, v2 CHARACTER VARYING) WITH (connector = 'kafka', topic = 'abc', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE JSON"#;
-        assert_eq!(altered_sql, altered_source.definition);
+        expect_test::expect!["CREATE SOURCE s_shared (v1 INT, v2 CHARACTER VARYING) WITH (connector = 'kafka', topic = 'abc', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE JSON"].assert_eq(&altered_source.definition);
+
+        let sql = "alter source s add column v2 varchar;";
+        frontend.run_sql(sql).await.unwrap();
+
+        let altered_source = get_source("s");
+        let altered_columns: BTreeMap<_, _> = altered_source
+            .columns
+            .iter()
+            .map(|col| (col.name(), (col.data_type().clone(), col.column_id())))
+            .collect();
+
+        // Check the new column is added.
+        // Check the old columns and IDs are not changed.
+        expect_test::expect![[r#"
+            {
+                "_row_id": (
+                    Serial,
+                    #0,
+                ),
+                "_rw_kafka_timestamp": (
+                    Timestamptz,
+                    #2,
+                ),
+                "v1": (
+                    Int32,
+                    #1,
+                ),
+                "v2": (
+                    Varchar,
+                    #3,
+                ),
+            }
+        "#]]
+        .assert_debug_eq(&altered_columns);
+
+        // Check version
+        assert_eq!(source.version + 1, altered_source.version);
+
+        // Check definition
+        expect_test::expect!["CREATE SOURCE s (v1 INT, v2 CHARACTER VARYING) WITH (connector = 'kafka', topic = 'abc', properties.bootstrap.server = 'localhost:29092') FORMAT PLAIN ENCODE JSON"].assert_eq(&altered_source.definition);
     }
 }

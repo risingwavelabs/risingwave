@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalIntersect, PlanTreeNode};
-use crate::optimizer::PlanRef;
 
 pub struct IntersectMergeRule {}
-impl Rule for IntersectMergeRule {
+impl Rule<Logical> for IntersectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let top_intersect: &LogicalIntersect = plan.as_logical_intersect()?;
         let top_all = top_intersect.all();

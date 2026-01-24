@@ -31,51 +31,9 @@ create sink sink_non_exist_broker from t_kafka with (
     type = 'append-only',
 );
 
-# Test create sink with connection
-# Create a mock connection
-statement ok
-create connection mock with (
-    type = 'privatelink',
-    provider = 'mock',
-);
-
-# Refer to a non-existant connection
-statement error
-create sink si_kafka_append_only_conn from t_kafka with (
-    connector = 'kafka',
-    properties.bootstrap.server = 'message_queue:29092',
-    topic = 'test-rw-sink-append-only',
-    type = 'append-only',
-    force_append_only = 'true',
-    connection.name = 'nonexist',
-);
-
-# Create sink with connection
-statement ok
-create sink si_kafka_append_only_conn from t_kafka with (
-    connector = 'kafka',
-    properties.bootstrap.server = 'message_queue:29092',
-    topic = 'test-rw-sink-append-only',
-    type = 'append-only',
-    force_append_only = 'true',
-    connection.name = 'mock',
-);
-
-# Try to drop connection mock, which is in use
-statement error
-drop connection mock;
-
-# Drop sink
-statement ok
-drop sink si_kafka_append_only_conn;
-
-# Drop connection
-statement ok
-drop connection mock;
-
 # Connection test clean-up finished
 
-statement error sink cannot be append-only
+statement error cannot be append-only
 create sink si_kafka_append_only from t_kafka with (
     connector = 'kafka',
     properties.bootstrap.server = 'message_queue:29092',
@@ -188,7 +146,7 @@ create sink invalid_pk_column from t_kafka with (
 
 ### Test sink with key encode ###
 
-statement error sink key encode unsupported: JSON, only TEXT supported
+statement error sink key encode unsupported: JSON, only TEXT and BYTES supported
 create sink sink_text_error from t_kafka with (
   connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -198,8 +156,7 @@ format plain encode json (
   force_append_only='true'
 ) key encode json ;
 
-statement error
-# The key encode is TEXT, but the primary key has 2 columns. The key encode TEXT requires the primary key to be a single column.s
+statement error KEY ENCODE TEXT expects only one primary key, but got 2
 create sink sink_text_error from t_kafka with (
   connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
@@ -230,6 +187,59 @@ format plain encode json (
   force_append_only='true'
 ) key encode text ;
 
+query TT
+SHOW CREATE SINK sink_text_id;
+----
+public.sink_text_id CREATE SINK sink_text_id FROM t_kafka WITH (connector = 'kafka', properties.bootstrap.server = 'message_queue:29092', topic = 'test-rw-sink-text-key-id', primary_key = 'id') FORMAT PLAIN ENCODE JSON (force_append_only = 'true') KEY ENCODE TEXT
+
+statement error sink key encode unsupported: JSON, only TEXT and BYTES supported
+create sink sink_bytes_error as (
+  select int8send(id) as id_bytes, * from t_kafka
+) with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-bytes-key-id',
+  primary_key = 'id_bytes')
+format plain encode json (
+  force_append_only='true'
+) key encode json;
+
+statement error KEY ENCODE BYTES expects only one primary key, but got 2
+create sink sink_bytes_error as (
+  select int8send(id) as id_bytes, '\x1234'::bytea as other_bytea, * from t_kafka
+) with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-bytes-key-id',
+  primary_key = 'id_bytes, other_bytea')
+format plain encode json (
+  force_append_only='true'
+) key encode bytes;
+
+statement error key encode bytes only works with kafka connector, but found kinesis
+create sink sink_bytes_json as (
+  select int8send(id) as id_bytes, * from t_kafka
+) with (
+  connector = 'kinesis',
+  topic = 'topic',
+  properties.bootstrap.server = 'message_queue:29092'
+)
+format plain encode json (
+  force_append_only='true'
+) key encode bytes;
+
+statement ok
+create sink sink_bytes_json as (
+  select int8send(id) as id_bytes, * from t_kafka
+) with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-bytes-key-id',
+  primary_key = 'id_bytes')
+format plain encode json (
+  force_append_only='true'
+) key encode bytes;
+
 statement ok
 create table t_sink_text_id (id int)
 include key as rw_key
@@ -237,6 +247,15 @@ with (
   connector = 'kafka',
   properties.bootstrap.server = 'message_queue:29092',
   topic = 'test-rw-sink-text-key-id',
+) format plain encode json;
+
+statement ok
+create table t_sink_bytea_id (id int)
+include key as rw_key
+with (
+  connector = 'kafka',
+  properties.bootstrap.server = 'message_queue:29092',
+  topic = 'test-rw-sink-bytes-key-id',
 ) format plain encode json;
 
 #======
@@ -273,9 +292,8 @@ create sink si_kafka_without_snapshot from t_kafka with (
     snapshot = 'false',
 );
 
-sleep 2s
 
-query T
+query T retry 4 backoff 1s
 select rw_key from t_sink_text_id order by rw_key
 ----
 \x31
@@ -286,6 +304,18 @@ select rw_key from t_sink_text_id order by rw_key
 \x36
 \x37
 
+query T
+select rw_key from t_sink_bytea_id order by rw_key
+----
+\x0000000000000001
+\x0000000000000002
+\x0000000000000003
+\x0000000000000004
+\x0000000000000005
+\x0000000000000006
+\x0000000000000007
+
+
 statement ok
 insert into t_kafka values
     (8, 'lv7Eq3g8hx', 194, 19036, 28641, 13652.073, 993.408963466774, '2023-04-13 13:52:09.356742', '\xDEADBABE', '04:00:00.1234', '1970-01-01', '00:00:01.123456', '0001-01-01 00:00:00.123456'::timestamptz, '{}'),
@@ -294,3 +324,9 @@ insert into t_kafka values
 
 statement ok
 drop table t_sink_text_id;
+
+statement ok
+drop table t_sink_bytea_id;
+
+statement ok
+drop sink sink_bytes_json;

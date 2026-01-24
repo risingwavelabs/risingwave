@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,9 +18,9 @@ use std::process::Command;
 
 use anyhow::Result;
 
-use super::{risingwave_cmd, ExecuteContext, Task};
+use super::{ExecuteContext, Task};
 use crate::util::{get_program_args, get_program_env_cmd, get_program_name};
-use crate::{add_meta_node, add_tempo_endpoint, ComputeNodeConfig};
+use crate::{ComputeNodeConfig, add_meta_node, add_tempo_endpoint};
 
 pub struct ComputeNodeService {
     config: ComputeNodeConfig,
@@ -49,7 +49,9 @@ impl ComputeNodeService {
             .arg("--total-memory-bytes")
             .arg(config.total_memory_bytes.to_string())
             .arg("--role")
-            .arg(&config.role);
+            .arg(&config.role)
+            .arg("--resource-group")
+            .arg(&config.resource_group);
 
         let provide_meta_node = config.provide_meta_node.as_ref().unwrap();
         add_meta_node(provide_meta_node, cmd)?;
@@ -66,18 +68,12 @@ impl Task for ComputeNodeService {
         ctx.service(self);
         ctx.pb.set_message("starting...");
 
-        let prefix_config = env::var("PREFIX_CONFIG")?;
-
-        let mut cmd = risingwave_cmd("compute-node")?;
+        let mut cmd = ctx.risingwave_cmd("compute-node")?;
 
         cmd.env(
             "TOKIO_CONSOLE_BIND",
             format!("127.0.0.1:{}", self.config.port + 1000),
         );
-
-        if crate::util::is_enable_backtrace() {
-            cmd.env("RUST_BACKTRACE", "1");
-        }
 
         if crate::util::is_env_set("RISEDEV_ENABLE_PROFILE") {
             cmd.env(
@@ -93,16 +89,6 @@ impl Task for ComputeNodeService {
             cmd.env("MALLOC_CONF", conf); // unprefixed for linux
         }
 
-        if crate::util::is_env_set("ENABLE_BUILD_RW_CONNECTOR") {
-            let prefix_bin = env::var("PREFIX_BIN")?;
-            cmd.env(
-                "CONNECTOR_LIBS_PATH",
-                Path::new(&prefix_bin).join("connector-node/libs/"),
-            );
-        }
-
-        cmd.arg("--config-path")
-            .arg(Path::new(&prefix_config).join("risingwave.toml"));
         Self::apply_command_args(&mut cmd, &self.config)?;
         if self.config.enable_tiered_cache {
             let prefix_data = env::var("PREFIX_DATA")?;

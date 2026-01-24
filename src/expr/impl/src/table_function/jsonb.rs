@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@
 
 use anyhow::anyhow;
 use risingwave_common::types::JsonbRef;
-use risingwave_expr::{function, Result};
+use risingwave_expr::{Result, function};
 
 /// Expands the top-level JSON array into a set of JSON values.
 #[function("jsonb_array_elements(jsonb) -> setof jsonb")]

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,18 +16,21 @@ use std::fmt::Debug;
 
 use jsonbb::Builder;
 use risingwave_common::types::{
-    DataType, Date, Decimal, Int256Ref, Interval, JsonbRef, JsonbVal, ListRef, MapRef,
-    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, F32, F64,
+    DataType, Date, Decimal, F32, F64, Int256Ref, Interval, JsonbRef, ListRef, MapRef,
+    ScalarRefImpl, Serial, StructRef, Time, Timestamp, Timestamptz, ToText, VectorRef,
 };
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::Context;
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 #[function("to_jsonb(*) -> jsonb")]
-fn to_jsonb(input: Option<impl ToJsonb>, ctx: &Context) -> Result<JsonbVal> {
-    let mut builder = Builder::default();
-    input.add_to(&ctx.arg_types[0], &mut builder)?;
-    Ok(builder.finish().into())
+fn to_jsonb(
+    input: Option<impl ToJsonb>,
+    ctx: &Context,
+    writer: &mut jsonbb::Builder,
+) -> Result<()> {
+    input.add_to(&ctx.arg_types[0], writer)?;
+    Ok(())
 }
 
 /// Values that can be converted to JSONB.
@@ -73,6 +76,7 @@ impl ToJsonb for ScalarRefImpl<'_> {
             Struct(v) => v.add_to(ty, builder),
             List(v) => v.add_to(ty, builder),
             Map(v) => v.add_to(ty, builder),
+            Vector(v) => v.add_to(ty, builder),
         }
     }
 }
@@ -209,6 +213,13 @@ impl ToJsonb for Serial {
     }
 }
 
+impl ToJsonb for VectorRef<'_> {
+    fn add_to(self, _: &DataType, builder: &mut Builder) -> Result<()> {
+        builder.display(ToTextDisplay(self));
+        Ok(())
+    }
+}
+
 impl ToJsonb for JsonbRef<'_> {
     fn add_to(self, _: &DataType, builder: &mut Builder) -> Result<()> {
         builder.add_value(self.into());
@@ -218,7 +229,7 @@ impl ToJsonb for JsonbRef<'_> {
 
 impl ToJsonb for ListRef<'_> {
     fn add_to(self, data_type: &DataType, builder: &mut Builder) -> Result<()> {
-        let elem_type = data_type.as_list();
+        let elem_type = data_type.as_list_elem();
         builder.begin_array();
         for value in self.iter() {
             value.add_to(elem_type, builder)?;
@@ -245,16 +256,11 @@ impl ToJsonb for MapRef<'_> {
 impl ToJsonb for StructRef<'_> {
     fn add_to(self, data_type: &DataType, builder: &mut Builder) -> Result<()> {
         builder.begin_object();
-        for (i, (value, (field_name, field_type))) in self
+        for (value, (field_name, field_type)) in self
             .iter_fields_ref()
             .zip_eq_debug(data_type.as_struct().iter())
-            .enumerate()
         {
-            if field_name.is_empty() {
-                builder.display(format_args!("f{}", i + 1));
-            } else {
-                builder.add_string(field_name);
-            };
+            builder.add_string(field_name);
             value.add_to(field_type, builder)?;
         }
         builder.end_object();

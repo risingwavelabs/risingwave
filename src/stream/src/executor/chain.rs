@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -105,8 +105,8 @@ impl Execute for ChainExecutor {
 mod test {
 
     use futures::StreamExt;
-    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::array::StreamChunk;
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::test_epoch;
@@ -114,12 +114,14 @@ mod test {
 
     use super::ChainExecutor;
     use crate::executor::test_utils::MockSource;
-    use crate::executor::{AddMutation, Barrier, Execute, Message, Mutation, PkIndices};
-    use crate::task::{CreateMviewProgressReporter, LocalBarrierManager};
+    use crate::executor::{AddMutation, Barrier, Execute, Message, Mutation, StreamKey};
+    use crate::task::CreateMviewProgressReporter;
+    use crate::task::barrier_test_utils::LocalBarrierTestEnv;
 
     #[tokio::test]
     async fn test_basic() {
-        let barrier_manager = LocalBarrierManager::for_test();
+        let test_env = LocalBarrierTestEnv::for_test().await;
+        let barrier_manager = test_env.local_barrier_manager.clone();
         let progress = CreateMviewProgressReporter::for_test(barrier_manager);
         let actor_id = progress.actor_id();
 
@@ -129,27 +131,25 @@ mod test {
             StreamChunk::from_pretty("I\n + 2"),
         ])
         .stop_on_finish(false)
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let second = MockSource::with_messages(vec![
             Message::Barrier(Barrier::new_test_barrier(test_epoch(1)).with_mutation(
                 Mutation::Add(AddMutation {
                     adds: maplit::hashmap! {
-                        0 => vec![Dispatcher {
+                        0.into() => vec![Dispatcher {
                             downstream_actor_id: vec![actor_id],
                             ..Default::default()
                         }],
                     },
                     added_actors: maplit::hashset! { actor_id },
-                    splits: Default::default(),
-                    pause: false,
-                    subscriptions_to_add: vec![],
+                    ..Default::default()
                 }),
             )),
             Message::Chunk(StreamChunk::from_pretty("I\n + 3")),
             Message::Chunk(StreamChunk::from_pretty("I\n + 4")),
         ])
-        .into_executor(schema.clone(), PkIndices::new());
+        .into_executor(schema.clone(), StreamKey::new());
 
         let chain = ChainExecutor::new(first, second, progress, false);
 

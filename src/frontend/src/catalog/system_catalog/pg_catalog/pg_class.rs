@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,27 +15,15 @@
 use risingwave_common::types::Fields;
 use risingwave_frontend_macro::system_catalog;
 
+use crate::catalog::OwnedByUserCatalog;
+use crate::catalog::system_catalog::SysCatalogReaderImpl;
+use crate::error::Result;
+
 /// The catalog `pg_class` catalogs tables and most everything else that has columns or is otherwise
-/// similar to a table. Ref: [`https://www.postgresql.org/docs/current/catalog-pg-class.html`]
-/// todo: should we add internal tables as well?
-#[system_catalog(view, "pg_catalog.pg_class",
-    "SELECT id AS oid, name AS relname, schema_id AS relnamespace, owner AS relowner, 'p' as relpersistence,
-    CASE
-        WHEN relation_type = 'table' THEN 'r'
-        WHEN relation_type = 'system table' THEN 'r'
-        WHEN relation_type = 'index' THEN 'i'
-        WHEN relation_type = 'view' THEN 'v'
-        WHEN relation_type = 'materialized view' THEN 'm'
-    END relkind,
-    0 AS relam,
-    0 AS reltablespace,
-    ARRAY[]::varchar[] AS reloptions,
-    FALSE AS relispartition,
-    null AS relpartbound
-    FROM rw_catalog.rw_relations
-")]
+/// similar to a table. Ref: `https://www.postgresql.org/docs/current/catalog-pg-class.html`
 #[derive(Fields)]
 struct PgClass {
+    #[primary_key]
     oid: i32,
     relname: String,
     relnamespace: i32,
@@ -45,10 +33,150 @@ struct PgClass {
     // r = ordinary table, i = index, S = sequence, t = TOAST table, v = view, m = materialized view,
     // c = composite type, f = foreign table, p = partitioned table, I = partitioned index
     relkind: String,
+    relpages: i16,
     relam: i32,
     reltablespace: i32,
     reloptions: Vec<String>,
     relispartition: bool,
     // PG uses pg_node_tree type but RW doesn't support it
     relpartbound: Option<String>,
+}
+
+#[system_catalog(table, "pg_catalog.pg_class")]
+fn read_pg_class_info(reader: &SysCatalogReaderImpl) -> Result<Vec<PgClass>> {
+    let catalog_reader = reader.catalog_reader.read_guard();
+    let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
+
+    Ok(schemas
+        .flat_map(|schema| {
+            schema
+                .iter_user_table()
+                .map(|table| PgClass {
+                    oid: table.id.as_i32_id(),
+                    relname: table.name.clone(),
+                    relnamespace: table.schema_id.as_i32_id(),
+                    relowner: table.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "r".to_owned(),
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                })
+                .chain(schema.iter_all_mvs().map(|mview| PgClass {
+                    oid: mview.id.as_i32_id(),
+                    relname: mview.name.clone(),
+                    relnamespace: mview.schema_id.as_i32_id(),
+                    relowner: mview.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "m".to_owned(),
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_system_tables().map(|table| PgClass {
+                    oid: table.id.as_i32_id(),
+                    relname: table.name.clone(),
+                    relnamespace: schema.id().as_i32_id(),
+                    relowner: table.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "r".to_owned(),
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_index().map(|index| PgClass {
+                    oid: index.id.as_i32_id(),
+                    relname: index.name.clone(),
+                    relnamespace: schema.id().as_i32_id(),
+                    relowner: index.owner() as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "i".to_owned(),
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_view().map(|view| PgClass {
+                    oid: view.id.as_i32_id(),
+                    relname: view.name.clone(),
+                    relnamespace: schema.id().as_i32_id(),
+                    relowner: view.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "v".to_owned(),
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_source().map(|source| PgClass {
+                    oid: source.id.as_i32_id(),
+                    relname: source.name.clone(),
+                    relnamespace: schema.id().as_i32_id(),
+                    relowner: source.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "s".to_owned(), // s for the source in rw.
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_sink().map(|sink| PgClass {
+                    oid: sink.id.as_i32_id(),
+                    relname: sink.name.clone(),
+                    relnamespace: schema.id().as_i32_id(),
+                    relowner: sink.owner.user_id as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "k".to_owned(), // k for the sink in rw.
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_subscription().map(|subscription| PgClass {
+                    oid: subscription.id.as_i32_id(),
+                    relname: subscription.name.clone(),
+                    relnamespace: schema.id().as_i32_id(),
+                    relowner: subscription.owner.user_id as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "u".to_owned(), // u for the subscription in rw.
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+                .chain(schema.iter_connections().map(|connection| PgClass {
+                    oid: connection.id.as_i32_id(),
+                    relname: connection.name.clone(),
+                    relnamespace: schema.id().as_i32_id(),
+                    relowner: connection.owner as i32,
+                    relpersistence: "p".to_owned(),
+                    relkind: "c".to_owned(), // c for the connection in rw.
+                    relpages: 0,
+                    relam: 0,
+                    reltablespace: 0,
+                    reloptions: vec![],
+                    relispartition: false,
+                    relpartbound: None,
+                }))
+        })
+        .collect())
 }

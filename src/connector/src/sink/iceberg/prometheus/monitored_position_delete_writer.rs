@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,27 +12,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use icelake::io_v2::{
-    FileWriterBuilder, IcebergWriter, IcebergWriterBuilder, PositionDeleteInput,
-    PositionDeleteMetrics, PositionDeleteWriter, PositionDeleteWriterBuilder,
+use iceberg::Result;
+use iceberg::spec::{DataFile, PartitionKey};
+use iceberg::writer::base_writer::sort_position_delete_writer::{
+    PositionDeleteInput, SortPositionDeleteWriter, SortPositionDeleteWriterBuilder,
 };
-use icelake::Result;
-use risingwave_common::array::arrow::arrow_schema_iceberg;
+use iceberg::writer::file_writer::FileWriterBuilder;
+use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
 pub struct MonitoredPositionDeleteWriterBuilder<B: FileWriterBuilder> {
-    current_cache_number: LabelGuardedIntGauge<3>,
-    inner: PositionDeleteWriterBuilder<B>,
+    cache_row_metrics: LabelGuardedIntGauge,
+    inner: SortPositionDeleteWriterBuilder<B>,
 }
 
 impl<B: FileWriterBuilder> MonitoredPositionDeleteWriterBuilder<B> {
     pub fn new(
-        inner: PositionDeleteWriterBuilder<B>,
-        current_cache_number: LabelGuardedIntGauge<3>,
+        inner: SortPositionDeleteWriterBuilder<B>,
+        cache_row_metrics: LabelGuardedIntGauge,
     ) -> Self {
         Self {
-            current_cache_number,
+            cache_row_metrics,
             inner,
         }
     }
@@ -44,51 +45,43 @@ impl<B: FileWriterBuilder> IcebergWriterBuilder<PositionDeleteInput>
 {
     type R = MonitoredPositionDeleteWriter<B>;
 
-    async fn build(self, schema: &arrow_schema_iceberg::SchemaRef) -> Result<Self::R> {
-        let writer = self.inner.build(schema).await?;
+    async fn build(self, partition_key: Option<PartitionKey>) -> Result<Self::R> {
+        let writer = self.inner.build(partition_key).await?;
         Ok(MonitoredPositionDeleteWriter {
             writer,
-            cache_number: self.current_cache_number,
-            current_metrics: PositionDeleteMetrics {
-                current_cache_number: 0,
-            },
+            cache_row_metrics: self.cache_row_metrics,
+            last_cache_row: 0,
         })
     }
 }
 
 pub struct MonitoredPositionDeleteWriter<B: FileWriterBuilder> {
-    writer: PositionDeleteWriter<B>,
+    writer: SortPositionDeleteWriter<B>,
 
     // metrics
-    cache_number: LabelGuardedIntGauge<3>,
-    current_metrics: PositionDeleteMetrics,
+    cache_row_metrics: LabelGuardedIntGauge,
+    last_cache_row: usize,
 }
 
 impl<B: FileWriterBuilder> MonitoredPositionDeleteWriter<B> {
-    fn update_metrics(&mut self) -> Result<()> {
-        let last_metrics = std::mem::replace(&mut self.current_metrics, self.writer.metrics());
-        {
-            let delta = self.current_metrics.current_cache_number as i64
-                - last_metrics.current_cache_number as i64;
-            self.cache_number.add(delta);
-        }
-        Ok(())
+    fn update_metrics(&mut self) {
+        self.cache_row_metrics
+            .add(self.writer.current_cache_number() as i64 - self.last_cache_row as i64);
+        self.last_cache_row = self.writer.current_cache_number();
     }
 }
 
 #[async_trait::async_trait]
 impl<B: FileWriterBuilder> IcebergWriter<PositionDeleteInput> for MonitoredPositionDeleteWriter<B> {
-    type R = <PositionDeleteWriter<B> as IcebergWriter<PositionDeleteInput>>::R;
-
     async fn write(&mut self, input: PositionDeleteInput) -> Result<()> {
         self.writer.write(input).await?;
-        self.update_metrics()?;
+        self.update_metrics();
         Ok(())
     }
 
-    async fn flush(&mut self) -> Result<Vec<Self::R>> {
-        let res = self.writer.flush().await?;
-        self.update_metrics()?;
+    async fn close(&mut self) -> Result<Vec<DataFile>> {
+        self.update_metrics();
+        let res = self.writer.close().await?;
         Ok(res)
     }
 }

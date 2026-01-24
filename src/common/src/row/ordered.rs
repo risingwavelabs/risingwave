@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use super::{OwnedRow, Row};
 use crate::types::{DefaultOrd, DefaultOrdered, DefaultPartialOrd};
-use crate::util::sort_util::{cmp_datum_iter, partial_cmp_datum_iter, OrderType};
+use crate::util::sort_util::{OrderType, cmp_datum_iter, partial_cmp_datum_iter};
 
 impl<R: Row> Row for DefaultOrdered<R> {
     deref_forward_row! {}

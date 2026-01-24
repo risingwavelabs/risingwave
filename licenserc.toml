@@ -1,0 +1,25 @@
+headerPath = "ci/license-header.txt"
+
+includes = [
+  "src/**/*.rs",
+  "src/**/*.py",
+  "src/**/*.html",
+  "dashboard/**/*.js",
+  "dashboard/**/*.ts",
+  "java/**/*.java",
+  "java/**/*.py",
+]
+
+excludes = [
+  "**/gen/**",
+  "**/*.d.ts",
+  "src/sqlparser/**/*.rs",
+  "java/connector-node/risingwave-source-cdc/src/main/java/com/risingwave/connector/cdc/debezium/internal/*.java",
+  "java/connector-node/risingwave-sink-iceberg/src/main/java/org/apache/iceberg/**/*.java",
+  "src/meta/model/migration/**/*.rs",
+  "lints/ui/**",
+]
+
+[git]
+ignore = "enable"
+attrs = "enable"

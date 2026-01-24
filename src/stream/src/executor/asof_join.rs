@@ -11,7 +11,9 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::collections::{BTreeMap, HashSet};
+use std::marker::PhantomData;
 use std::ops::Bound;
 use std::time::Duration;
 
@@ -30,6 +32,7 @@ use super::join::hash_join::*;
 use super::join::*;
 use super::watermark::*;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
+use crate::executor::join::row::JoinEncoding;
 use crate::executor::prelude::*;
 
 /// Evict the cache every n rows.
@@ -55,23 +58,24 @@ impl JoinParams {
     }
 }
 
-struct JoinSide<K: HashKey, S: StateStore> {
+struct JoinSide<K: HashKey, S: StateStore, E: JoinEncoding> {
     /// Store all data from a one side stream
-    ht: JoinHashMap<K, S>,
+    ht: JoinHashMap<K, S, E>,
     /// Indices of the join key columns
     join_key_indices: Vec<usize>,
     /// The data type of all columns without degree.
     all_data_types: Vec<DataType>,
     /// The start position for the side in output new columns
     start_pos: usize,
-    /// The mapping from input indices of a side to output columes.
+    /// The mapping from input indices of a side to output columns.
     i2o_mapping: Vec<(usize, usize)>,
     i2o_mapping_indexed: MultiMap<usize, usize>,
     /// Whether degree table is needed for this side.
     need_degree_table: bool,
+    _marker: std::marker::PhantomData<E>,
 }
 
-impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
+impl<K: HashKey, S: StateStore, E: JoinEncoding> std::fmt::Debug for JoinSide<K, S, E> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("JoinSide")
             .field("join_key_indices", &self.join_key_indices)
@@ -83,7 +87,7 @@ impl<K: HashKey, S: StateStore> std::fmt::Debug for JoinSide<K, S> {
     }
 }
 
-impl<K: HashKey, S: StateStore> JoinSide<K, S> {
+impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinSide<K, S, E> {
     // WARNING: Please do not call this until we implement it.
     fn is_dirty(&self) -> bool {
         unimplemented!()
@@ -100,14 +104,19 @@ impl<K: HashKey, S: StateStore> JoinSide<K, S> {
         // self.ht.clear();
     }
 
-    pub fn init(&mut self, epoch: EpochPair) {
-        self.ht.init(epoch);
+    pub async fn init(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+        self.ht.init(epoch).await
     }
 }
 
 /// `AsOfJoinExecutor` takes two input streams and runs equal hash join on them.
 /// The output columns are the concatenation of left and right columns.
-pub struct AsOfJoinExecutor<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> {
+pub struct AsOfJoinExecutor<
+    K: HashKey,
+    S: StateStore,
+    const T: AsOfJoinTypePrimitive,
+    E: JoinEncoding,
+> {
     ctx: ActorContextRef,
     info: ExecutorInfo,
 
@@ -118,9 +127,9 @@ pub struct AsOfJoinExecutor<K: HashKey, S: StateStore, const T: AsOfJoinTypePrim
     /// The data types of the formed new columns
     actual_output_data_types: Vec<DataType>,
     /// The parameters of the left join executor
-    side_l: JoinSide<K, S>,
+    side_l: JoinSide<K, S, E>,
     /// The parameters of the right join executor
-    side_r: JoinSide<K, S>,
+    side_r: JoinSide<K, S, E>,
 
     metrics: Arc<StreamingMetrics>,
     /// The maximum size of the chunk produced by executor at a time
@@ -136,8 +145,8 @@ pub struct AsOfJoinExecutor<K: HashKey, S: StateStore, const T: AsOfJoinTypePrim
     asof_desc: AsOfDesc,
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> std::fmt::Debug
-    for AsOfJoinExecutor<K, S, T>
+impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding> std::fmt::Debug
+    for AsOfJoinExecutor<K, S, T, E>
 {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("AsOfJoinExecutor")
@@ -146,25 +155,25 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> std::fmt::Debug
             .field("input_right", &self.input_r.as_ref().unwrap().identity())
             .field("side_l", &self.side_l)
             .field("side_r", &self.side_r)
-            .field("pk_indices", &self.info.pk_indices)
+            .field("stream_key", &self.info.stream_key)
             .field("schema", &self.info.schema)
             .field("actual_output_data_types", &self.actual_output_data_types)
             .finish()
     }
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> Execute
-    for AsOfJoinExecutor<K, S, T>
+impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding> Execute
+    for AsOfJoinExecutor<K, S, T, E>
 {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         self.into_stream().boxed()
     }
 }
 
-struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
+struct EqJoinArgs<'a, K: HashKey, S: StateStore, E: JoinEncoding> {
     ctx: &'a ActorContextRef,
-    side_l: &'a mut JoinSide<K, S>,
-    side_r: &'a mut JoinSide<K, S>,
+    side_l: &'a mut JoinSide<K, S, E>,
+    side_r: &'a mut JoinSide<K, S, E>,
     asof_desc: &'a AsOfDesc,
     actual_output_data_types: &'a [DataType],
     // inequality_watermarks: &'a Watermark,
@@ -174,7 +183,9 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore> {
     high_join_amplification_threshold: usize,
 }
 
-impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor<K, S, T> {
+impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive, E: JoinEncoding>
+    AsOfJoinExecutor<K, S, T, E>
+{
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
@@ -214,17 +225,15 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
         let state_all_data_types_l = input_l.schema().data_types();
         let state_all_data_types_r = input_r.schema().data_types();
 
-        let state_pk_indices_l = input_l.pk_indices().to_vec();
-        let state_pk_indices_r = input_r.pk_indices().to_vec();
+        let state_pk_indices_l = input_l.stream_key().to_vec();
+        let state_pk_indices_r = input_r.stream_key().to_vec();
 
         let state_join_key_indices_l = params_l.join_key_indices;
         let state_join_key_indices_r = params_r.join_key_indices;
 
         // If pk is contained in join key.
-        let pk_contained_in_jk_l =
-            is_subset(state_pk_indices_l.clone(), state_join_key_indices_l.clone());
-        let pk_contained_in_jk_r =
-            is_subset(state_pk_indices_r.clone(), state_join_key_indices_r.clone());
+        let pk_contained_in_jk_l = is_subset(state_pk_indices_l, state_join_key_indices_l.clone());
+        let pk_contained_in_jk_r = is_subset(state_pk_indices_r, state_join_key_indices_r.clone());
 
         let join_key_data_types_l = state_join_key_indices_l
             .iter()
@@ -291,6 +300,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 i2o_mapping_indexed: l2o_indexed,
                 start_pos: 0,
                 need_degree_table: false,
+                _marker: PhantomData,
             },
             side_r: JoinSide {
                 ht: JoinHashMap::new(
@@ -315,6 +325,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 i2o_mapping: right_to_output,
                 i2o_mapping_indexed: r2o_indexed,
                 need_degree_table: false,
+                _marker: PhantomData,
             },
             metrics,
             chunk_size,
@@ -338,13 +349,15 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
             "Join",
         );
         pin_mut!(aligned_stream);
+        let actor_id = self.ctx.id;
 
         let barrier = expect_first_barrier_from_aligned_stream(&mut aligned_stream).await?;
-        self.side_l.init(barrier.epoch);
-        self.side_r.init(barrier.epoch);
-
+        let first_epoch = barrier.epoch;
         // The first barrier message should be propagated.
         yield Message::Barrier(barrier);
+        self.side_l.init(first_epoch).await?;
+        self.side_r.init(first_epoch).await?;
+
         let actor_id_str = self.ctx.id.to_string();
         let fragment_id_str = self.ctx.fragment_id.to_string();
 
@@ -356,26 +369,30 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
         let left_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "left"]);
         let right_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
         let barrier_join_match_duration_ns = self
             .metrics
             .join_match_duration_ns
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "barrier"]);
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                "barrier",
+            ]);
 
         let left_join_cached_entry_count = self
             .metrics
             .join_cached_entry_count
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "left"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "left"]);
 
         let right_join_cached_entry_count = self
             .metrics
             .join_cached_entry_count
-            .with_guarded_label_values(&[&actor_id_str, &fragment_id_str, "right"]);
+            .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
         let mut start_time = Instant::now();
 
@@ -446,17 +463,24 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 }
                 AlignedMessage::Barrier(barrier) => {
                     let barrier_start_time = Instant::now();
-                    self.flush_data(barrier.epoch).await?;
+                    let (left_post_commit, right_post_commit) =
+                        self.flush_data(barrier.epoch).await?;
+
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+                    yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap for state tables of both sides if asked.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        if self.side_l.ht.update_vnode_bitmap(vnode_bitmap.clone()) {
-                            self.watermark_buffers
-                                .values_mut()
-                                .for_each(|buffers| buffers.clear());
-                            // self.inequality_watermarks.fill(None);
-                        }
-                        self.side_r.ht.update_vnode_bitmap(vnode_bitmap);
+                    right_post_commit
+                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .await?;
+                    if left_post_commit
+                        .post_yield_barrier(update_vnode_bitmap)
+                        .await?
+                        .unwrap_or(false)
+                    {
+                        self.watermark_buffers
+                            .values_mut()
+                            .for_each(|buffers| buffers.clear());
                     }
 
                     // Report metrics of cached join rows/entries
@@ -469,19 +493,24 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
 
                     barrier_join_match_duration_ns
                         .inc_by(barrier_start_time.elapsed().as_nanos() as u64);
-                    yield Message::Barrier(barrier);
                 }
             }
             start_time = Instant::now();
         }
     }
 
-    async fn flush_data(&mut self, epoch: EpochPair) -> StreamExecutorResult<()> {
+    async fn flush_data(
+        &mut self,
+        epoch: EpochPair,
+    ) -> StreamExecutorResult<(
+        JoinHashMapPostCommit<'_, K, S, E>,
+        JoinHashMapPostCommit<'_, K, S, E>,
+    )> {
         // All changes to the state has been buffered in the mem-table of the state table. Just
         // `commit` them here.
-        self.side_l.ht.flush(epoch).await?;
-        self.side_r.ht.flush(epoch).await?;
-        Ok(())
+        let left = self.side_l.ht.flush(epoch).await?;
+        let right = self.side_r.ht.flush(epoch).await?;
+        Ok((left, right))
     }
 
     async fn try_flush_data(&mut self) -> StreamExecutorResult<()> {
@@ -494,8 +523,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
 
     // We need to manually evict the cache.
     fn evict_cache(
-        side_update: &mut JoinSide<K, S>,
-        side_match: &mut JoinSide<K, S>,
+        side_update: &mut JoinSide<K, S, E>,
+        side_match: &mut JoinSide<K, S, E>,
         cnt_rows_received: &mut u32,
     ) {
         *cnt_rows_received += 1;
@@ -558,8 +587,8 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
     /// data chunk with the executor state
     async fn hash_eq_match(
         key: &K,
-        ht: &mut JoinHashMap<K, S>,
-    ) -> StreamExecutorResult<Option<HashValueType>> {
+        ht: &mut JoinHashMap<K, S, E>,
+    ) -> StreamExecutorResult<Option<HashValueType<E>>> {
         if !key.null_bitmap().is_subset(ht.null_matched()) {
             Ok(None)
         } else {
@@ -568,7 +597,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn eq_join_left(args: EqJoinArgs<'_, K, S>) {
+    async fn eq_join_left(args: EqJoinArgs<'_, K, S, E>) {
         let EqJoinArgs {
             ctx: _,
             side_l,
@@ -688,7 +717,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
     }
 
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
-    async fn eq_join_right(args: EqJoinArgs<'_, K, S>) {
+    async fn eq_join_right(args: EqJoinArgs<'_, K, S, E>) {
         let EqJoinArgs {
             ctx,
             side_l,
@@ -742,7 +771,7 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 let (row_to_delete_r, row_to_insert_r) =
                     if let Some(pks) = right_inequality_index.get(&inequal_key) {
                         assert!(!pks.is_empty());
-                        let row_pk = side_match.ht.serialize_pk_from_row(row);
+                        let row_pk = side_update.ht.serialize_pk_from_row(row);
                         match op {
                             Op::Insert | Op::UpdateInsert => {
                                 // If there are multiple rows match the inequality key in the right table, we use one with smallest pk.
@@ -861,12 +890,11 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                             {
                                 yield chunk;
                             }
-                        } else if is_as_of_left_outer(T) {
-                            if let Some(chunk) =
+                        } else if is_as_of_left_outer(T)
+                            && let Some(chunk) =
                                 join_chunk_builder.append_row_matched(Op::Delete, &row_l)
-                            {
-                                yield chunk;
-                            }
+                        {
+                            yield chunk;
                         }
                         if let Some(row_to_insert_r) = &row_to_insert_r {
                             if let Some(chunk) =
@@ -874,12 +902,11 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                             {
                                 yield chunk;
                             }
-                        } else if is_as_of_left_outer(T) {
-                            if let Some(chunk) =
+                        } else if is_as_of_left_outer(T)
+                            && let Some(chunk) =
                                 join_chunk_builder.append_row_matched(Op::Insert, &row_l)
-                            {
-                                yield chunk;
-                            }
+                        {
+                            yield chunk;
                         }
                     }
                 }
@@ -906,11 +933,11 @@ impl<K: HashKey, S: StateStore, const T: AsOfJoinTypePrimitive> AsOfJoinExecutor
                 let key = key.deserialize(join_key_data_types)?;
                 tracing::warn!(target: "high_join_amplification",
                     matched_rows_len = join_matched_rows_cnt,
-                    update_table_id = side_update.ht.table_id(),
-                    match_table_id = side_match.ht.table_id(),
+                    update_table_id = %side_update.ht.table_id(),
+                    match_table_id = %side_match.ht.table_id(),
                     join_key = ?key,
-                    actor_id = ctx.id,
-                    fragment_id = ctx.fragment_id,
+                    actor_id = %ctx.id,
+                    fragment_id = %ctx.fragment_id,
                     "large rows matched for join key when AsOf join updating right side",
                 );
             }
@@ -934,6 +961,7 @@ mod tests {
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
+    use crate::executor::MemoryEncoding;
     use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
 
     async fn create_in_memory_state_table(
@@ -1012,13 +1040,9 @@ mod tests {
             .into_iter()
             .collect();
         let schema_len = schema.len();
-        let info = ExecutorInfo {
-            schema,
-            pk_indices: vec![1],
-            identity: "HashJoinExecutor".to_string(),
-        };
+        let info = ExecutorInfo::for_test(schema, vec![1], "HashJoinExecutor".to_owned(), 0);
 
-        let executor = AsOfJoinExecutor::<Key64, MemoryStateStore, T>::new(
+        let executor = AsOfJoinExecutor::<Key64, MemoryStateStore, T, MemoryEncoding>::new(
             ActorContext::for_test(123),
             info,
             source_l,
@@ -1261,8 +1285,8 @@ mod tests {
             chunk,
             StreamChunk::from_pretty(
                 " I I I I I I
-                + 3 8 1 . . .
-                - 3 8 1 . . ."
+                + 3 8 1 . . . D
+                - 3 8 1 . . . D"
             )
         );
 

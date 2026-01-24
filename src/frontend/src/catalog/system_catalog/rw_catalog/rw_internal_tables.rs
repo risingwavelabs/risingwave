@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,8 @@
 
 use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
-use risingwave_pb::user::grant_privilege::Object;
 
-use crate::catalog::system_catalog::{get_acl_items, SysCatalogReaderImpl};
+use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
 
 #[derive(Fields)]
@@ -25,9 +24,10 @@ struct RwInternalTable {
     id: i32,
     name: String,
     schema_id: i32,
+    job_id: i32,
     owner: i32,
     definition: String,
-    acl: String,
+    acl: Vec<String>,
     initialized_at: Option<Timestamptz>,
     created_at: Option<Timestamptz>,
     initialized_at_cluster_version: Option<String>,
@@ -39,28 +39,29 @@ fn read_rw_internal_tables(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIntern
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.iter_schemas(&reader.auth_context.database)?;
     let user_reader = reader.user_info_reader.read_guard();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
     let users = user_reader.get_all_users();
     let username_map = user_reader.get_user_name_map();
 
     Ok(schemas
         .flat_map(|schema| {
-            schema.iter_internal_table().map(|table| RwInternalTable {
-                id: table.id.table_id as i32,
-                name: table.name().into(),
-                schema_id: schema.id() as i32,
-                owner: table.owner as i32,
-                definition: table.create_sql(),
-                acl: get_acl_items(
-                    &Object::TableId(table.id.table_id),
-                    true,
-                    &users,
-                    username_map,
-                ),
-                initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
-                initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
-                created_at_cluster_version: table.created_at_cluster_version.clone(),
-            })
+            schema
+                .iter_internal_table_with_acl(current_user)
+                .map(|table| RwInternalTable {
+                    id: table.id.as_i32_id(),
+                    name: table.name().into(),
+                    schema_id: schema.id().as_i32_id(),
+                    job_id: table.job_id.unwrap().as_i32_id(),
+                    owner: table.owner as i32,
+                    definition: table.create_sql(),
+                    acl: get_acl_items(table.id, false, &users, username_map),
+                    initialized_at: table.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                    created_at: table.created_at_epoch.map(|e| e.as_timestamptz()),
+                    initialized_at_cluster_version: table.initialized_at_cluster_version.clone(),
+                    created_at_cluster_version: table.created_at_cluster_version.clone(),
+                })
         })
         .collect())
 }

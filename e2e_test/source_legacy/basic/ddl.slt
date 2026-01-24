@@ -27,10 +27,10 @@ create source s(x int) WITH(unknown_field='1', connector='kafka') FORMAT PLAIN E
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSource`) failed: Internal error
   2: failed to create source worker
   3: failed to parse json
-  4: missing field `properties.bootstrap.server`
+  4: missing field `topic`
 
 
 statement error
@@ -39,7 +39,7 @@ create source s(x int) WITH(unknown_field='1', connector='kafka', properties.boo
 db error: ERROR: Failed to run the query
 
 Caused by these errors (recent errors listed first):
-  1: gRPC request to meta service failed: Internal error
+  1: gRPC request to meta service (call `/ddl_service.DdlService/CreateSource`) failed: Internal error
   2: failed to create source worker
   3: Unknown fields in the WITH clause: {"unknown_field": "1"}
 
@@ -165,7 +165,7 @@ create source s (
 query T
 show sources
 ----
-s
+public.s
 
 query T
 show tables
@@ -188,44 +188,15 @@ create table s (
 query T
 show sources
 ----
-s
+public.s
 
 query T
 show tables
 ----
-s
+public.s
 
 statement ok
 drop table s
-
-# Test create source with connection
-statement ok
-CREATE CONNECTION mock WITH (type = 'privatelink', provider = 'mock');
-
-# Reference to non-existant connection
-statement error
-create source s (
-  column1 varchar
-) with (
-  connector = 'kafka',
-  topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'nonexist',
-) FORMAT PLAIN ENCODE JSON;
-
-statement ok
-CREATE TABLE mytable (
-  column1 varchar
-) with (
-  connector = 'kafka',
-  topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'mock'
-) FORMAT PLAIN ENCODE JSON;
-
-statement ok
-DROP TABLE mytable;
-
 
 # `DEBEZIUM_MONGO_JSON` requires the source table have `_id` and `payload` columns.
 statement error
@@ -236,7 +207,6 @@ create source s (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'nonexist',
 ) FORMAT DEBEZIUM_MONGO ENCODE JSON;
 
 # `DEBEZIUM_MONGO_JSON` requires the `_id` column is primary key.
@@ -248,7 +218,6 @@ create source s (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'nonexist',
 ) FORMAT DEBEZIUM_MONGO ENCODE JSON;
 
 # `DEBEZIUM_MONGO_JSON` requires the `payload` column is jsonb type.
@@ -260,25 +229,4 @@ create source s (
   connector = 'kafka',
   topic = 'kafka_1_partition_topic',
   properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'nonexist',
 ) FORMAT DEBEZIUM_MONGO ENCODE JSON;
-
-statement ok
-create source s (
-  column1 varchar
-) with (
-  connector = 'kafka',
-  topic = 'kafka_1_partition_topic',
-  properties.bootstrap.server = 'message_queue:29092',
-  connection.name = 'mock',
-) FORMAT PLAIN ENCODE JSON;
-
-# Drop a connection in use
-statement error
-drop connection mock;
-
-statement ok
-drop source s;
-
-statement ok
-drop connection mock;

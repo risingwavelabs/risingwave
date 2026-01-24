@@ -67,8 +67,6 @@ cluster_stop() {
 
 download_and_prepare_rw "$profile" common
 
-sudo apt install sqlite3 -y
-
 echo "--- e2e, ci-meta-backup-test"
 test_root="src/storage/backup/integration_tests"
 BACKUP_TEST_MCLI=".risingwave/bin/mcli" \

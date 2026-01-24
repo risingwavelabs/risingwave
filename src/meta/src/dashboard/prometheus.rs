@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ use axum::{Extension, Json};
 use prometheus_http_query::response::{InstantVector, RangeVector, Sample};
 use serde::Serialize;
 
-use super::handlers::{err, DashboardError};
 use super::Service;
+use super::handlers::{DashboardError, err};
 
 #[derive(Serialize, Debug)]
 pub struct PrometheusSample {
@@ -80,8 +80,10 @@ pub async fn list_prometheus_cluster(
     if let Some(ref client) = srv.prometheus_client {
         // assume job_name is one of compute, meta, frontend
         let now = SystemTime::now();
-        let cpu_query =
-            format!("sum(rate(process_cpu_seconds_total{{job=~\"compute|meta|frontend\",{}}}[60s])) by (job,instance)", srv.prometheus_selector);
+        let cpu_query = format!(
+            "sum(rate(process_cpu_seconds_total{{job=~\"standalone|compute|meta|frontend\", {}}}[60s]) or label_replace(rate(process_cpu_seconds_total{{component=~\"standalone|compute|meta|frontend\", {}}}[60s]), \"job\", \"$1\", \"component\", \"(.*)\")) by (job,instance)",
+            srv.prometheus_selector, srv.prometheus_selector
+        );
         let result = client
             .query_range(
                 cpu_query,
@@ -104,8 +106,10 @@ pub async fn list_prometheus_cluster(
             .iter()
             .map(PrometheusVector::from)
             .collect();
-        let memory_query =
-            format!("avg(process_resident_memory_bytes{{job=~\"compute|meta|frontend\",{}}}) by (job,instance)", srv.prometheus_selector);
+        let memory_query = format!(
+            "avg(process_resident_memory_bytes{{job=~\"standalone|compute|meta|frontend\", {}}} or label_replace(process_resident_memory_bytes{{component=~\"standalone|compute|meta|frontend\", {}}}, \"job\", \"$1\", \"component\", \"(.*)\")) by (job,instance)",
+            srv.prometheus_selector, srv.prometheus_selector
+        );
         let result = client
             .query_range(
                 memory_query,
@@ -131,38 +135,6 @@ pub async fn list_prometheus_cluster(
         Ok(Json(ClusterMetrics {
             cpu_data,
             memory_data,
-        }))
-    } else {
-        Err(err(anyhow!("Prometheus endpoint is not set")))
-    }
-}
-
-#[derive(Serialize, Debug)]
-#[serde(rename_all = "camelCase")]
-pub struct FragmentBackPressure {
-    output_buffer_blocking_duration: Vec<PrometheusVector>,
-}
-pub async fn list_prometheus_fragment_back_pressure(
-    Extension(srv): Extension<Service>,
-) -> Result<Json<FragmentBackPressure>> {
-    if let Some(ref client) = srv.prometheus_client {
-        let back_pressure_query = format!(
-            "sum(rate(stream_actor_output_buffer_blocking_duration_ns{{{}}}[60s])) by (fragment_id, downstream_fragment_id) \
-             / ignoring (downstream_fragment_id) group_left sum(stream_actor_count{{{}}}) by (fragment_id) \
-             / 1000000000",
-            srv.prometheus_selector,
-            srv.prometheus_selector,
-        );
-        let result = client.query(back_pressure_query).get().await.map_err(err)?;
-        let back_pressure_data = result
-            .data()
-            .as_vector()
-            .unwrap()
-            .iter()
-            .map(PrometheusVector::from)
-            .collect();
-        Ok(Json(FragmentBackPressure {
-            output_buffer_blocking_duration: back_pressure_data,
         }))
     } else {
         Err(err(anyhow!("Prometheus endpoint is not set")))

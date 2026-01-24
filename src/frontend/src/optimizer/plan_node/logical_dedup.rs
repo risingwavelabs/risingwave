@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,13 +16,13 @@ use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
-use super::generic::TopNLimit;
+use super::generic::{GenericPlanRef, TopNLimit};
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchGroupTopN, ColPrunable, ColumnPruningContext,
-    ExprRewritable, Logical, LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary,
-    PredicatePushdown, PredicatePushdownContext, RewriteStreamContext, StreamDedup,
-    StreamGroupTopN, ToBatch, ToStream, ToStreamContext,
+    BatchGroupTopN, BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    PredicatePushdownContext, RewriteStreamContext, StreamDedup, StreamGroupTopN, ToBatch,
+    ToStream, ToStreamContext, gen_filter_and_pushdown, generic, try_enforce_locality_requirement,
 };
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -39,7 +39,7 @@ pub struct LogicalDedup {
 
 impl LogicalDedup {
     pub fn new(input: PlanRef, dedup_cols: Vec<usize>) -> Self {
-        let core = generic::Dedup { input, dedup_cols };
+        let core = generic::Dedup::new(input, dedup_cols);
         let base = PlanBase::new_logical_with_core(&core);
         LogicalDedup { base, core }
     }
@@ -49,7 +49,7 @@ impl LogicalDedup {
     }
 }
 
-impl PlanTreeNodeUnary for LogicalDedup {
+impl PlanTreeNodeUnary<Logical> for LogicalDedup {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -58,7 +58,6 @@ impl PlanTreeNodeUnary for LogicalDedup {
         Self::new(input, self.dedup_cols().to_vec())
     }
 
-    #[must_use]
     fn rewrite_with_input(
         &self,
         input: PlanRef,
@@ -77,7 +76,7 @@ impl PlanTreeNodeUnary for LogicalDedup {
     }
 }
 
-impl_plan_tree_node_for_unary! {LogicalDedup}
+impl_plan_tree_node_for_unary! { Logical, LogicalDedup}
 
 impl PredicatePushdown for LogicalDedup {
     fn predicate_pushdown(
@@ -99,17 +98,20 @@ impl ToStream for LogicalDedup {
         Ok((logical.into(), out_col_change))
     }
 
-    fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         use super::stream::prelude::*;
 
-        let input = self.input().to_stream(ctx)?;
+        let logical_input = try_enforce_locality_requirement(self.input(), self.dedup_cols());
+        let input = logical_input.to_stream(ctx)?;
         let input = RequiredDist::hash_shard(self.dedup_cols())
-            .enforce_if_not_satisfies(input, &Order::any())?;
+            .streaming_enforce_if_not_satisfies(input)?;
         if input.append_only() {
             // `LogicalDedup` is transformed to `StreamDedup` only when the input is append-only.
-            let mut logical_dedup = self.core.clone();
-            logical_dedup.input = input;
-            Ok(StreamDedup::new(logical_dedup).into())
+            let core = self.core.clone_with_input(input);
+            Ok(StreamDedup::new(core).into())
         } else {
             // If the input is not append-only, we use a `StreamGroupTopN` with the limit being 1.
             let logical_top_n = generic::TopN::with_group(
@@ -119,13 +121,13 @@ impl ToStream for LogicalDedup {
                 Order::default(),
                 self.dedup_cols().to_vec(),
             );
-            Ok(StreamGroupTopN::new(logical_top_n, None).into())
+            Ok(StreamGroupTopN::new(logical_top_n, None)?.into())
         }
     }
 }
 
 impl ToBatch for LogicalDedup {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<BatchPlanRef> {
         let input = self.input().to_batch()?;
         let logical_top_n = generic::TopN::with_group(
             input,
@@ -138,7 +140,7 @@ impl ToBatch for LogicalDedup {
     }
 }
 
-impl ExprRewritable for LogicalDedup {}
+impl ExprRewritable<Logical> for LogicalDedup {}
 
 impl ExprVisitable for LogicalDedup {}
 
@@ -163,7 +165,12 @@ impl ColPrunable for LogicalDedup {
         );
 
         let new_input = self.input().prune_col(&input_required_cols, ctx);
-        let logical_dedup = Self::new(new_input, self.dedup_cols().to_vec()).into();
+        let new_dedup_cols = self
+            .dedup_cols()
+            .iter()
+            .map(|&idx| mapping.map(idx))
+            .collect_vec();
+        let logical_dedup = Self::new(new_input, new_dedup_cols).into();
 
         if input_required_cols == required_cols {
             logical_dedup

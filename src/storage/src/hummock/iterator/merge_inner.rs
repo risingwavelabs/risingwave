@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ use futures::FutureExt;
 use risingwave_hummock_sdk::key::FullKey;
 
 use super::Forward;
+use crate::hummock::HummockResult;
 use crate::hummock::iterator::{
     DirectionEnum, HummockIterator, HummockIteratorDirection, ValueMeta,
 };
@@ -27,7 +28,6 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatchIterator, SharedBufferVersionedEntryRef,
 };
 use crate::hummock::value::HummockValue;
-use crate::hummock::HummockResult;
 use crate::monitor::StoreLocalStatistic;
 
 pub struct Node<I: HummockIterator> {
@@ -172,7 +172,7 @@ impl<'a, T: Ord> PeekMutGuard<'a, T> {
     }
 }
 
-impl<'a, T: Ord> Deref for PeekMutGuard<'a, T> {
+impl<T: Ord> Deref for PeekMutGuard<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -180,13 +180,13 @@ impl<'a, T: Ord> Deref for PeekMutGuard<'a, T> {
     }
 }
 
-impl<'a, T: Ord> DerefMut for PeekMutGuard<'a, T> {
+impl<T: Ord> DerefMut for PeekMutGuard<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         self.peek.as_mut().expect("should not be None")
     }
 }
 
-impl<'a, T: Ord> Drop for PeekMutGuard<'a, T> {
+impl<T: Ord> Drop for PeekMutGuard<'_, T> {
     /// When the guard is dropped, if `pop` or `used` is not called before it is dropped, we will
     /// call `PeekMut::pop` on the `PeekMut` and recycle the node to the unused list.
     fn drop(&mut self) {
@@ -271,7 +271,7 @@ where
     }
 
     fn is_valid(&self) -> bool {
-        self.heap.peek().map_or(false, |n| n.iter.is_valid())
+        self.heap.peek().is_some_and(|n| n.iter.is_valid())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {

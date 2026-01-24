@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 use anyhow::anyhow;
 use async_trait::async_trait;
-use aws_sdk_kinesis::types::Shard;
 use aws_sdk_kinesis::Client as kinesis_client;
+use aws_sdk_kinesis::types::Shard;
 use risingwave_common::bail;
 
 use crate::error::ConnectorResult as Result;
@@ -85,7 +85,7 @@ impl SplitEnumerator for KinesisSplitEnumerator {
         Ok(shard_collect
             .into_iter()
             .map(|x| KinesisSplit {
-                shard_id: x.shard_id().to_string().into(),
+                shard_id: x.shard_id().to_owned().into(),
                 // handle start with position in reader part
                 next_offset: KinesisOffset::None,
                 end_offset: KinesisOffset::None,
@@ -103,7 +103,7 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn test_kinesis_split_enumerator() -> Result<()> {
-        let stream_name = "kinesis_debug".to_string();
+        let stream_name = "kinesis_debug".to_owned();
         let config = aws_config::from_env()
             .region(Region::new("cn-northwest-1"))
             .load()

@@ -11,16 +11,16 @@
         ├─LogicalShare { id: 3 }
         │ └─LogicalProject { exprs: [(t1.x + t1.y) as $expr1] }
         │   └─LogicalFilter { predicate: (t1.y > 0:Int32) }
-        │     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+        │     └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
         └─LogicalShare { id: 7 }
           └─LogicalProject { exprs: [(t1.x * $expr1) as $expr2, (t1.y * $expr1) as $expr3] }
             └─LogicalFilter { predicate: ($expr1 = t1.x) }
               └─LogicalJoin { type: Inner, on: true, output: all }
-                ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+                ├─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
                 └─LogicalShare { id: 3 }
                   └─LogicalProject { exprs: [(t1.x + t1.y) as $expr1] }
                     └─LogicalFilter { predicate: (t1.y > 0:Int32) }
-                      └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id] }
+                      └─LogicalScan { table: t1, columns: [t1.x, t1.y, t1._row_id, t1._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [z, a, b, t1._row_id(hidden), t1._row_id#1(hidden), t1._row_id#2(hidden), t1.x(hidden)], stream_key: [t1._row_id, t1._row_id#1, t1._row_id#2, t1.x, z], pk_columns: [t1._row_id, t1._row_id#1, t1._row_id#2, t1.x, z], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard($expr1, t1._row_id, t1._row_id, t1._row_id, t1.x) }

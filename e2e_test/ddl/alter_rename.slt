@@ -206,6 +206,12 @@ ALTER SOURCE msrc RENAME TO msrc1;
 statement ok
 ALTER TABLE msrc RENAME TO msrc1;
 
+# the associated source name should also be changed to msrc1
+query I
+select count(*) from rw_sources where name = 'msrc1';
+----
+1
+
 query TT
 SHOW CREATE TABLE msrc1;
 ----
@@ -280,3 +286,43 @@ DROP TABLE t2;
 
 statement ok
 DROP TABLE t_as_1;
+
+# BEGIN references in changelog
+
+statement ok
+CREATE TABLE a (a0 int);
+
+statement ok
+CREATE TABLE b (b0 int);
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS
+WITH a_log AS changelog FROM a,
+     b_log AS changelog FROM b
+SELECT 'a' AS tbl, * FROM a_log
+UNION ALL
+SELECT 'b', * FROM b_log;
+
+query T
+SELECT definition FROM rw_materialized_views WHERE name = 'mv';
+----
+CREATE MATERIALIZED VIEW mv AS WITH a_log AS changelog from a, b_log AS changelog from b SELECT 'a' AS tbl, * FROM a_log UNION ALL SELECT 'b', * FROM b_log
+
+statement ok
+ALTER TABLE a RENAME TO c;
+
+query T
+SELECT definition FROM rw_materialized_views WHERE name = 'mv';
+----
+CREATE MATERIALIZED VIEW mv AS WITH a_log AS changelog from c, b_log AS changelog from b SELECT 'a' AS tbl, * FROM a_log UNION ALL SELECT 'b', * FROM b_log
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP TABLE b;
+
+statement ok
+DROP TABLE c;
+
+# END references in changelog

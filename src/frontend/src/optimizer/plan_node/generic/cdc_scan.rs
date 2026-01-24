@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,24 +17,25 @@ use std::str::FromStr;
 
 use anyhow::anyhow;
 use educe::Educe;
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::Pretty;
 use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, Field, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_connector::source::cdc::{
-    CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY,
-    CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY,
+    CDC_BACKFILL_AS_EVEN_SPLITS, CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_MAX_PARALLELISM,
+    CDC_BACKFILL_NUM_ROWS_PER_SPLIT, CDC_BACKFILL_PARALLELISM,
+    CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY, CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY,
+    CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX, CdcScanOptions,
 };
-use risingwave_pb::stream_plan::StreamCdcScanOptions;
 
 use super::GenericPlanNode;
+use crate::WithOptions;
 use crate::catalog::ColumnId;
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::{FunctionalDependencySet, MonotonicityMap};
-use crate::WithOptions;
+use crate::optimizer::property::{FunctionalDependencySet, MonotonicityMap, WatermarkColumns};
 
 /// [`CdcScan`] reads rows of a table from an external upstream database
 #[derive(Debug, Clone, Educe)]
@@ -52,56 +53,73 @@ pub struct CdcScan {
     pub options: CdcScanOptions,
 }
 
-#[derive(Debug, Clone, Hash, PartialEq)]
-pub struct CdcScanOptions {
-    pub disable_backfill: bool,
-    pub snapshot_barrier_interval: u32,
-    pub snapshot_batch_size: u32,
-}
+pub fn build_cdc_scan_options_with_options(
+    with_options: &WithOptions,
+    cdc_table_type: &ExternalCdcTableType,
+) -> Result<CdcScanOptions> {
+    // Update this after more CDC table type is supported for backfill v2.
+    let support_backfill_v2 = matches!(
+        cdc_table_type,
+        ExternalCdcTableType::Postgres | ExternalCdcTableType::Mock
+    );
 
-impl Default for CdcScanOptions {
-    fn default() -> Self {
-        Self {
-            disable_backfill: false,
-            snapshot_barrier_interval: 1,
-            snapshot_batch_size: 1000,
+    // unspecified option will use default values
+    let mut scan_options = CdcScanOptions::default();
+
+    // disable backfill if 'snapshot=false'
+    if let Some(snapshot) = with_options.get(CDC_BACKFILL_ENABLE_KEY) {
+        scan_options.disable_backfill = !(bool::from_str(snapshot)
+            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?);
+    };
+
+    if let Some(snapshot_interval) = with_options.get(CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY) {
+        scan_options.snapshot_barrier_interval = u32::from_str(snapshot_interval)
+            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY))?;
+    };
+
+    if let Some(snapshot_batch_size) = with_options.get(CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY) {
+        scan_options.snapshot_batch_size = u32::from_str(snapshot_batch_size)
+            .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY))?;
+    };
+
+    if support_backfill_v2 {
+        if let Some(backfill_parallelism) = with_options.get(CDC_BACKFILL_PARALLELISM) {
+            scan_options.backfill_parallelism = u32::from_str(backfill_parallelism)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_PARALLELISM))?;
+            if scan_options.backfill_parallelism > CDC_BACKFILL_MAX_PARALLELISM {
+                return Err(anyhow!(
+                    "Invalid value for {}, should be in range [0,{}] ",
+                    CDC_BACKFILL_PARALLELISM,
+                    CDC_BACKFILL_MAX_PARALLELISM
+                )
+                .into());
+            }
         }
-    }
-}
 
-impl CdcScanOptions {
-    pub fn from_with_options(with_options: &WithOptions) -> Result<Self> {
-        // unspecified option will use default values
-        let mut scan_options = Self::default();
+        if let Some(backfill_num_rows_per_split) = with_options.get(CDC_BACKFILL_NUM_ROWS_PER_SPLIT)
+        {
+            scan_options.backfill_num_rows_per_split = u64::from_str(backfill_num_rows_per_split)
+                .map_err(|_| {
+                anyhow!("Invalid value for {}", CDC_BACKFILL_NUM_ROWS_PER_SPLIT)
+            })?;
+        }
 
-        // disable backfill if 'snapshot=false'
-        if let Some(snapshot) = with_options.get(CDC_BACKFILL_ENABLE_KEY) {
-            scan_options.disable_backfill = !(bool::from_str(snapshot)
-                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_ENABLE_KEY))?);
-        };
+        if let Some(backfill_as_even_splits) = with_options.get(CDC_BACKFILL_AS_EVEN_SPLITS) {
+            scan_options.backfill_as_even_splits = bool::from_str(backfill_as_even_splits)
+                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_AS_EVEN_SPLITS))?;
+        }
 
-        if let Some(snapshot_interval) = with_options.get(CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY) {
-            scan_options.snapshot_barrier_interval = u32::from_str(snapshot_interval)
-                .map_err(|_| anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY))?;
-        };
-
-        if let Some(snapshot_batch_size) = with_options.get(CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY) {
-            scan_options.snapshot_batch_size =
-                u32::from_str(snapshot_batch_size).map_err(|_| {
-                    anyhow!("Invalid value for {}", CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY)
+        if let Some(backfill_split_pk_column_index) =
+            with_options.get(CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX)
+        {
+            scan_options.backfill_split_pk_column_index =
+                u32::from_str(backfill_split_pk_column_index).map_err(|_| {
+                    anyhow!("Invalid value for {}", CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX)
                 })?;
-        };
-
-        Ok(scan_options)
-    }
-
-    pub fn to_proto(&self) -> StreamCdcScanOptions {
-        StreamCdcScanOptions {
-            disable_backfill: self.disable_backfill,
-            snapshot_barrier_interval: self.snapshot_barrier_interval,
-            snapshot_batch_size: self.snapshot_batch_size,
         }
     }
+
+    Ok(scan_options)
 }
 
 impl CdcScan {
@@ -121,8 +139,8 @@ impl CdcScan {
         &self.cdc_table_desc.pk
     }
 
-    pub fn watermark_columns(&self) -> FixedBitSet {
-        FixedBitSet::with_capacity(self.get_table_columns().len())
+    pub fn watermark_columns(&self) -> WatermarkColumns {
+        WatermarkColumns::new()
     }
 
     pub fn columns_monotonicity(&self) -> MonotonicityMap {
@@ -228,10 +246,6 @@ impl GenericPlanNode for CdcScan {
 impl CdcScan {
     pub fn get_table_columns(&self) -> &[ColumnDesc] {
         &self.cdc_table_desc.columns
-    }
-
-    pub fn append_only(&self) -> bool {
-        false
     }
 
     /// Get the descs of the output columns.

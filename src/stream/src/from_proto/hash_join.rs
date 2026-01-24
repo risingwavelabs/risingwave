@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::min;
 use std::sync::Arc;
 
+use risingwave_common::config::streaming::JoinEncodingType;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher};
 use risingwave_common::types::DataType;
-use risingwave_expr::expr::{
-    build_func_non_strict, build_non_strict_from_prost, InputRefExpression, NonStrictExpression,
-};
+use risingwave_expr::expr::{NonStrictExpression, build_non_strict_from_prost};
 use risingwave_pb::plan_common::JoinType as JoinTypeProto;
-use risingwave_pb::stream_plan::HashJoinNode;
+use risingwave_pb::stream_plan::{HashJoinNode, InequalityType};
 
 use super::*;
-use crate::common::table::state_table::StateTable;
+use crate::common::table::state_table::{StateTable, StateTableBuilder};
 use crate::executor::hash_join::*;
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::{ActorContextRef, JoinType};
+use crate::executor::{ActorContextRef, CpuEncoding, JoinType, MemoryEncoding};
 use crate::task::AtomicU64Ref;
 
 pub struct HashJoinExecutorBuilder;
@@ -71,7 +69,7 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
                 .map(|key| *key as usize)
                 .collect_vec(),
         );
-        let null_safe = node.get_null_safe().to_vec();
+        let null_safe = node.get_null_safe().clone();
         let output_indices = node
             .get_output_indices()
             .iter()
@@ -86,36 +84,64 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             Err(_) => None,
         };
         trace!("Join non-equi condition: {:?}", condition);
-        let mut inequality_pairs = Vec::with_capacity(node.get_inequality_pairs().len());
-        for inequality_pair in node.get_inequality_pairs() {
-            let key_required_larger = inequality_pair.get_key_required_larger() as usize;
-            let key_required_smaller = inequality_pair.get_key_required_smaller() as usize;
-            inequality_pairs.push((
-                key_required_larger,
-                key_required_smaller,
-                inequality_pair.get_clean_state(),
-                if let Some(delta_expression) = inequality_pair.delta_expression.as_ref() {
-                    let data_type = source_l.schema().fields
-                        [min(key_required_larger, key_required_smaller)]
-                    .data_type();
-                    Some(build_func_non_strict(
-                        delta_expression.delta_type(),
-                        data_type.clone(),
-                        vec![
-                            Box::new(InputRefExpression::new(data_type, 0)),
-                            build_non_strict_from_prost(
-                                delta_expression.delta.as_ref().unwrap(),
-                                params.eval_error_report.clone(),
-                            )?
-                            .into_inner(),
-                        ],
-                        params.eval_error_report.clone(),
-                    )?)
-                } else {
-                    None
-                },
-            ));
-        }
+
+        // Parse inequality pairs - prefer V2 format if available
+        let inequality_pairs: Vec<InequalityPairInfo> =
+            if !node.get_inequality_pairs_v2().is_empty() {
+                // Use new V2 format
+                node.get_inequality_pairs_v2()
+                    .iter()
+                    .map(|pair| InequalityPairInfo {
+                        left_idx: pair.get_left_idx() as usize,
+                        right_idx: pair.get_right_idx() as usize,
+                        clean_left_state: pair.get_clean_left_state(),
+                        clean_right_state: pair.get_clean_right_state(),
+                        op: pair.op(),
+                    })
+                    .collect()
+            } else {
+                // Fall back to old format for backward compatibility
+                node.get_inequality_pairs()
+                    .iter()
+                    .map(|pair| {
+                        let key_required_larger = pair.get_key_required_larger() as usize;
+                        let key_required_smaller = pair.get_key_required_smaller() as usize;
+                        let left_input_len = source_l.schema().len();
+
+                        // Convert old format to new format
+                        // In old format: key_required_larger >= key_required_smaller
+                        // Determine which side is left/right based on column indices
+                        let (left_idx, right_idx, clean_left, clean_right, op) =
+                            if key_required_larger < left_input_len {
+                                // Larger key is on left side
+                                (
+                                    key_required_larger,
+                                    key_required_smaller - left_input_len,
+                                    pair.get_clean_state(),
+                                    false,
+                                    InequalityType::GreaterThanOrEqual,
+                                )
+                            } else {
+                                // Larger key is on right side
+                                (
+                                    key_required_smaller,
+                                    key_required_larger - left_input_len,
+                                    false,
+                                    pair.get_clean_state(),
+                                    InequalityType::LessThanOrEqual,
+                                )
+                            };
+
+                        InequalityPairInfo {
+                            left_idx,
+                            right_idx,
+                            clean_left_state: clean_left,
+                            clean_right_state: clean_right,
+                            op,
+                        }
+                    })
+                    .collect()
+            };
 
         let join_key_data_types = params_l
             .join_key_indices
@@ -123,16 +149,31 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             .map(|idx| source_l.schema().fields[*idx].data_type())
             .collect_vec();
 
-        let state_table_l =
-            StateTable::from_table_catalog(table_l, store.clone(), Some(vnodes.clone())).await;
+        let state_table_l = StateTableBuilder::new(table_l, store.clone(), Some(vnodes.clone()))
+            .enable_preload_all_rows_by_config(&params.config)
+            .build()
+            .await;
         let degree_state_table_l =
-            StateTable::from_table_catalog(degree_table_l, store.clone(), Some(vnodes.clone()))
+            StateTableBuilder::new(degree_table_l, store.clone(), Some(vnodes.clone()))
+                .enable_preload_all_rows_by_config(&params.config)
+                .build()
                 .await;
 
-        let state_table_r =
-            StateTable::from_table_catalog(table_r, store.clone(), Some(vnodes.clone())).await;
-        let degree_state_table_r =
-            StateTable::from_table_catalog(degree_table_r, store, Some(vnodes)).await;
+        let state_table_r = StateTableBuilder::new(table_r, store.clone(), Some(vnodes.clone()))
+            .enable_preload_all_rows_by_config(&params.config)
+            .build()
+            .await;
+        let degree_state_table_r = StateTableBuilder::new(degree_table_r, store, Some(vnodes))
+            .enable_preload_all_rows_by_config(&params.config)
+            .build()
+            .await;
+
+        // Previously, the `join_encoding_type` is persisted in the plan node.
+        // Now it's always `Unspecified` and we should refer to the job's config override.
+        #[allow(deprecated)]
+        let join_encoding_type = node
+            .get_join_encoding_type()
+            .map_or(params.config.developer.join_encoding_type, Into::into);
 
         let args = HashJoinExecutorDispatcherArgs {
             ctx: params.actor_context,
@@ -154,12 +195,10 @@ impl ExecutorBuilder for HashJoinExecutorBuilder {
             metrics: params.executor_stats,
             join_type_proto: node.get_join_type()?,
             join_key_data_types,
-            chunk_size: params.env.config().developer.chunk_size,
-            high_join_amplification_threshold: params
-                .env
-                .config()
-                .developer
+            chunk_size: params.config.developer.chunk_size,
+            high_join_amplification_threshold: (params.config.developer)
                 .high_join_amplification_threshold,
+            join_encoding_type,
         };
 
         let exec = args.dispatch()?;
@@ -177,7 +216,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     null_safe: Vec<bool>,
     output_indices: Vec<usize>,
     cond: Option<NonStrictExpression>,
-    inequality_pairs: Vec<(usize, usize, bool, Option<NonStrictExpression>)>,
+    inequality_pairs: Vec<InequalityPairInfo>,
     state_table_l: StateTable<S>,
     degree_state_table_l: StateTable<S>,
     state_table_r: StateTable<S>,
@@ -189,6 +228,7 @@ struct HashJoinExecutorDispatcherArgs<S: StateStore> {
     join_key_data_types: Vec<DataType>,
     chunk_size: usize,
     high_join_amplification_threshold: usize,
+    join_encoding_type: JoinEncodingType,
 }
 
 impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
@@ -197,43 +237,56 @@ impl<S: StateStore> HashKeyDispatcher for HashJoinExecutorDispatcherArgs<S> {
     fn dispatch_impl<K: HashKey>(self) -> Self::Output {
         /// This macro helps to fill the const generic type parameter.
         macro_rules! build {
-            ($join_type:ident) => {
-                Ok(HashJoinExecutor::<K, S, { JoinType::$join_type }>::new(
-                    self.ctx,
-                    self.info,
-                    self.source_l,
-                    self.source_r,
-                    self.params_l,
-                    self.params_r,
-                    self.null_safe,
-                    self.output_indices,
-                    self.cond,
-                    self.inequality_pairs,
-                    self.state_table_l,
-                    self.degree_state_table_l,
-                    self.state_table_r,
-                    self.degree_state_table_r,
-                    self.lru_manager,
-                    self.is_append_only,
-                    self.metrics,
-                    self.chunk_size,
-                    self.high_join_amplification_threshold,
+            ($join_type:ident, $join_encoding:ident) => {
+                Ok(
+                    HashJoinExecutor::<K, S, { JoinType::$join_type }, $join_encoding>::new(
+                        self.ctx,
+                        self.info,
+                        self.source_l,
+                        self.source_r,
+                        self.params_l,
+                        self.params_r,
+                        self.null_safe,
+                        self.output_indices,
+                        self.cond,
+                        self.inequality_pairs,
+                        self.state_table_l,
+                        self.degree_state_table_l,
+                        self.state_table_r,
+                        self.degree_state_table_r,
+                        self.lru_manager,
+                        self.is_append_only,
+                        self.metrics,
+                        self.chunk_size,
+                        self.high_join_amplification_threshold,
+                    )
+                    .boxed(),
                 )
-                .boxed())
             };
         }
-        match self.join_type_proto {
-            JoinTypeProto::AsofInner
-            | JoinTypeProto::AsofLeftOuter
-            | JoinTypeProto::Unspecified => unreachable!(),
-            JoinTypeProto::Inner => build!(Inner),
-            JoinTypeProto::LeftOuter => build!(LeftOuter),
-            JoinTypeProto::RightOuter => build!(RightOuter),
-            JoinTypeProto::FullOuter => build!(FullOuter),
-            JoinTypeProto::LeftSemi => build!(LeftSemi),
-            JoinTypeProto::LeftAnti => build!(LeftAnti),
-            JoinTypeProto::RightSemi => build!(RightSemi),
-            JoinTypeProto::RightAnti => build!(RightAnti),
+
+        macro_rules! build_match {
+            ($($join_type:ident),*) => {
+                match (self.join_type_proto, self.join_encoding_type) {
+                    (JoinTypeProto::AsofInner, _)
+                    | (JoinTypeProto::AsofLeftOuter, _)
+                    | (JoinTypeProto::Unspecified, _) => unreachable!(),
+                    $(
+                        (JoinTypeProto::$join_type, JoinEncodingType::Memory) => build!($join_type, MemoryEncoding),
+                        (JoinTypeProto::$join_type, JoinEncodingType::Cpu) => build!($join_type, CpuEncoding),
+                    )*
+                }
+            };
+        }
+        build_match! {
+            Inner,
+            LeftOuter,
+            RightOuter,
+            FullOuter,
+            LeftSemi,
+            LeftAnti,
+            RightSemi,
+            RightAnti
         }
     }
 

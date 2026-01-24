@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use std::sync::Arc;
 use std::time::SystemTime;
 
 use parking_lot::RwLock;
-use risingwave_pb::meta::event_log::{Event as PbEvent, Event};
 use risingwave_pb::meta::EventLog as PbEventLog;
+use risingwave_pb::meta::event_log::{Event as PbEvent, Event};
 use tokio::task::JoinHandle;
 
 pub type EventLogManagerRef = Arc<EventLogManger>;
@@ -149,7 +149,7 @@ impl EventLogManger {
         self.event_logs
             .read()
             .values()
-            .flat_map(|v| v.iter().map(|e| e.payload.to_owned()))
+            .flat_map(|v| v.iter().map(|e| e.payload.clone()))
             .collect()
     }
 }
@@ -172,6 +172,8 @@ impl From<&EventLog> for ChannelId {
             Event::CollectBarrierFail(_) => 6,
             Event::WorkerNodePanic(_) => 7,
             Event::AutoSchemaChangeFail(_) => 8,
+            Event::SinkFail(_) => 9,
+            Event::Recovery(_) => 10,
         }
     }
 }

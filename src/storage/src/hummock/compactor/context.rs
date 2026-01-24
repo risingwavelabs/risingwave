@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 use std::sync::Arc;
 
 use super::task_progress::TaskProgressManagerRef;
+use crate::hummock::MemoryLimiter;
 use crate::hummock::compactor::CompactionExecutor;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::MemoryLimiter;
 use crate::monitor::CompactorMetrics;
 use crate::opts::StorageOpts;
 

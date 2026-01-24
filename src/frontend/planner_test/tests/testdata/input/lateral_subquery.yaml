@@ -98,8 +98,7 @@
     create table t2(c varchar, p varchar, id varchar, d varchar);
     select array_agg(t1.n order by path_idx) from t1
     join t2
-    on t1.c = 'abc'
-    and t2.c = 'abc'
+    on t1.c = 'abc' and t2.c = 'abc' and t1.c = t2.c
     cross join unnest((case when t2.p <> '' then (string_to_array(trim(t2.p, ','), ',') || t2.d) else ARRAY[t2.d] end)) WITH ORDINALITY AS path_cols(path_val, path_idx)
     where path_val = t1.id;
   expected_outputs:
@@ -134,3 +133,53 @@
     )d on true;
   expected_outputs:
     - batch_plan
+- name: lateral join with CTE
+  sql: |
+    create table t1(x int, y int);
+    create table t2(x int, y int);
+    select * from t1, lateral (
+        with cte as (select * from t2 where t2.y = t1.y)  select x from cte
+    );
+  expected_outputs:
+    - batch_plan
+- name: use lateral join to express asof join
+  sql: |
+    create table t1 (
+      price_at date,
+      qid varchar,
+      price float,
+      currency varchar,
+    );
+    create table t2 (
+      ex_date date,
+      qid varchar,
+      factor float,
+    );
+    create table t3 (
+      price_at date,
+      qid varchar
+    );
+    SELECT
+        *
+    FROM t1
+    LEFT JOIN LATERAL (
+        SELECT
+            t2.ex_date,
+            t2.factor
+        FROM (
+          select * from t2
+        ) t2
+        WHERE
+            t1.qid = t2.qid
+            AND t1.price_at IN (
+                SELECT MAX(t3.price_at) AS price_at from t3
+                WHERE
+                    t3.price_at < t2.ex_date
+                    AND t3.qid = t2.qid
+            )
+        ORDER BY t2.ex_date
+        LIMIT 1
+    ) t2 ON TRUE;
+  expected_outputs:
+    - batch_plan
+    - stream_plan

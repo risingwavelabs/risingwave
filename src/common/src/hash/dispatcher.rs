@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use super::HashKey;
 use crate::dispatch_data_types;
 use crate::hash::{
-    self, HashKeySer, HeapNullBitmap, NullBitmap, StackNullBitmap, MAX_GROUP_KEYS_ON_STACK,
+    self, HashKeySer, HeapNullBitmap, MAX_GROUP_KEYS_ON_STACK, NullBitmap, StackNullBitmap,
 };
 use crate::types::DataType;
 
@@ -143,7 +143,7 @@ pub fn calc_hash_key_kind(data_types: &[DataType]) -> HashKeyKind {
 #[cfg(test)]
 mod tests {
 
-    use super::{calc_hash_key_kind, HashKeyKind};
+    use super::{HashKeyKind, calc_hash_key_kind};
     use crate::types::DataType;
 
     fn all_data_types() -> Vec<DataType> {

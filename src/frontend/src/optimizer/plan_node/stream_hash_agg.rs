@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,19 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
-use super::utils::{childless_record, plan_node_name, watermark_pretty, Distill};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::error::{ErrorCode, Result};
+use super::utils::{Distill, childless_record, plan_node_name, watermark_pretty};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamPlanRef as PlanRef, TryToStreamPb};
+use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::{ColIndexMapping, ColIndexMappingRewriteExt, IndexSet};
 
@@ -52,7 +52,7 @@ impl StreamHashAgg {
         core: generic::Agg<PlanRef>,
         vnode_col_idx: Option<usize>,
         row_count_idx: usize,
-    ) -> Self {
+    ) -> Result<Self> {
         Self::new_with_eowc(core, vnode_col_idx, row_count_idx, false)
     }
 
@@ -61,8 +61,9 @@ impl StreamHashAgg {
         vnode_col_idx: Option<usize>,
         row_count_idx: usize,
         emit_on_window_close: bool,
-    ) -> Self {
+    ) -> Result<Self> {
         assert_eq!(core.agg_calls[row_count_idx], PlanAggCall::count_star());
+        reject_upsert_input!(core.input);
 
         let input = core.input.clone();
         let input_dist = input.distribution();
@@ -70,19 +71,24 @@ impl StreamHashAgg {
             .i2o_col_mapping()
             .rewrite_provided_distribution(input_dist);
 
-        let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        let mut watermark_columns = WatermarkColumns::new();
         let mut window_col_idx = None;
         let mapping = core.i2o_col_mapping();
         if emit_on_window_close {
-            let wtmk_group_key = core.watermark_group_key(input.watermark_columns());
-            assert!(wtmk_group_key.len() == 1); // checked in `to_eowc_version`
-            window_col_idx = Some(wtmk_group_key[0]);
-            // EOWC HashAgg only produce one watermark column, i.e. the window column
-            watermark_columns.insert(mapping.map(wtmk_group_key[0]));
+            let window_col = core
+                .eowc_window_column(input.watermark_columns())
+                .expect("checked in `to_eowc_version`");
+            // EOWC HashAgg only propagate one watermark column, the window column.
+            watermark_columns.insert(
+                mapping.map(window_col),
+                input.watermark_columns().get_group(window_col).unwrap(),
+            );
+            window_col_idx = Some(window_col);
         } else {
             for idx in core.group_key.indices() {
-                if input.watermark_columns().contains(idx) {
-                    watermark_columns.insert(mapping.map(idx));
+                if let Some(wtmk_group) = input.watermark_columns().get_group(idx) {
+                    // Non-EOWC `StreamHashAgg` simply forwards the watermark messages from the input.
+                    watermark_columns.insert(mapping.map(idx), wtmk_group);
                 }
             }
         }
@@ -91,19 +97,25 @@ impl StreamHashAgg {
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            emit_on_window_close, // in EOWC mode, we produce append only output
+            if emit_on_window_close {
+                // in EOWC mode, we produce append only output
+                StreamKind::AppendOnly
+            } else {
+                StreamKind::Retract
+            },
             emit_on_window_close,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
-        StreamHashAgg {
+
+        Ok(StreamHashAgg {
             base,
             core,
             vnode_col_idx,
             row_count_idx,
             emit_on_window_close,
             window_col_idx,
-        }
+        })
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -122,23 +134,16 @@ impl StreamHashAgg {
     // optimize for 2-phase EOWC aggregation later.
     pub fn to_eowc_version(&self) -> Result<PlanRef> {
         let input = self.input();
-        let wtmk_group_key = self.core.watermark_group_key(input.watermark_columns());
 
-        if wtmk_group_key.is_empty() || wtmk_group_key.len() > 1 {
-            return Err(ErrorCode::NotSupported(
-                "The query cannot be executed in Emit-On-Window-Close mode.".to_string(),
-                "Please make sure there is one and only one watermark column in GROUP BY"
-                    .to_string(),
-            )
-            .into());
-        }
+        // check whether the group by columns are valid
+        let _ = self.core.eowc_window_column(input.watermark_columns())?;
 
         Ok(Self::new_with_eowc(
             self.core.clone(),
             self.vnode_col_idx,
             self.row_count_idx,
             true,
-        )
+        )?
         .into())
     }
 }
@@ -160,7 +165,7 @@ impl Distill for StreamHashAgg {
     }
 }
 
-impl PlanTreeNodeUnary for StreamHashAgg {
+impl PlanTreeNodeUnary<Stream> for StreamHashAgg {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -170,30 +175,37 @@ impl PlanTreeNodeUnary for StreamHashAgg {
             input,
             ..self.core.clone()
         };
+
         Self::new_with_eowc(
             logical,
             self.vnode_col_idx,
             self.row_count_idx,
             self.emit_on_window_close,
         )
+        .unwrap()
     }
 }
-impl_plan_tree_node_for_unary! { StreamHashAgg }
+impl_plan_tree_node_for_unary! { Stream, StreamHashAgg }
 
-impl StreamNode for StreamHashAgg {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
+impl TryToStreamPb for StreamHashAgg {
+    fn try_to_stream_prost_body(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbNodeBody> {
         use risingwave_pb::stream_plan::*;
         let (intermediate_state_table, agg_states, distinct_dedup_tables) =
             self.core
                 .infer_tables(&self.base, self.vnode_col_idx, self.window_col_idx);
 
-        PbNodeBody::HashAgg(HashAggNode {
+        let agg_calls = self
+            .agg_calls()
+            .iter()
+            .map(|call| call.to_protobuf_checked_pure(self.input().stream_kind().is_retract()))
+            .collect::<crate::error::Result<Vec<_>>>()?;
+
+        Ok(PbNodeBody::HashAgg(Box::new(HashAggNode {
             group_key: self.group_key().to_vec_as_u32(),
-            agg_calls: self
-                .agg_calls()
-                .iter()
-                .map(PlanAggCall::to_protobuf)
-                .collect(),
+            agg_calls,
 
             is_append_only: self.input().append_only(),
             agg_call_states: agg_states
@@ -219,12 +231,12 @@ impl StreamNode for StreamHashAgg {
                 .collect(),
             row_count_index: self.row_count_idx as u32,
             emit_on_window_close: self.base.emit_on_window_close(),
-            version: PbAggNodeVersion::Issue13465 as _,
-        })
+            version: PbAggNodeVersion::LATEST as _,
+        })))
     }
 }
 
-impl ExprRewritable for StreamHashAgg {
+impl ExprRewritable<Stream> for StreamHashAgg {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -238,6 +250,7 @@ impl ExprRewritable for StreamHashAgg {
             self.row_count_idx,
             self.emit_on_window_close,
         )
+        .unwrap()
         .into()
     }
 }

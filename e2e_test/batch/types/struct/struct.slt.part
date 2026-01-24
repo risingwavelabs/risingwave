@@ -93,6 +93,19 @@ select Row('foo', 'bar', null);
 (foo,bar,)
 
 query T
+select (Row('foo', 'bar')).f1;
+----
+foo
+
+query T
+select (Row('foo', 'bar')).f2;
+----
+bar
+
+query error column "f3" not found in struct type
+select (Row('foo', 'bar')).f3;
+
+query T
 select Row();
 ----
 ()

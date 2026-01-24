@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use futures_async_stream::try_stream;
-use futures_util::stream::BoxStream;
 use futures_util::StreamExt;
+use futures_util::stream::BoxStream;
 use risingwave_common::array::{Array, ArrayBuilder, ArrayImpl, DataChunk};
 use risingwave_common::types::{DataType, DatumRef};
-use risingwave_pb::expr::table_function::PbType;
 use risingwave_pb::expr::PbTableFunction;
+use risingwave_pb::expr::table_function::PbType;
 
 use super::{ExprError, Result};
-use crate::expr::{build_from_prost as expr_build_from_prost, BoxedExpression};
+use crate::expr::{BoxedExpression, build_from_prost as expr_build_from_prost};
 
 mod empty;
 mod repeat;
@@ -42,7 +42,7 @@ pub trait TableFunction: std::fmt::Debug + Sync + Send {
     /// # Contract of the output
     ///
     /// The returned `DataChunk` contains two or three columns:
-    /// - The first column is an I32Array containing row indices of input chunk. It should be
+    /// - The first column is an `I32Array` containing row indices of input chunk. It should be
     ///   monotonically increasing.
     /// - The second column is the output values. The data type of the column is `return_type`.
     /// - (Optional) If any error occurs, the error message is stored in the third column.
@@ -232,17 +232,17 @@ impl<'a> TableFunctionOutputIter<'a> {
 
 /// Checks if the output chunk returned by `TableFunction::eval` contains any error.
 pub fn check_error(chunk: &DataChunk) -> Result<()> {
-    if let Some(errors) = chunk.columns().get(2) {
-        if errors.null_bitmap().any() {
-            return Err(ExprError::Custom(
-                errors
-                    .as_utf8()
-                    .iter()
-                    .find_map(|s| s)
-                    .expect("no error message")
-                    .into(),
-            ));
-        }
+    if let Some(errors) = chunk.columns().get(2)
+        && errors.null_bitmap().any()
+    {
+        return Err(ExprError::Custom(
+            errors
+                .as_utf8()
+                .iter()
+                .find_map(|s| s)
+                .expect("no error message")
+                .into(),
+        ));
     }
     Ok(())
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,24 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, VecDeque};
+use std::collections::{BTreeMap, HashMap};
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::AtomicBool;
 use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 
+use anyhow::anyhow;
 use bytes::Bytes;
 use itertools::Itertools;
+use parking_lot::lock_api::RwLock;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    version_archive_dir, version_checkpoint_path, CompactionGroupId, HummockCompactionTaskId,
-    HummockContextId, HummockVersionId,
+    CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockVersionId,
+    version_archive_dir, version_checkpoint_path,
 };
-use risingwave_meta_model_v2::{
+use risingwave_meta_model::{
     compaction_status, compaction_task, hummock_pinned_version, hummock_version_delta,
     hummock_version_stats,
 };
@@ -34,16 +37,18 @@ use risingwave_pb::hummock::{
     HummockVersionStats, PbCompactTaskAssignment, PbCompactionGroupInfo,
     SubscribeCompactionEventRequest,
 };
-use tokio::sync::mpsc::UnboundedSender;
+use table_write_throughput_statistic::TableWriteThroughputStatisticManager;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::{Mutex, Semaphore};
 use tonic::Streaming;
 
+use crate::MetaResult;
+use crate::hummock::CompactorManagerRef;
 use crate::hummock::compaction::CompactStatus;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::{DeleteObjectTracker, FullGcState, PagedMetrics};
-use crate::hummock::CompactorManagerRef;
+use crate::hummock::manager::gc::{FullGcState, GcManager};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::model::{ClusterId, MetadataModelError};
 use crate::rpc::metrics::MetaMetrics;
@@ -58,6 +63,7 @@ pub(crate) mod checkpoint;
 mod commit_epoch;
 mod compaction;
 pub mod sequence;
+pub mod table_write_throughput_statistic;
 pub mod time_travel;
 mod timer_task;
 mod transaction;
@@ -65,10 +71,40 @@ mod utils;
 mod worker;
 
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
+pub use compaction::compaction_event_loop::*;
 use compaction::*;
-pub use compaction::{check_cg_write_limit, WriteLimitType};
+pub use compaction::{GroupState, GroupStateValidator};
 pub(crate) use utils::*;
 
+struct TableCommittedEpochNotifiers {
+    txs: HashMap<TableId, Vec<UnboundedSender<u64>>>,
+}
+
+impl TableCommittedEpochNotifiers {
+    fn notify_deltas(&mut self, deltas: &[HummockVersionDelta]) {
+        self.txs.retain(|table_id, txs| {
+            let mut is_dropped = false;
+            let mut committed_epoch = None;
+            for delta in deltas {
+                if delta.removed_table_ids.contains(table_id) {
+                    is_dropped = true;
+                    break;
+                }
+                if let Some(info) = delta.state_table_info_delta.get(table_id) {
+                    committed_epoch = Some(info.committed_epoch);
+                }
+            }
+            if is_dropped {
+                false
+            } else if let Some(committed_epoch) = committed_epoch {
+                txs.retain(|tx| tx.send(committed_epoch).is_ok());
+                !txs.is_empty()
+            } else {
+                true
+            }
+        })
+    }
+}
 // Update to states are performed as follow:
 // - Initialize ValTransaction for the meta state to update
 // - Make changes on the ValTransaction.
@@ -90,35 +126,36 @@ pub struct HummockManager {
     pub metrics: Arc<MetaMetrics>,
 
     pub compactor_manager: CompactorManagerRef,
+    pub iceberg_compactor_manager: Arc<IcebergCompactorManager>,
     event_sender: HummockManagerEventSender,
-
-    delete_object_tracker: DeleteObjectTracker,
-
     object_store: ObjectStoreRef,
     version_checkpoint_path: String,
     version_archive_dir: String,
     pause_version_checkpoint: AtomicBool,
-    history_table_throughput: parking_lot::RwLock<HashMap<u32, VecDeque<u64>>>,
+    table_write_throughput_statistic_manager:
+        parking_lot::RwLock<TableWriteThroughputStatisticManager>,
+    table_committed_epoch_notifiers: parking_lot::Mutex<TableCommittedEpochNotifiers>,
 
     // for compactor
     // `compactor_streams_change_tx` is used to pass the mapping from `context_id` to event_stream
     // and is maintained in memory. All event_streams are consumed through a separate event loop
-    compactor_streams_change_tx: UnboundedSender<(u32, Streaming<SubscribeCompactionEventRequest>)>,
+    compactor_streams_change_tx:
+        UnboundedSender<(HummockContextId, Streaming<SubscribeCompactionEventRequest>)>,
 
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
     pub compaction_state: CompactionState,
-    full_gc_state: FullGcState,
-    /// Gather metrics that require accumulation across multiple operations.
-    /// For example, to get the total number of objects in object store, multiple LISTs are required because a single LIST can visit at most `full_gc_object_limit` objects.
-    paged_metrics: parking_lot::Mutex<PagedMetrics>,
+    full_gc_state: Arc<FullGcState>,
     now: Mutex<u64>,
     inflight_time_travel_query: Semaphore,
+    gc_manager: GcManager,
+
+    table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
 
-use risingwave_object_store::object::{build_remote_object_store, ObjectError, ObjectStoreRef};
+use risingwave_object_store::object::{ObjectError, ObjectStoreRef, build_remote_object_store};
 use risingwave_pb::catalog::Table;
 
 macro_rules! start_measure_real_process_timer {
@@ -132,6 +169,7 @@ macro_rules! start_measure_real_process_timer {
 }
 pub(crate) use start_measure_real_process_timer;
 
+use super::IcebergCompactorManager;
 use crate::controller::SqlMetaStore;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
 use crate::hummock::manager::worker::HummockManagerEventSender;
@@ -143,7 +181,7 @@ impl HummockManager {
         metrics: Arc<MetaMetrics>,
         compactor_manager: CompactorManagerRef,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
@@ -168,7 +206,7 @@ impl HummockManager {
         compactor_manager: CompactorManagerRef,
         config: risingwave_pb::hummock::CompactionConfig,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> HummockManagerRef {
@@ -195,13 +233,15 @@ impl HummockManager {
         compactor_manager: CompactorManagerRef,
         compaction_group_manager: CompactionGroupManager,
         compactor_streams_change_tx: UnboundedSender<(
-            u32,
+            HummockContextId,
             Streaming<SubscribeCompactionEventRequest>,
         )>,
     ) -> Result<HummockManagerRef> {
         let sys_params = env.system_params_reader().await;
         let state_store_url = sys_params.state_store();
+
         let state_store_dir: &str = sys_params.data_directory();
+        let use_new_object_prefix_strategy: bool = sys_params.use_new_object_prefix_strategy();
         let deterministic_mode = env.opts.compaction_deterministic_test;
         let mut object_store_config = env.opts.object_store_config.clone();
         // For fs and hdfs object store, operations are not always atomic.
@@ -243,8 +283,20 @@ impl HummockManager {
         let version_checkpoint_path = version_checkpoint_path(state_store_dir);
         let version_archive_dir = version_archive_dir(state_store_dir);
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let full_gc_object_limit = env.opts.full_gc_object_limit;
         let inflight_time_travel_query = env.opts.max_inflight_time_travel_query;
+        let gc_manager = GcManager::new(
+            object_store.clone(),
+            state_store_dir,
+            use_new_object_prefix_strategy,
+        );
+
+        let max_table_statistic_expired_time = std::cmp::max(
+            env.opts.table_stat_throuput_window_seconds_for_split,
+            env.opts.table_stat_throuput_window_seconds_for_merge,
+        ) as i64;
+
+        let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
+
         let instance = HummockManager {
             env,
             versioning: MonitoredRwLock::new(
@@ -269,25 +321,32 @@ impl HummockManager {
             ),
             metrics,
             metadata_manager,
-            // compaction_request_channel: parking_lot::RwLock::new(None),
             compactor_manager,
+            iceberg_compactor_manager,
             event_sender: tx,
-            delete_object_tracker: Default::default(),
             object_store,
             version_checkpoint_path,
             version_archive_dir,
             pause_version_checkpoint: AtomicBool::new(false),
-            history_table_throughput: parking_lot::RwLock::new(HashMap::default()),
+            table_write_throughput_statistic_manager: parking_lot::RwLock::new(
+                TableWriteThroughputStatisticManager::new(max_table_statistic_expired_time),
+            ),
+            table_committed_epoch_notifiers: parking_lot::Mutex::new(
+                TableCommittedEpochNotifiers {
+                    txs: Default::default(),
+                },
+            ),
             compactor_streams_change_tx,
             compaction_state: CompactionState::new(),
-            full_gc_state: FullGcState::new(Some(full_gc_object_limit)),
-            paged_metrics: parking_lot::Mutex::new(PagedMetrics::new()),
+            full_gc_state: FullGcState::new().into(),
             now: Mutex::new(0),
             inflight_time_travel_query: Semaphore::new(inflight_time_travel_query as usize),
+            gc_manager,
+            table_id_to_table_option: RwLock::new(HashMap::new()),
         };
         let instance = Arc::new(instance);
         instance.init_time_travel_state().await?;
-        instance.start_worker(rx).await;
+        instance.start_worker(rx);
         instance.load_meta_store_state().await?;
         instance.release_invalid_contexts().await?;
         // Release snapshots pinned by meta on restarting.
@@ -382,11 +441,29 @@ impl HummockManager {
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
             checkpoint_version
         };
-        for version_delta in hummock_version_deltas.values() {
-            if version_delta.prev_id == redo_state.id {
-                redo_state.apply_version_delta(version_delta);
+        let mut applied_delta_count = 0;
+        let total_to_apply = hummock_version_deltas.range(redo_state.id + 1..).count();
+        tracing::info!(
+            total_delta = hummock_version_deltas.len(),
+            total_to_apply,
+            "Start redo Hummock version."
+        );
+        for version_delta in hummock_version_deltas
+            .range(redo_state.id + 1..)
+            .map(|(_, v)| v)
+        {
+            assert_eq!(
+                version_delta.prev_id, redo_state.id,
+                "delta prev_id {}, redo state id {}",
+                version_delta.prev_id, redo_state.id
+            );
+            redo_state.apply_version_delta(version_delta);
+            applied_delta_count += 1;
+            if applied_delta_count % 1000 == 0 {
+                tracing::info!("Redo progress {applied_delta_count}/{total_to_apply}.");
             }
         }
+        tracing::info!("Finish redo Hummock version.");
         versioning_guard.version_stats = hummock_version_stats::Entity::find()
             .one(&meta_store.conn)
             .await
@@ -408,12 +485,6 @@ impl HummockManager {
             .into_iter()
             .map(|m| (m.context_id as HummockContextId, m.into()))
             .collect();
-
-        self.delete_object_tracker.clear();
-        // Not delete stale objects when archive or time travel is enabled
-        if !self.env.opts.enable_hummock_data_archive && !self.time_travel_enabled().await {
-            versioning_guard.mark_objects_for_deletion(context_info, &self.delete_object_tracker);
-        }
 
         self.initial_compaction_group_config_after_load(
             versioning_guard,
@@ -465,6 +536,36 @@ impl HummockManager {
     pub fn object_store_media_type(&self) -> &'static str {
         self.object_store.media_type()
     }
+
+    pub fn update_table_id_to_table_option(
+        &self,
+        new_table_id_to_table_option: HashMap<TableId, TableOption>,
+    ) {
+        *self.table_id_to_table_option.write() = new_table_id_to_table_option;
+    }
+
+    pub fn metadata_manager_ref(&self) -> &MetadataManager {
+        &self.metadata_manager
+    }
+
+    pub async fn subscribe_table_committed_epoch(
+        &self,
+        table_id: TableId,
+    ) -> MetaResult<(u64, UnboundedReceiver<u64>)> {
+        let version = self.versioning.read().await;
+        if let Some(epoch) = version.current_version.table_committed_epoch(table_id) {
+            let (tx, rx) = unbounded_channel();
+            self.table_committed_epoch_notifiers
+                .lock()
+                .txs
+                .entry(table_id)
+                .or_default()
+                .push(tx);
+            Ok((epoch, rx))
+        } else {
+            Err(anyhow!("table {} not exist", table_id).into())
+        }
+    }
 }
 
 async fn write_exclusive_cluster_id(
@@ -476,6 +577,7 @@ async fn write_exclusive_cluster_id(
     const CLUSTER_ID_NAME: &str = "0";
     let cluster_id_dir = format!("{}/{}/", state_store_dir, CLUSTER_ID_DIR);
     let cluster_id_full_path = format!("{}{}", cluster_id_dir, CLUSTER_ID_NAME);
+    tracing::info!("try reading cluster_id");
     match object_store.read(&cluster_id_full_path, ..).await {
         Ok(stored_cluster_id) => {
             let stored_cluster_id = String::from_utf8(stored_cluster_id.to_vec()).unwrap();
@@ -491,6 +593,7 @@ async fn write_exclusive_cluster_id(
         }
         Err(e) => {
             if e.is_object_not_found_error() {
+                tracing::info!("cluster_id not found, writing cluster_id");
                 object_store
                     .upload(&cluster_id_full_path, Bytes::from(String::from(cluster_id)))
                     .await?;

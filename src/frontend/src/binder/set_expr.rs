@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,11 +21,11 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_sqlparser::ast::{Corresponding, SetExpr, SetOperator};
 
-use super::statement::RewriteExprsRecursive;
 use super::UNNAMED_COLUMN;
+use super::statement::RewriteExprsRecursive;
 use crate::binder::{BindContext, Binder, BoundQuery, BoundSelect, BoundValues};
 use crate::error::{ErrorCode, Result};
-use crate::expr::{align_types, CorrelatedId, Depth};
+use crate::expr::{CorrelatedId, Depth, align_types};
 
 /// Part of a validated query, without order or limit clause. It may be composed of smaller
 /// `BoundSetExpr`(s) via set operators (e.g., union).
@@ -78,7 +78,6 @@ impl From<SetOperator> for BoundSetOperation {
 
 impl BoundSetExpr {
     /// The schema returned by this [`BoundSetExpr`].
-
     pub fn schema(&self) -> Cow<'_, Schema> {
         match self {
             BoundSetExpr::Select(s) => Cow::Borrowed(s.schema()),
@@ -105,13 +104,25 @@ impl BoundSetExpr {
         }
     }
 
-    pub fn is_correlated(&self, depth: Depth) -> bool {
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         match self {
-            BoundSetExpr::Select(s) => s.is_correlated(depth),
-            BoundSetExpr::Values(v) => v.is_correlated(depth),
-            BoundSetExpr::Query(q) => q.is_correlated(depth),
+            BoundSetExpr::Select(s) => s.is_correlated_by_depth(depth),
+            BoundSetExpr::Values(v) => v.is_correlated_by_depth(depth),
+            BoundSetExpr::Query(q) => q.is_correlated_by_depth(depth),
             BoundSetExpr::SetOperation { left, right, .. } => {
-                left.is_correlated(depth) || right.is_correlated(depth)
+                left.is_correlated_by_depth(depth) || right.is_correlated_by_depth(depth)
+            }
+        }
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        match self {
+            BoundSetExpr::Select(s) => s.is_correlated_by_correlated_id(correlated_id),
+            BoundSetExpr::Values(v) => v.is_correlated_by_correlated_id(correlated_id),
+            BoundSetExpr::Query(q) => q.is_correlated_by_correlated_id(correlated_id),
+            BoundSetExpr::SetOperation { left, right, .. } => {
+                left.is_correlated_by_correlated_id(correlated_id)
+                    || right.is_correlated_by_correlated_id(correlated_id)
             }
         }
     }
@@ -224,7 +235,7 @@ impl Binder {
         &self,
         left: &BoundSetExpr,
         right: &BoundSetExpr,
-        corresponding: Corresponding,
+        corresponding: &Corresponding,
         op: &SetOperator,
     ) -> Result<(ColIndexMapping, ColIndexMapping)> {
         let check_duplicate_name = |set_expr: &BoundSetExpr| {
@@ -233,7 +244,9 @@ impl Binder {
                 if name2idx.insert(field.name.clone(), idx).is_some() {
                     return Err(ErrorCode::InvalidInputSyntax(format!(
                         "Duplicated column name `{}` in a column list of the query in a {} operation. Column list of the query: ({}).",
-                        field.name, op, set_expr.schema().formatted_col_names(),
+                        field.name,
+                        op,
+                        set_expr.schema().formatted_col_names(),
                     )));
                 }
             }
@@ -304,11 +317,11 @@ impl Binder {
         Ok((corresponding_mapping_l, corresponding_mapping_r))
     }
 
-    pub(super) fn bind_set_expr(&mut self, set_expr: SetExpr) -> Result<BoundSetExpr> {
+    pub(super) fn bind_set_expr(&mut self, set_expr: &SetExpr) -> Result<BoundSetExpr> {
         match set_expr {
-            SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(*s)?))),
+            SetExpr::Select(s) => Ok(BoundSetExpr::Select(Box::new(self.bind_select(s)?))),
             SetExpr::Values(v) => Ok(BoundSetExpr::Values(Box::new(self.bind_values(v, None)?))),
-            SetExpr::Query(q) => Ok(BoundSetExpr::Query(Box::new(self.bind_query(*q)?))),
+            SetExpr::Query(q) => Ok(BoundSetExpr::Query(Box::new(self.bind_query(q)?))),
             SetExpr::SetOperation {
                 op,
                 all,
@@ -316,31 +329,27 @@ impl Binder {
                 left,
                 right,
             } => {
-                match op.clone() {
+                match op {
                     SetOperator::Union | SetOperator::Intersect | SetOperator::Except => {
-                        let mut left = self.bind_set_expr(*left)?;
+                        let mut left = self.bind_set_expr(left)?;
                         // Reset context for right side, but keep `cte_to_relation`.
                         let new_context = std::mem::take(&mut self.context);
                         self.context
                             .cte_to_relation
                             .clone_from(&new_context.cte_to_relation);
-                        let mut right = self.bind_set_expr(*right)?;
+                        self.context.disable_security_invoker =
+                            new_context.disable_security_invoker;
+                        let mut right = self.bind_set_expr(right)?;
 
                         let corresponding_col_indices = if corresponding.is_corresponding() {
-                            Some(Self::corresponding(
-                                self,
-                                &left,
-                                &right,
-                                corresponding,
-                                &op,
-                            )?)
+                            Some(Self::corresponding(self, &left, &right, corresponding, op)?)
                             // TODO: Align schema
                         } else {
-                            Self::align_schema(&mut left, &mut right, op.clone())?;
+                            Self::align_schema(&mut left, &mut right, *op)?;
                             None
                         };
 
-                        if all {
+                        if *all {
                             match op {
                                 SetOperator::Union => {}
                                 SetOperator::Intersect | SetOperator::Except => {
@@ -356,8 +365,8 @@ impl Binder {
                         self.context = BindContext::default();
                         self.context.cte_to_relation = new_context.cte_to_relation;
                         Ok(BoundSetExpr::SetOperation {
-                            op: op.into(),
-                            all,
+                            op: (*op).into(),
+                            all: *all,
                             corresponding_col_indices,
                             left: Box::new(left),
                             right: Box::new(right),

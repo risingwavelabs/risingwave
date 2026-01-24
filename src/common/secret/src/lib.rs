@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-type SecretId = u32;
+type SecretId = risingwave_pb::id::SecretId;
 
 mod secret_manager;
 pub use secret_manager::*;
@@ -20,3 +20,4 @@ mod encryption;
 pub use encryption::*;
 mod error;
 pub use error::*;
+pub mod vault_client;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,3 +14,10 @@
 
 pub(crate) mod batch_project_merge_rule;
 pub mod batch_push_limit_to_scan_rule;
+
+mod prelude {
+    pub(super) use crate::optimizer::plan_node::{Batch, BatchPlanRef as PlanRef};
+    pub(super) use crate::optimizer::rule::Rule;
+
+    pub(super) type BoxedRule = crate::optimizer::rule::BoxedRule<Batch>;
+}

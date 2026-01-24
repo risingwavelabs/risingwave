@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,17 @@
  */
 
 import {
-  primaryKeyColumn,
   Relations,
   streamingJobColumns,
+  tableColumns,
 } from "../components/Relations"
 import { getMaterializedViews } from "../lib/api/streaming"
 
 export default function MaterializedViews() {
-  return Relations("Materialized Views", getMaterializedViews, [
-    ...streamingJobColumns,
-    primaryKeyColumn,
-  ])
+  return Relations(
+    "Materialized Views",
+    getMaterializedViews,
+    [...streamingJobColumns, ...tableColumns],
+    { withStreamingJobs: true }
+  )
 }

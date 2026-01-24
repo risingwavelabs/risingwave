@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,8 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use std::sync::LazyLock;
 
 use enum_as_inner::EnumAsInner;
 
@@ -31,12 +33,15 @@ pub enum Deployment {
 impl Deployment {
     /// Returns the deployment environment detected from current environment variables.
     pub fn current() -> Self {
-        if env_var_is_true("RISINGWAVE_CI") {
-            Self::Ci
-        } else if env_var_is_true("RISINGWAVE_CLOUD") {
-            Self::Cloud
-        } else {
-            Self::Other
-        }
+        static CURRENT: LazyLock<Deployment> = LazyLock::new(|| {
+            if env_var_is_true("RISINGWAVE_CI") {
+                Deployment::Ci
+            } else if env_var_is_true("RISINGWAVE_CLOUD") {
+                Deployment::Cloud
+            } else {
+                Deployment::Other
+            }
+        });
+        *CURRENT
     }
 }

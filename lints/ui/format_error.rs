@@ -89,4 +89,10 @@ fn main() {
     let _ = format!("{}", box_dyn_err_1);
     info!("{}", box_dyn_err_2);
     let _ = box_dyn_err_3.to_string();
+
+    // We tolerate formatting error in `#[error("...")]`. Should not emit lint.
+    // TODO: shall we lint this as well?
+    #[derive(thiserror::Error, Debug)]
+    #[error("my io error: {0}")]
+    struct _MyIoError(std::io::Error);
 }

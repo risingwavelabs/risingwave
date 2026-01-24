@@ -40,6 +40,10 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
+            <artifactId>risingwave-jdbc-runner</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>com.risingwave</groupId>
             <artifactId>risingwave-sink-jdbc</artifactId>
         </dependency>
         <dependency>
@@ -48,11 +52,11 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-deltalake</artifactId>
+            <artifactId>s3-common</artifactId>
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
-            <artifactId>s3-common</artifactId>
+            <artifactId>tracing</artifactId>
         </dependency>
     </dependencies>
 
@@ -61,7 +65,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-assembly-plugin</artifactId>
-                <version>3.4.2</version>
+                <version>3.7.1</version>
                 <configuration>
                     <encoding>UTF-8</encoding>
                     <finalName>${assembly.name}</finalName>

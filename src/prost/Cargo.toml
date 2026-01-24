@@ -9,30 +9,31 @@ repository = { workspace = true }
 
 [dependencies]
 enum-as-inner = "0.6"
-pbjson = "0.7"
+paste = "1"
+pbjson = "0.9"
 prost = { workspace = true }
 prost-helpers = { path = "helpers" }
 risingwave_error = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-strum = { version = "0.26", features = ["derive"] }
-thiserror = "1"
+sea-orm  = { workspace = true }
+serde = { workspace = true }
+strum = { version = "0.27", features = ["derive"] }
+thiserror = { workspace = true }
+thiserror-ext = { workspace = true }
 tonic = { workspace = true }
+tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
 
+[dev-dependencies]
+static_assertions = "1"
+
 [build-dependencies]
-fs-err = "2.11"
-pbjson-build = "0.7"
+fs-err = "3.2"
+pbjson-build = "0.9"
 prost-build = { workspace = true }
 tonic-build = { workspace = true }
 walkdir = "2"
-
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
 
 [lints]
 workspace = true

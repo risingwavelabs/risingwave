@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -67,18 +67,18 @@ impl FromStr for SearchPath {
         for p in paths {
             let p = p.trim();
             if !p.is_empty() {
-                real_path.push(p.to_string());
+                real_path.push(p.to_owned());
             }
         }
         let string = real_path.join(SESSION_CONFIG_LIST_SEP);
 
         let mut path = real_path.clone();
-        let rw_catalog = RW_CATALOG_SCHEMA_NAME.to_string();
+        let rw_catalog = RW_CATALOG_SCHEMA_NAME.to_owned();
         if !real_path.contains(&rw_catalog) {
             path.insert(0, rw_catalog);
         }
 
-        let pg_catalog = PG_CATALOG_SCHEMA_NAME.to_string();
+        let pg_catalog = PG_CATALOG_SCHEMA_NAME.to_owned();
         if !real_path.contains(&pg_catalog) {
             path.insert(0, pg_catalog);
         }

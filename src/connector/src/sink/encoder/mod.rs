@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,6 +22,7 @@ use crate::sink::Result;
 
 mod avro;
 mod bson;
+pub mod bytes;
 mod json;
 mod proto;
 pub mod template;

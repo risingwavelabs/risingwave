@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,19 +18,19 @@ use std::time::Duration;
 
 use bytes::Bytes;
 use fail::fail_point;
-use futures::{stream, StreamExt};
+use futures::{StreamExt, stream};
 use opendal::layers::{RetryLayer, TimeoutLayer};
 use opendal::raw::BoxedStaticFuture;
 use opendal::services::Memory;
-use opendal::{Execute, Executor, Metakey, Operator, Writer};
+use opendal::{Execute, Executor, Operator, Writer};
 use risingwave_common::config::ObjectStoreConfig;
 use risingwave_common::range::RangeBoundsExt;
 use thiserror_ext::AsReport;
 
 use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::{
-    prefix, ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
-    ObjectResult, ObjectStore, OperationType, StreamingUploader,
+    ObjectDataStream, ObjectError, ObjectMetadata, ObjectMetadataIter, ObjectRangeBounds,
+    ObjectResult, ObjectStore, OperationType, StreamingUploader, prefix,
 };
 
 /// Opendal object storage.
@@ -38,7 +38,6 @@ use crate::object::{
 pub struct OpendalObjectStore {
     pub(crate) op: Operator,
     pub(crate) media_type: MediaType,
-
     pub(crate) config: Arc<ObjectStoreConfig>,
     pub(crate) metrics: Arc<ObjectStoreMetrics>,
 }
@@ -80,6 +79,7 @@ impl OpendalObjectStore {
         // Create memory backend builder.
         let builder = Memory::default();
         let op: Operator = Operator::new(builder)?.finish();
+
         Ok(Self {
             op,
             media_type: MediaType::Memory,
@@ -122,7 +122,7 @@ impl ObjectStore for OpendalObjectStore {
     async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
         Ok(OpendalStreamingUploader::new(
             self.op.clone(),
-            path.to_string(),
+            path.to_owned(),
             self.config.clone(),
             self.metrics.clone(),
             self.store_media_type(),
@@ -204,7 +204,7 @@ impl ObjectStore for OpendalObjectStore {
 
     async fn metadata(&self, path: &str) -> ObjectResult<ObjectMetadata> {
         let opendal_metadata = self.op.stat(path).await?;
-        let key = path.to_string();
+        let key = path.to_owned();
         let last_modified = match opendal_metadata.last_modified() {
             Some(t) => t.timestamp() as f64,
             None => 0_f64,
@@ -227,7 +227,7 @@ impl ObjectStore for OpendalObjectStore {
     /// Deletes the objects with the given paths permanently from the storage. If an object
     /// specified in the request is not found, it will be considered as successfully deleted.
     async fn delete_objects(&self, paths: &[String]) -> ObjectResult<()> {
-        self.op.remove(paths.to_vec()).await?;
+        self.op.delete_iter(paths.to_vec()).await?;
         Ok(())
     }
 
@@ -237,35 +237,56 @@ impl ObjectStore for OpendalObjectStore {
         start_after: Option<String>,
         limit: Option<usize>,
     ) -> ObjectResult<ObjectMetadataIter> {
-        let mut object_lister = self
-            .op
-            .lister_with(prefix)
-            .recursive(true)
-            .metakey(Metakey::ContentLength);
+        let mut object_lister = self.op.lister_with(prefix).recursive(true);
         if let Some(start_after) = start_after {
             object_lister = object_lister.start_after(&start_after);
         }
         let object_lister = object_lister.await?;
 
-        let stream = stream::unfold(object_lister, |mut object_lister| async move {
-            match object_lister.next().await {
-                Some(Ok(object)) => {
-                    let key = object.path().to_string();
-                    let om = object.metadata();
-                    let last_modified = match om.last_modified() {
-                        Some(t) => t.timestamp() as f64,
-                        None => 0_f64,
-                    };
-                    let total_size = om.content_length() as usize;
-                    let metadata = ObjectMetadata {
-                        key,
-                        last_modified,
-                        total_size,
-                    };
-                    Some((Ok(metadata), object_lister))
+        let op = self.op.clone();
+        let full_capability = op.info().full_capability();
+        let stream = stream::unfold(object_lister, move |mut object_lister| {
+            let op = op.clone();
+
+            async move {
+                match object_lister.next().await {
+                    Some(Ok(object)) => {
+                        let key = object.path().to_owned();
+
+                        // Check if we need to call stat() to get complete metadata.
+                        let (last_modified, total_size) = if !full_capability
+                            .list_has_content_length
+                            || !full_capability.list_has_last_modified
+                        {
+                            // Need complete metadata, call stat()
+                            let stat_meta = op.stat(&key).await.ok()?;
+                            let last_modified = match stat_meta.last_modified() {
+                                Some(t) => t.timestamp() as f64,
+                                None => 0_f64,
+                            };
+                            let total_size = stat_meta.content_length() as usize;
+                            (last_modified, total_size)
+                        } else {
+                            // Use metadata from list operation
+                            let meta = object.metadata();
+                            let last_modified = match meta.last_modified() {
+                                Some(t) => t.timestamp() as f64,
+                                None => 0_f64,
+                            };
+                            let total_size = meta.content_length() as usize;
+                            (last_modified, total_size)
+                        };
+
+                        let metadata = ObjectMetadata {
+                            key,
+                            last_modified,
+                            total_size,
+                        };
+                        Some((Ok(metadata), object_lister))
+                    }
+                    Some(Err(err)) => Some((Err(err.into()), object_lister)),
+                    None => None,
                 }
-                Some(Err(err)) => Some((Err(err.into()), object_lister)),
-                None => None,
             }
         });
 
@@ -278,6 +299,13 @@ impl ObjectStore for OpendalObjectStore {
 
     fn support_streaming_upload(&self) -> bool {
         self.op.info().native_capability().write_can_multi
+    }
+}
+
+impl OpendalObjectStore {
+    pub async fn copy(&self, from_path: &str, to_path: &str) -> ObjectResult<()> {
+        self.op.copy(from_path, to_path).await?;
+        Ok(())
     }
 }
 
@@ -327,11 +355,11 @@ pub struct OpendalStreamingUploader {
     is_valid: bool,
 
     abort_on_err: bool,
+
+    upload_part_size: usize,
 }
 
 impl OpendalStreamingUploader {
-    const UPLOAD_BUFFER_SIZE: usize = 16 * 1024 * 1024;
-
     pub async fn new(
         op: Operator,
         path: String,
@@ -340,11 +368,9 @@ impl OpendalStreamingUploader {
         media_type: &'static str,
     ) -> ObjectResult<Self> {
         let monitored_execute = OpendalStreamingUploaderExecute::new(metrics, media_type);
+        let executor = Executor::with(monitored_execute);
+        op.update_executor(|_| executor);
 
-        // The layer specified first will be executed first.
-        // `TimeoutLayer` must be specified before `RetryLayer`.
-        // Otherwise, it will lead to bad state inside OpenDAL and panic.
-        // See https://docs.rs/opendal/latest/opendal/layers/struct.RetryLayer.html#panics
         let writer = op
             .clone()
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
@@ -360,7 +386,6 @@ impl OpendalStreamingUploader {
             )
             .writer_with(&path)
             .concurrent(config.opendal_upload_concurrency)
-            .executor(Executor::with(monitored_execute))
             .await?;
         Ok(Self {
             writer,
@@ -368,6 +393,7 @@ impl OpendalStreamingUploader {
             not_uploaded_len: 0,
             is_valid: true,
             abort_on_err: config.opendal_writer_abort_on_err,
+            upload_part_size: config.upload_part_size,
         })
     }
 
@@ -394,7 +420,7 @@ impl StreamingUploader for OpendalStreamingUploader {
         assert!(self.is_valid);
         self.not_uploaded_len += data.len();
         self.buf.push(data);
-        if self.not_uploaded_len >= Self::UPLOAD_BUFFER_SIZE {
+        if self.not_uploaded_len >= self.upload_part_size {
             self.flush().await?;
         }
         Ok(())
@@ -423,8 +449,9 @@ impl StreamingUploader for OpendalStreamingUploader {
         Ok(())
     }
 
+    // Not absolutely accurate. Some bytes may be in the infight request.
     fn get_memory_usage(&self) -> u64 {
-        Self::UPLOAD_BUFFER_SIZE as u64
+        self.not_uploaded_len as u64
     }
 }
 
@@ -454,7 +481,7 @@ mod tests {
         store.read("/ab", 0..3).await.unwrap_err();
 
         let bytes = store.read("/abc", 4..6).await.unwrap();
-        assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_string());
+        assert_eq!(String::from_utf8(bytes.to_vec()).unwrap(), "56".to_owned());
 
         store.delete("/abc").await.unwrap();
 
@@ -476,7 +503,7 @@ mod tests {
     #[tokio::test]
     async fn test_memory_metadata() {
         let block = Bytes::from("123456");
-        let path = "/abc".to_string();
+        let path = "/abc".to_owned();
         let obj_store = OpendalObjectStore::test_new_memory_engine().unwrap();
         obj_store.upload("/abc", block).await.unwrap();
 

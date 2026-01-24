@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use futures::Stream;
+use risingwave_batch::task::BatchTaskContext;
 use risingwave_common::array::DataChunk;
 
 use crate::error::Result;
@@ -31,6 +32,8 @@ mod snapshot;
 pub use snapshot::*;
 mod local;
 pub use local::*;
+mod fast_insert;
+pub use fast_insert::*;
 
 use crate::scheduler::task_context::FrontendBatchTaskContext;
 
@@ -64,7 +67,7 @@ impl ExecutionContext {
         self.timeout
     }
 
-    pub fn to_batch_task_context(&self) -> FrontendBatchTaskContext {
-        FrontendBatchTaskContext::new(self.session.clone())
+    pub fn to_batch_task_context(&self) -> Arc<dyn BatchTaskContext> {
+        FrontendBatchTaskContext::create(self.session.clone())
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ async fn test_hash_agg_count_sum() {
     ];
 
     let (mut tx, source) = MockSource::channel();
-    let source = source.into_executor(schema, PkIndices::new());
+    let source = source.into_executor(schema, StreamKey::new());
     let hash_agg = new_boxed_hash_agg_executor(
         store,
         source,
@@ -271,7 +271,7 @@ async fn test_hash_agg_emit_on_window_close() {
 
     let create_executor = || async {
         let (tx, source) = MockSource::channel();
-        let source = source.into_executor(input_schema.clone(), PkIndices::new());
+        let source = source.into_executor(input_schema.clone(), StreamKey::new());
         let hash_agg = new_boxed_hash_agg_executor(
             store.clone(),
             source,

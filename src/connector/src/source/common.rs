@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::collections::HashMap;
 
 use futures::{Stream, StreamExt, TryStreamExt};
@@ -32,7 +33,7 @@ pub(crate) async fn into_chunk_stream(
     let actor_id = source_ctx.actor_id.to_string();
     let fragment_id = source_ctx.fragment_id.to_string();
     let source_id = source_ctx.source_id.to_string();
-    let source_name = source_ctx.source_name.to_string();
+    let source_name = source_ctx.source_name.clone();
     let metrics = source_ctx.metrics.clone();
     let mut partition_input_count = HashMap::new();
     let mut partition_bytes_count = HashMap::new();
@@ -43,7 +44,7 @@ pub(crate) async fn into_chunk_stream(
             let mut by_split_id = std::collections::HashMap::new();
 
             for msg in data_batch {
-                let split_id: String = msg.split_id.as_ref().to_string();
+                let split_id: String = msg.split_id.as_ref().to_owned();
                 by_split_id
                     .entry(split_id.clone())
                     .or_insert_with(Vec::new)
@@ -93,7 +94,7 @@ pub(crate) async fn into_chunk_stream(
     let parser =
         crate::parser::ByteStreamSourceParserImpl::create(parser_config, source_ctx).await?;
     #[for_await]
-    for msg_batch in parser.into_stream(data_stream) {
-        yield msg_batch?;
+    for chunk in parser.parse_stream(data_stream) {
+        yield chunk?;
     }
 }

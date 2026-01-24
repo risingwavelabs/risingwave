@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use risingwave_common::bail;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
 use risingwave_expr::expr::{BoxedExpression, Expression};
-use risingwave_expr::{build_function, Result};
+use risingwave_expr::{Result, build_function};
 
 #[derive(Debug)]
 struct WhenClause {
@@ -95,7 +95,7 @@ impl Expression for CaseExpression {
 
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         for WhenClause { when, then } in &self.when_clauses {
-            if when.eval_row(input).await?.map_or(false, |w| w.into_bool()) {
+            if when.eval_row(input).await?.is_some_and(|w| w.into_bool()) {
                 return then.eval_row(input).await;
             }
         }

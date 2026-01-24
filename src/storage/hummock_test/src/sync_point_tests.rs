@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,35 +12,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 use bytes::Bytes;
-use foyer::CacheContext;
+use foyer::Hint;
 use risingwave_common::catalog::hummock::CompactionFilterFlag;
-use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::key::{next_key, user_key};
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
-use risingwave_hummock_sdk::HummockVersionId;
 use risingwave_meta::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use risingwave_meta::hummock::compaction::selector::ManualCompactionOption;
 use risingwave_meta::hummock::test_utils::{setup_compute_env, setup_compute_env_with_config};
 use risingwave_meta::hummock::{HummockManagerRef, MockHummockMetaClient};
 use risingwave_rpc_client::HummockMetaClient;
-use risingwave_storage::filter_key_extractor::FilterKeyExtractorManager;
-use risingwave_storage::hummock::compactor::compactor_runner::compact;
-use risingwave_storage::hummock::compactor::CompactorContext;
-use risingwave_storage::hummock::{CachePolicy, GetObjectId, SstableObjectIdManager};
-use risingwave_storage::store::{LocalStateStore, NewLocalOptions, ReadOptions, StateStoreRead};
 use risingwave_storage::StateStore;
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgentRef;
+use risingwave_storage::hummock::compactor::CompactorContext;
+use risingwave_storage::hummock::compactor::compactor_runner::compact_with_agent;
+use risingwave_storage::hummock::test_utils::{ReadOptions, *};
+use risingwave_storage::hummock::{CachePolicy, GetObjectId, ObjectIdManager};
+use risingwave_storage::store::*;
 use serial_test::serial;
 
-use super::compactor_tests::tests::{get_hummock_storage, prepare_compactor_and_filter};
-use crate::compactor_tests::tests::flush_and_commit;
+use super::compactor_tests::tests::get_hummock_storage;
+use crate::compactor_tests::tests::{flush_and_commit, get_compactor_context};
 use crate::get_notification_client_for_test;
 use crate::local_state_store_test_utils::LocalStateStoreTestExt;
 use crate::test_utils::gen_key_from_bytes;
@@ -48,15 +48,14 @@ use crate::test_utils::gen_key_from_bytes;
 #[tokio::test]
 #[cfg(feature = "sync_point")]
 #[serial]
-async fn test_syncpoints_sstable_object_id_manager() {
+async fn test_syncpoints_object_id_manager() {
     let (_env, hummock_manager_ref, _cluster_manager_ref, worker_id) =
         setup_compute_env(8080).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager_ref.clone(),
         worker_id as _,
     ));
-    let sstable_object_id_manager =
-        Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
+    let object_id_manager = Arc::new(ObjectIdManager::new(hummock_meta_client.clone(), 5));
 
     // Block filling cache after fetching ids.
     sync_point::hook("MAP_NEXT_SST_OBJECT_ID.BEFORE_FILL_CACHE", || async {
@@ -69,9 +68,9 @@ async fn test_syncpoints_sstable_object_id_manager() {
     });
 
     // Start the task that fetches new ids.
-    let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+    let object_id_manager_clone = object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
-        sstable_object_id_manager_clone
+        object_id_manager_clone
             .get_new_sst_object_id()
             .await
             .unwrap();
@@ -86,9 +85,9 @@ async fn test_syncpoints_sstable_object_id_manager() {
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+        let object_id_manager_clone = object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
-            sstable_object_id_manager_clone
+            object_id_manager_clone
                 .get_new_sst_object_id()
                 .await
                 .unwrap();
@@ -121,8 +120,7 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
         hummock_manager_ref.clone(),
         worker_id as _,
     ));
-    let sstable_object_id_manager =
-        Arc::new(SstableObjectIdManager::new(hummock_meta_client.clone(), 5));
+    let object_id_manager = Arc::new(ObjectIdManager::new(hummock_meta_client.clone(), 5));
 
     // Block fetching ids.
     sync_point::hook("MAP_NEXT_SST_OBJECT_ID.BEFORE_FETCH", || async {
@@ -133,10 +131,10 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     });
 
     // Start the task that fetches new ids.
-    let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+    let object_id_manager_clone = object_id_manager.clone();
     let leader_task = tokio::spawn(async move {
         fail::cfg("get_new_sst_ids_err", "return").unwrap();
-        sstable_object_id_manager_clone
+        object_id_manager_clone
             .get_new_sst_object_id()
             .await
             .unwrap_err();
@@ -149,9 +147,9 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
     // Start tasks that waits to be notified.
     let mut follower_tasks = vec![];
     for _ in 0..3 {
-        let mut sstable_object_id_manager_clone = sstable_object_id_manager.clone();
+        let object_id_manager_clone = object_id_manager.clone();
         let follower_task = tokio::spawn(async move {
-            sstable_object_id_manager_clone
+            object_id_manager_clone
                 .get_new_sst_object_id()
                 .await
                 .unwrap();
@@ -178,8 +176,8 @@ async fn test_syncpoints_test_failpoints_fetch_ids() {
 pub async fn compact_once(
     hummock_manager_ref: HummockManagerRef,
     compact_ctx: CompactorContext,
-    filter_key_extractor_manager: FilterKeyExtractorManager,
-    sstable_object_id_manager: Arc<SstableObjectIdManager>,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    object_id_manager: Arc<ObjectIdManager>,
 ) {
     // 2. get compact task
     let manual_compcation_option = ManualCompactionOption {
@@ -201,12 +199,12 @@ pub async fn compact_once(
     compact_task.compaction_filter_mask = compaction_filter_flag.bits();
     // 3. compact
     let (_tx, rx) = tokio::sync::oneshot::channel();
-    let ((result_task, task_stats, object_timestamps), _) = compact(
+    let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
         compact_ctx,
         compact_task.clone(),
         rx,
-        Box::new(sstable_object_id_manager),
-        filter_key_extractor_manager.clone(),
+        object_id_manager,
+        compaction_catalog_agent_ref.clone(),
     )
     .await;
 
@@ -237,7 +235,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         hummock_manager_ref.clone(),
         worker_id as _,
     ));
-    let existing_table_id: u32 = 1;
+    let existing_table_id = 1.into();
 
     let storage = get_hummock_storage(
         hummock_meta_client.clone(),
@@ -252,10 +250,15 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         &[existing_table_id],
     )
     .await;
-    let (compact_ctx, filter_key_extractor_manager) =
-        prepare_compactor_and_filter(&storage, existing_table_id);
 
-    let sstable_object_id_manager = Arc::new(SstableObjectIdManager::new(
+    let compact_ctx = get_compactor_context(&storage);
+    let compaction_catalog_agent_ref = storage
+        .compaction_catalog_manager_ref()
+        .acquire(vec![existing_table_id])
+        .await
+        .unwrap();
+
+    let object_id_manager = Arc::new(ObjectIdManager::new(
         hummock_meta_client.clone(),
         storage
             .storage_opts()
@@ -264,7 +267,7 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     ));
 
     let mut local = storage
-        .new_local(NewLocalOptions::for_test(existing_table_id.into()))
+        .new_local(NewLocalOptions::for_test(existing_table_id))
         .await;
 
     // 1. add sstables
@@ -316,11 +319,12 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
         local.table_id(),
     )
     .await;
+
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
-        filter_key_extractor_manager.clone(),
-        sstable_object_id_manager.clone(),
+        compaction_catalog_agent_ref.clone(),
+        object_id_manager.clone(),
     )
     .await;
 
@@ -360,8 +364,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
-        filter_key_extractor_manager.clone(),
-        sstable_object_id_manager.clone(),
+        compaction_catalog_agent_ref.clone(),
+        object_id_manager.clone(),
     )
     .await;
 
@@ -402,8 +406,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
-        filter_key_extractor_manager.clone(),
-        sstable_object_id_manager.clone(),
+        compaction_catalog_agent_ref.clone(),
+        object_id_manager.clone(),
     )
     .await;
 
@@ -437,8 +441,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     compact_once(
         hummock_manager_ref.clone(),
         compact_ctx.clone(),
-        filter_key_extractor_manager.clone(),
-        sstable_object_id_manager.clone(),
+        compaction_catalog_agent_ref.clone(),
+        object_id_manager.clone(),
     )
     .await;
 
@@ -455,8 +459,8 @@ async fn test_syncpoints_get_in_delete_range_boundary() {
     );
     storage.wait_version(version).await;
     let read_options = ReadOptions {
-        table_id: TableId::from(existing_table_id),
-        cache_policy: CachePolicy::Fill(CacheContext::Default),
+        table_id: existing_table_id,
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
     let get_result = storage

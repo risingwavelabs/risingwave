@@ -18,31 +18,33 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::catalog::Field;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_sqlparser::ast::{DeclareCursorStatement, ObjectName, Query, Since, Statement};
+use risingwave_sqlparser::ast::{
+    DeclareCursorStatement, Ident, ObjectName, Query, Since, Statement,
+};
 
+use super::RwPgResponse;
 use super::query::{
-    gen_batch_plan_by_statement, gen_batch_plan_fragmenter, BatchPlanFragmenterResult,
+    BatchPlanFragmenterResult, gen_batch_plan_by_statement, gen_batch_plan_fragmenter,
 };
 use super::util::convert_unix_millis_to_logstore_u64;
-use super::RwPgResponse;
 use crate::error::{ErrorCode, Result};
-use crate::handler::query::{distribute_execute, local_execute};
 use crate::handler::HandlerArgs;
-use crate::session::cursor_manager::CursorDataChunkStream;
+use crate::handler::query::{distribute_execute, local_execute};
 use crate::session::SessionImpl;
+use crate::session::cursor_manager::CursorDataChunkStream;
 use crate::{Binder, OptimizerContext};
 
 pub async fn handle_declare_cursor(
-    handle_args: HandlerArgs,
+    handler_args: HandlerArgs,
     stmt: DeclareCursorStatement,
 ) -> Result<RwPgResponse> {
     match stmt.declare_cursor {
         risingwave_sqlparser::ast::DeclareCursor::Query(query) => {
-            handle_declare_query_cursor(handle_args, stmt.cursor_name, query).await
+            handle_declare_query_cursor(handler_args, stmt.cursor_name, query).await
         }
         risingwave_sqlparser::ast::DeclareCursor::Subscription(sub_name, rw_timestamp) => {
             handle_declare_subscription_cursor(
-                handle_args,
+                handler_args,
                 sub_name,
                 stmt.cursor_name,
                 rw_timestamp,
@@ -51,20 +53,19 @@ pub async fn handle_declare_cursor(
         }
     }
 }
-async fn handle_declare_subscription_cursor(
-    handle_args: HandlerArgs,
+pub async fn handle_declare_subscription_cursor(
+    handler_args: HandlerArgs,
     sub_name: ObjectName,
-    cursor_name: ObjectName,
+    cursor_name: Ident,
     rw_timestamp: Since,
 ) -> Result<RwPgResponse> {
-    let session = handle_args.session.clone();
-    let db_name = session.database();
-    let (schema_name, cursor_name) =
-        Binder::resolve_schema_qualified_name(db_name, cursor_name.clone())?;
-
-    let cursor_from_subscription_name = sub_name.0.last().unwrap().real_value().clone();
-    let subscription =
-        session.get_subscription_by_name(schema_name, &cursor_from_subscription_name)?;
+    let session = handler_args.session.clone();
+    let subscription = {
+        let db_name = &session.database();
+        let (sub_schema_name, sub_name) =
+            Binder::resolve_schema_qualified_name(db_name, &sub_name)?;
+        session.get_subscription_by_name(sub_schema_name, &sub_name)?
+    };
     // Start the first query of cursor, which includes querying the table and querying the subscription's logstore
     let start_rw_timestamp = match rw_timestamp {
         risingwave_sqlparser::ast::Since::TimestampMsNum(start_rw_timestamp) => {
@@ -85,11 +86,11 @@ async fn handle_declare_subscription_cursor(
     if let Err(e) = session
         .get_cursor_manager()
         .add_subscription_cursor(
-            cursor_name.clone(),
+            cursor_name.real_value(),
             start_rw_timestamp,
             subscription.dependent_table_id,
             subscription,
-            &handle_args,
+            &handler_args,
         )
         .await
     {
@@ -110,40 +111,58 @@ fn check_cursor_unix_millis(unix_millis: u64, retention_seconds: u64) -> Result<
     if unix_millis > now {
         return Err(ErrorCode::CatalogError(
             "rw_timestamp is too large, need to be less than the current unix_millis"
-                .to_string()
+                .to_owned()
                 .into(),
         )
         .into());
     }
     if unix_millis < min_unix_millis {
-        return Err(ErrorCode::CatalogError("rw_timestamp is too small, need to be large than the current unix_millis - subscription's retention time".to_string().into()).into());
+        return Err(ErrorCode::CatalogError("rw_timestamp is too small, need to be large than the current unix_millis - subscription's retention time".to_owned().into()).into());
     }
     Ok(())
 }
 
 async fn handle_declare_query_cursor(
-    handle_args: HandlerArgs,
-    cursor_name: ObjectName,
+    handler_args: HandlerArgs,
+    cursor_name: Ident,
     query: Box<Query>,
 ) -> Result<RwPgResponse> {
     let (chunk_stream, fields) =
-        create_stream_for_cursor_stmt(handle_args.clone(), Statement::Query(query)).await?;
-    handle_args
+        create_stream_for_cursor_stmt(handler_args.clone(), Statement::Query(query)).await?;
+    handler_args
         .session
         .get_cursor_manager()
-        .add_query_cursor(cursor_name, chunk_stream, fields)
+        .add_query_cursor(cursor_name.real_value(), chunk_stream, fields)
+        .await?;
+    Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
+}
+
+pub async fn handle_bound_declare_query_cursor(
+    handler_args: HandlerArgs,
+    cursor_name: Ident,
+    plan_fragmenter_result: BatchPlanFragmenterResult,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+    let (chunk_stream, fields) =
+        create_chunk_stream_for_cursor(session, plan_fragmenter_result).await?;
+
+    handler_args
+        .session
+        .get_cursor_manager()
+        .add_query_cursor(cursor_name.real_value(), chunk_stream, fields)
         .await?;
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
 
 pub async fn create_stream_for_cursor_stmt(
-    handle_args: HandlerArgs,
+    handler_args: HandlerArgs,
     stmt: Statement,
 ) -> Result<(CursorDataChunkStream, Vec<Field>)> {
-    let session = handle_args.session.clone();
+    let session = handler_args.session.clone();
     let plan_fragmenter_result = {
-        let context = OptimizerContext::from_handler_args(handle_args);
-        let plan_result = gen_batch_plan_by_statement(&session, context.into(), stmt)?;
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let plan_result =
+            gen_batch_plan_by_statement(&session, context.into(), stmt)?.unwrap_rw()?;
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
     create_chunk_stream_for_cursor(session, plan_fragmenter_result).await
@@ -157,7 +176,6 @@ pub async fn create_chunk_stream_for_cursor(
         plan_fragmenter,
         query_mode,
         schema,
-        read_storage_tables,
         ..
     } = plan_fragmenter_result;
 
@@ -170,22 +188,10 @@ pub async fn create_chunk_stream_for_cursor(
         match query_mode {
             QueryMode::Auto => unreachable!(),
             QueryMode::Local => CursorDataChunkStream::LocalDataChunk(Some(
-                local_execute(
-                    session.clone(),
-                    query,
-                    can_timeout_cancel,
-                    &read_storage_tables,
-                )
-                .await?,
+                local_execute(session.clone(), query, can_timeout_cancel).await?,
             )),
             QueryMode::Distributed => CursorDataChunkStream::DistributedDataChunk(Some(
-                distribute_execute(
-                    session.clone(),
-                    query,
-                    can_timeout_cancel,
-                    read_storage_tables,
-                )
-                .await?,
+                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
             )),
         },
         schema.fields.clone(),

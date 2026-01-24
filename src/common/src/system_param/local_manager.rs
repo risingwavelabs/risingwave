@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use std::sync::Arc;
 
 use arc_swap::ArcSwap;
 use risingwave_pb::meta::SystemParams;
-use tokio::sync::watch::{channel, Receiver, Sender};
+use tokio::sync::watch::{Receiver, Sender, channel};
 
 use super::common::CommonHandler;
 use super::diff::SystemParamsDiff;

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,32 +15,34 @@
 use std::collections::{BinaryHeap, HashMap, HashSet};
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
-use futures::{stream, FutureExt, StreamExt};
+use futures::{FutureExt, StreamExt, stream};
 use itertools::Itertools;
+use risingwave_common::catalog::TableId;
 use risingwave_common::util::value_encoding::column_aware_row_encoding::try_drop_invalid_columns;
 use risingwave_hummock_sdk::compact::{
     compact_task_to_string, estimate_memory_for_compact_task, statistics_compact_task,
 };
 use risingwave_hummock_sdk::compact_task::CompactTask;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker};
 use risingwave_hummock_sdk::key_range::{KeyRange, KeyRangeCommon};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_stats::{add_table_stats_map, TableStats, TableStatsMap};
+use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap, add_table_stats_map};
 use risingwave_hummock_sdk::{
-    can_concat, compact_task_output_to_string, full_key_can_concat, HummockSstableObjectId,
-    KeyComparator,
+    HummockSstableObjectId, KeyComparator, can_concat, compact_task_output_to_string,
+    full_key_can_concat,
 };
-use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::LevelType;
+use risingwave_pb::hummock::compact_task::TaskStatus;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
 use super::iterator::MonitoredCompactorIterator;
 use super::task_progress::TaskProgress;
 use super::{CompactionStatistics, TaskConfig};
-use crate::filter_key_extractor::{FilterKeyExtractorImpl, FilterKeyExtractorManager};
+use crate::compaction_catalog_manager::{CompactionCatalogAgentRef, CompactionCatalogManagerRef};
 use crate::hummock::compactor::compaction_utils::{
     build_multi_compaction_filter, estimate_task_output_capacity, generate_splits_for_task,
     metrics_report_for_task, optimize_by_copy_block,
@@ -48,18 +50,20 @@ use crate::hummock::compactor::compaction_utils::{
 use crate::hummock::compactor::iterator::ConcatSstableIterator;
 use crate::hummock::compactor::task_progress::TaskProgressGuard;
 use crate::hummock::compactor::{
-    await_tree_key, fast_compactor_runner, CompactOutput, CompactionFilter, Compactor,
-    CompactorContext,
+    CompactOutput, CompactionFilter, Compactor, CompactorContext, await_tree_key,
+    fast_compactor_runner,
 };
 use crate::hummock::iterator::{
-    Forward, HummockIterator, MergeIterator, SkipWatermarkIterator, ValueMeta,
+    Forward, HummockIterator, MergeIterator, NonPkPrefixSkipWatermarkIterator,
+    NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
+    ValueMeta, ValueSkipWatermarkIterator, ValueSkipWatermarkState,
 };
 use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
 use crate::hummock::utils::MemoryTracker;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult,
-    SstableBuilderOptions, SstableStoreRef,
+    CachePolicy, CompressionAlgorithm, GetObjectId, HummockResult, SstableBuilderOptions,
+    SstableStoreRef,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 pub struct CompactorRunner {
@@ -75,7 +79,7 @@ impl CompactorRunner {
         split_index: usize,
         context: CompactorContext,
         task: CompactTask,
-        object_id_getter: Box<dyn GetObjectId>,
+        object_id_getter: Arc<dyn GetObjectId>,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
         options.compression_algorithm = match task.compression_algorithm {
@@ -85,14 +89,7 @@ impl CompactorRunner {
         };
 
         options.capacity = estimate_task_output_capacity(context.clone(), &task);
-        let kv_count = task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .map(|sst| sst.total_key_count)
-            .sum::<u64>() as usize;
-        let use_block_based_filter =
-            BlockedXor16FilterBuilder::is_kv_count_too_large(kv_count) || task.target_level > 0;
+        let use_block_based_filter = task.should_use_block_based_filter();
 
         let key_range = KeyRange {
             left: task.splits[split_index].left.clone(),
@@ -134,16 +131,17 @@ impl CompactorRunner {
     pub async fn run(
         &self,
         compaction_filter: impl CompactionFilter,
-        filter_key_extractor: Arc<FilterKeyExtractorImpl>,
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
         task_progress: Arc<TaskProgress>,
     ) -> HummockResult<CompactOutput> {
-        let iter = self.build_sst_iter(task_progress.clone())?;
+        let iter =
+            self.build_sst_iter(task_progress.clone(), compaction_catalog_agent_ref.clone())?;
         let (ssts, compaction_stat) = self
             .compactor
             .compact_key_range(
                 iter,
                 compaction_filter,
-                filter_key_extractor,
+                compaction_catalog_agent_ref,
                 Some(task_progress),
                 Some(self.compact_task.task_id),
                 Some(self.split_index),
@@ -156,7 +154,8 @@ impl CompactorRunner {
     fn build_sst_iter(
         &self,
         task_progress: Arc<TaskProgress>,
-    ) -> HummockResult<impl HummockIterator<Direction = Forward>> {
+        compaction_catalog_agent_ref: CompactionCatalogAgentRef,
+    ) -> HummockResult<impl HummockIterator<Direction = Forward> + use<>> {
         let compactor_iter_max_io_retry_times = self
             .compactor
             .context
@@ -236,15 +235,39 @@ impl CompactorRunner {
             }
         }
 
-        // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // // The `SkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
+        // // in https://github.com/risingwavelabs/risingwave/issues/13148
+        // The `Pk/NonPkPrefixSkipWatermarkIterator` is used to handle the table watermark state cleaning introduced
         // in https://github.com/risingwavelabs/risingwave/issues/13148
-        Ok(SkipWatermarkIterator::from_safe_epoch_watermarks(
-            MonitoredCompactorIterator::new(
-                MergeIterator::for_compactor(table_iters),
-                task_progress.clone(),
-            ),
-            &self.compact_task.table_watermarks,
-        ))
+        let combine_iter = {
+            let skip_watermark_iter = PkPrefixSkipWatermarkIterator::new(
+                MonitoredCompactorIterator::new(
+                    MergeIterator::for_compactor(table_iters),
+                    task_progress,
+                ),
+                PkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.pk_prefix_table_watermarks.clone(),
+                ),
+            );
+
+            let pk_skip_watermark_iter = NonPkPrefixSkipWatermarkIterator::new(
+                skip_watermark_iter,
+                NonPkPrefixSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.non_pk_prefix_table_watermarks.clone(),
+                    compaction_catalog_agent_ref.clone(),
+                ),
+            );
+
+            ValueSkipWatermarkIterator::new(
+                pk_skip_watermark_iter,
+                ValueSkipWatermarkState::from_safe_epoch_watermarks(
+                    self.compact_task.value_table_watermarks.clone(),
+                    compaction_catalog_agent_ref,
+                ),
+            )
+        };
+
+        Ok(combine_iter)
     }
 }
 
@@ -281,15 +304,15 @@ pub fn partition_overlapping_sstable_infos(
     });
     for sst in origin_infos {
         // Pick group with the smallest right bound for every new sstable. So do not check the larger one if the smallest one does not meet condition.
-        if let Some(mut prev_group) = groups.peek_mut() {
-            if KeyComparator::encoded_full_key_less_than(
+        if let Some(mut prev_group) = groups.peek_mut()
+            && KeyComparator::encoded_full_key_less_than(
                 &prev_group.max_right_bound,
                 &sst.key_range.left,
-            ) {
-                prev_group.max_right_bound.clone_from(&sst.key_range.right);
-                prev_group.ssts.push(sst);
-                continue;
-            }
+            )
+        {
+            prev_group.max_right_bound.clone_from(&sst.key_range.right);
+            prev_group.ssts.push(sst);
+            continue;
         }
         groups.push(SstableGroup {
             max_right_bound: sst.key_range.right.clone(),
@@ -302,16 +325,16 @@ pub fn partition_overlapping_sstable_infos(
 
 /// Handles a compaction task and reports its status to hummock manager.
 /// Always return `Ok` and let hummock manager handle errors.
-pub async fn compact(
+pub async fn compact_with_agent(
     compactor_context: CompactorContext,
     mut compact_task: CompactTask,
     mut shutdown_rx: Receiver<()>,
-    object_id_getter: Box<dyn GetObjectId>,
-    filter_key_extractor_manager: FilterKeyExtractorManager,
+    object_id_getter: Arc<dyn GetObjectId>,
+    compaction_catalog_agent_ref: CompactionCatalogAgentRef,
 ) -> (
     (
         CompactTask,
-        HashMap<u32, TableStats>,
+        HashMap<TableId, TableStats>,
         HashMap<HummockSstableObjectId, u64>,
     ),
     Option<MemoryTracker>,
@@ -330,35 +353,6 @@ pub async fn compact(
         .start_timer();
 
     let multi_filter = build_multi_compaction_filter(&compact_task);
-
-    let existing_table_ids: HashSet<u32> =
-        HashSet::from_iter(compact_task.existing_table_ids.clone());
-    let compact_table_ids = HashSet::from_iter(
-        compact_task
-            .input_ssts
-            .iter()
-            .flat_map(|level| level.table_infos.iter())
-            .flat_map(|sst| sst.table_ids.clone())
-            .filter(|table_id| existing_table_ids.contains(table_id)),
-    );
-
-    let multi_filter_key_extractor = match build_filter_key_extractor(
-        &compact_task,
-        filter_key_extractor_manager,
-        &compact_table_ids,
-    )
-    .await
-    {
-        Some(multi_filter_key_extractor) => multi_filter_key_extractor,
-        None => {
-            let task_status = TaskStatus::ExecuteFailed;
-            return (
-                compact_done(compact_task, context.clone(), vec![], task_status),
-                None,
-            );
-        }
-    };
-
     let mut task_status = TaskStatus::Success;
     let optimize_by_copy_block = optimize_by_copy_block(&compact_task, &context);
 
@@ -399,13 +393,13 @@ pub async fn compact(
 
     tracing::info!(
         "Ready to handle task: {} compact_task_statistics {:?} compression_algorithm {:?}  parallelism {} task_memory_capacity_with_parallelism {}, enable fast runner: {}, {}",
-            compact_task.task_id,
-            compact_task_statistics,
-            compact_task.compression_algorithm,
-            parallelism,
-            task_memory_capacity_with_parallelism,
-            optimize_by_copy_block,
-            compact_task_to_string(&compact_task),
+        compact_task.task_id,
+        compact_task_statistics,
+        compact_task.compression_algorithm,
+        parallelism,
+        task_memory_capacity_with_parallelism,
+        optimize_by_copy_block,
+        compact_task_to_string(&compact_task),
     );
 
     // If the task does not have enough memory, it should cancel the task and let the meta
@@ -415,12 +409,12 @@ pub async fn compact(
         .try_require_memory(task_memory_capacity_with_parallelism);
     if memory_detector.is_none() {
         tracing::warn!(
-                "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
-                compact_task.task_id,
-                task_memory_capacity_with_parallelism,
-                context.memory_limiter.get_memory_usage(),
-                context.memory_limiter.quota()
-            );
+            "Not enough memory to serve the task {} task_memory_capacity_with_parallelism {}  memory_usage {} memory_quota {}",
+            compact_task.task_id,
+            task_memory_capacity_with_parallelism,
+            context.memory_limiter.get_memory_usage(),
+            context.memory_limiter.quota()
+        );
         task_status = TaskStatus::NoAvailMemoryResourceCanceled;
         return (
             compact_done(compact_task, context.clone(), output_ssts, task_status),
@@ -446,9 +440,10 @@ pub async fn compact(
         let runner = fast_compactor_runner::CompactorRunner::new(
             context.clone(),
             compact_task.clone(),
-            multi_filter_key_extractor.clone(),
+            compaction_catalog_agent_ref.clone(),
             object_id_getter.clone(),
             task_progress_guard.progress.clone(),
+            multi_filter,
         );
 
         tokio::select! {
@@ -490,7 +485,7 @@ pub async fn compact(
     }
     for (split_index, _) in compact_task.splits.iter().enumerate() {
         let filter = multi_filter.clone();
-        let multi_filter_key_extractor = multi_filter_key_extractor.clone();
+        let compaction_catalog_agent_ref = compaction_catalog_agent_ref.clone();
         let compactor_runner = CompactorRunner::new(
             split_index,
             compactor_context.clone(),
@@ -500,7 +495,7 @@ pub async fn compact(
         let task_progress = task_progress_guard.progress.clone();
         let runner = async move {
             compactor_runner
-                .run(filter, multi_filter_key_extractor, task_progress)
+                .run(filter, compaction_catalog_agent_ref, task_progress)
                 .await
         };
         let traced = match context.await_tree_reg.as_ref() {
@@ -587,6 +582,92 @@ pub async fn compact(
     )
 }
 
+/// Handles a compaction task and reports its status to hummock manager.
+/// Always return `Ok` and let hummock manager handle errors.
+pub async fn compact(
+    compactor_context: CompactorContext,
+    mut compact_task: CompactTask,
+    shutdown_rx: Receiver<()>,
+    object_id_getter: Arc<dyn GetObjectId>,
+    compaction_catalog_manager_ref: CompactionCatalogManagerRef,
+) -> (
+    (
+        CompactTask,
+        HashMap<TableId, TableStats>,
+        HashMap<HummockSstableObjectId, u64>,
+    ),
+    Option<MemoryTracker>,
+) {
+    let table_ids_to_be_compacted = compact_task.build_compact_table_ids();
+    let compaction_catalog_agent_ref = match compaction_catalog_manager_ref
+        .acquire(table_ids_to_be_compacted.clone())
+        .await
+    {
+        Ok(compaction_catalog_agent_ref) => {
+            let acquire_table_ids: HashSet<StateTableId> =
+                compaction_catalog_agent_ref.table_ids().collect();
+            if acquire_table_ids.len() != table_ids_to_be_compacted.len() {
+                let diff = table_ids_to_be_compacted
+                    .into_iter()
+                    .collect::<HashSet<_>>()
+                    .symmetric_difference(&acquire_table_ids)
+                    .cloned()
+                    .collect::<Vec<_>>();
+                tracing::warn!(
+                    dif= ?diff,
+                    "Some table ids are not acquired."
+                );
+                return (
+                    compact_done(
+                        compact_task,
+                        compactor_context.clone(),
+                        vec![],
+                        TaskStatus::ExecuteFailed,
+                    ),
+                    None,
+                );
+            }
+
+            compaction_catalog_agent_ref
+        }
+        Err(e) => {
+            tracing::warn!(
+                error = %e.as_report(),
+                "Failed to acquire compaction catalog agent"
+            );
+            return (
+                compact_done(
+                    compact_task,
+                    compactor_context.clone(),
+                    vec![],
+                    TaskStatus::ExecuteFailed,
+                ),
+                None,
+            );
+        }
+    };
+
+    // rewrite compact_task watermarks
+    {
+        compact_task
+            .pk_prefix_table_watermarks
+            .retain(|table_id, _| table_ids_to_be_compacted.contains(table_id));
+
+        compact_task
+            .non_pk_prefix_table_watermarks
+            .retain(|table_id, _| table_ids_to_be_compacted.contains(table_id));
+    }
+
+    compact_with_agent(
+        compactor_context,
+        compact_task,
+        shutdown_rx,
+        object_id_getter,
+        compaction_catalog_agent_ref,
+    )
+    .await
+}
+
 /// Fills in the compact task and tries to report the task result to meta node.
 pub(crate) fn compact_done(
     mut compact_task: CompactTask,
@@ -595,7 +676,7 @@ pub(crate) fn compact_done(
     task_status: TaskStatus,
 ) -> (
     CompactTask,
-    HashMap<u32, TableStats>,
+    HashMap<TableId, TableStats>,
     HashMap<HummockSstableObjectId, u64>,
 ) {
     let mut table_stats_map = TableStatsMap::default();
@@ -626,12 +707,12 @@ pub(crate) fn compact_done(
     context
         .compactor_metrics
         .compact_write_bytes
-        .with_label_values(&[&group_label, level_label.as_str()])
+        .with_label_values(&[&group_label, &level_label])
         .inc_by(compaction_write_bytes);
     context
         .compactor_metrics
         .compact_write_sstn
-        .with_label_values(&[&group_label, level_label.as_str()])
+        .with_label_values(&[&group_label, &level_label])
         .inc_by(compact_task.sorted_output_ssts.len() as u64);
 
     (compact_task, table_stats_map, object_timestamps)
@@ -650,10 +731,10 @@ where
     if !task_config.key_range.left.is_empty() {
         let full_key = FullKey::decode(&task_config.key_range.left);
         iter.seek(full_key)
-            .verbose_instrument_await("iter_seek")
+            .instrument_await("iter_seek".verbose())
             .await?;
     } else {
-        iter.rewind().verbose_instrument_await("rewind").await?;
+        iter.rewind().instrument_await("rewind".verbose()).await?;
     };
 
     let end_key = if task_config.key_range.right.is_empty() {
@@ -673,7 +754,7 @@ where
     let mut compaction_statistics = CompactionStatistics::default();
     // object id -> block id. For an object id, block id is updated in a monotonically increasing manner.
     let mut skip_schema_check: HashMap<HummockSstableObjectId, u64> = HashMap::default();
-    let schemas: HashMap<u32, HashSet<i32>> = task_config
+    let schemas: HashMap<TableId, HashSet<i32>> = task_config
         .table_schemas
         .iter()
         .map(|(table_id, schema)| (*table_id, schema.column_ids.iter().copied().collect()))
@@ -702,13 +783,11 @@ where
             local_stats.skip_multi_version_key_count += 1;
         }
 
-        if last_table_id.map_or(true, |last_table_id| {
-            last_table_id != iter_key.user_key.table_id.table_id
-        }) {
+        if last_table_id != Some(iter_key.user_key.table_id) {
             if let Some(last_table_id) = last_table_id.take() {
                 table_stats_drop.insert(last_table_id, std::mem::take(&mut last_table_stats));
             }
-            last_table_id = Some(iter_key.user_key.table_id.table_id);
+            last_table_id = Some(iter_key.user_key.table_id);
         }
 
         // Among keys with same user key, only keep the latest key unless retain_multiple_version is true.
@@ -731,9 +810,7 @@ where
             compaction_statistics.iter_drop_key_counts += 1;
 
             let should_count = match task_config.stats_target_table_ids.as_ref() {
-                Some(target_table_ids) => {
-                    target_table_ids.contains(&iter_key.user_key.table_id.table_id)
-                }
+                Some(target_table_ids) => target_table_ids.contains(&iter_key.user_key.table_id),
                 None => true,
             };
             if should_count {
@@ -742,13 +819,13 @@ where
                 last_table_stats.total_value_size -= iter.value().encoded_len() as i64;
             }
             iter.next()
-                .verbose_instrument_await("iter_next_in_drop")
+                .instrument_await("iter_next_in_drop".verbose())
                 .await?;
             continue;
         }
 
         // May drop stale columns
-        let check_table_id = iter_key.user_key.table_id.table_id;
+        let check_table_id = iter_key.user_key.table_id;
         let mut is_value_rewritten = false;
         if let HummockValue::Put(v) = value
             && let Some(object_id) = object_id
@@ -776,7 +853,7 @@ where
                     let new_put = HummockValue::put(new_value.as_slice());
                     sst_builder
                         .add_full_key(iter_key, new_put, is_new_user_key)
-                        .verbose_instrument_await("add_rewritten_full_key")
+                        .instrument_await("add_rewritten_full_key".verbose())
                         .await?;
                     let value_size_change = value_size as i64 - new_value.len() as i64;
                     assert!(value_size_change >= 0);
@@ -789,11 +866,11 @@ where
             // Don't allow two SSTs to share same user key
             sst_builder
                 .add_full_key(iter_key, value, is_new_user_key)
-                .verbose_instrument_await("add_full_key")
+                .instrument_await("add_full_key".verbose())
                 .await?;
         }
 
-        iter.next().verbose_instrument_await("iter_next").await?;
+        iter.next().instrument_await("iter_next".verbose()).await?;
     }
 
     if let Some(last_table_id) = last_table_id.take() {
@@ -808,39 +885,6 @@ where
     compaction_statistics.delta_drop_stat = table_stats_drop;
 
     Ok(compaction_statistics)
-}
-
-async fn build_filter_key_extractor(
-    compact_task: &CompactTask,
-    filter_key_extractor_manager: FilterKeyExtractorManager,
-    compact_table_ids: &HashSet<u32>,
-) -> Option<Arc<FilterKeyExtractorImpl>> {
-    let multi_filter_key_extractor = match filter_key_extractor_manager
-        .acquire(compact_table_ids.clone())
-        .await
-    {
-        Err(e) => {
-            tracing::error!(error = %e.as_report(), "Failed to fetch filter key extractor tables [{:?}], it may caused by some RPC error", compact_task.existing_table_ids);
-            return None;
-        }
-        Ok(extractor) => extractor,
-    };
-
-    if let FilterKeyExtractorImpl::Multi(multi) = &multi_filter_key_extractor {
-        let found_tables = multi.get_existing_table_ids();
-        let removed_tables = compact_table_ids
-            .iter()
-            .filter(|table_id| !found_tables.contains(table_id))
-            .collect_vec();
-        if !removed_tables.is_empty() {
-            tracing::error!("Failed to fetch filter key extractor tables [{:?}. [{:?}] may be removed by meta-service. ", compact_table_ids, removed_tables);
-            return None;
-        }
-    }
-
-    let multi_filter_key_extractor = Arc::new(multi_filter_key_extractor);
-
-    Some(multi_filter_key_extractor)
 }
 
 #[cfg(test)]

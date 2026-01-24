@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,24 +15,19 @@
 mod error;
 mod stream;
 
-use std::collections::btree_map::{Entry, VacantEntry};
 use std::collections::BTreeMap;
+use std::collections::btree_map::{Entry, VacantEntry};
 use std::fmt::Debug;
 use std::ops::{Deref, DerefMut};
 
 use async_trait::async_trait;
 pub use error::*;
+pub use risingwave_common::id::{ActorId, FragmentId, SubscriptionId};
 pub use stream::*;
 use uuid::Uuid;
 
-/// A global, unique identifier of an actor
-pub type ActorId = u32;
-
 /// Should be used together with `ActorId` to uniquely identify a dispatcher
-pub type DispatcherId = u64;
-
-/// A global, unique identifier of a fragment
-pub type FragmentId = u32;
+pub type DispatcherId = FragmentId;
 
 #[derive(Clone, Debug)]
 pub struct ClusterId(String);
@@ -113,7 +108,7 @@ impl<'a, T> VarTransaction<'a, T> {
     }
 }
 
-impl<'a, T> Deref for VarTransaction<'a, T> {
+impl<T> Deref for VarTransaction<'_, T> {
     type Target = T;
 
     fn deref(&self) -> &Self::Target {
@@ -124,7 +119,7 @@ impl<'a, T> Deref for VarTransaction<'a, T> {
     }
 }
 
-impl<'a, T: Clone> DerefMut for VarTransaction<'a, T> {
+impl<T: Clone> DerefMut for VarTransaction<'_, T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         if self.new_value.is_none() {
             self.new_value.replace(self.orig_value_ref.clone());
@@ -133,7 +128,7 @@ impl<'a, T: Clone> DerefMut for VarTransaction<'a, T> {
     }
 }
 
-impl<'a, T> InMemValTransaction for VarTransaction<'a, T>
+impl<T> InMemValTransaction for VarTransaction<'_, T>
 where
     T: PartialEq,
 {
@@ -144,7 +139,7 @@ where
     }
 }
 
-impl<'a, TXN, T> ValTransaction<TXN> for VarTransaction<'a, T>
+impl<TXN, T> ValTransaction<TXN> for VarTransaction<'_, T>
 where
     T: Transactional<TXN> + PartialEq,
 {
@@ -202,7 +197,7 @@ impl<'a, K: Ord, V: Clone> BTreeMapTransactionValueGuard<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'a, K, V> {
+impl<K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'_, K, V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -216,7 +211,7 @@ impl<'a, K: Ord, V: Clone> Deref for BTreeMapTransactionValueGuard<'a, K, V> {
     }
 }
 
-impl<'a, K: Ord, V: Clone> DerefMut for BTreeMapTransactionValueGuard<'a, K, V> {
+impl<K: Ord, V: Clone> DerefMut for BTreeMapTransactionValueGuard<'_, K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         let is_occupied = matches!(
             self.staging_entry.as_ref().unwrap(),
@@ -377,7 +372,9 @@ impl<K: Ord + Debug, V: Clone, P: DerefMut<Target = BTreeMap<K, V>>>
                         Some(v)
                     }
                     BTreeMapOp::Delete => {
-                        unreachable!("we have checked that the op of the key is `Insert`, so it's impossible to be Delete")
+                        unreachable!(
+                            "we have checked that the op of the key is `Insert`, so it's impossible to be Delete"
+                        )
                     }
                 },
             };
@@ -478,7 +475,7 @@ impl<'a, K: Ord + Debug, V: Clone> BTreeMapEntryTransaction<'a, K, V> {
     }
 }
 
-impl<'a, K, V> Deref for BTreeMapEntryTransaction<'a, K, V> {
+impl<K, V> Deref for BTreeMapEntryTransaction<'_, K, V> {
     type Target = V;
 
     fn deref(&self) -> &Self::Target {
@@ -486,20 +483,20 @@ impl<'a, K, V> Deref for BTreeMapEntryTransaction<'a, K, V> {
     }
 }
 
-impl<'a, K, V> DerefMut for BTreeMapEntryTransaction<'a, K, V> {
+impl<K, V> DerefMut for BTreeMapEntryTransaction<'_, K, V> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.new_value
     }
 }
 
-impl<'a, K: Ord, V: PartialEq> InMemValTransaction for BTreeMapEntryTransaction<'a, K, V> {
+impl<K: Ord, V: PartialEq> InMemValTransaction for BTreeMapEntryTransaction<'_, K, V> {
     fn commit(self) {
         self.tree_ref.insert(self.key, self.new_value);
     }
 }
 
-impl<'a, K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
-    for BTreeMapEntryTransaction<'a, K, V>
+impl<K: Ord, V: PartialEq + Transactional<TXN>, TXN> ValTransaction<TXN>
+    for BTreeMapEntryTransaction<'_, K, V>
 {
     async fn apply_to_txn(&self, txn: &mut TXN) -> MetadataModelResult<()> {
         if !self.tree_ref.contains_key(&self.key)
@@ -541,12 +538,12 @@ pub struct DerefMutForward<
 }
 
 impl<
-        Inner,
-        Target,
-        P: DerefMut<Target = Inner>,
-        F: Fn(&Inner) -> &Target,
-        FMut: Fn(&mut Inner) -> &mut Target,
-    > DerefMutForward<Inner, Target, P, F, FMut>
+    Inner,
+    Target,
+    P: DerefMut<Target = Inner>,
+    F: Fn(&Inner) -> &Target,
+    FMut: Fn(&mut Inner) -> &mut Target,
+> DerefMutForward<Inner, Target, P, F, FMut>
 {
     pub fn new(ptr: P, f: F, f_mut: FMut) -> Self {
         Self { ptr, f, f_mut }
@@ -554,12 +551,12 @@ impl<
 }
 
 impl<
-        Inner,
-        Target,
-        P: DerefMut<Target = Inner>,
-        F: Fn(&Inner) -> &Target,
-        FMut: Fn(&mut Inner) -> &mut Target,
-    > Deref for DerefMutForward<Inner, Target, P, F, FMut>
+    Inner,
+    Target,
+    P: DerefMut<Target = Inner>,
+    F: Fn(&Inner) -> &Target,
+    FMut: Fn(&mut Inner) -> &mut Target,
+> Deref for DerefMutForward<Inner, Target, P, F, FMut>
 {
     type Target = Target;
 
@@ -569,275 +566,14 @@ impl<
 }
 
 impl<
-        Inner,
-        Target,
-        P: DerefMut<Target = Inner>,
-        F: Fn(&Inner) -> &Target,
-        FMut: Fn(&mut Inner) -> &mut Target,
-    > DerefMut for DerefMutForward<Inner, Target, P, F, FMut>
+    Inner,
+    Target,
+    P: DerefMut<Target = Inner>,
+    F: Fn(&Inner) -> &Target,
+    FMut: Fn(&mut Inner) -> &mut Target,
+> DerefMut for DerefMutForward<Inner, Target, P, F, FMut>
 {
     fn deref_mut(&mut self) -> &mut Self::Target {
         (self.f_mut)(&mut self.ptr)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::storage::{Operation, Transaction};
-
-    #[derive(PartialEq, Clone, Debug)]
-    struct TestTransactional {
-        key: &'static str,
-        value: &'static str,
-    }
-
-    const TEST_CF: &str = "test-cf";
-
-    #[async_trait]
-    impl Transactional<Transaction> for TestTransactional {
-        async fn upsert_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-            trx.put(
-                TEST_CF.to_string(),
-                self.key.as_bytes().into(),
-                self.value.as_bytes().into(),
-            );
-            Ok(())
-        }
-
-        async fn delete_in_transaction(&self, trx: &mut Transaction) -> MetadataModelResult<()> {
-            trx.delete(TEST_CF.to_string(), self.key.as_bytes().into());
-            Ok(())
-        }
-    }
-
-    #[tokio::test]
-    async fn test_simple_var_transaction_commit() {
-        let mut kv = TestTransactional {
-            key: "key",
-            value: "original",
-        };
-        let mut num_txn = VarTransaction::new(&mut kv);
-        num_txn.value = "modified";
-        assert_eq!(num_txn.value, "modified");
-        let mut txn = Transaction::default();
-        num_txn.apply_to_txn(&mut txn).await.unwrap();
-        let txn_op = txn.get_operations();
-        assert_eq!(1, txn_op.len());
-        assert!(matches!(
-            &txn_op[0],
-            Operation::Put {
-                cf: _,
-                key: _,
-                value: _
-            }
-        ));
-        assert!(
-            matches!(&txn_op[0], Operation::Put { cf, key, value } if *cf == TEST_CF && key == "key".as_bytes() && value == "modified".as_bytes())
-        );
-        num_txn.commit();
-        assert_eq!("modified", kv.value);
-    }
-
-    #[test]
-    fn test_simple_var_transaction_abort() {
-        let mut kv = TestTransactional {
-            key: "key",
-            value: "original",
-        };
-        let mut num_txn = VarTransaction::new(&mut kv);
-        num_txn.value = "modified";
-        assert_eq!("original", kv.value);
-    }
-
-    #[tokio::test]
-    async fn test_tree_map_transaction_commit() {
-        let mut map: BTreeMap<String, TestTransactional> = BTreeMap::new();
-        map.insert(
-            "to-remove".to_string(),
-            TestTransactional {
-                key: "to-remove",
-                value: "to-remove-value",
-            },
-        );
-        map.insert(
-            "to-remove-after-modify".to_string(),
-            TestTransactional {
-                key: "to-remove-after-modify",
-                value: "to-remove-after-modify-value",
-            },
-        );
-        map.insert(
-            "first".to_string(),
-            TestTransactional {
-                key: "first",
-                value: "first-orig-value",
-            },
-        );
-
-        let mut map_copy = map.clone();
-        let mut map_txn = BTreeMapTransaction::new(&mut map);
-        map_txn.remove("to-remove".to_string());
-        map_txn.insert(
-            "to-remove-after-modify".to_string(),
-            TestTransactional {
-                key: "to-remove-after-modify",
-                value: "to-remove-after-modify-value-modifying",
-            },
-        );
-        map_txn.remove("to-remove-after-modify".to_string());
-        map_txn.insert(
-            "first".to_string(),
-            TestTransactional {
-                key: "first",
-                value: "first-value",
-            },
-        );
-        map_txn.insert(
-            "second".to_string(),
-            TestTransactional {
-                key: "second",
-                value: "second-value",
-            },
-        );
-        assert_eq!(
-            &TestTransactional {
-                key: "second",
-                value: "second-value",
-            },
-            map_txn.get(&"second".to_string()).unwrap()
-        );
-        map_txn.insert(
-            "third".to_string(),
-            TestTransactional {
-                key: "third",
-                value: "third-value",
-            },
-        );
-        assert_eq!(
-            &TestTransactional {
-                key: "third",
-                value: "third-value",
-            },
-            map_txn.get(&"third".to_string()).unwrap()
-        );
-
-        let mut third_entry = map_txn.get_mut("third".to_string()).unwrap();
-        third_entry.value = "third-value-updated";
-        assert_eq!(
-            &TestTransactional {
-                key: "third",
-                value: "third-value-updated",
-            },
-            map_txn.get(&"third".to_string()).unwrap()
-        );
-
-        let mut txn = Transaction::default();
-        map_txn.apply_to_txn(&mut txn).await.unwrap();
-        let txn_ops = txn.get_operations();
-        assert_eq!(5, txn_ops.len());
-        for op in txn_ops {
-            match op {
-                Operation::Put { cf, key, value }
-                    if cf == TEST_CF
-                        && key == "first".as_bytes()
-                        && value == "first-value".as_bytes() => {}
-                Operation::Put { cf, key, value }
-                    if cf == TEST_CF
-                        && key == "second".as_bytes()
-                        && value == "second-value".as_bytes() => {}
-                Operation::Put { cf, key, value }
-                    if cf == TEST_CF
-                        && key == "third".as_bytes()
-                        && value == "third-value-updated".as_bytes() => {}
-                Operation::Delete { cf, key } if cf == TEST_CF && key == "to-remove".as_bytes() => {
-                }
-                Operation::Delete { cf, key }
-                    if cf == TEST_CF && key == "to-remove-after-modify".as_bytes() => {}
-                _ => unreachable!("invalid operation"),
-            }
-        }
-        map_txn.commit();
-
-        // replay the change to local copy and compare
-        map_copy.remove("to-remove").unwrap();
-        map_copy.insert(
-            "to-remove-after-modify".to_string(),
-            TestTransactional {
-                key: "to-remove-after-modify",
-                value: "to-remove-after-modify-value-modifying",
-            },
-        );
-        map_copy.remove("to-remove-after-modify").unwrap();
-        map_copy.insert(
-            "first".to_string(),
-            TestTransactional {
-                key: "first",
-                value: "first-value",
-            },
-        );
-        map_copy.insert(
-            "second".to_string(),
-            TestTransactional {
-                key: "second",
-                value: "second-value",
-            },
-        );
-        map_copy.insert(
-            "third".to_string(),
-            TestTransactional {
-                key: "third",
-                value: "third-value-updated",
-            },
-        );
-        assert_eq!(map_copy, map);
-    }
-
-    #[tokio::test]
-    async fn test_tree_map_entry_update_transaction_commit() {
-        let mut map: BTreeMap<String, TestTransactional> = BTreeMap::new();
-        map.insert(
-            "first".to_string(),
-            TestTransactional {
-                key: "first",
-                value: "first-orig-value",
-            },
-        );
-
-        let mut map_txn = BTreeMapTransaction::new(&mut map);
-        let mut first_entry_txn = map_txn.new_entry_txn("first".to_string()).unwrap();
-        first_entry_txn.value = "first-value";
-        let mut txn = Transaction::default();
-        first_entry_txn.apply_to_txn(&mut txn).await.unwrap();
-        let txn_ops = txn.get_operations();
-        assert_eq!(1, txn_ops.len());
-        assert!(
-            matches!(&txn_ops[0], Operation::Put {cf, key, value} if *cf == TEST_CF && key == "first".as_bytes() && value == "first-value".as_bytes())
-        );
-        first_entry_txn.commit();
-        assert_eq!("first-value", map.get("first").unwrap().value);
-    }
-
-    #[tokio::test]
-    async fn test_tree_map_entry_insert_transaction_commit() {
-        let mut map: BTreeMap<String, TestTransactional> = BTreeMap::new();
-
-        let mut map_txn = BTreeMapTransaction::new(&mut map);
-        let first_entry_txn = map_txn.new_entry_insert_txn(
-            "first".to_string(),
-            TestTransactional {
-                key: "first",
-                value: "first-value",
-            },
-        );
-        let mut txn = Transaction::default();
-        first_entry_txn.apply_to_txn(&mut txn).await.unwrap();
-        let txn_ops = txn.get_operations();
-        assert_eq!(1, txn_ops.len());
-        assert!(
-            matches!(&txn_ops[0], Operation::Put {cf, key, value} if *cf == TEST_CF && key == "first".as_bytes() && value == "first-value".as_bytes())
-        );
-        first_entry_txn.commit();
-        assert_eq!("first-value", map.get("first").unwrap().value);
     }
 }

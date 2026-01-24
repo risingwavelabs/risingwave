@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,8 +16,8 @@ use std::collections::{HashMap, HashSet};
 use std::process::exit;
 
 use itertools::Itertools;
-use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use risingwave_pb::meta::GetClusterInfoResponse;
+use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
 use crate::common::CtlContext;
@@ -59,6 +59,7 @@ pub async fn update_schedulability(
         let worker_id = worker
             .parse::<u32>()
             .ok()
+            .map(Into::into)
             .or_else(|| worker_index_by_host.get(&worker).cloned());
 
         if let Some(worker_id) = worker_id

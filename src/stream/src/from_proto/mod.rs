@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,15 +23,19 @@ mod cdc_filter;
 mod changelog;
 mod dml;
 mod dynamic_filter;
+mod eowc_gap_fill;
 mod eowc_over_window;
 mod expand;
 mod filter;
+mod gap_fill;
 mod group_top_n;
 mod hash_agg;
 mod hash_join;
 mod hop_window;
+mod locality_provider;
 mod lookup;
 mod lookup_union;
+mod materialized_exprs;
 mod merge;
 mod mview;
 mod no_op;
@@ -51,12 +55,17 @@ mod stream_scan;
 mod temporal_join;
 mod top_n;
 mod union;
+mod upstream_sink_union;
 mod values;
 mod watermark_filter;
 
 mod row_merge;
 
 mod approx_percentile;
+
+mod sync_log_store;
+mod vector_index_lookup_join;
+mod vector_index_write;
 
 // import for submodules
 use itertools::Itertools;
@@ -73,15 +82,19 @@ use self::batch_query::*;
 use self::cdc_filter::CdcFilterExecutorBuilder;
 use self::dml::*;
 use self::dynamic_filter::*;
+use self::eowc_gap_fill::EowcGapFillExecutorBuilder;
 use self::eowc_over_window::*;
 use self::expand::*;
 use self::filter::*;
+use self::gap_fill::GapFillExecutorBuilder;
 use self::group_top_n::GroupTopNExecutorBuilder;
 use self::hash_agg::*;
 use self::hash_join::*;
 use self::hop_window::*;
+use self::locality_provider::*;
 use self::lookup::*;
 use self::lookup_union::*;
+use self::materialized_exprs::MaterializedExprsExecutorBuilder;
 pub(crate) use self::merge::MergeExecutorBuilder;
 use self::mview::*;
 use self::no_op::*;
@@ -99,14 +112,18 @@ use self::source_backfill::*;
 use self::stateless_simple_agg::*;
 use self::stream_cdc_scan::*;
 use self::stream_scan::*;
+use self::sync_log_store::*;
 use self::temporal_join::*;
 use self::top_n::*;
 use self::union::*;
+use self::upstream_sink_union::*;
 use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Execute, Executor, ExecutorInfo};
 use crate::from_proto::changelog::ChangeLogExecutorBuilder;
 use crate::from_proto::values::ValuesExecutorBuilder;
+use crate::from_proto::vector_index_lookup_join::VectorIndexLookupJoinBuilder;
+use crate::from_proto::vector_index_write::VectorIndexWriteExecutorBuilder;
 use crate::task::ExecutorParams;
 
 trait ExecutorBuilder {
@@ -188,5 +205,13 @@ pub async fn create_executor(
         NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
         NodeBody::RowMerge => RowMergeExecutorBuilder,
         NodeBody::AsOfJoin => AsOfJoinExecutorBuilder,
+        NodeBody::SyncLogStore => SyncLogStoreExecutorBuilder,
+        NodeBody::MaterializedExprs => MaterializedExprsExecutorBuilder,
+        NodeBody::VectorIndexWrite => VectorIndexWriteExecutorBuilder,
+        NodeBody::UpstreamSinkUnion => UpstreamSinkUnionExecutorBuilder,
+        NodeBody::LocalityProvider => LocalityProviderBuilder,
+        NodeBody::EowcGapFill => EowcGapFillExecutorBuilder,
+        NodeBody::GapFill => GapFillExecutorBuilder,
+        NodeBody::VectorIndexLookupJoin => VectorIndexLookupJoinBuilder,
     }
 }

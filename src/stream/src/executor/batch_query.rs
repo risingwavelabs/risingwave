@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,14 +16,14 @@ use futures::TryStreamExt;
 use risingwave_common::array::Op;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_storage::table::collect_data_chunk;
 
 use crate::executor::prelude::*;
 
 pub struct BatchQueryExecutor<S: StateStore> {
-    /// The [`StorageTable`] that needs to be queried
-    table: StorageTable<S>,
+    /// The [`BatchTable`] that needs to be queried
+    table: BatchTable<S>,
 
     /// The number of tuples in one [`StreamChunk`]
     batch_size: usize,
@@ -35,7 +35,7 @@ impl<S> BatchQueryExecutor<S>
 where
     S: StateStore,
 {
-    pub fn new(table: StorageTable<S>, batch_size: usize, schema: Schema) -> Self {
+    pub fn new(table: BatchTable<S>, batch_size: usize, schema: Schema) -> Self {
         Self {
             table,
             batch_size,

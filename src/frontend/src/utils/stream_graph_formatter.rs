@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,24 +16,51 @@ use std::cmp::max;
 use std::collections::{BTreeMap, HashMap};
 
 use itertools::Itertools;
+use petgraph::Graph;
+use petgraph::dot::Dot;
+use petgraph::graph::NodeIndex;
 use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::util::stream_graph_visitor;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::stream_plan::stream_fragment_graph::StreamFragmentEdge;
-use risingwave_pb::stream_plan::{stream_node, DispatcherType, StreamFragmentGraph, StreamNode};
+use risingwave_pb::stream_plan::{DispatcherType, StreamFragmentGraph, StreamNode, stream_node};
 
+use super::PrettySerde;
 use crate::TableCatalog;
+use crate::catalog::TableId;
 
 /// ice: in the future, we may allow configurable width, boundaries, etc.
-pub fn explain_stream_graph(graph: &StreamFragmentGraph, is_verbose: bool) -> String {
+pub fn explain_stream_graph(
+    graph: &StreamFragmentGraph,
+    table: Option<Table>,
+    is_verbose: bool,
+) -> String {
     let mut output = String::with_capacity(2048);
     let mut config = PrettyConfig {
         need_boundaries: false,
         width: 80,
         ..Default::default()
     };
-    StreamGraphFormatter::new(is_verbose).explain_graph(graph, &mut config, &mut output);
+    let mut fmt = StreamGraphFormatter::new(is_verbose);
+    if let Some(tb) = table {
+        fmt.add_table(&tb);
+    }
+    fmt.explain_graph(graph, &mut config, &mut output);
     output
+}
+
+pub fn explain_stream_graph_as_dot(
+    sg: &StreamFragmentGraph,
+    table: Option<Table>,
+    is_verbose: bool,
+) -> String {
+    let mut fmt = StreamGraphFormatter::new(is_verbose);
+    if let Some(tb) = table {
+        fmt.add_table(&tb);
+    }
+    let graph = fmt.explain_graph_as_dot(sg);
+    let dot = Dot::new(&graph);
+    dot.to_string()
 }
 
 /// A formatter to display the final stream plan graph, used for `explain (distsql) create
@@ -42,7 +69,7 @@ struct StreamGraphFormatter {
     /// exchange's `operator_id` -> edge
     edges: HashMap<u64, StreamFragmentEdge>,
     verbose: bool,
-    tables: BTreeMap<u32, Table>,
+    tables: BTreeMap<TableId, Table>,
 }
 
 impl StreamGraphFormatter {
@@ -55,7 +82,7 @@ impl StreamGraphFormatter {
     }
 
     /// collect the table catalog and return the table id
-    fn add_table(&mut self, tb: &Table) -> u32 {
+    fn add_table(&mut self, tb: &Table) -> TableId {
         self.tables.insert(tb.id, tb.clone());
         tb.id
     }
@@ -88,6 +115,34 @@ impl StreamGraphFormatter {
         }
     }
 
+    fn explain_graph_as_dot(&mut self, graph: &StreamFragmentGraph) -> Graph<String, String> {
+        self.edges.clear();
+        for edge in &graph.edges {
+            self.edges.insert(edge.link_id, edge.clone());
+        }
+
+        let mut g = Graph::<String, String>::new();
+        let mut nodes = HashMap::new();
+        for (_, fragment) in graph.fragments.iter().sorted_by_key(|(id, _)| **id) {
+            let mut label = String::new();
+            label.push_str("Fragment ");
+            label.push_str(&fragment.get_fragment_id().to_string());
+            label.push('\n');
+            nodes.insert(label.clone(), g.add_node(label.clone()));
+
+            build_graph_from_pretty(
+                &self.explain_node(fragment.node.as_ref().unwrap()),
+                &mut g,
+                &mut nodes,
+                Some(&label),
+            );
+        }
+        for tb in self.tables.values() {
+            build_graph_from_pretty(&self.explain_table(tb), &mut g, &mut nodes, None);
+        }
+        g
+    }
+
     fn explain_table<'a>(&self, tb: &Table) -> Pretty<'a> {
         let tb = TableCatalog::from(tb.clone());
         let columns = tb
@@ -97,7 +152,7 @@ impl StreamGraphFormatter {
                 let s = if self.verbose {
                     format!("{}: {}", c.name(), c.data_type())
                 } else {
-                    c.name().to_string()
+                    c.name().to_owned()
                 };
                 Pretty::Text(s.into())
             })
@@ -131,7 +186,7 @@ impl StreamGraphFormatter {
     fn explain_node<'a>(&mut self, node: &StreamNode) -> Pretty<'a> {
         let one_line_explain = match node.get_node_body().unwrap() {
             stream_node::NodeBody::Exchange(_) => {
-                let edge = self.edges.get(&node.operator_id).unwrap();
+                let edge = self.edges.get(&node.operator_id.as_raw_id()).unwrap();
                 let upstream_fragment_id = edge.upstream_id;
                 let dist = edge.dispatch_strategy.as_ref().unwrap();
                 format!(
@@ -139,9 +194,9 @@ impl StreamGraphFormatter {
                     match dist.r#type() {
                         DispatcherType::Unspecified => unreachable!(),
                         DispatcherType::Hash => format!("Hash({:?})", dist.dist_key_indices),
-                        DispatcherType::Broadcast => "Broadcast".to_string(),
-                        DispatcherType::Simple => "Single".to_string(),
-                        DispatcherType::NoShuffle => "NoShuffle".to_string(),
+                        DispatcherType::Broadcast => "Broadcast".to_owned(),
+                        DispatcherType::Simple => "Single".to_owned(),
+                        DispatcherType::NoShuffle => "NoShuffle".to_owned(),
                     },
                     upstream_fragment_id
                 )
@@ -149,15 +204,15 @@ impl StreamGraphFormatter {
             _ => node.identity.clone(),
         };
 
-        let mut tables: Vec<(String, u32)> = Vec::with_capacity(7);
+        let mut tables: Vec<(String, TableId)> = Vec::with_capacity(7);
         let mut node_copy = node.clone();
 
         stream_graph_visitor::visit_stream_node_tables_inner(
             &mut node_copy,
-            false,
+            true,
             false,
             |table, table_name| {
-                tables.push((table_name.to_string(), self.add_table(table)));
+                tables.push((table_name.to_owned(), self.add_table(table)));
             },
         );
 
@@ -199,5 +254,44 @@ impl StreamGraphFormatter {
             .map(|input| self.explain_node(input))
             .collect();
         Pretty::simple_record(one_line_explain, fields, children)
+    }
+}
+
+pub fn build_graph_from_pretty(
+    pretty: &Pretty<'_>,
+    graph: &mut Graph<String, String>,
+    nodes: &mut HashMap<String, NodeIndex>,
+    parent_label: Option<&str>,
+) {
+    if let Pretty::Record(r) = pretty {
+        let mut label = String::new();
+        label.push_str(&r.name);
+        for (k, v) in &r.fields {
+            label.push('\n');
+            label.push_str(k);
+            label.push_str(": ");
+            label.push_str(
+                &serde_json::to_string(&PrettySerde(v.clone(), false))
+                    .expect("failed to serialize plan to dot"),
+            );
+        }
+        // output alignment.
+        if !r.fields.is_empty() {
+            label.push('\n');
+        }
+
+        let current_node = *nodes
+            .entry(label.clone())
+            .or_insert_with(|| graph.add_node(label.clone()));
+
+        if let Some(parent_label) = parent_label
+            && let Some(&parent_node) = nodes.get(parent_label)
+        {
+            graph.add_edge(parent_node, current_node, "".to_owned());
+        }
+
+        for child in &r.children {
+            build_graph_from_pretty(child, graph, nodes, Some(&label));
+        }
     }
 }

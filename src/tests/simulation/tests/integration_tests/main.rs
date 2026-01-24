@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,15 +18,17 @@
 //! for the rationale behind this approach.
 
 #![feature(stmt_expr_attributes)]
-#![feature(extract_if)]
+#![feature(impl_trait_in_assoc_type)]
 
 mod backfill_tests;
 mod batch;
+mod compaction;
+mod default_parallelism;
+mod license_cpu_limit;
+mod log_store;
 mod recovery;
 mod scale;
 mod sink;
 mod storage;
 mod throttle;
-
-mod compaction;
 mod utils;

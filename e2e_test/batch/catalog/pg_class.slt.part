@@ -2,22 +2,22 @@ query ITIT
 SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class ORDER BY oid limit 15;
 ----
 2147478647 columns 1 v
-2147478648 schemata 1 v
-2147478649 table_constraints 1 v
-2147478650 tables 1 v
-2147478651 views 1 v
-2147478652 pg_am 1 v
-2147478653 pg_attrdef 1 v
-2147478654 pg_attribute 1 v
-2147478655 pg_auth_members 1 v
-2147478656 pg_cast 1 r
-2147478657 pg_class 1 v
-2147478658 pg_collation 1 v
-2147478659 pg_constraint 1 r
-2147478660 pg_conversion 1 v
-2147478661 pg_database 1 v
+2147478648 key_column_usage 1 v
+2147478649 schemata 1 v
+2147478650 table_constraints 1 v
+2147478651 tables 1 v
+2147478652 views 1 v
+2147478653 pg_am 1 v
+2147478654 pg_attrdef 1 v
+2147478655 pg_attribute 1 v
+2147478656 pg_auth_members 1 v
+2147478657 pg_cast 1 r
+2147478658 pg_class 1 r
+2147478659 pg_collation 1 v
+2147478660 pg_constraint 1 r
+2147478661 pg_conversion 1 v
 
 query ITIT
 SELECT oid,relname,relowner,relkind FROM pg_catalog.pg_class WHERE oid = 'pg_namespace'::regclass;
 ----
-2147478672 pg_namespace 1 v
+2147478673 pg_namespace 1 v

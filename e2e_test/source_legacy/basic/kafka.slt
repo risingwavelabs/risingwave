@@ -1,3 +1,6 @@
+statement ok
+SET streaming_use_shared_source TO false;
+
 # We don't support CSV header for Kafka
 statement error CSV HEADER is not supported when creating table with Kafka connector
 create table s0 (v1 int, v2 varchar) with (
@@ -111,7 +114,7 @@ from
 query T
 show sinks
 ----
-si
+public.si
 
 statement ok
 create table s7 (v1 int, v2 varchar, v3 int[], v4 struct<v5 int, v6 int>) with (
@@ -384,6 +387,20 @@ WITH (
 FORMAT DEBEZIUM_MONGO ENCODE JSON
 
 statement ok
+CREATE TABLE mongo_customers_strong_schema (
+	_id BIGINT PRIMARY KEY,
+	email VARCHAR,
+	first_name VARCHAR,
+	last_name VARCHAR
+)
+WITH (
+	connector = 'kafka',
+	properties.bootstrap.server = 'message_queue:29092',
+	topic = 'debezium_mongo_json_customers'
+)
+FORMAT DEBEZIUM_MONGO ENCODE JSON ( strong_schema = true )
+
+statement ok
 CREATE TABLE mongo_customers_no_schema_field (
 	_id BIGINT PRIMARY KEY,
 	payload jsonb
@@ -393,6 +410,20 @@ WITH (
   properties.bootstrap.server = 'message_queue:29092',
 	topic = 'debezium_mongo_json_customers_no_schema_field')
 FORMAT DEBEZIUM_MONGO ENCODE JSON
+
+statement ok
+CREATE TABLE mongo_customers_no_schema_field_strong_schema (
+	_id BIGINT PRIMARY KEY,
+	email VARCHAR,
+	first_name VARCHAR,
+	last_name VARCHAR
+)
+WITH (
+	connector = 'kafka',
+	properties.bootstrap.server = 'message_queue:29092',
+	topic = 'debezium_mongo_json_customers_no_schema_field'
+)
+FORMAT DEBEZIUM_MONGO ENCODE JSON ( strong_schema = true )
 
 statement ok
 CREATE TABLE upsert_students_default_key (
@@ -497,12 +528,21 @@ WITH (
 ) FORMAT PLAIN ENCODE JSON
 
 statement ok
+CREATE TABLE test_include_payload_only
+INCLUDE payload
+WITH (
+    connector = 'kafka',
+    topic = 'kafka_1_partition_topic',
+    properties.bootstrap.server = 'message_queue:29092',
+    scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON
+
+statement ok
 flush;
 
 # Wait enough time to ensure SourceExecutor consumes all Kafka data.
-sleep 1s
 
-query IT rowsort
+query IT rowsort retry 4 backoff 1s
 select v1, v2 from t0;
 ----
 1 1
@@ -510,7 +550,7 @@ select v1, v2 from t0;
 3 333
 4 4444
 
-query ITT rowsort
+query ITT rowsort retry 4 backoff 1s
 select v1, v2, _rw_kafka_payload from test_include_payload;
 ----
 1 1 {"v1": 1, "v2": "1"}
@@ -518,7 +558,7 @@ select v1, v2, _rw_kafka_payload from test_include_payload;
 3 333 {"v1": 3, "v2": "333"}
 4 4444 {"v1": 4, "v2": "4444"}
 
-query IT rowsort
+query IT rowsort retry 4 backoff 1s
 select v1, v2 from s0;
 ----
 1 1
@@ -740,6 +780,20 @@ query II
 SELECT
 	*
 FROM
+	mongo_customers_strong_schema
+ORDER BY
+	_id;
+----
+1001 sally.thomas@acme.com Sally Thomas
+1002 gbailey@foobar.com George Bailey
+1003 ed@walker.com Edward Walker
+1004 annek@noanswer.org Anne Kretchmar
+
+
+query II
+SELECT
+	*
+FROM
 	mongo_customers_no_schema_field
 ORDER BY
 	_id;
@@ -749,6 +803,19 @@ ORDER BY
 1003    {"_id": {"$numberLong": "1003"}, "email": "ed@walker.com", "first_name": "Edward", "last_name": "Walker"}
 1004    {"_id": {"$numberLong": "1004"}, "email": "annek@noanswer.org", "first_name": "Anne", "last_name": "Kretchmar"}
 
+
+query II
+SELECT
+	*
+FROM
+	mongo_customers_no_schema_field_strong_schema
+ORDER BY
+	_id;
+----
+1001 sally.thomas@acme.com Sally Thomas
+1002 gbailey@foobar.com George Bailey
+1003 ed@walker.com Edward Walker
+1004 annek@noanswer.org Anne Kretchmar
 
 query II
 SELECT
@@ -894,6 +961,12 @@ statement ok
 DROP TABLE mongo_customers_no_schema_field;
 
 statement ok
+DROP TABLE mongo_customers_strong_schema;
+
+statement ok
+DROP TABLE mongo_customers_no_schema_field_strong_schema;
+
+statement ok
 DROP TABLE upsert_students;
 
 statement ok
@@ -909,4 +982,10 @@ statement ok
 drop table debezium_ignore_key;
 
 statement ok
+drop table test_include_payload_only;
+
+statement ok
 drop table test_include_payload;
+
+statement ok
+SET streaming_use_shared_source TO true;

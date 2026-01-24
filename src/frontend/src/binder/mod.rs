@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,11 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use parking_lot::RwLock;
+use risingwave_common::catalog::FunctionId;
 use risingwave_common::session_config::{SearchPath, SessionConfig};
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_sqlparser::ast::{Expr as AstExpr, SelectItem, SetExpr, Statement};
+use risingwave_sqlparser::ast::Statement;
 
 use crate::error::Result;
 
@@ -28,10 +29,12 @@ mod bind_context;
 mod bind_param;
 mod create;
 mod create_view;
+mod declare_cursor;
 mod delete;
 mod expr;
 pub mod fetch_cursor;
 mod for_system;
+mod gap_fill_binder;
 mod insert;
 mod query;
 mod relation;
@@ -45,27 +48,32 @@ mod values;
 pub use bind_context::{BindContext, Clause, LateralBindContext};
 pub use create_view::BoundCreateView;
 pub use delete::BoundDelete;
-pub use expr::{bind_data_type, bind_struct_field};
+pub use expr::bind_data_type;
+pub use gap_fill_binder::BoundFillStrategy;
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBackCteRef, BoundBaseTable, BoundJoin, BoundShare, BoundShareInput, BoundSource,
+    BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput, BoundSource,
     BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation,
     ResolveQualifiedNameError, WindowTableFunctionKind,
 };
+// Re-export common types
+pub use risingwave_common::gap_fill::FillStrategy;
+use risingwave_common::id::ObjectId;
 pub use select::{BoundDistinct, BoundSelect};
 pub use set_expr::*;
 pub use statement::BoundStatement;
-pub use update::BoundUpdate;
+pub use update::{BoundUpdate, UpdateProject};
 pub use values::BoundValues;
 
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
-use crate::catalog::{CatalogResult, TableId, ViewId};
+use crate::catalog::{CatalogResult, DatabaseId, ViewId};
 use crate::error::ErrorCode;
-use crate::expr::ExprImpl;
-use crate::session::{AuthContext, SessionImpl, TemporarySourceManager};
+use crate::session::{AuthContext, SessionImpl, StagingCatalogManager, TemporarySourceManager};
+use crate::user::user_service::UserInfoReadGuard;
 
 pub type ShareId = usize;
 
@@ -85,7 +93,9 @@ enum BindFor {
 pub struct Binder {
     // TODO: maybe we can only lock the database, but not the whole catalog.
     catalog: CatalogReadGuard,
+    user: UserInfoReadGuard,
     db_name: String,
+    database_id: DatabaseId,
     session_id: SessionId,
     context: BindContext,
     auth_context: Arc<AuthContext>,
@@ -118,111 +128,31 @@ pub struct Binder {
     shared_views: HashMap<ViewId, ShareId>,
 
     /// The included relations while binding a query.
-    included_relations: HashSet<TableId>,
+    included_relations: HashSet<ObjectId>,
+
+    /// The included user-defined functions while binding a query.
+    included_udfs: HashSet<FunctionId>,
 
     param_types: ParameterTypes,
 
-    /// The sql udf context that will be used during binding phase
-    udf_context: UdfContext,
-
     /// The temporary sources that will be used during binding phase
     temporary_source_manager: TemporarySourceManager,
+
+    /// The staging catalogs that will be used during binding phase
+    staging_catalog_manager: StagingCatalogManager,
+
+    /// Information for `secure_compare` function. It's ONLY available when binding the
+    /// `VALIDATE` clause of Webhook source i.e. `VALIDATE SECRET ... AS SECURE_COMPARE(...)`.
+    secure_compare_context: Option<SecureCompareContext>,
 }
 
-#[derive(Clone, Debug, Default)]
-pub struct UdfContext {
-    /// The mapping from `sql udf parameters` to a bound `ExprImpl` generated from `ast expressions`
-    /// Note: The expressions are constructed during runtime, correspond to the actual users' input
-    udf_param_context: HashMap<String, ExprImpl>,
-
-    /// The global counter that records the calling stack depth
-    /// of the current binding sql udf chain
-    udf_global_counter: u32,
-}
-
-impl UdfContext {
-    pub fn new() -> Self {
-        Self {
-            udf_param_context: HashMap::new(),
-            udf_global_counter: 0,
-        }
-    }
-
-    pub fn global_count(&self) -> u32 {
-        self.udf_global_counter
-    }
-
-    pub fn incr_global_count(&mut self) {
-        self.udf_global_counter += 1;
-    }
-
-    pub fn decr_global_count(&mut self) {
-        self.udf_global_counter -= 1;
-    }
-
-    pub fn _is_empty(&self) -> bool {
-        self.udf_param_context.is_empty()
-    }
-
-    pub fn update_context(&mut self, context: HashMap<String, ExprImpl>) {
-        self.udf_param_context = context;
-    }
-
-    pub fn _clear(&mut self) {
-        self.udf_global_counter = 0;
-        self.udf_param_context.clear();
-    }
-
-    pub fn get_expr(&self, name: &str) -> Option<&ExprImpl> {
-        self.udf_param_context.get(name)
-    }
-
-    pub fn get_context(&self) -> HashMap<String, ExprImpl> {
-        self.udf_param_context.clone()
-    }
-
-    /// A common utility function to extract sql udf
-    /// expression out from the input `ast`
-    pub fn extract_udf_expression(ast: Vec<Statement>) -> Result<AstExpr> {
-        if ast.len() != 1 {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "the query for sql udf should contain only one statement".to_string(),
-            )
-            .into());
-        }
-
-        // Extract the expression out
-        let Statement::Query(query) = ast[0].clone() else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "invalid function definition, please recheck the syntax".to_string(),
-            )
-            .into());
-        };
-
-        let SetExpr::Select(select) = query.body else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "missing `select` body for sql udf expression, please recheck the syntax"
-                    .to_string(),
-            )
-            .into());
-        };
-
-        if select.projection.len() != 1 {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "`projection` should contain only one `SelectItem`".to_string(),
-            )
-            .into());
-        }
-
-        let SelectItem::UnnamedExpr(expr) = select.projection[0].clone() else {
-            return Err(ErrorCode::InvalidInputSyntax(
-                "expect `UnnamedExpr` for `projection`".to_string(),
-            )
-            .into());
-        };
-
-        Ok(expr)
-    }
+// There's one more hidden name, `HEADERS`, which is a reserved identifier for HTTP headers. Its type is `JSONB`.
+#[derive(Default, Clone, Debug)]
+pub struct SecureCompareContext {
+    /// The column name to store the whole payload in `JSONB`, but during validation it will be used as `bytea`
+    pub column_name: String,
+    /// The secret (usually a token provided by the webhook source user) to validate the calls
+    pub secret_name: Option<String>,
 }
 
 /// `ParameterTypes` is used to record the types of the parameters during binding prepared stataments.
@@ -234,13 +164,13 @@ impl UdfContext {
 ///    will record the target type as infer type for that parameter(call `record_infer_type`). If the
 ///    parameter has been inferred, the cast function will act as a normal cast.
 /// 4. After bind finished:
-///     (a) parameter not in `ParameterTypes` means that the user didn't specify it and it didn't
+///    (a) parameter not in `ParameterTypes` means that the user didn't specify it and it didn't
 ///    occur in the query. `export` will return error if there is a kind of
 ///    parameter. This rule is compatible with PostgreSQL
-///     (b) parameter is None means that it's a unknown type. The user didn't specify it
+///    (b) parameter is None means that it's a unknown type. The user didn't specify it
 ///    and we can't infer it in the query. We will treat it as VARCHAR type finally. This rule is
 ///    compatible with PostgreSQL.
-///     (c) parameter is Some means that it's a known type.
+///    (c) parameter is Some means that it's a known type.
 #[derive(Clone, Debug)]
 pub struct ParameterTypes(Arc<RwLock<HashMap<u64, Option<DataType>>>>);
 
@@ -266,12 +196,16 @@ impl ParameterTypes {
         self.0.write().entry(index).or_insert(None);
     }
 
-    pub fn record_infer_type(&mut self, index: u64, data_type: DataType) {
+    pub fn record_infer_type(&mut self, index: u64, data_type: &DataType) {
         assert!(
             !self.has_infer(index),
             "The parameter has been inferred, should not be inferred again."
         );
-        self.0.write().get_mut(&index).unwrap().replace(data_type);
+        self.0
+            .write()
+            .get_mut(&index)
+            .unwrap()
+            .replace(data_type.clone());
     }
 
     pub fn export(&self) -> Result<Vec<DataType>> {
@@ -302,14 +236,12 @@ impl ParameterTypes {
 }
 
 impl Binder {
-    fn new_inner(
-        session: &SessionImpl,
-        bind_for: BindFor,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
+    fn new(session: &SessionImpl, bind_for: BindFor) -> Binder {
         Binder {
             catalog: session.env().catalog_reader().read_guard(),
-            db_name: session.database().to_string(),
+            user: session.env().user_info_reader().read_guard(),
+            db_name: session.database(),
+            database_id: session.database_id(),
             session_id: session.id(),
             context: BindContext::new(),
             auth_context: session.auth_context(),
@@ -323,47 +255,47 @@ impl Binder {
             bind_for,
             shared_views: HashMap::new(),
             included_relations: HashSet::new(),
-            param_types: ParameterTypes::new(param_types),
-            udf_context: UdfContext::new(),
+            included_udfs: HashSet::new(),
+            param_types: ParameterTypes::new(vec![]),
             temporary_source_manager: session.temporary_source_manager(),
+            staging_catalog_manager: session.staging_catalog_manager(),
+            secure_compare_context: None,
         }
     }
 
-    pub fn new(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::Batch, vec![])
-    }
-
-    pub fn new_with_param_types(
-        session: &SessionImpl,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
-        Self::new_inner(session, BindFor::Batch, param_types)
+    pub fn new_for_batch(session: &SessionImpl) -> Binder {
+        Self::new(session, BindFor::Batch)
     }
 
     pub fn new_for_stream(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::Stream, vec![])
+        Self::new(session, BindFor::Stream)
     }
 
     pub fn new_for_ddl(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::Ddl, vec![])
+        Self::new(session, BindFor::Ddl)
     }
 
     pub fn new_for_system(session: &SessionImpl) -> Binder {
-        Self::new_inner(session, BindFor::System, vec![])
+        Self::new(session, BindFor::System)
     }
 
-    pub fn new_for_stream_with_param_types(
-        session: &SessionImpl,
-        param_types: Vec<Option<DataType>>,
-    ) -> Binder {
-        Self::new_inner(session, BindFor::Stream, param_types)
+    /// Set the specified parameter types.
+    pub fn with_specified_params_types(mut self, param_types: Vec<Option<DataType>>) -> Self {
+        self.param_types = ParameterTypes::new(param_types);
+        self
+    }
+
+    /// Set the secure compare context.
+    pub fn with_secure_compare(mut self, ctx: SecureCompareContext) -> Self {
+        self.secure_compare_context = Some(ctx);
+        self
     }
 
     fn is_for_stream(&self) -> bool {
         matches!(self.bind_for, BindFor::Stream)
     }
 
-    #[expect(dead_code)]
+    #[allow(dead_code)]
     fn is_for_batch(&self) -> bool {
         matches!(self.bind_for, BindFor::Batch)
     }
@@ -381,13 +313,18 @@ impl Binder {
         self.param_types.export()
     }
 
-    /// Returns included relations in the query after binding. This is used for resolving relation
+    /// Get included relations in the query after binding. This is used for resolving relation
     /// dependencies. Note that it only contains referenced relations discovered during binding.
     /// After the plan is built, the referenced relations may be changed. We cannot rely on the
     /// collection result of plan, because we still need to record the dependencies that have been
     /// optimised away.
-    pub fn included_relations(&self) -> HashSet<TableId> {
-        self.included_relations.clone()
+    pub fn included_relations(&self) -> &HashSet<ObjectId> {
+        &self.included_relations
+    }
+
+    /// Get included user-defined functions in the query after binding.
+    pub fn included_udfs(&self) -> &HashSet<FunctionId> {
+        &self.included_udfs
     }
 
     fn push_context(&mut self) {
@@ -395,6 +332,7 @@ impl Binder {
         self.context
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
+        self.context.disable_security_invoker = new_context.disable_security_invoker;
         let new_lateral_contexts = std::mem::take(&mut self.lateral_contexts);
         self.upper_subquery_contexts
             .push((new_context, new_lateral_contexts));
@@ -404,7 +342,7 @@ impl Binder {
         let (old_context, old_lateral_contexts) = self
             .upper_subquery_contexts
             .pop()
-            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_string()))?;
+            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_owned()))?;
         self.context = old_context;
         self.lateral_contexts = old_lateral_contexts;
         Ok(())
@@ -415,6 +353,7 @@ impl Binder {
         self.context
             .cte_to_relation
             .clone_from(&new_context.cte_to_relation);
+        self.context.disable_security_invoker = new_context.disable_security_invoker;
         self.lateral_contexts.push(LateralBindContext {
             is_visible: false,
             context: new_context,
@@ -425,7 +364,7 @@ impl Binder {
         let mut old_context = self
             .lateral_contexts
             .pop()
-            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_string()))?
+            .ok_or_else(|| ErrorCode::InternalError("Popping non-existent context".to_owned()))?
             .context;
         old_context.merge_context(self.context.clone())?;
         self.context = old_context;
@@ -444,6 +383,20 @@ impl Binder {
             ctx.is_visible = false;
             self.lateral_contexts.push(ctx);
         }
+    }
+
+    /// Returns a reverse iterator over the upper subquery contexts that are visible to the current
+    /// context. Not to be confused with `is_visible` in [`LateralBindContext`].
+    ///
+    /// In most cases, this should include all the upper subquery contexts. However, when binding
+    /// SQL UDFs, we should avoid resolving the context outside the UDF for hygiene.
+    fn visible_upper_subquery_contexts_rev(
+        &self,
+    ) -> impl Iterator<Item = &(BindContext, Vec<LateralBindContext>)> + '_ {
+        self.upper_subquery_contexts
+            .iter()
+            .rev()
+            .take_while(|(context, _)| context.sql_udf_arguments.is_none())
     }
 
     fn next_subquery_id(&mut self) -> usize {
@@ -472,12 +425,12 @@ impl Binder {
         )
     }
 
-    pub fn set_clause(&mut self, clause: Option<Clause>) {
-        self.context.clause = clause;
+    fn bind_schema_path<'a>(&'a self, schema_name: Option<&'a str>) -> SchemaPath<'a> {
+        SchemaPath::new(schema_name, &self.search_path, &self.auth_context.user_name)
     }
 
-    pub fn udf_context_mut(&mut self) -> &mut UdfContext {
-        &mut self.udf_context
+    pub fn set_clause(&mut self, clause: Option<Clause>) {
+        self.context.clause = clause;
     }
 }
 
@@ -495,14 +448,12 @@ pub mod test_utils {
     use super::Binder;
     use crate::session::SessionImpl;
 
-    #[cfg(test)]
     pub fn mock_binder() -> Binder {
-        Binder::new(&SessionImpl::mock())
+        mock_binder_with_param_types(vec![])
     }
 
-    #[cfg(test)]
     pub fn mock_binder_with_param_types(param_types: Vec<Option<DataType>>) -> Binder {
-        Binder::new_with_param_types(&SessionImpl::mock(), param_types)
+        Binder::new_for_batch(&SessionImpl::mock()).with_specified_params_types(param_types)
     }
 }
 
@@ -511,225 +462,6 @@ mod tests {
     use expect_test::expect;
 
     use super::test_utils::*;
-
-    #[tokio::test]
-    async fn test_rcte() {
-        let stmt = risingwave_sqlparser::parser::Parser::parse_sql(
-            "WITH RECURSIVE t1 AS (SELECT 1 AS a UNION ALL SELECT a + 1 FROM t1 WHERE a < 10) SELECT * FROM t1",
-        ).unwrap().into_iter().next().unwrap();
-        let mut binder = mock_binder();
-        let bound = binder.bind(stmt).unwrap();
-
-        let expected = expect![[r#"
-            Query(
-                BoundQuery {
-                    body: Select(
-                        BoundSelect {
-                            distinct: All,
-                            select_items: [
-                                InputRef(
-                                    InputRef {
-                                        index: 0,
-                                        data_type: Int32,
-                                    },
-                                ),
-                            ],
-                            aliases: [
-                                Some(
-                                    "a",
-                                ),
-                            ],
-                            from: Some(
-                                Share(
-                                    BoundShare {
-                                        share_id: 0,
-                                        input: Query(
-                                            Right(
-                                                RecursiveUnion {
-                                                    all: true,
-                                                    base: Select(
-                                                        BoundSelect {
-                                                            distinct: All,
-                                                            select_items: [
-                                                                Literal(
-                                                                    Literal {
-                                                                        data: Some(
-                                                                            Int32(
-                                                                                1,
-                                                                            ),
-                                                                        ),
-                                                                        data_type: Some(
-                                                                            Int32,
-                                                                        ),
-                                                                    },
-                                                                ),
-                                                            ],
-                                                            aliases: [
-                                                                Some(
-                                                                    "a",
-                                                                ),
-                                                            ],
-                                                            from: None,
-                                                            where_clause: None,
-                                                            group_by: GroupKey(
-                                                                [],
-                                                            ),
-                                                            having: None,
-                                                            schema: Schema {
-                                                                fields: [
-                                                                    a:Int32,
-                                                                ],
-                                                            },
-                                                        },
-                                                    ),
-                                                    recursive: Select(
-                                                        BoundSelect {
-                                                            distinct: All,
-                                                            select_items: [
-                                                                FunctionCall(
-                                                                    FunctionCall {
-                                                                        func_type: Add,
-                                                                        return_type: Int32,
-                                                                        inputs: [
-                                                                            InputRef(
-                                                                                InputRef {
-                                                                                    index: 0,
-                                                                                    data_type: Int32,
-                                                                                },
-                                                                            ),
-                                                                            Literal(
-                                                                                Literal {
-                                                                                    data: Some(
-                                                                                        Int32(
-                                                                                            1,
-                                                                                        ),
-                                                                                    ),
-                                                                                    data_type: Some(
-                                                                                        Int32,
-                                                                                    ),
-                                                                                },
-                                                                            ),
-                                                                        ],
-                                                                    },
-                                                                ),
-                                                            ],
-                                                            aliases: [
-                                                                None,
-                                                            ],
-                                                            from: Some(
-                                                                BackCteRef(
-                                                                    BoundBackCteRef {
-                                                                        share_id: 0,
-                                                                        base: Select(
-                                                                            BoundSelect {
-                                                                                distinct: All,
-                                                                                select_items: [
-                                                                                    Literal(
-                                                                                        Literal {
-                                                                                            data: Some(
-                                                                                                Int32(
-                                                                                                    1,
-                                                                                                ),
-                                                                                            ),
-                                                                                            data_type: Some(
-                                                                                                Int32,
-                                                                                            ),
-                                                                                        },
-                                                                                    ),
-                                                                                ],
-                                                                                aliases: [
-                                                                                    Some(
-                                                                                        "a",
-                                                                                    ),
-                                                                                ],
-                                                                                from: None,
-                                                                                where_clause: None,
-                                                                                group_by: GroupKey(
-                                                                                    [],
-                                                                                ),
-                                                                                having: None,
-                                                                                schema: Schema {
-                                                                                    fields: [
-                                                                                        a:Int32,
-                                                                                    ],
-                                                                                },
-                                                                            },
-                                                                        ),
-                                                                    },
-                                                                ),
-                                                            ),
-                                                            where_clause: Some(
-                                                                FunctionCall(
-                                                                    FunctionCall {
-                                                                        func_type: LessThan,
-                                                                        return_type: Boolean,
-                                                                        inputs: [
-                                                                            InputRef(
-                                                                                InputRef {
-                                                                                    index: 0,
-                                                                                    data_type: Int32,
-                                                                                },
-                                                                            ),
-                                                                            Literal(
-                                                                                Literal {
-                                                                                    data: Some(
-                                                                                        Int32(
-                                                                                            10,
-                                                                                        ),
-                                                                                    ),
-                                                                                    data_type: Some(
-                                                                                        Int32,
-                                                                                    ),
-                                                                                },
-                                                                            ),
-                                                                        ],
-                                                                    },
-                                                                ),
-                                                            ),
-                                                            group_by: GroupKey(
-                                                                [],
-                                                            ),
-                                                            having: None,
-                                                            schema: Schema {
-                                                                fields: [
-                                                                    ?column?:Int32,
-                                                                ],
-                                                            },
-                                                        },
-                                                    ),
-                                                    schema: Schema {
-                                                        fields: [
-                                                            a:Int32,
-                                                        ],
-                                                    },
-                                                },
-                                            ),
-                                        ),
-                                    },
-                                ),
-                            ),
-                            where_clause: None,
-                            group_by: GroupKey(
-                                [],
-                            ),
-                            having: None,
-                            schema: Schema {
-                                fields: [
-                                    a:Int32,
-                                ],
-                            },
-                        },
-                    ),
-                    order: [],
-                    limit: None,
-                    offset: None,
-                    with_ties: false,
-                    extra_order_exprs: [],
-                },
-            )"#]];
-
-        expected.assert_eq(&format!("{:#?}", bound));
-    }
 
     #[tokio::test]
     async fn test_bind_approx_percentile() {
@@ -841,6 +573,7 @@ mod tests {
                             selection: None,
                             group_by: [],
                             having: None,
+                            window: [],
                         },
                     ),
                     order_by: [],
@@ -907,9 +640,7 @@ mod tests {
                                             Literal {
                                                 data: Some(
                                                     Float64(
-                                                        OrderedFloat(
-                                                            0.5,
-                                                        ),
+                                                        0.5,
                                                     ),
                                                 ),
                                                 data_type: Some(
@@ -919,9 +650,7 @@ mod tests {
                                             Literal {
                                                 data: Some(
                                                     Float64(
-                                                        OrderedFloat(
-                                                            0.01,
-                                                        ),
+                                                        0.01,
                                                     ),
                                                 ),
                                                 data_type: Some(
@@ -979,6 +708,7 @@ mod tests {
                                 [],
                             ),
                             having: None,
+                            window: {},
                             schema: Schema {
                                 fields: [
                                     approx_percentile:Float64,

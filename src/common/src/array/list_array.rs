@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::borrow::Cow;
 use std::cmp::Ordering;
 use std::fmt::{self, Debug, Display};
 use std::future::Future;
-use std::mem::size_of;
+use std::mem::{ManuallyDrop, size_of};
 
 use bytes::{Buf, BufMut};
 use itertools::Itertools;
@@ -32,8 +32,8 @@ use super::{
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, ScalarRefImpl,
-    ToDatumRef, ToText,
+    DataType, Datum, DatumRef, DefaultOrd, ListType, Scalar, ScalarImpl, ScalarRef, ScalarRefImpl,
+    ToDatumRef, ToText, hash_datum,
 };
 use crate::util::memcmp_encoding;
 use crate::util::value_encoding::estimate_serialize_datum_size;
@@ -43,7 +43,6 @@ pub struct ListArrayBuilder {
     bitmap: BitmapBuilder,
     offsets: Vec<u32>,
     value: Box<ArrayBuilderImpl>,
-    len: usize,
 }
 
 impl ArrayBuilder for ListArrayBuilder {
@@ -60,12 +59,12 @@ impl ArrayBuilder for ListArrayBuilder {
         Self::with_type(
             capacity,
             // Default datatype
-            DataType::List(Box::new(DataType::Int16)),
+            DataType::Int16.list(),
         )
     }
 
     fn with_type(capacity: usize, ty: DataType) -> Self {
-        let DataType::List(value_type) = ty else {
+        let DataType::List(list_ty) = ty else {
             panic!("data type must be DataType::List");
         };
         let mut offsets = Vec::with_capacity(capacity + 1);
@@ -73,8 +72,7 @@ impl ArrayBuilder for ListArrayBuilder {
         Self {
             bitmap: BitmapBuilder::with_capacity(capacity),
             offsets,
-            value: Box::new(value_type.create_array_builder(capacity)),
-            len: 0,
+            value: Box::new(list_ty.elem().create_array_builder(capacity)),
         }
     }
 
@@ -102,7 +100,6 @@ impl ArrayBuilder for ListArrayBuilder {
                 }
             }
         }
-        self.len += n;
     }
 
     fn append_array(&mut self, other: &ListArray) {
@@ -111,14 +108,12 @@ impl ArrayBuilder for ListArrayBuilder {
         self.offsets
             .append(&mut other.offsets[1..].iter().map(|o| *o + last).collect());
         self.value.append_array(&other.value);
-        self.len += other.len();
     }
 
     fn pop(&mut self) -> Option<()> {
         self.bitmap.pop()?;
         let start = self.offsets.pop().unwrap();
         let end = *self.offsets.last().unwrap();
-        self.len -= 1;
         for _ in end..start {
             self.value.pop().unwrap();
         }
@@ -144,10 +139,13 @@ impl ListArrayBuilder {
         let last = *self.offsets.last().unwrap();
         self.offsets
             .push(last.checked_add(row.len() as u32).expect("offset overflow"));
-        self.len += 1;
         for v in row.iter() {
             self.value.append(v);
         }
+    }
+
+    pub fn writer(&mut self) -> ListWriter<'_> {
+        ListWriter::new(self)
     }
 }
 
@@ -181,10 +179,12 @@ impl Array for ListArray {
     type RefItem<'a> = ListRef<'a>;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> Self::RefItem<'_> {
-        ListRef {
-            array: &self.value,
-            start: *self.offsets.get_unchecked(idx),
-            end: *self.offsets.get_unchecked(idx + 1),
+        unsafe {
+            ListRef {
+                array: &self.value,
+                start: *self.offsets.get_unchecked(idx),
+                end: *self.offsets.get_unchecked(idx + 1),
+            }
         }
     }
 
@@ -201,6 +201,7 @@ impl Array for ListArray {
                 offsets: self.offsets.to_vec(),
                 value: Some(Box::new(value)),
                 value_type: Some(self.value.data_type().to_protobuf()),
+                elem_size: None,
             })),
             null_bitmap: Some(self.bitmap.to_protobuf()),
             values: vec![],
@@ -220,7 +221,7 @@ impl Array for ListArray {
     }
 
     fn data_type(&self) -> DataType {
-        DataType::List(Box::new(self.value.data_type()))
+        DataType::list(self.value.data_type())
     }
 }
 
@@ -306,10 +307,8 @@ where
 {
     fn from_iter<I: IntoIterator<Item = Option<L>>>(iter: I) -> Self {
         let iter = iter.into_iter();
-        let mut builder = ListArrayBuilder::with_type(
-            iter.size_hint().0,
-            DataType::List(Box::new(T::DATA_TYPE.clone())),
-        );
+        let mut builder =
+            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(T::DATA_TYPE));
         for v in iter {
             match v {
                 None => builder.append(None),
@@ -326,10 +325,8 @@ impl FromIterator<ListValue> for ListArray {
     fn from_iter<I: IntoIterator<Item = ListValue>>(iter: I) -> Self {
         let mut iter = iter.into_iter();
         let first = iter.next().expect("empty iterator");
-        let mut builder = ListArrayBuilder::with_type(
-            iter.size_hint().0,
-            DataType::List(Box::new(first.data_type())),
-        );
+        let mut builder =
+            ListArrayBuilder::with_type(iter.size_hint().0, DataType::list(first.elem_type()));
         builder.append(Some(first.as_scalar_ref()));
         for v in iter {
             builder.append(Some(v.as_scalar_ref()));
@@ -362,21 +359,23 @@ impl ListValue {
         }
     }
 
+    /// Convert this list into an [`Array`] of the element type.
     pub fn into_array(self) -> ArrayImpl {
         *self.values
     }
 
-    pub fn empty(datatype: &DataType) -> Self {
-        Self::new(datatype.create_array_builder(0).finish())
+    /// Creates a new empty `ListValue` with the given element type.
+    pub fn empty(elem_type: &DataType) -> Self {
+        Self::new(elem_type.create_array_builder(0).finish())
     }
 
-    /// Creates a new `ListValue` from an iterator of `Datum`.
+    /// Creates a new `ListValue` from an iterator of elements with the given element type.
     pub fn from_datum_iter<T: ToDatumRef>(
-        elem_datatype: &DataType,
+        elem_type: &DataType,
         iter: impl IntoIterator<Item = T>,
     ) -> Self {
         let iter = iter.into_iter();
-        let mut builder = elem_datatype.create_array_builder(iter.size_hint().0);
+        let mut builder = elem_type.create_array_builder(iter.size_hint().0);
         for datum in iter {
             builder.append(datum);
         }
@@ -408,20 +407,22 @@ impl ListValue {
     }
 
     /// Returns the data type of the elements in the list.
-    pub fn data_type(&self) -> DataType {
+    pub fn elem_type(&self) -> DataType {
         self.values.data_type()
     }
 
     pub fn memcmp_deserialize(
-        item_datatype: &DataType,
+        list_type: &ListType,
         deserializer: &mut memcomparable::Deserializer<impl Buf>,
     ) -> memcomparable::Result<Self> {
+        let elem_type = list_type.elem();
+
         let bytes = serde_bytes::ByteBuf::deserialize(deserializer)?;
         let mut inner_deserializer = memcomparable::Deserializer::new(bytes.as_slice());
-        let mut builder = item_datatype.create_array_builder(0);
+        let mut builder = elem_type.create_array_builder(0);
         while inner_deserializer.has_remaining() {
             builder.append(memcmp_encoding::deserialize_datum_in_composite(
-                item_datatype,
+                elem_type,
                 &mut inner_deserializer,
             )?)
         }
@@ -465,45 +466,42 @@ impl Ord for ListValue {
     }
 }
 
+// Construction helpers:
+
+// [Some(1), None].collect()
 impl<T: PrimitiveArrayItemType> FromIterator<Option<T>> for ListValue {
     fn from_iter<I: IntoIterator<Item = Option<T>>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<PrimitiveArray<T>>().into())
     }
 }
-
+// [1, 2].collect()
 impl<T: PrimitiveArrayItemType> FromIterator<T> for ListValue {
     fn from_iter<I: IntoIterator<Item = T>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<PrimitiveArray<T>>().into())
     }
 }
-
+// [true, false].collect()
 impl FromIterator<bool> for ListValue {
     fn from_iter<I: IntoIterator<Item = bool>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<BoolArray>().into())
     }
 }
-
+// [Some("hello"), None].collect()
 impl<'a> FromIterator<Option<&'a str>> for ListValue {
     fn from_iter<I: IntoIterator<Item = Option<&'a str>>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<Utf8Array>().into())
     }
 }
-
+// ["hello", "world"].collect()
 impl<'a> FromIterator<&'a str> for ListValue {
     fn from_iter<I: IntoIterator<Item = &'a str>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<Utf8Array>().into())
     }
 }
-
+// nested: [ListValue::from_iter([1,2,3]), ListValue::from_iter([4,5])].collect()
 impl FromIterator<ListValue> for ListValue {
     fn from_iter<I: IntoIterator<Item = ListValue>>(iter: I) -> Self {
         Self::new(iter.into_iter().collect::<ListArray>().into())
-    }
-}
-
-impl From<ListValue> for ArrayImpl {
-    fn from(value: ListValue) -> Self {
-        *value.values
     }
 }
 
@@ -527,7 +525,7 @@ impl<'a> ListRef<'a> {
     }
 
     /// Returns the data type of the elements in the list.
-    pub fn data_type(&self) -> DataType {
+    pub fn elem_type(&self) -> DataType {
         self.array.data_type()
     }
 
@@ -580,22 +578,14 @@ impl<'a> ListRef<'a> {
         self.iter().map(estimate_serialize_datum_size).sum()
     }
 
-    pub fn to_owned(self) -> ListValue {
-        let mut builder = self.array.create_builder(self.len());
-        for datum_ref in self.iter() {
-            builder.append(datum_ref);
-        }
-        ListValue::new(builder.finish())
+    pub fn as_primitive_slice<T: PrimitiveArrayItemType>(self) -> Option<&'a [T]> {
+        T::try_into_array_ref(self.array)
+            .map(|prim_arr| &prim_arr.as_slice()[self.start as usize..self.end as usize])
     }
 
     /// Returns a slice if the list is of type `int64[]`.
     pub fn as_i64_slice(&self) -> Option<&[i64]> {
-        match &self.array {
-            ArrayImpl::Int64(array) => {
-                Some(&array.as_slice()[self.start as usize..self.end as usize])
-            }
-            _ => None,
-        }
+        self.as_primitive_slice()
     }
 
     /// # Panics
@@ -649,7 +639,7 @@ impl Row for ListRef<'_> {
     }
 
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.array.value_at_unchecked(self.start as usize + index)
+        unsafe { self.array.value_at_unchecked(self.start as usize + index) }
     }
 
     fn len(&self) -> usize {
@@ -674,7 +664,7 @@ impl ToText for ListRef<'_> {
                 // chars and whitespaces.
                 let need_quote = !matches!(datum_ref, None | Some(ScalarRefImpl::List(_)))
                     && (s.is_empty()
-                        || s.to_ascii_lowercase() == "null"
+                        || s.eq_ignore_ascii_case("null")
                         || s.contains([
                             '"', '\\', ',',
                             // whilespace:
@@ -707,24 +697,38 @@ impl ToText for ListRef<'_> {
     }
 }
 
-impl<'a> From<&'a ListValue> for ListRef<'a> {
-    fn from(value: &'a ListValue) -> Self {
+/// Implement `Scalar` for `ListValue`.
+impl Scalar for ListValue {
+    type ScalarRefType<'a> = ListRef<'a>;
+
+    fn as_scalar_ref(&self) -> ListRef<'_> {
         ListRef {
-            array: &value.values,
+            array: &self.values,
             start: 0,
-            end: value.len() as u32,
+            end: self.len() as u32,
         }
     }
 }
 
-impl From<ListRef<'_>> for ListValue {
-    fn from(value: ListRef<'_>) -> Self {
-        value.to_owned()
+/// Implement `Scalar` for `ListValue`.
+impl<'a> ScalarRef<'a> for ListRef<'a> {
+    type ScalarType = ListValue;
+
+    fn to_owned_scalar(&self) -> ListValue {
+        let mut builder = self.array.create_builder(self.len());
+        for datum_ref in self.iter() {
+            builder.append(datum_ref);
+        }
+        ListValue::new(builder.finish())
+    }
+
+    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.hash_scalar_inner(state)
     }
 }
 
 impl ListValue {
-    /// Construct an array from literal string.
+    /// Construct an array from literal string and the data type of the list.
     pub fn from_str(input: &str, data_type: &DataType) -> Result<Self, String> {
         struct Parser<'a> {
             input: &'a str,
@@ -749,17 +753,18 @@ impl ListValue {
             fn parse_array(&mut self) -> Result<ListValue, String> {
                 self.skip_whitespace();
                 if !self.try_consume('{') {
-                    return Err("Array value must start with \"{\"".to_string());
+                    return Err("Array value must start with \"{\"".to_owned());
                 }
                 self.skip_whitespace();
                 if self.try_consume('}') {
-                    return Ok(ListValue::empty(self.data_type.as_list()));
+                    return Ok(ListValue::empty(self.data_type.as_list_elem()));
                 }
-                let mut builder = ArrayBuilderImpl::with_type(0, self.data_type.as_list().clone());
+                let mut builder =
+                    ArrayBuilderImpl::with_type(0, self.data_type.as_list_elem().clone());
                 loop {
                     let mut parser = Self {
                         input: self.input,
-                        data_type: self.data_type.as_list(),
+                        data_type: self.data_type.as_list_elem(),
                     };
                     builder.append(parser.parse()?);
                     self.input = parser.input;
@@ -775,7 +780,7 @@ impl ListValue {
                             break;
                         }
                         None => return Err(Self::eoi()),
-                        _ => return Err("Unexpected array element.".to_string()),
+                        _ => return Err("Unexpected array element.".to_owned()),
                     }
                 }
                 Ok(ListValue::new(builder.finish()))
@@ -813,8 +818,8 @@ impl ListValue {
                                 Cow::Borrowed(trimmed)
                             };
                         }
-                        (_, '{') => return Err("Unexpected \"{\" character.".to_string()),
-                        (_, '"') => return Err("Unexpected array element.".to_string()),
+                        (_, '{') => return Err("Unexpected \"{\" character.".to_owned()),
+                        (_, '"') => return Err("Unexpected array element.".to_owned()),
                         _ => {}
                     }
                 };
@@ -921,7 +926,7 @@ impl ListValue {
             fn expect_end(&mut self) -> Result<(), String> {
                 self.skip_whitespace();
                 match self.peek() {
-                    Some(_) => Err("Junk after closing right brace.".to_string()),
+                    Some(_) => Err("Junk after closing right brace.".to_owned()),
                     None => Ok(()),
                 }
             }
@@ -956,6 +961,70 @@ impl ListValue {
     }
 }
 
+pub struct ListWriter<'a> {
+    builder: &'a mut ListArrayBuilder,
+}
+
+impl<'a> ListWriter<'a> {
+    pub fn new(builder: &'a mut ListArrayBuilder) -> Self {
+        Self { builder }
+    }
+
+    /// `finish` will be called when the entire record is successfully written.
+    /// The partial data was committed and the `builder` can no longer be used.
+    pub fn finish(self) {
+        self.builder.offsets.push(
+            self.builder
+                .value
+                .len()
+                .try_into()
+                .expect("offset overflow"),
+        );
+        self.builder.bitmap.append(true);
+        let _ = ManuallyDrop::new(self); // prevent drop
+    }
+
+    /// `rollback` will be called while the entire record is abandoned.
+    /// The partial data was cleaned and the `builder` can be safely used.
+    pub fn rollback(self) {
+        // just drop self, the drop impl will rollback the partial data
+    }
+}
+
+impl Drop for ListWriter<'_> {
+    /// If the writer is dropped without calling `finish` or `rollback`,
+    /// we rollback the partial data by default.
+    fn drop(&mut self) {
+        let last = *self.builder.offsets.last().unwrap() as usize;
+        let cur = self.builder.value.len();
+        for _ in last..cur {
+            self.builder.value.pop().unwrap();
+        }
+    }
+}
+
+pub trait ListWrite {
+    fn write(&mut self, value: impl ToDatumRef);
+
+    fn write_iter(&mut self, values: impl IntoIterator<Item = impl ToDatumRef>) {
+        for v in values {
+            self.write(v);
+        }
+    }
+}
+
+impl<'a> ListWrite for ListWriter<'a> {
+    fn write(&mut self, value: impl ToDatumRef) {
+        self.builder.value.append(value);
+    }
+}
+
+impl ListWrite for ArrayBuilderImpl {
+    fn write(&mut self, value: impl ToDatumRef) {
+        self.append(value);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use more_asserts::{assert_gt, assert_lt};
@@ -980,7 +1049,7 @@ mod tests {
         let part1 = ListArray::from_iter([Some([12i32, -7, 25]), None]);
         let part2 = ListArray::from_iter([Some(vec![0, -127, 127, 50]), Some(vec![])]);
 
-        let mut builder = ListArrayBuilder::with_type(4, DataType::List(Box::new(DataType::Int32)));
+        let mut builder = ListArrayBuilder::with_type(4, DataType::Int32.list());
         builder.append_array(&part1);
         builder.append_array(&part2);
 
@@ -1007,8 +1076,7 @@ mod tests {
         use crate::array::*;
 
         {
-            let mut builder =
-                ListArrayBuilder::with_type(1, DataType::List(Box::new(DataType::Int32)));
+            let mut builder = ListArrayBuilder::with_type(1, DataType::Int32.list());
             let val = ListValue::from_iter([1i32, 2, 3]);
             builder.append(Some(val.as_scalar_ref()));
             assert!(builder.pop().is_some());
@@ -1018,7 +1086,7 @@ mod tests {
         }
 
         {
-            let data_type = DataType::List(Box::new(DataType::List(Box::new(DataType::Int32))));
+            let data_type = DataType::Int32.list().list();
             let mut builder = ListArrayBuilder::with_type(2, data_type);
             let val1 = ListValue::from_iter([1, 2, 3]);
             let val2 = ListValue::from_iter([1, 2, 3]);
@@ -1113,12 +1181,12 @@ mod tests {
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         deserializer.set_reverse(true);
         assert_eq!(
-            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&ListType::new(DataType::Varchar), &mut deserializer)
+                .unwrap(),
             value
         );
 
-        let mut builder =
-            ListArrayBuilder::with_type(0, DataType::List(Box::new(DataType::Varchar)));
+        let mut builder = ListArrayBuilder::with_type(0, DataType::Varchar.list());
         builder.append(Some(list_ref));
         let array = builder.finish();
         let list_ref = array.value_at(0).unwrap();
@@ -1127,7 +1195,8 @@ mod tests {
         let buf = serializer.into_inner();
         let mut deserializer = memcomparable::Deserializer::new(&buf[..]);
         assert_eq!(
-            ListValue::memcmp_deserialize(&DataType::Varchar, &mut deserializer).unwrap(),
+            ListValue::memcmp_deserialize(&ListType::new(DataType::Varchar), &mut deserializer)
+                .unwrap(),
             value
         );
     }

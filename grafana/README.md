@@ -15,7 +15,6 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-And don't forget to include the generated `risingwave-<xxx>-dashboard.json` in the commit.
 
 ## Generate Dashboard
 
@@ -23,7 +22,13 @@ And don't forget to include the generated `risingwave-<xxx>-dashboard.json` in t
 ./generate.sh
 ```
 
-## Update without Restarting Grafana
+Don't forget to include the generated `risingwave-<xxx>-dashboard.json` in the commit.
+
+A separate workflow generates production dashboards on merges to `main` when the
+`RISINGWAVE_PROD_GRAFANA_DASHBOARD_UID` variable is configured, and uploads them as
+an artifact named `grafana-prod-dashboards`.
+
+## Update without Restarting Grafana (to localhost:3001)
 
 ```bash
 ./update.sh

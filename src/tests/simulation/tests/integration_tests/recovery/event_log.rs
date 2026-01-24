@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -91,14 +91,16 @@ async fn assert_latest_event(
             .to_lowercase(),
         definition.to_string().to_lowercase()
     );
-    assert!(inner
-        .get("error")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .to_lowercase()
-        .find(&error.to_string().to_lowercase())
-        .is_some());
+    assert!(
+        inner
+            .get("error")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .to_lowercase()
+            .find(&error.to_string().to_lowercase())
+            .is_some()
+    );
 }
 
 async fn test_create_succ(
@@ -254,13 +256,15 @@ async fn failpoint_limited_test_collect_barrier_failure() -> Result<()> {
         .unwrap();
     let json = serde_json::from_str::<serde_json::Value>(&info).unwrap();
     let inner = json.get("collectBarrierFail").unwrap();
-    assert!(inner
-        .get("error")
-        .unwrap()
-        .as_str()
-        .unwrap()
-        .find("intentional collect_actors_err")
-        .is_some());
+    assert!(
+        inner
+            .get("error")
+            .unwrap()
+            .as_str()
+            .unwrap()
+            .find("intentional collect_actors_err")
+            .is_some()
+    );
 
     Ok(())
 }

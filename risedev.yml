@@ -30,7 +30,9 @@ profile:
       # - use: aws-s3
       #   bucket: test-bucket
 
-      # By default, the meta-backend is sqlite.
+      # By default, the meta-backend is memory.
+      # To enable sqlite backend, uncomment the following lines and set the meta-backend to sqlite in 'meta-node'
+      # - use: sqlite
       # To enable postgres backend, uncomment the following lines and set the meta-backend to postgres in 'meta-node'
       # - use: postgres
       #   port: 8432
@@ -43,7 +45,7 @@ profile:
       # - use: grafana     # visualization
 
       - use: meta-node
-      #   - meta-backend: postgres
+        # meta-backend: postgres
       - use: compute-node
       - use: frontend
 
@@ -117,16 +119,23 @@ profile:
       - use: postgres
         port: 8432
         user: postgres
+        password: postgres
         database: metadata
       - use: meta-node
         meta-backend: postgres
       - use: compute-node
       - use: frontend
       - use: compactor
+      - use: compactor
+        compactor-mode: "dedicated-iceberg"
+        port: 6661
+        exporter-port: 1261
       - use: prometheus
       - use: grafana
       - use: kafka
         persist-data: true
+      - use: lakekeeper
+        port: 8181
 
   standalone-full-peripherals:
     steps:
@@ -279,6 +288,10 @@ profile:
       - use: kafka
         persist-data: true
 
+  kafka:
+    steps:
+      - use: kafka
+
   meta-1cn-1fe-sqlite:
     steps:
       - use: minio
@@ -290,6 +303,28 @@ profile:
         meta-backend: sqlite
       - use: compactor
       - use: compute-node
+      - use: frontend
+
+  # Start 4 CNs with resource groups rg1, rg2, and default
+  multiple-resource-groups:
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compactor
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+        resource-group: "rg1"
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        resource-group: "rg2"
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
       - use: frontend
 
   ci-time-travel:
@@ -305,6 +340,36 @@ profile:
       - use: compactor
       - use: compute-node
       - use: frontend
+
+  ci-iceberg-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: mysql
+        port: 3306
+        address: mysql
+        user: root
+        password: 123456
+        user-managed: true
+      - use: postgres
+        port: 5432
+        address: db
+        database: metadata
+        user: postgres
+        password: post\tgres
+        user-managed: true
+        application: metastore
+      - use: meta-node
+        meta-backend: postgres
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+      - use: compactor
+        compactor-mode: "dedicated-iceberg"
+        port: 6661
+        exporter-port: 1261
+      - use: lakekeeper
+        port: 8181
 
   meta-1cn-1fe-sqlite-with-recovery:
     config-path: src/config/ci-recovery.toml
@@ -424,127 +489,6 @@ profile:
       #   port: 9092
       #   persist-data: true
 
-  ######################################
-  ### Configurations used in Compose ###
-  ######################################
-
-  compose:
-    steps:
-      - use: minio
-        id: minio-0
-        address: ${id}
-        listen-address: "0.0.0.0"
-        console-address: "0.0.0.0"
-
-      - use: meta-node
-        # Id must starts with `meta-node`, therefore to be picked up by other
-        # components.
-        id: meta-node-0
-
-        # Advertise address can be `id`, so as to use docker's DNS. If running
-        # in host network mode, we should use IP directly in this field.
-        address: ${id}
-
-        listen-address: "0.0.0.0"
-
-      - use: compute-node
-        id: compute-node-0
-        listen-address: "0.0.0.0"
-        address: ${id}
-
-      - use: frontend
-        id: frontend-node-0
-        listen-address: "0.0.0.0"
-        address: ${id}
-
-      - use: compactor
-        id: compactor-0
-        listen-address: "0.0.0.0"
-        address: ${id}
-
-      - use: redpanda
-
-      - use: prometheus
-        id: prometheus-0
-        listen-address: "0.0.0.0"
-        address: ${id}
-
-      - use: grafana
-        listen-address: "0.0.0.0"
-        address: ${id}
-        id: grafana-0
-
-      - use: tempo
-        listen-address: "0.0.0.0"
-        address: ${id}
-        id: tempo-0
-
-  # special config for deployment, see related PR for more information
-  compose-3node-deploy:
-    steps:
-      # - use: minio
-      #   id: minio-0
-      #   address: ${dns-host:rw-source-0}
-      #   listen-address: "0.0.0.0"
-      #   console-address: "0.0.0.0"
-
-      - use: aws-s3
-        bucket: ${terraform:s3-bucket}
-
-      - use: meta-node
-        # Id must starts with `meta-node`, therefore to be picked up by other
-        # components.
-        id: meta-node-0
-
-        # Advertise address can be `id`, so as to use docker's DNS. If running
-        # in host network mode, we should use IP directly in this field.
-        address: ${dns-host:rw-meta-0}
-        listen-address: "0.0.0.0"
-
-      - use: compute-node
-        id: compute-node-0
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-compute-0}
-        async-stack-trace: verbose
-        enable-tiered-cache: true
-
-      - use: compute-node
-        id: compute-node-1
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-compute-1}
-        async-stack-trace: verbose
-        enable-tiered-cache: true
-
-      - use: compute-node
-        id: compute-node-2
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-compute-2}
-        async-stack-trace: verbose
-        enable-tiered-cache: true
-
-      - use: frontend
-        id: frontend-node-0
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-meta-0}
-
-      - use: compactor
-        id: compactor-0
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-source-0}
-        compaction-worker-threads-number: 15
-
-      - use: redpanda
-        address: ${dns-host:rw-source-0}
-
-      - use: prometheus
-        id: prometheus-0
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-meta-0}
-
-      - use: grafana
-        listen-address: "0.0.0.0"
-        address: ${dns-host:rw-meta-0}
-        id: grafana-0
 
   #################################
   ### Configurations used on CI ###
@@ -552,6 +496,17 @@ profile:
 
   ci-1cn-1fe:
     config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  ci-1cn-1fe-jdbc-to-native:
+    config-path: src/config/ci-jdbc-to-native.toml
     steps:
       - use: minio
       - use: sqlite
@@ -566,9 +521,53 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+
+  # Used for e2e monitoring tests in CI
+  ci-3cn-1fe-with-monitoring:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+        port: 5687
+        exporter-port: 1222
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5688
+        exporter-port: 1223
+        enable-tiered-cache: true
+      - use: compute-node
+        port: 5689
+        exporter-port: 1224
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: prometheus
+      - use: grafana
+
+  ci-backfill-3cn-1fe:
+    config-path: src/config/ci-longer-streaming-upload-timeout.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -588,9 +587,8 @@ profile:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -612,11 +610,12 @@ profile:
     config-path: src/config/ci-longer-streaming-upload-timeout.toml
     steps:
       - use: minio
-        api-requests-max: 30
-        api-requests-deadline: 3s
-      - use: sqlite
+        # Set the rate limit for MinIO to N requests per second
+        api-requests-max: 1000
+        # Set the deadline for API requests to N seconds
+        api-requests-deadline: 20s
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -638,9 +637,8 @@ profile:
       - use: minio
         api-requests-max: 30
         api-requests-deadline: 2s
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -662,9 +660,8 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -691,39 +688,11 @@ profile:
         health-check-port: 6788
       - use: compactor
 
-  ci-3cn-3fe-in-memory:
-    config-path: src/config/ci-mem.toml
-    steps:
-      - use: meta-node
-        enable-in-memory-kv-state-backend: true
-      - use: compute-node
-        port: 5687
-        exporter-port: 1222
-      - use: compute-node
-        port: 5688
-        exporter-port: 1223
-      - use: compute-node
-        port: 5689
-        exporter-port: 1224
-      - use: frontend
-        port: 4565
-        exporter-port: 2222
-        health-check-port: 6786
-      - use: frontend
-        port: 4566
-        exporter-port: 2223
-        health-check-port: 6787
-      - use: frontend
-        port: 4567
-        exporter-port: 2224
-        health-check-port: 6788
-
   ci-3cn-3fe-opendal-fs-backend:
     config-path: src/config/ci.toml
     steps:
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: opendal
         engine: fs
         bucket: "/tmp/rw_ci"
@@ -754,9 +723,8 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -805,9 +773,8 @@ profile:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -821,13 +788,31 @@ profile:
         address: schemaregistry
         port: 8082
 
-  ci-inline-source-test:
+  local-inline-source-test:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
       - use: sqlite
       - use: meta-node
         meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: pubsub
+        persist-data: true
+      - use: kafka
+        persist-data: true
+      - use: schema-registry
+      - use: mysql
+      - use: postgres
+
+  ci-inline-source-test:
+    config-path: src/config/ci-recovery.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -842,20 +827,30 @@ profile:
         user-managed: true
         address: schemaregistry
         port: 8082
+      - use: pulsar
+        address: pulsar-server
+        broker-port: 6650
+        http-port: 8080
+        user-managed: true
       - use: mysql
         port: 3306
         address: mysql
         user: root
         password: 123456
         user-managed: true
+      - use: postgres
+        port: 5432
+        address: db
+        user: postgres
+        password: post\tgres
+        user-managed: true
 
   ci-redis:
     config-path: src/config/ci.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -866,9 +861,8 @@ profile:
     config-path: src/config/ci-compaction-test.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
         total-memory-bytes: 17179869184
@@ -879,9 +873,8 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -891,9 +884,8 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         port: 5687
         exporter-port: 1222
@@ -913,9 +905,8 @@ profile:
     config-path: src/config/ci-recovery.toml
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
         enable-tiered-cache: true
       - use: frontend
@@ -924,6 +915,56 @@ profile:
         user-managed: true
         address: message_queue
         port: 29092
+
+  ci-ldap-simple-bind:
+    config-path: src/config/ci-ldap-simple-bind.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
+  ci-ldap-search-bind:
+    config-path: src/config/ci-ldap-search-bind.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
+  ci-ldap-simple-bind-url:
+    config-path: src/config/ci-ldap-simple-bind-url.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
+  ci-ldap-search-bind-url:
+    config-path: src/config/ci-ldap-search-bind-url.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+
+  ci-ldap-search-bind-filter:
+    config-path: src/config/ci-ldap-search-bind-filter.toml
+    steps:
+      - use: minio
+      - use: meta-node
+        meta-backend: env
+      - use: compute-node
+      - use: frontend
+      - use: compactor
 
   ci-meta-backup-test-sql:
     config-path: src/config/ci-meta-backup-test.toml
@@ -941,16 +982,6 @@ profile:
     steps:
       - use: sqlite
       - use: minio
-
-  ci-iceberg-test:
-    config-path: src/config/ci-iceberg-test.toml
-    steps:
-      - use: minio
-      - use: meta-node
-      - use: compute-node
-        enable-tiered-cache: true
-      - use: frontend
-      - use: compactor
 
   ci-sink-test:
     config-path: src/config/ci.toml
@@ -975,26 +1006,11 @@ profile:
     config-path: "src/config/ci-backfill.toml"
     steps:
       - use: minio
-      - use: sqlite
       - use: meta-node
-        meta-backend: sqlite
+        meta-backend: env
       - use: compute-node
       - use: frontend
       - use: compactor
-
-  full-iceberg-bench:
-    config-path: src/config/full-iceberg-bench.toml
-    steps:
-      - use: aws-s3
-        bucket: renjie-iceberg-bench
-      - use: sqlite
-      - use: meta-node
-        meta-backend: sqlite
-      - use: compute-node
-      - use: frontend
-      - use: compactor
-      - use: prometheus
-      - use: grafana
 
   full-with-batch-query-limit:
     config-path: src/config/full-with-batch-query-limit.toml
@@ -1009,13 +1025,54 @@ profile:
       - use: prometheus
       - use: grafana
 
-compose:
-  risingwave: "ghcr.io/risingwavelabs/risingwave:latest"
-  prometheus: "prom/prometheus:latest"
-  minio: "quay.io/minio/minio:latest"
-  redpanda: "redpandadata/redpanda:latest"
-  grafana: "grafana/grafana-oss:latest"
-  tempo: "grafana/tempo:latest"
+  mysql-offline-schema-change-test:
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+      - use: frontend
+      - use: compactor
+      - use: mysql
+        port: 3306
+        address: mysql
+        user: root
+        password: 123456
+        database: risedev
+        user-managed: true
+
+  mysql-only:
+    steps:
+      - use: minio
+      - use: mysql
+        port: 3306
+        address: mysql
+        user: root
+        password: 123456
+        database: risedev
+        user-managed: true
+
+  postgres-with-latency:
+    steps:
+      - use: postgres
+        port: 8432
+        user: postgres
+        database: metadata
+        # Add 100ms latency to any network call to the pg service
+        latency-ms: 100
+
+  moat-1cn-1fe:
+    steps:
+      - use: minio
+      - use: sqlite
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: moat
 
 # The `use` field specified in the above `risedev` section will refer to the templates below.
 template:
@@ -1098,6 +1155,9 @@ template:
     # AWS s3 bucket used by this compute node
     provide-aws-s3: "aws-s3*"
 
+    # Moat used by this compute node
+    provide-moat: "moat*"
+
     # Meta-nodes used by this compute node
     provide-meta-node: "meta-node*"
 
@@ -1114,6 +1174,9 @@ template:
     parallelism: 4
 
     role: both
+
+    # Resource group for scheduling, default value is "default"
+    resource-group: "default"
 
   meta-node:
     # Meta-node advertise address
@@ -1167,11 +1230,11 @@ template:
     # AWS s3 bucket used by the cluster
     provide-aws-s3: "aws-s3*"
 
+    # Moat used by this compute node
+    provide-moat: "moat*"
+
     # Tempo used by this meta node
     provide-tempo: "tempo*"
-
-    # Whether to enable in-memory pure KV state backend
-    enable-in-memory-kv-state-backend: false
 
   prometheus:
     # Advertise address of Prometheus
@@ -1207,9 +1270,6 @@ template:
     # Compactors used by this Prometheus instance
     provide-compactor: "compactor*"
 
-    # Redpanda used by this Prometheus instance
-    provide-redpanda: "redpanda*"
-
     # Frontend used by this Prometheus instance
     provide-frontend: "frontend*"
 
@@ -1241,6 +1301,9 @@ template:
     # Tempo used by this frontend instance
     provide-tempo: "tempo*"
 
+    # Prometheus nodes used by frontend for metrics queries
+    provide-prometheus: "prometheus*"
+
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
 
@@ -1271,6 +1334,8 @@ template:
 
     # If `user-managed` is true, this service will be started by user with the above config
     user-managed: false
+
+    compactor-mode: "dedicated"
 
   grafana:
     # Listen address of Grafana
@@ -1382,25 +1447,16 @@ template:
 
     persist-data: true
 
-  # Only supported in RiseDev compose
-  redpanda:
-    # Id to be picked-up by services
-    id: redpanda
-
-    # Port used inside docker-compose cluster (e.g. create MV)
-    internal-port: 29092
-
-    # Port used on host (e.g. import data, connecting using kafkacat)
-    outside-port: 9092
-
-    # Connect address
-    address: ${id}
-
-    # Number of CPUs to use
-    cpus: 8
-
-    # Memory limit for Redpanda
-    memory: 16G
+  # Apache Pulsar. Currently user-managed only
+  pulsar:
+    id: pulsar-${broker-port}
+    address: localhost
+    broker-port: 6650
+    http-port: 8080
+    user-managed: false
+    # Only effective when NOT user managed
+    image: "apachepulsar/pulsar:4.0.4"
+    persist-data: true
 
   # redis service
   redis:
@@ -1429,8 +1485,7 @@ template:
     #   * If the user is "root", the password will be used as the root password.
     #   * Otherwise, a regular user will be created with the given password. The root password will be empty.
     #   Note that this only applies to fresh instances, i.e., the data directory is empty.
-    # - In user-managed mode, these configs are not validated by risedev.
-    #   They are passed as-is to risedev-env default user for MySQL operations.
+    # - These configs will be passed as-is to risedev-env default user for MySQL operations.
     # - This is not used in RISEDEV_MYSQL_WITH_OPTIONS_COMMON.
     user: root
     password: ""
@@ -1440,7 +1495,7 @@ template:
     application: "connector"
 
     # The docker image. Can be overridden to use a different version.
-    image: "mysql:8.0"
+    image: "mysql:8.4"
 
     # If set to true, data will be persisted at data/{id}.
     persist-data: true
@@ -1462,8 +1517,7 @@ template:
 
     # Note:
     # - This will be used to initialize the PostgreSQL instance if it's fresh.
-    # - In user-managed mode, these configs are not validated by risedev.
-    #   They are passed as-is to risedev-env default user for PostgreSQL operations.
+    # - These configs will be passed as-is to risedev-env default user for PostgreSQL operations.
     user: postgres
     password: ""
     database: "postgres"
@@ -1480,6 +1534,9 @@ template:
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
     user-managed: false
+
+    # New optional field for latency
+    latency-ms: 0  # Optional: latency in milliseconds
 
   # Sql Server service backed by docker.
   sqlserver:
@@ -1510,3 +1567,45 @@ template:
     # If `user-managed` is true, user is responsible for starting the service
     # to serve at the above address and port in any way they see fit.
     user-managed: false
+
+  # Lakekeeper Apache Iceberg REST Catalog service backed by binary.
+  lakekeeper:
+    # Id to be picked-up by services
+    id: lakekeeper-${port}
+
+    # Address of Lakekeeper
+    address: "127.0.0.1"
+
+    # Listen port of Lakekeeper
+    port: 8181
+
+    # If set to true, data will be persisted at data/{id}.
+    persist-data: true
+
+    # If `user-managed` is true, user is responsible for starting the service
+    # to serve at the above address and port in any way they see fit.
+    user-managed: false
+
+    # Catalog backend - PostgreSQL or other supported backends
+    catalog-backend: "postgres"
+
+    # Encryption key for PostgreSQL backend (should be 32 characters for production)
+    encryption-key: "MySecretEncryptionKeyForDevelopment"
+
+    # PostgreSQL backend config for Lakekeeper catalog
+    provide-postgres-backend: "postgres*"
+
+    # Storage backend - MinIO for S3-compatible storage
+    provide-minio: "minio*"
+  moat:
+    # Id to be picked-up by services
+    id: moat-${port}
+
+    # Address of Moat
+    address: "127.0.0.1"
+
+    # Listen port of Moat
+    port: 8182
+
+    # Storage backend - MinIO for S3-compatible storage
+    provide-minio: "minio*"

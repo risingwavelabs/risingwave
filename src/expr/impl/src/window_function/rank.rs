@@ -16,12 +16,12 @@ use std::marker::PhantomData;
 
 use risingwave_common::types::Datum;
 use risingwave_common::util::memcmp_encoding::MemcmpEncoded;
-use risingwave_common_estimate_size::collections::EstimatedVecDeque;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_estimate_size::collections::EstimatedVecDeque;
+use risingwave_expr::Result;
 use risingwave_expr::window_function::{
     StateEvictHint, StateKey, StatePos, WindowFuncCall, WindowState,
 };
-use risingwave_expr::Result;
 use smallvec::SmallVec;
 
 use self::private::RankFuncCount;
@@ -198,8 +198,9 @@ mod tests {
     fn test_rank_state_bad_use() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::RowNumber,
-            args: AggArgs::default(),
             return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
                 FrameBound::UnboundedFollowing,
@@ -215,8 +216,9 @@ mod tests {
     fn test_row_number_state() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::RowNumber,
-            args: AggArgs::default(),
             return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
                 FrameBound::UnboundedFollowing,
@@ -257,8 +259,9 @@ mod tests {
     fn test_rank_state() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::Rank,
-            args: AggArgs::default(),
             return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
                 FrameBound::UnboundedFollowing,
@@ -298,8 +301,9 @@ mod tests {
     fn test_dense_rank_state() {
         let call = WindowFuncCall {
             kind: WindowFuncKind::DenseRank,
-            args: AggArgs::default(),
             return_type: DataType::Int64,
+            args: AggArgs::default(),
+            ignore_nulls: false,
             frame: Frame::rows(
                 FrameBound::UnboundedPreceding,
                 FrameBound::UnboundedFollowing,

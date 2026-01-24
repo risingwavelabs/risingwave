@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -52,14 +52,14 @@ use itertools::Itertools;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::catalog::{FieldDisplay, Schema, TableId};
 use risingwave_common::hash::WorkerSlotId;
+use risingwave_pb::batch_plan::ExchangeInfo;
 use risingwave_pb::batch_plan::exchange_info::{
     ConsistentHashInfo, Distribution as PbDistribution, DistributionMode, HashInfo,
 };
-use risingwave_pb::batch_plan::ExchangeInfo;
 
 use super::super::plan_node::*;
-use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::FragmentId;
+use crate::catalog::catalog_service::CatalogReader;
 use crate::error::Result;
 use crate::optimizer::property::Order;
 
@@ -67,6 +67,10 @@ use crate::optimizer::property::Order;
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Distribution {
     /// There is only one partition. All records are placed on it.
+    ///
+    /// Note: singleton will not be enforced automatically.
+    /// It's set in `crate::stream_fragmenter::build_fragment`,
+    /// by setting `requires_singleton` manually.
     Single,
     /// Records are sharded into partitions, and satisfy the `AnyShard` but without any guarantee
     /// about their placement rules.
@@ -102,8 +106,12 @@ pub enum RequiredDist {
     AnyShard,
     /// records are shard on partitions based on some keys(order-irrelevance, ShardByKey({a,b}) is
     /// equivalent with ShardByKey({b,a})), which means the records with same keys must be on
-    /// the same partition, as required property only.
+    /// the same partition, as required property only. Any distribution sharded by a subset of this
+    /// key set satisfies the requirement.
     ShardByKey(FixedBitSet),
+    /// records are shard on partitions based on an exact set of keys (order-irrelevance).
+    /// Only distribution sharded by the same key set satisfies this requirement.
+    ShardByExactKey(FixedBitSet),
     /// must be the same with the physical distribution
     PhysicalDist(Distribution),
 }
@@ -146,7 +154,7 @@ impl Distribution {
                     );
 
                     let vnode_mapping = worker_node_manager
-                        .fragment_mapping(Self::get_fragment_id(catalog_reader, table_id)?)?;
+                        .fragment_mapping(Self::get_fragment_id(catalog_reader, *table_id)?)?;
 
                     let worker_slot_to_id_map: HashMap<WorkerSlotId, u32> = vnode_mapping
                         .iter_unique()
@@ -187,23 +195,37 @@ impl Distribution {
                 }
                 _ => false,
             },
+            RequiredDist::ShardByExactKey(required_key) => match self {
+                Distribution::HashShard(hash_key)
+                | Distribution::UpstreamHashShard(hash_key, _) => {
+                    hash_key.len() == required_key.count_ones(..)
+                        && hash_key.iter().all(|idx| required_key.contains(*idx))
+                }
+                _ => false,
+            },
             RequiredDist::PhysicalDist(other) => self == other,
         }
     }
 
-    /// Get distribution column indices. After optimization, only `HashShard` and `Single` are
-    /// valid.
+    /// Get distribution column indices. Panics if the distribution is `SomeShard` or `Broadcast`.
     pub fn dist_column_indices(&self) -> &[usize] {
+        self.dist_column_indices_opt()
+            .unwrap_or_else(|| panic!("cannot obtain distribution columns for {self:?}"))
+    }
+
+    /// Get distribution column indices. Returns `None` if the distribution is `SomeShard` or `Broadcast`.
+    pub fn dist_column_indices_opt(&self) -> Option<&[usize]> {
         match self {
-            Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => {
-                Default::default()
+            Distribution::Single => Some(&[]),
+            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => {
+                Some(dists)
             }
-            Distribution::HashShard(dists) | Distribution::UpstreamHashShard(dists, _) => dists,
+            Distribution::SomeShard | Distribution::Broadcast => None,
         }
     }
 
     #[inline(always)]
-    fn get_fragment_id(catalog_reader: &CatalogReader, table_id: &TableId) -> Result<FragmentId> {
+    fn get_fragment_id(catalog_reader: &CatalogReader, table_id: TableId) -> Result<FragmentId> {
         catalog_reader
             .read_guard()
             .get_any_table_by_id(table_id)
@@ -291,31 +313,43 @@ impl RequiredDist {
         Self::ShardByKey(cols)
     }
 
+    pub fn shard_by_exact_key(tot_col_num: usize, key: &[usize]) -> Self {
+        let mut cols = FixedBitSet::with_capacity(tot_col_num);
+        for i in key {
+            cols.insert(*i);
+        }
+        assert!(!cols.is_clear());
+        Self::ShardByExactKey(cols)
+    }
+
     pub fn hash_shard(key: &[usize]) -> Self {
         assert!(!key.is_empty());
         Self::PhysicalDist(Distribution::HashShard(key.to_vec()))
     }
 
-    pub fn enforce_if_not_satisfies(
+    pub fn batch_enforce_if_not_satisfies(
         &self,
-        mut plan: PlanRef,
+        mut plan: BatchPlanRef,
         required_order: &Order,
-    ) -> Result<PlanRef> {
-        if let Convention::Batch = plan.convention() {
-            plan = required_order.enforce_if_not_satisfies(plan)?;
-        }
+    ) -> Result<BatchPlanRef> {
+        plan = required_order.enforce_if_not_satisfies(plan)?;
         if !plan.distribution().satisfies(self) {
-            Ok(self.enforce(plan, required_order))
+            Ok(self.batch_enforce(plan, required_order))
         } else {
             Ok(plan)
         }
     }
 
-    pub fn no_shuffle(plan: PlanRef) -> PlanRef {
-        match plan.convention() {
-            Convention::Stream => StreamExchange::new_no_shuffle(plan).into(),
-            Convention::Logical | Convention::Batch => unreachable!(),
+    pub fn streaming_enforce_if_not_satisfies(&self, plan: StreamPlanRef) -> Result<StreamPlanRef> {
+        if !plan.distribution().satisfies(self) {
+            Ok(self.stream_enforce(plan))
+        } else {
+            Ok(plan)
         }
+    }
+
+    pub fn no_shuffle(plan: StreamPlanRef) -> StreamPlanRef {
+        StreamExchange::new_no_shuffle(plan).into()
     }
 
     /// check if the distribution satisfies other required distribution
@@ -328,19 +362,29 @@ impl RequiredDist {
             RequiredDist::ShardByKey(key) => match required {
                 RequiredDist::Any | RequiredDist::AnyShard => true,
                 RequiredDist::ShardByKey(required_key) => key.is_subset(required_key),
+                RequiredDist::ShardByExactKey(required_key) => {
+                    key == required_key && key.count_ones(..) == 1
+                }
+                _ => false,
+            },
+            RequiredDist::ShardByExactKey(key) => match required {
+                RequiredDist::Any | RequiredDist::AnyShard => true,
+                RequiredDist::ShardByKey(required_key) => key.is_subset(required_key),
+                RequiredDist::ShardByExactKey(required_key) => key == required_key,
                 _ => false,
             },
             RequiredDist::PhysicalDist(dist) => dist.satisfies(required),
         }
     }
 
-    pub fn enforce(&self, plan: PlanRef, required_order: &Order) -> PlanRef {
+    pub fn batch_enforce(&self, plan: BatchPlanRef, required_order: &Order) -> BatchPlanRef {
         let dist = self.to_dist();
-        match plan.convention() {
-            Convention::Batch => BatchExchange::new(plan, required_order.clone(), dist).into(),
-            Convention::Stream => StreamExchange::new(plan, dist).into(),
-            _ => unreachable!(),
-        }
+        BatchExchange::new(plan, required_order.clone(), dist).into()
+    }
+
+    pub fn stream_enforce(&self, plan: StreamPlanRef) -> StreamPlanRef {
+        let dist = self.to_dist();
+        StreamExchange::new(plan, dist).into()
     }
 
     fn to_dist(&self) -> Distribution {
@@ -353,7 +397,24 @@ impl RequiredDist {
             RequiredDist::ShardByKey(required_keys) => {
                 Distribution::HashShard(required_keys.ones().collect())
             }
+            RequiredDist::ShardByExactKey(required_keys) => {
+                Distribution::HashShard(required_keys.ones().collect())
+            }
             RequiredDist::PhysicalDist(dist) => dist.clone(),
+        }
+    }
+}
+
+impl StreamPlanRef {
+    /// Eliminate `SomeShard` distribution by using the stream key as the distribution key to
+    /// enforce the current plan to have a known distribution key.
+    pub fn enforce_concrete_distribution(self) -> Self {
+        match self.distribution() {
+            Distribution::SomeShard => {
+                RequiredDist::shard_by_key(self.schema().len(), self.expect_stream_key())
+                    .stream_enforce(self)
+            }
+            _ => self,
         }
     }
 }
@@ -372,6 +433,8 @@ mod tests {
         let r1 = RequiredDist::shard_by_key(2, &[0, 1]);
         let r3 = RequiredDist::shard_by_key(2, &[0]);
         let r4 = RequiredDist::shard_by_key(2, &[1]);
+        let r_exact = RequiredDist::shard_by_exact_key(2, &[0, 1]);
+        let r_exact_single = RequiredDist::shard_by_exact_key(2, &[0]);
         assert!(d1.satisfies(&RequiredDist::PhysicalDist(d1.clone())));
         assert!(d2.satisfies(&RequiredDist::PhysicalDist(d2.clone())));
         assert!(d3.satisfies(&RequiredDist::PhysicalDist(d3.clone())));
@@ -401,11 +464,24 @@ mod tests {
         assert!(!d3.satisfies(&r4));
         assert!(d4.satisfies(&r4));
 
+        assert!(d1.satisfies(&r_exact));
+        assert!(d2.satisfies(&r_exact));
+        assert!(!d3.satisfies(&r_exact));
+        assert!(!d4.satisfies(&r_exact));
+
         assert!(r3.satisfies(&r1));
         assert!(r4.satisfies(&r1));
         assert!(!r1.satisfies(&r3));
         assert!(!r1.satisfies(&r4));
         assert!(!r3.satisfies(&r4));
         assert!(!r4.satisfies(&r3));
+
+        assert!(r_exact.satisfies(&r1));
+        assert!(!r1.satisfies(&r_exact));
+        assert!(!r3.satisfies(&r_exact));
+        assert!(!r_exact.satisfies(&r3));
+
+        assert!(r3.satisfies(&r_exact_single));
+        assert!(r_exact_single.satisfies(&r3));
     }
 }

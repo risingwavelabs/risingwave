@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ impl LookupCache {
 
     /// Update a key after lookup cache misses.
     pub fn batch_update(&mut self, key: OwnedRow, value: EstimatedVec<OwnedRow>) {
-        self.data.push(key, LookupEntryState::from_vec(value));
+        self.data.put(key, LookupEntryState::from_vec(value));
     }
 
     /// Apply a batch from the arrangement side

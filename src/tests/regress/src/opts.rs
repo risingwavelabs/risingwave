@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,7 +55,7 @@ pub(crate) struct Opts {
     /// Input directory containing sqls, expected outputs.
     #[clap(name = "INPUT_DIR", short = 'i', long = "input", value_parser, value_hint = ValueHint::DirPath)]
     input_dir: PathBuf,
-    /// Output directory containing output files, diff reuslts.
+    /// Output directory containing output files, diff results.
     #[clap(name = "OUTPUT_DIR", short = 'o', long = "output", value_parser, value_hint = ValueHint::DirPath)]
     output_dir: PathBuf,
     /// Schedule file containing each parallel schedule.
@@ -111,7 +111,7 @@ impl Opts {
     }
 
     pub(crate) fn host(&self) -> String {
-        self.pg_server_host.to_string()
+        self.pg_server_host.clone()
     }
 
     pub(crate) fn port(&self) -> u16 {

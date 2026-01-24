@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ impl TypeUrl for batch_plan::ExchangeNode {
 
 pub struct StackTraceResponseOutput<'a>(&'a StackTraceResponse);
 
-impl<'a> Deref for StackTraceResponseOutput<'a> {
+impl Deref for StackTraceResponseOutput<'_> {
     type Target = StackTraceResponse;
 
     fn deref(&self) -> &Self::Target {
@@ -40,7 +40,7 @@ impl<'a> Deref for StackTraceResponseOutput<'a> {
     }
 }
 
-impl<'a> Display for StackTraceResponseOutput<'a> {
+impl Display for StackTraceResponseOutput<'_> {
     fn fmt(&self, s: &mut Formatter<'_>) -> std::fmt::Result {
         if !self.actor_traces.is_empty() {
             writeln!(s, "--- Actor Traces ---")?;
@@ -86,6 +86,14 @@ impl<'a> Display for StackTraceResponseOutput<'a> {
             }
         }
 
+        if !self.meta_traces.is_empty() {
+            writeln!(s, "\n\n--- Meta Traces ---")?;
+            for (key, value) in &self.meta_traces {
+                writeln!(s, ">> {key}")?;
+                writeln!(s, "{value}\n")?;
+            }
+        }
+
         Ok(())
     }
 }
@@ -102,7 +110,7 @@ impl StackTraceResponse {
             match self.barrier_worker_state.entry(worker_id) {
                 Entry::Occupied(_entry) => {
                     warn!(
-                        worker_id,
+                        %worker_id,
                         worker_state, "duplicate barrier worker state. skipped"
                     );
                 }
@@ -115,7 +123,7 @@ impl StackTraceResponse {
             match self.jvm_stack_traces.entry(worker_id) {
                 Entry::Occupied(_entry) => {
                     warn!(
-                        worker_id,
+                        %worker_id,
                         worker_state, "duplicate jvm stack trace. skipped"
                     );
                 }
@@ -124,6 +132,7 @@ impl StackTraceResponse {
                 }
             }
         }
+        self.meta_traces.extend(b.meta_traces);
     }
 
     pub fn output(&self) -> StackTraceResponseOutput<'_> {

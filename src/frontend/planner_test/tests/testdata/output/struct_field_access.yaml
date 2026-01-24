@@ -12,39 +12,39 @@
     select (t.c).x from t
   logical_plan: |-
     LogicalProject { exprs: [Field(t.c, 0:Int32) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.c, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.c, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     select (c).x from t
   logical_plan: |-
     LogicalProject { exprs: [Field(t.c, 0:Int32) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.c, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.c, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     -- select (t).c.x from t
     select (t.c).x from t
   logical_plan: |-
     LogicalProject { exprs: [Field(t.c, 0:Int32) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.c, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.c, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     select (t.c).* from t
   logical_plan: |-
     LogicalProject { exprs: [Field(t.c, 0:Int32) as $expr1, Field(t.c, 1:Int32) as $expr2] }
-    └─LogicalScan { table: t, columns: [t.c, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.c, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     select (c).* from t
   logical_plan: |-
     LogicalProject { exprs: [Field(t.c, 0:Int32) as $expr1, Field(t.c, 1:Int32) as $expr2] }
-    └─LogicalScan { table: t, columns: [t.c, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.c, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     -- select (t).c.* from t
     select (t.c).* from t
   logical_plan: |-
     LogicalProject { exprs: [Field(t.c, 0:Int32) as $expr1, Field(t.c, 1:Int32) as $expr2] }
-    └─LogicalScan { table: t, columns: [t.c, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.c, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t1(c STRUCT<x INTEGER, y INTEGER>);
     create table t2(c STRUCT<x INTEGER, y INTEGER>);
@@ -63,24 +63,24 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.c] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: t1, columns: [t1.c, t1._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.c, t1._row_id, t1._rw_timestamp] }
       └─LogicalProject { exprs: [t2.c] }
         └─LogicalFilter { predicate: (Field(t2.c, 1:Int32) = 100:Int32) AND (Field(CorrelatedInputRef { index: 0, correlated_id: 1 }, 0:Int32) = Field(t2.c, 0:Int32)) AND (Field(t2.c, 0:Int32) = 1000:Int32) AND (Field(CorrelatedInputRef { index: 0, correlated_id: 1 }, 1:Int32) = Field(t2.c, 1:Int32)) }
-          └─LogicalScan { table: t2, columns: [t2.c, t2._row_id] }
+          └─LogicalScan { table: t2, columns: [t2.c, t2._row_id, t2._rw_timestamp] }
 - sql: |
     create schema s;
     create table s.t(a STRUCT<b INTEGER, c INTEGER>);
     select s.t.a from s.t;
   logical_plan: |-
     LogicalProject { exprs: [t.a] }
-    └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - sql: |
     create schema s;
     create table s.t(a STRUCT<b INTEGER, c INTEGER>);
     select (s.t.a).b from s.t;
   logical_plan: |-
     LogicalProject { exprs: [Field(t.a, 0:Int32) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - sql: |
     create schema s;
     create table s.t(a STRUCT<b INTEGER, c INTEGER>);
@@ -88,7 +88,7 @@
     select (s.t.a).b from s.t;
   logical_plan: |-
     LogicalProject { exprs: [Field(t.a, 0:Int32) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - sql: |
     create schema s;
     create table s.t(a STRUCT<b INTEGER, c INTEGER>);
@@ -96,7 +96,7 @@
     select (s.t.a).b from s.t;
   logical_plan: |-
     LogicalProject { exprs: [Field(t.a, 0:Int32) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - sql: |
     create schema s;
     create table s.t(a STRUCT<b INTEGER, c INTEGER>);
@@ -104,7 +104,7 @@
     select (s.t.a).* from s.t;
   logical_plan: |-
     LogicalProject { exprs: [Field(t.a, 0:Int32) as $expr1, Field(t.a, 1:Int32) as $expr2] }
-    └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - sql: |
     create schema s;
     create table s.t(a STRUCT<b INTEGER, c INTEGER>);
@@ -112,30 +112,30 @@
     select (s.t.a).* from s.t;
   logical_plan: |-
     LogicalProject { exprs: [Field(t.a, 0:Int32) as $expr1, Field(t.a, 1:Int32) as $expr2] }
-    └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - sql: |
     create schema t;
     create table t.t(t STRUCT<t INTEGER>);
     select (t.t.t).t from t.t;
   logical_plan: |-
     LogicalProject { exprs: [Field(t.t, 0:Int32) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.t, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.t, t._row_id, t._rw_timestamp] }
 - sql: |
     create schema t;
     create table t.t(t STRUCT<t STRUCT<t INTEGER>>);
     select (t.t.t).t.t from t.t;
   logical_plan: |-
     LogicalProject { exprs: [Field(Field(t.t, 0:Int32), 0:Int32) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.t, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.t, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>[]);
     select (c[1]).x from t
   logical_plan: |-
     LogicalProject { exprs: [Field(ArrayAccess(t.c, 1:Int32), 0:Int32) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.c, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.c, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t(c STRUCT<x INTEGER, y INTEGER>);
     select (case when true then c end).x from t
   logical_plan: |-
     LogicalProject { exprs: [Field(Case(true:Boolean, t.c), 0:Int32) as $expr1] }
-    └─LogicalScan { table: t, columns: [t.c, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.c, t._row_id, t._rw_timestamp] }

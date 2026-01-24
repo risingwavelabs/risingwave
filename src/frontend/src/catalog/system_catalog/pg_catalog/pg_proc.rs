@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@ use risingwave_frontend_macro::system_catalog;
 
 /// The catalog `pg_proc` stores information about functions, procedures, aggregate functions, and
 /// window functions (collectively also known as routines).
-/// Ref: [`https://www.postgresql.org/docs/current/catalog-pg-proc.html`]
+/// Ref: `https://www.postgresql.org/docs/current/catalog-pg-proc.html`
 // TODO: read real data including oid etc in rw, currently there are no such data in rw.
 // more details can be found here: https://github.com/postgres/postgres/blob/master/src/include/catalog/pg_proc.dat
 #[system_catalog(view, "pg_catalog.pg_proc")]
@@ -31,4 +31,5 @@ struct PgProc {
     // Data type of the return value, refer to pg_type.
     prorettype: i32,
     prokind: String,
+    proargtypes: Vec<i32>,
 }

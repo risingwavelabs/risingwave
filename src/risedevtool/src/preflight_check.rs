@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,7 +41,9 @@ fn preflight_check_proxy() -> Result<()> {
                 "[{}] {} - `no_proxy` is not set correctly, which might cause failure in RiseDev and RisingWave. Consider {}.",
                 style("risedev-preflight-check").bold(),
                 style("WARN").yellow().bold(),
-                style("`export no_proxy=localhost,127.0.0.1,::1`").blue().bold()
+                style("`export no_proxy=localhost,127.0.0.1,::1`")
+                    .blue()
+                    .bold()
             );
         }
     }

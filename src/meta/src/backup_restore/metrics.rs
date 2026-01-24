@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 use std::sync::LazyLock;
 
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_int_counter_with_registry, Histogram, IntCounter, Registry,
+    Histogram, IntCounter, Registry, exponential_buckets, histogram_opts,
+    register_histogram_vec_with_registry, register_int_counter_with_registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 

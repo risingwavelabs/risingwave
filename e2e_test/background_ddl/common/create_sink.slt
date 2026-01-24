@@ -1,2 +1,0 @@
-statement ok
-CREATE SINK i FROM t WITH (connector='blackhole');

@@ -1,5 +1,8 @@
 control substitution on
 
+statement ok
+SET streaming_use_shared_source TO false;
+
 # https://github.com/risingwavelabs/risingwave/issues/16486
 
 # cleanup
@@ -12,7 +15,7 @@ system ok
 rpk topic create 'avro_alter_source_test'
 
 system ok
-sr_register avro_alter_source_test-value '{"type":"record","name":"Root","fields":[{"name":"foo","type":"string"}]}'
+sr_register avro_alter_source_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"foo","type":"string"}]}'
 
 statement ok
 create source s
@@ -26,7 +29,7 @@ FORMAT PLAIN ENCODE AVRO (
 
 # create a new version of schema and produce a message
 system ok
-sr_register avro_alter_source_test-value '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}'
+sr_register avro_alter_source_test-value AVRO <<< '{"type":"record","name":"Root","fields":[{"name":"bar","type":"int","default":0},{"name":"foo","type":"string"}]}'
 
 system ok
 echo '{"foo":"ABC", "bar":1}' | rpk topic produce --schema-id=topic avro_alter_source_test
@@ -49,6 +52,12 @@ No tracking issue yet. Feel free to submit a feature request at https://github.c
 statement ok
 alter source s format plain encode avro (schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}');
 
+# Demonstrate definition change.
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 's';
+----
+CREATE SOURCE s (foo CHARACTER VARYING, bar INT)
+
 query ??
 select * from s
 ----
@@ -57,12 +66,14 @@ ABC	1
 statement ok
 create materialized view mv as select * from s;
 
-sleep 2s
 
-query ??
+query ?? retry 4 backoff 1s
 select * from mv
 ----
 ABC	1
 
 statement ok
 drop source s cascade;
+
+statement ok
+SET streaming_use_shared_source TO true;

@@ -4,8 +4,8 @@
     select * from tumble(t1, created_at, interval '3' day);
   logical_plan: |-
     LogicalProject { exprs: [t1.id, t1.created_at, $expr1, $expr2] }
-    └─LogicalProject { exprs: [t1.id, t1.created_at, t1._row_id, TumbleStart(t1.created_at, '3 days':Interval) as $expr1, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr2] }
-      └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
+    └─LogicalProject { exprs: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp, TumbleStart(t1.created_at, '3 days':Interval) as $expr1, (TumbleStart(t1.created_at, '3 days':Interval) + '3 days':Interval) as $expr2] }
+      └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t1.id, t1.created_at, $expr1, ($expr1 + '3 days':Interval) as $expr2] }
@@ -65,7 +65,7 @@
     LogicalProject { exprs: [t1.id, t1.created_at, window_start, window_end] }
     └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
-        └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
+        └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [id, created_at, window_start, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_start, window_end], pk_columns: [t1._row_id, window_start, window_end], pk_conflict: NoCheck }
     └─StreamHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at, window_start, window_end, t1._row_id] }
@@ -78,7 +78,7 @@
     LogicalProject { exprs: [t1.id, t1.created_at, window_start] }
     └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
-        └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
+        └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [id, created_at, window_start, t1._row_id(hidden)], stream_key: [t1._row_id, window_start], pk_columns: [t1._row_id, window_start], pk_conflict: NoCheck }
     └─StreamHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at, window_start, t1._row_id] }
@@ -91,7 +91,7 @@
     LogicalProject { exprs: [t1.id, t1.created_at, window_end] }
     └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
-        └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
+        └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [id, created_at, window_end, t1._row_id(hidden)], stream_key: [t1._row_id, window_end], pk_columns: [t1._row_id, window_end], pk_conflict: NoCheck }
     └─StreamHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at, window_end, t1._row_id] }
@@ -104,7 +104,7 @@
     LogicalProject { exprs: [t1.id, t1.created_at] }
     └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
-        └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
+        └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
     BatchHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at] }
     └─BatchExchange { order: [], dist: Single }
@@ -122,7 +122,7 @@
     LogicalProject { exprs: [t1.id, t1.created_at] }
     └─LogicalHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
-        └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id] }
+        └─LogicalScan { table: t1, columns: [t1.id, t1.created_at, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
     BatchHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: [t1.id, t1.created_at] }
     └─BatchExchange { order: [], dist: Single }
@@ -142,7 +142,7 @@
       └─LogicalProject { exprs: [t.v1, window_end, t.v3] }
         └─LogicalHopWindow { time_col: t.v2, slide: 00:01:00, size: 00:10:00, output: all }
           └─LogicalFilter { predicate: IsNotNull(t.v2) }
-            └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+            └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.v1, window_end, (sum(t.v3) / count(t.v3)::Float64) as $expr1] }
@@ -169,7 +169,7 @@
       └─LogicalShare { id: 3 }
         └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at] }
           └─LogicalFilter { predicate: (t1.v1 >= 10:Int32) }
-            └─LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id] }
+            └─LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t1.id, t1.v1, t1.created_at, $expr1, ($expr1 + '3 days':Interval) as $expr2] }
@@ -193,7 +193,7 @@
         └─LogicalShare { id: 3 }
           └─LogicalProject { exprs: [t1.id, t1.v1, t1.created_at] }
             └─LogicalFilter { predicate: (t1.v1 >= 10:Int32) }
-              └─LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id] }
+              └─LogicalScan { table: t1, columns: [t1.id, t1.v1, t1.created_at, t1._row_id, t1._rw_timestamp] }
   batch_plan: |-
     BatchHopWindow { time_col: t1.created_at, slide: 1 day, size: 3 days, output: all }
     └─BatchExchange { order: [], dist: Single }
@@ -223,10 +223,10 @@
   logical_plan: |-
     LogicalProject { exprs: [t2.d1, t2.d2, t2.d3, t1.c1, t1.c2, t1.c3, window_start, window_end] }
     └─LogicalJoin { type: Inner, on: (t2.d1 = t1.c2), output: all }
-      ├─LogicalScan { table: t2, columns: [t2.d1, t2.d2, t2.d3, t2._row_id] }
+      ├─LogicalScan { table: t2, columns: [t2.d1, t2.d2, t2.d3, t2._row_id, t2._rw_timestamp] }
       └─LogicalHopWindow { time_col: t1.c3, slide: 00:10:00, size: 00:20:00, output: all }
         └─LogicalFilter { predicate: IsNotNull(t1.c3) }
-          └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
+          └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id, t1._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalHopWindow { time_col: t1.c3, slide: 00:10:00, size: 00:20:00, output: all }
     └─LogicalFilter { predicate: IsNotNull(t1.c3) }
@@ -250,10 +250,10 @@
     └─LogicalJoin { type: Inner, on: (t2.d1 = t1.c2), output: all }
       ├─LogicalHopWindow { time_col: t2.d3, slide: 00:10:00, size: 00:20:00, output: all }
       │ └─LogicalFilter { predicate: IsNotNull(t2.d3) }
-      │   └─LogicalScan { table: t2, columns: [t2.d1, t2.d2, t2.d3, t2._row_id] }
+      │   └─LogicalScan { table: t2, columns: [t2.d1, t2.d2, t2.d3, t2._row_id, t2._rw_timestamp] }
       └─LogicalHopWindow { time_col: t1.c3, slide: 00:10:00, size: 00:20:00, output: all }
         └─LogicalFilter { predicate: IsNotNull(t1.c3) }
-          └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id] }
+          └─LogicalScan { table: t1, columns: [t1.c1, t1.c2, t1.c3, t1._row_id, t1._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalHopWindow { time_col: t1.c3, slide: 00:10:00, size: 00:20:00, output: [t2.d1, t2.d2, t2.d3, window_start, window_end, t1.c1, t1.c2, t1.c3, window_start, window_end] }
     └─LogicalFilter { predicate: IsNotNull(t1.c3) }
@@ -285,10 +285,10 @@
           └─LogicalJoin { type: Inner, on: true, output: all }
             ├─LogicalHopWindow { time_col: alltypes2.c11, slide: 01:00:00, size: 40:00:00, output: all }
             │ └─LogicalFilter { predicate: IsNotNull(alltypes2.c11) }
-            │   └─LogicalScan { table: alltypes2, columns: [alltypes2.c1, alltypes2.c2, alltypes2.c3, alltypes2.c4, alltypes2.c5, alltypes2.c6, alltypes2.c7, alltypes2.c8, alltypes2.c9, alltypes2.c10, alltypes2.c11, alltypes2.c13, alltypes2.c14, alltypes2.c15, alltypes2.c16, alltypes2._row_id] }
+            │   └─LogicalScan { table: alltypes2, columns: [alltypes2.c1, alltypes2.c2, alltypes2.c3, alltypes2.c4, alltypes2.c5, alltypes2.c6, alltypes2.c7, alltypes2.c8, alltypes2.c9, alltypes2.c10, alltypes2.c11, alltypes2.c13, alltypes2.c14, alltypes2.c15, alltypes2.c16, alltypes2._row_id, alltypes2._rw_timestamp] }
             └─LogicalJoin { type: Inner, on: (nation.n_name = auction.item_name), output: all }
-              ├─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment] }
-              └─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction.extra] }
+              ├─LogicalScan { table: nation, columns: [nation.n_nationkey, nation.n_name, nation.n_regionkey, nation.n_comment, nation._rw_timestamp] }
+              └─LogicalScan { table: auction, columns: [auction.id, auction.item_name, auction.description, auction.initial_bid, auction.reserve, auction.date_time, auction.expires, auction.seller, auction.category, auction.extra, auction._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [(Case((alltypes2.c2 = 32:Int32), '2022-07-29 15:06:36':Timestamp, alltypes2.c1, auction.expires, false:Boolean, (auction.expires + '-00:00:18':Interval), auction.expires) + '00:01:27':Interval) as $expr1, (618:Int32 % 311:Int32) as $expr2, 35:Int16, (Coalesce(null:Int32, null:Int32, null:Int32, null:Int32, null:Int32, 0:Int32, null:Int32, null:Int32, null:Int32, null:Int32)::Decimal - alltypes2.c7) as $expr3] }
     └─LogicalAgg { group_key: [auction.description, alltypes2.c7, auction.category, auction.item_name, alltypes2.c15, alltypes2.c2, alltypes2.c1, alltypes2.c9, auction.expires, alltypes2.c6], aggs: [] }

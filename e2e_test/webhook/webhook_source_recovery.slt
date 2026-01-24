@@ -1,0 +1,19 @@
+# Simulation test for table with webhook source after recovery
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# insert once
+system ok
+python3 e2e_test/webhook/sender.py --secret TEST_WEBHOOK
+
+sleep 3s
+
+include ./check_3.slt.part
+
+include ./drop_table.slt.part
+
+statement ok
+DROP SECRET test_secret

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::fmt::Debug;
 use std::ops::Range;
 
 use anyhow::anyhow;
-use downcast_rs::{impl_downcast, Downcast};
+use downcast_rs::{Downcast, impl_downcast};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::types::{DataType, Datum};

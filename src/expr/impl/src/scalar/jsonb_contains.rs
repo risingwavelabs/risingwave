@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -122,7 +122,7 @@ fn jsonbb_contains(left: ValueRef<'_>, right: ValueRef<'_>, root: bool) -> bool 
             right_obj.iter().all(|(key, value)| {
                 left_obj
                     .get(key)
-                    .map_or(false, |left_val| jsonbb_contains(left_val, value, false))
+                    .is_some_and(|left_val| jsonbb_contains(left_val, value, false))
             })
         }
 
@@ -205,7 +205,7 @@ fn jsonb_exists(left: JsonbRef<'_>, key: &str) -> bool {
     match left.into() {
         ValueRef::Object(object) => object.get(key).is_some(),
         ValueRef::Array(array) => array.iter().any(|val| val.as_str() == Some(key)),
-        ValueRef::String(str) => str == key,
+        ValueRef::String(str) => str.as_str() == key,
         _ => false,
     }
 }
@@ -236,7 +236,7 @@ fn jsonb_exists_any(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
     match left.into() {
         ValueRef::Object(object) => keys.any(|key| object.get(key).is_some()),
         ValueRef::Array(array) => keys.any(|key| array.iter().any(|val| val.as_str() == Some(key))),
-        ValueRef::String(str) => keys.any(|key| str == key),
+        ValueRef::String(str) => keys.any(|key| str.as_str() == key),
         _ => false,
     }
 }
@@ -267,7 +267,7 @@ fn jsonb_exists_all(left: JsonbRef<'_>, keys: ListRef<'_>) -> bool {
     match left.into() {
         ValueRef::Object(object) => keys.all(|key| object.get(key).is_some()),
         ValueRef::Array(array) => keys.all(|key| array.iter().any(|val| val.as_str() == Some(key))),
-        ValueRef::String(str) => keys.all(|key| str == key),
+        ValueRef::String(str) => keys.all(|key| str.as_str() == key),
         _ => false,
     }
 }

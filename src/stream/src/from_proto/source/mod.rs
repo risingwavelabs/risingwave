@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,16 +16,15 @@ mod trad_source;
 
 use std::collections::BTreeMap;
 
-pub use trad_source::{create_source_desc_builder, SourceExecutorBuilder};
+pub use trad_source::{SourceExecutorBuilder, create_source_desc_builder};
 mod fs_fetch;
 pub use fs_fetch::FsFetchExecutorBuilder;
-use risingwave_common::catalog::TableId;
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::catalog::PbStreamSourceInfo;
-use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
+use risingwave_pb::plan_common::SourceRefreshMode;
+use risingwave_pb::plan_common::source_refresh_mode::RefreshMode;
 
 use super::*;
-use crate::telemetry::report_event;
 
 fn get_connector_name(with_props: &BTreeMap<String, String>) -> String {
     with_props
@@ -34,29 +33,9 @@ fn get_connector_name(with_props: &BTreeMap<String, String>) -> String {
         .unwrap_or_default()
 }
 
-fn telemetry_source_build(
-    source_type: &str, // "source" or "source backfill"
-    source_id: &TableId,
-    source_info: &PbStreamSourceInfo,
-    with_props: &BTreeMap<String, String>,
-) {
-    let mut builder = jsonbb::Builder::<Vec<u8>>::new();
-    builder.begin_object();
-    builder.add_string("format");
-    builder.add_value(jsonbb::ValueRef::String(source_info.format().as_str_name()));
-    builder.add_string("encode");
-    builder.add_value(jsonbb::ValueRef::String(
-        source_info.row_encode().as_str_name(),
-    ));
-    builder.end_object();
-    let value = builder.finish();
-
-    report_event(
-        PbTelemetryEventStage::CreateStreamJob,
-        source_type,
-        source_id.table_id as i64,
-        Some(get_connector_name(with_props)),
-        Some(PbTelemetryDatabaseObject::Source),
-        Some(value),
-    )
+fn is_full_reload_refresh(refresh_mode: &Option<SourceRefreshMode>) -> bool {
+    refresh_mode
+        .as_ref()
+        .map(|refresh_mode| matches!(refresh_mode.refresh_mode, Some(RefreshMode::FullReload(_))))
+        .unwrap_or(false)
 }

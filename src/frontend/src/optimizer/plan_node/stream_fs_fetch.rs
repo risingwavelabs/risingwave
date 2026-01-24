@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,21 +14,21 @@
 
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{PbStreamFsFetch, StreamFsFetchNode};
 
 use super::stream::prelude::*;
-use super::{PlanBase, PlanRef, PlanTreeNodeUnary};
+use super::{PlanBase, PlanTreeNodeUnary, StreamPlanRef as PlanRef};
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::{childless_record, Distill};
-use crate::optimizer::plan_node::{generic, ExprRewritable, StreamNode};
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::plan_node::utils::{Distill, childless_record};
+use crate::optimizer::plan_node::{ExprRewritable, StreamNode, generic};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
+/// Fetch files from filesystem/s3/iceberg.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamFsFetch {
     pub base: PlanBase<Stream>,
@@ -36,7 +36,7 @@ pub struct StreamFsFetch {
     core: generic::Source,
 }
 
-impl PlanTreeNodeUnary for StreamFsFetch {
+impl PlanTreeNodeUnary<Stream> for StreamFsFetch {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -45,16 +45,16 @@ impl PlanTreeNodeUnary for StreamFsFetch {
         Self::new(input, self.core.clone())
     }
 }
-impl_plan_tree_node_for_unary! { StreamFsFetch }
+impl_plan_tree_node_for_unary! { Stream, StreamFsFetch }
 
 impl StreamFsFetch {
     pub fn new(input: PlanRef, source: generic::Source) -> Self {
         let base = PlanBase::new_stream_with_core(
             &source,
             Distribution::SomeShard,
-            source.catalog.as_ref().map_or(true, |s| s.append_only),
+            source.stream_kind(),
             false,
-            FixedBitSet::with_capacity(source.column_catalog.len()),
+            WatermarkColumns::new(),
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
@@ -90,7 +90,7 @@ impl Distill for StreamFsFetch {
     }
 }
 
-impl ExprRewritable for StreamFsFetch {}
+impl ExprRewritable<Stream> for StreamFsFetch {}
 
 impl ExprVisitable for StreamFsFetch {}
 
@@ -119,12 +119,14 @@ impl StreamNode for StreamFsFetch {
                     .map(|c| c.to_protobuf())
                     .collect_vec(),
                 with_properties,
-                rate_limit: self.base.ctx().overwrite_options().source_rate_limit,
+                rate_limit: source_catalog.rate_limit,
                 secret_refs,
+                refresh_mode: source_catalog.refresh_mode,
+                associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
             }
         });
-        NodeBody::StreamFsFetch(StreamFsFetchNode {
+        NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {
             node_inner: source_inner,
-        })
+        }))
     }
 }

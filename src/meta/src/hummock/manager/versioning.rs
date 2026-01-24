@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,36 +13,38 @@
 // limitations under the License.
 
 use std::cmp;
+use std::collections::Bound::{Excluded, Included};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use itertools::Itertools;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    get_compaction_group_ids, get_table_compaction_group_id_mapping, BranchedSstInfo,
-};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
+    BranchedSstInfo, get_compaction_group_ids, get_table_compaction_group_id_mapping,
+};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::table_stats::add_prost_table_stats_map;
+use risingwave_hummock_sdk::table_stats::{PbTableStatsMap, add_prost_table_stats_map};
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
-    CompactionGroupId, HummockContextId, HummockSstableId, HummockSstableObjectId, HummockVersionId,
+    CompactionGroupId, HummockContextId, HummockObjectId, HummockSstableId, HummockSstableObjectId,
+    HummockVersionId, get_stale_object_ids,
 };
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::write_limits::WriteLimit;
-use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats, TableStats};
+use risingwave_pb::hummock::{HummockPinnedVersion, HummockVersionStats};
+use risingwave_pb::id::TableId;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 
-use super::check_cg_write_limit;
+use super::GroupStateValidator;
+use crate::MetaResult;
+use crate::hummock::HummockManager;
 use crate::hummock::error::Result;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
 use crate::hummock::manager::commit_multi_var;
 use crate::hummock::manager::context::ContextInfo;
-use crate::hummock::manager::gc::DeleteObjectTracker;
 use crate::hummock::manager::transaction::HummockVersionTransaction;
-use crate::hummock::metrics_utils::{trigger_write_stop_stats, LocalTableMetrics};
+use crate::hummock::metrics_utils::{LocalTableMetrics, trigger_write_stop_stats};
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::HummockManager;
 use crate::model::VarTransaction;
-use crate::MetaResult;
 
 #[derive(Default)]
 pub struct Versioning {
@@ -52,12 +54,10 @@ pub struct Versioning {
     pub disable_commit_epochs: bool,
     /// Latest hummock version
     pub current_version: HummockVersion,
-    pub local_metrics: HashMap<u32, LocalTableMetrics>,
+    pub local_metrics: HashMap<TableId, LocalTableMetrics>,
     pub time_travel_snapshot_interval_counter: u64,
     /// Used to avoid the attempts to rewrite the same SST to meta store
     pub last_time_travel_snapshot_sst_ids: HashSet<HummockSstableId>,
-    /// Whether time travel is enabled during last commit epoch.
-    pub time_travel_toggle_check: bool,
 
     // Persistent states below
     pub hummock_version_deltas: BTreeMap<HummockVersionId, HummockVersionDelta>,
@@ -82,24 +82,36 @@ impl ContextInfo {
 }
 
 impl Versioning {
-    /// Marks all objects <= `min_pinned_version_id` for deletion.
-    pub(super) fn mark_objects_for_deletion(
+    pub(super) fn mark_next_time_travel_version_snapshot(&mut self) {
+        self.time_travel_snapshot_interval_counter = u64::MAX;
+    }
+
+    pub fn get_tracked_object_ids(
         &self,
-        context_info: &ContextInfo,
-        delete_object_tracker: &DeleteObjectTracker,
-    ) {
-        let min_pinned_version_id = context_info.min_pinned_version_id();
-        delete_object_tracker.add(
+        min_pinned_version_id: HummockVersionId,
+    ) -> HashSet<HummockObjectId> {
+        // object ids in checkpoint version
+        let mut tracked_object_ids = self
+            .checkpoint
+            .version
+            .get_object_ids(false)
+            .collect::<HashSet<_>>();
+        // add object ids added between checkpoint version and current version
+        for (_, delta) in self.hummock_version_deltas.range((
+            Excluded(self.checkpoint.version.id),
+            Included(self.current_version.id),
+        )) {
+            tracked_object_ids.extend(delta.newly_added_object_ids(false));
+        }
+        // add stale object ids before the checkpoint version
+        tracked_object_ids.extend(
             self.checkpoint
                 .stale_objects
                 .iter()
-                .filter(|(version_id, _)| **version_id <= min_pinned_version_id)
-                .flat_map(|(_, stale_objects)| stale_objects.id.iter().cloned()),
+                .filter(|(version_id, _)| **version_id >= min_pinned_version_id)
+                .flat_map(|(_, objects)| get_stale_object_ids(objects)),
         );
-    }
-
-    pub(super) fn mark_next_time_travel_version_snapshot(&mut self) {
-        self.time_travel_snapshot_interval_counter = u64::MAX;
+        tracked_object_ids
     }
 }
 
@@ -156,7 +168,6 @@ impl HummockManager {
     }
 
     /// Get version deltas from meta store
-    #[cfg_attr(coverage, coverage(off))]
     pub async fn list_version_deltas(
         &self,
         start_id: HummockVersionId,
@@ -252,6 +263,7 @@ impl HummockManager {
                 &mut versioning.current_version,
                 &mut versioning.hummock_version_deltas,
                 self.env.notification_manager(),
+                None,
                 &self.metrics,
             );
             let mut new_version_delta = version.new_delta();
@@ -282,8 +294,12 @@ pub(super) fn calc_new_write_limits(
             Some(levels) => levels,
         };
 
-        let write_limit_type = check_cg_write_limit(levels, config.compaction_config.as_ref());
-        if write_limit_type.is_write_stop() {
+        let group_state = GroupStateValidator::check_single_group_write_stop(
+            levels,
+            config.compaction_config.as_ref(),
+        );
+
+        if group_state.is_write_stop() {
             new_write_limits.insert(
                 *id,
                 WriteLimit {
@@ -291,9 +307,9 @@ pub(super) fn calc_new_write_limits(
                         .state_table_info
                         .compaction_group_member_table_ids(*id)
                         .iter()
-                        .map(|table_id| table_id.table_id)
+                        .copied()
                         .collect(),
-                    reason: write_limit_type.as_str(),
+                    reason: group_state.reason().unwrap().to_owned(),
                 },
             );
             continue;
@@ -324,8 +340,8 @@ fn rebuild_table_stats(version: &HummockVersion) -> HummockVersionStats {
 /// - The file stats is evenly distributed among multiple tables within the file.
 /// - The total key size and total value size are estimated based on key range and file size.
 /// - Branched files may lead to an overestimation.
-fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
-    let mut changes: HashMap<u32, TableStats> = HashMap::default();
+fn estimate_table_stats(sst: &SstableInfo) -> PbTableStatsMap {
+    let mut changes: PbTableStatsMap = HashMap::default();
     let weighted_value =
         |value: i64| -> i64 { (value as f64 / sst.table_ids.len() as f64).ceil() as i64 };
     let key_range = &sst.key_range;
@@ -333,7 +349,12 @@ fn estimate_table_stats(sst: &SstableInfo) -> HashMap<u32, TableStats> {
     let mut estimated_total_key_size = estimated_key_size * sst.total_key_count;
     if estimated_total_key_size > sst.uncompressed_file_size {
         estimated_total_key_size = sst.uncompressed_file_size / 2;
-        tracing::warn!(sst.sst_id, "Calculated estimated_total_key_size {} > uncompressed_file_size {}. Use uncompressed_file_size/2 as estimated_total_key_size instead.", estimated_total_key_size, sst.uncompressed_file_size);
+        tracing::warn!(
+            %sst.sst_id,
+            "Calculated estimated_total_key_size {} > uncompressed_file_size {}. Use uncompressed_file_size/2 as estimated_total_key_size instead.",
+            estimated_total_key_size,
+            sst.uncompressed_file_size
+        );
     }
     let estimated_total_value_size = sst.uncompressed_file_size - estimated_total_key_size;
     for table_id in &sst.table_ids {
@@ -350,9 +371,10 @@ mod tests {
     use std::collections::HashMap;
     use std::sync::Arc;
 
+    use itertools::Itertools;
     use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::{Level, Levels};
-    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::version::HummockVersion;
     use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId};
     use risingwave_pb::hummock::write_limits::WriteLimit;
@@ -370,9 +392,9 @@ mod tests {
         let mut context_info = ContextInfo::default();
         assert_eq!(context_info.min_pinned_version_id(), HummockVersionId::MAX);
         context_info.pinned_versions.insert(
-            1,
+            1.into(),
             HummockPinnedVersion {
-                context_id: 1,
+                context_id: 1.into(),
                 min_pinned_id: 10,
             },
         );
@@ -410,13 +432,47 @@ mod tests {
                 );
             };
 
+        let set_level_0_max_sst_count_threshold_for_group_1 =
+            |target_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
+             max_sst_count_threshold: u32| {
+                target_groups.insert(
+                    1,
+                    CompactionGroup {
+                        group_id: 1,
+                        compaction_config: Arc::new(
+                            CompactionConfigBuilder::new()
+                                .level0_stop_write_threshold_max_sst_count(Some(
+                                    max_sst_count_threshold,
+                                ))
+                                .build(),
+                        ),
+                    },
+                );
+            };
+
+        let set_level_0_max_size_threshold_for_group_1 =
+            |target_groups: &mut HashMap<CompactionGroupId, CompactionGroup>,
+             max_size_threshold: u64| {
+                target_groups.insert(
+                    1,
+                    CompactionGroup {
+                        group_id: 1,
+                        compaction_config: Arc::new(
+                            CompactionConfigBuilder::new()
+                                .level0_stop_write_threshold_max_size(Some(max_size_threshold))
+                                .build(),
+                        ),
+                    },
+                );
+            };
+
         let mut target_groups: HashMap<CompactionGroupId, CompactionGroup> = Default::default();
         set_sub_level_number_threshold_for_group_1(&mut target_groups, 10);
         let origin_snapshot: HashMap<CompactionGroupId, WriteLimit> = [(
             2,
             WriteLimit {
-                table_ids: vec![1, 2, 3],
-                reason: "for test".to_string(),
+                table_ids: [1, 2, 3].into_iter().map_into().collect(),
+                reason: "for test".to_owned(),
             },
         )]
         .into_iter()
@@ -464,7 +520,7 @@ mod tests {
 
         set_sub_level_number_threshold_for_group_1(&mut target_groups, 5);
         let new_write_limits =
-            calc_new_write_limits(target_groups, origin_snapshot.clone(), &version);
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
         assert_ne!(
             new_write_limits, origin_snapshot,
             "write limit should be triggered for group 1"
@@ -473,21 +529,100 @@ mod tests {
             new_write_limits.get(&1).as_ref().unwrap().reason,
             "WriteStop(l0_level_count: 11, threshold: 5) too many L0 sub levels"
         );
+
+        set_sub_level_number_threshold_for_group_1(&mut target_groups, 100);
+        let last_level = version
+            .levels
+            .get_mut(&1)
+            .unwrap()
+            .l0
+            .sub_levels
+            .last_mut()
+            .unwrap();
+        last_level.table_infos.extend(vec![
+            SstableInfoInner {
+                key_range: KeyRange::default(),
+                table_ids: vec![1.into(), 2.into(), 3.into()],
+                total_key_count: 100,
+                sst_size: 100,
+                uncompressed_file_size: 100,
+                ..Default::default()
+            }
+            .into(),
+            SstableInfoInner {
+                key_range: KeyRange::default(),
+                table_ids: vec![1.into(), 2.into(), 3.into()],
+                total_key_count: 100,
+                sst_size: 100,
+                uncompressed_file_size: 100,
+                ..Default::default()
+            }
+            .into(),
+        ]);
+        version.levels.get_mut(&1).unwrap().l0.total_file_size += 200;
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_eq!(
+            new_write_limits, origin_snapshot,
+            "write limit should not be triggered for group 1"
+        );
+
+        set_level_0_max_size_threshold_for_group_1(&mut target_groups, 10);
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_ne!(
+            new_write_limits, origin_snapshot,
+            "write limit should be triggered for group 1"
+        );
+        assert_eq!(
+            new_write_limits.get(&1).as_ref().unwrap().reason,
+            "WriteStop(l0_size: 200, threshold: 10) too large L0 size"
+        );
+
+        set_level_0_max_size_threshold_for_group_1(&mut target_groups, 10000);
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_eq!(
+            new_write_limits, origin_snapshot,
+            "write limit should not be triggered for group 1"
+        );
+
+        set_level_0_max_sst_count_threshold_for_group_1(&mut target_groups, 1);
+        let new_write_limits =
+            calc_new_write_limits(target_groups.clone(), origin_snapshot.clone(), &version);
+        assert_ne!(
+            new_write_limits, origin_snapshot,
+            "write limit should be triggered for group 1"
+        );
+        assert_eq!(
+            new_write_limits.get(&1).as_ref().unwrap().reason,
+            "WriteStop(l0_sst_count: 2, threshold: 1) too many L0 sst files"
+        );
+
+        set_level_0_max_sst_count_threshold_for_group_1(&mut target_groups, 100);
+        let new_write_limits =
+            calc_new_write_limits(target_groups, origin_snapshot.clone(), &version);
+
+        assert_eq!(
+            new_write_limits, origin_snapshot,
+            "write limit should not be triggered for group 1"
+        );
     }
 
     #[test]
     fn test_estimate_table_stats() {
-        let sst = SstableInfo {
+        let sst = SstableInfoInner {
             key_range: KeyRange {
                 left: vec![1; 10].into(),
                 right: vec![1; 20].into(),
                 ..Default::default()
             },
-            table_ids: vec![1, 2, 3],
+            table_ids: vec![1.into(), 2.into(), 3.into()],
             total_key_count: 6000,
             uncompressed_file_size: 6_000_000,
             ..Default::default()
-        };
+        }
+        .into();
         let changes = estimate_table_stats(&sst);
         assert_eq!(changes.len(), 3);
         for stats in changes.values() {
@@ -538,17 +673,18 @@ mod tests {
 
     #[test]
     fn test_estimate_table_stats_large_key_range() {
-        let sst = SstableInfo {
+        let sst = SstableInfoInner {
             key_range: KeyRange {
                 left: vec![1; 1000].into(),
                 right: vec![1; 2000].into(),
                 ..Default::default()
             },
-            table_ids: vec![1, 2, 3],
+            table_ids: vec![1.into(), 2.into(), 3.into()],
             total_key_count: 6000,
             uncompressed_file_size: 60_000,
             ..Default::default()
-        };
+        }
+        .into();
         let changes = estimate_table_stats(&sst);
         assert_eq!(changes.len(), 3);
         for t in &sst.table_ids {

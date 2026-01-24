@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,14 +17,16 @@ use std::fmt::Debug;
 use std::future::Future;
 
 use itertools::Itertools;
-use risingwave_common::array::{Op, RowRef};
-use risingwave_common::row::{CompactedRow, Row, RowDeserializer, RowExt};
+use risingwave_common::array::RowRef;
+use risingwave_common::array::stream_record::Record;
+use risingwave_common::row::{CompactedRow, OwnedRow, Row, RowDeserializer, RowExt};
 use risingwave_common::types::DataType;
-use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_common_estimate_size::EstimateSize;
+use risingwave_common_estimate_size::collections::EstimatedBTreeMap;
 use risingwave_storage::StateStore;
 
 use super::{GroupKey, ManagedTopNState};
+use crate::common::change_buffer::ChangeBuffer;
 use crate::consistency::{consistency_error, enable_strict_consistency};
 use crate::executor::error::StreamExecutorResult;
 
@@ -149,14 +151,7 @@ pub trait TopNCacheTrait {
     ///
     /// Changes in `self.middle` is recorded to `res_ops` and `res_rows`, which will be
     /// used to generate messages to be sent to downstream operators.
-    #[allow(clippy::too_many_arguments)]
-    fn insert(
-        &mut self,
-        cache_key: CacheKey,
-        row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
-    );
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging);
 
     /// Delete input row from the cache.
     ///
@@ -166,21 +161,31 @@ pub trait TopNCacheTrait {
     /// Because we may need to refill data from the state table to `self.high` during the delete
     /// operation, we need to pass in `group_key`, `epoch` and `managed_state` to do a prefix
     /// scan of the state table.
-    #[allow(clippy::too_many_arguments)]
     fn delete<S: StateStore>(
         &mut self,
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        row: impl Row,
+        staging: &mut TopNStaging,
     ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 }
 
 impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
     /// `data_types` -- Data types for the full row.
+    /// `min_capacity` -- Minimum capacity for the high cache. When not provided, defaults to `TOPN_CACHE_MIN_CAPACITY`.
     pub fn new(offset: usize, limit: usize, data_types: Vec<DataType>) -> Self {
+        Self::with_min_capacity(offset, limit, data_types, TOPN_CACHE_MIN_CAPACITY)
+    }
+
+    /// `data_types` -- Data types for the full row.
+    /// `min_capacity` -- Minimum capacity for the high cache.
+    pub fn with_min_capacity(
+        offset: usize,
+        limit: usize,
+        data_types: Vec<DataType>,
+        min_capacity: usize,
+    ) -> Self {
         assert!(limit > 0);
         if WITH_TIES {
             // It's trickier to support.
@@ -191,7 +196,7 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
             .checked_add(limit)
             .and_then(|v| v.checked_mul(TOPN_CACHE_HIGH_CAPACITY_FACTOR))
             .unwrap_or(usize::MAX)
-            .max(TOPN_CACHE_MIN_CAPACITY);
+            .max(min_capacity);
         Self {
             low: if offset > 0 { Some(Cache::new()) } else { None },
             middle: Cache::new(),
@@ -286,21 +291,10 @@ impl<const WITH_TIES: bool> TopNCache<WITH_TIES> {
 }
 
 impl TopNCacheTrait for TopNCache<false> {
-    fn insert(
-        &mut self,
-        cache_key: CacheKey,
-        row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
-    ) {
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging) {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count += 1;
         }
-
-        let mut append_res = |op: Op, row: CompactedRow| {
-            res_ops.push(op);
-            res_rows.push(row);
-        };
 
         let mut to_insert = (cache_key, (&row).into());
         let mut is_last_of_lower_cache = false; // for saving one key comparison
@@ -328,8 +322,8 @@ impl TopNCacheTrait for TopNCache<false> {
         // try insert into middle cache
 
         if !self.middle_is_full() {
-            self.middle.insert(to_insert.0, to_insert.1.clone());
-            append_res(Op::Insert, to_insert.1);
+            self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+            staging.insert(to_insert.0, to_insert.1);
             return;
         }
 
@@ -338,10 +332,10 @@ impl TopNCacheTrait for TopNCache<false> {
         if is_last_of_lower_cache || &to_insert.0 < middle_last.key() {
             // make space for the new entry
             let middle_last = middle_last.remove_entry();
-            self.middle.insert(to_insert.0, to_insert.1.clone());
+            self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
 
-            append_res(Op::Delete, middle_last.1.clone());
-            append_res(Op::Insert, to_insert.1);
+            staging.delete(middle_last.0.clone(), middle_last.1.clone());
+            staging.insert(to_insert.0, to_insert.1);
 
             to_insert = middle_last; // move the last entry to the high cache
             is_last_of_lower_cache = true;
@@ -381,9 +375,8 @@ impl TopNCacheTrait for TopNCache<false> {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        row: impl Row,
+        staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
         if !enable_strict_consistency() && self.table_row_count == Some(0) {
             // If strict consistency is disabled, and we receive a `DELETE` but the row count is 0, we
@@ -394,11 +387,6 @@ impl TopNCacheTrait for TopNCache<false> {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count -= 1;
         }
-
-        let mut append_res = |op: Op, row: CompactedRow| {
-            res_ops.push(op);
-            res_rows.push(row);
-        };
 
         if self.middle_is_full() && &cache_key > self.middle.last_key_value().unwrap().0 {
             // the row is in high
@@ -414,7 +402,7 @@ impl TopNCacheTrait for TopNCache<false> {
         {
             // the row is in middle
             let removed = self.middle.remove(&cache_key);
-            append_res(Op::Delete, (&row).into());
+            staging.delete(cache_key.clone(), (&row).into());
 
             if removed.is_none() {
                 // the middle cache should always be synced, if the key is not found, then it also doesn't
@@ -443,8 +431,9 @@ impl TopNCacheTrait for TopNCache<false> {
             // bring one element, if any, from high cache to middle cache
             if !self.high.is_empty() {
                 let high_first = self.high.pop_first().unwrap();
-                append_res(Op::Insert, high_first.1.clone());
-                self.middle.insert(high_first.0, high_first.1);
+                self.middle
+                    .insert(high_first.0.clone(), high_first.1.clone());
+                staging.insert(high_first.0, high_first.1);
             }
 
             assert!(self.high.is_empty() || self.middle.len() == self.limit);
@@ -463,7 +452,7 @@ impl TopNCacheTrait for TopNCache<false> {
             // bring one element, if any, from middle cache to low cache
             if !self.middle.is_empty() {
                 let middle_first = self.middle.pop_first().unwrap();
-                append_res(Op::Delete, middle_first.1.clone());
+                staging.delete(middle_first.0.clone(), middle_first.1.clone());
                 low.insert(middle_first.0, middle_first.1);
 
                 // fill the high cache if it's not synced
@@ -482,8 +471,9 @@ impl TopNCacheTrait for TopNCache<false> {
                 // bring one element, if any, from high cache to middle cache
                 if !self.high.is_empty() {
                     let high_first = self.high.pop_first().unwrap();
-                    append_res(Op::Insert, high_first.1.clone());
-                    self.middle.insert(high_first.0, high_first.1);
+                    self.middle
+                        .insert(high_first.0.clone(), high_first.1.clone());
+                    staging.insert(high_first.0, high_first.1);
                 }
             }
         }
@@ -493,13 +483,7 @@ impl TopNCacheTrait for TopNCache<false> {
 }
 
 impl TopNCacheTrait for TopNCache<true> {
-    fn insert(
-        &mut self,
-        cache_key: CacheKey,
-        row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
-    ) {
+    fn insert(&mut self, cache_key: CacheKey, row: impl Row, staging: &mut TopNStaging) {
         if let Some(row_count) = self.table_row_count.as_mut() {
             *row_count += 1;
         }
@@ -509,18 +493,13 @@ impl TopNCacheTrait for TopNCache<true> {
             "Offset is not supported yet for WITH TIES, so low cache should be None"
         );
 
-        let mut append_res = |op: Op, row: CompactedRow| {
-            res_ops.push(op);
-            res_rows.push(row);
-        };
-
         let to_insert: (CacheKey, CompactedRow) = (cache_key, (&row).into());
 
         // try insert into middle cache
 
         if !self.middle_is_full() {
             self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
-            append_res(Op::Insert, to_insert.1);
+            staging.insert(to_insert.0.clone(), to_insert.1);
             return;
         }
 
@@ -550,7 +529,7 @@ impl TopNCacheTrait for TopNCache<true> {
                         && middle_last.key().0 == middle_last_sort_key
                     {
                         let middle_last = middle_last.remove_entry();
-                        append_res(Op::Delete, middle_last.1.clone());
+                        staging.delete(middle_last.0.clone(), middle_last.1.clone());
                         // we can blindly move entries from middle cache to high cache no matter high cache is synced or not
                         self.high.insert(middle_last.0, middle_last.1);
                     }
@@ -564,13 +543,13 @@ impl TopNCacheTrait for TopNCache<true> {
                     self.high.retain(|k, _| k.0 != high_last_sort_key);
                 }
 
-                append_res(Op::Insert, to_insert.1.clone());
-                self.middle.insert(to_insert.0, to_insert.1);
+                self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+                staging.insert(to_insert.0, to_insert.1);
             }
             Ordering::Equal => {
                 // the row is in middle and is a tie of the last row
-                append_res(Op::Insert, to_insert.1.clone());
-                self.middle.insert(to_insert.0, to_insert.1);
+                self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+                staging.insert(to_insert.0, to_insert.1);
             }
             Ordering::Greater => {
                 // the row is in high
@@ -609,9 +588,8 @@ impl TopNCacheTrait for TopNCache<true> {
         group_key: Option<impl GroupKey>,
         managed_state: &mut ManagedTopNState<S>,
         cache_key: CacheKey,
-        row: impl Row + Send,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        row: impl Row,
+        staging: &mut TopNStaging,
     ) -> StreamExecutorResult<()> {
         if !enable_strict_consistency() && self.table_row_count == Some(0) {
             // If strict consistency is disabled, and we receive a `DELETE` but the row count is 0, we
@@ -627,18 +605,13 @@ impl TopNCacheTrait for TopNCache<true> {
             "Offset is not supported yet for WITH TIES, so low cache should be None"
         );
 
-        let mut append_res = |op: Op, row: CompactedRow| {
-            res_ops.push(op);
-            res_rows.push(row);
-        };
-
         if self.middle.is_empty() {
             consistency_error!(
                 ?group_key,
                 ?cache_key,
                 "middle cache is empty, but we receive a DELETE operation"
             );
-            append_res(Op::Delete, (&row).into());
+            staging.delete(cache_key, (&row).into());
             return Ok(());
         }
 
@@ -651,7 +624,7 @@ impl TopNCacheTrait for TopNCache<true> {
         } else {
             // the row is in middle
             self.middle.remove(&cache_key);
-            append_res(Op::Delete, (&row).into());
+            staging.delete(cache_key.clone(), (&row).into());
             if self.middle.len() >= self.limit {
                 // this can happen when there are ties
                 return Ok(());
@@ -675,12 +648,13 @@ impl TopNCacheTrait for TopNCache<true> {
                 let high_first_sort_key = (high_first.0).0.clone();
                 assert!(high_first_sort_key > middle_last_sort_key);
 
-                append_res(Op::Insert, high_first.1.clone());
-                self.middle.insert(high_first.0, high_first.1);
+                self.middle
+                    .insert(high_first.0.clone(), high_first.1.clone());
+                staging.insert(high_first.0, high_first.1);
 
                 for (cache_key, row) in self.high.extract_if(|k, _| k.0 == high_first_sort_key) {
-                    append_res(Op::Insert, row.clone());
-                    self.middle.insert(cache_key, row);
+                    self.middle.insert(cache_key.clone(), row.clone());
+                    staging.insert(cache_key, row);
                 }
             }
         }
@@ -702,8 +676,7 @@ pub trait AppendOnlyTopNCacheTrait {
         &mut self,
         cache_key: CacheKey,
         row_ref: RowRef<'_>,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        staging: &mut TopNStaging,
         managed_state: &mut ManagedTopNState<S>,
         row_deserializer: &RowDeserializer,
     ) -> StreamExecutorResult<()>;
@@ -714,8 +687,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
         &mut self,
         cache_key: CacheKey,
         row_ref: RowRef<'_>,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        staging: &mut TopNStaging,
         managed_state: &mut ManagedTopNState<S>,
         row_deserializer: &RowDeserializer,
     ) -> StreamExecutorResult<()> {
@@ -723,11 +695,6 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
             return Ok(());
         }
         managed_state.insert(row_ref);
-
-        let mut append_res = |op: Op, row: CompactedRow| {
-            res_ops.push(op);
-            res_rows.push(row);
-        };
 
         // insert input row into corresponding cache according to its sort key
         let mut to_insert = (cache_key, row_ref.into());
@@ -754,8 +721,8 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
         // try insert into middle cache
 
         if !self.middle_is_full() {
-            self.middle.insert(to_insert.0, to_insert.1.clone());
-            append_res(Op::Insert, to_insert.1);
+            self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+            staging.insert(to_insert.0, to_insert.1);
             return Ok(());
         }
 
@@ -763,12 +730,11 @@ impl AppendOnlyTopNCacheTrait for TopNCache<false> {
         // the largest row in `cache.middle` needs to be removed.
         let middle_last = self.middle.pop_last().unwrap();
         debug_assert!(to_insert.0 < middle_last.0);
-
-        append_res(Op::Delete, middle_last.1.clone());
         managed_state.delete(row_deserializer.deserialize(middle_last.1.row.as_ref())?);
+        staging.delete(middle_last.0, middle_last.1);
 
-        append_res(Op::Insert, to_insert.1.clone());
-        self.middle.insert(to_insert.0, to_insert.1);
+        self.middle.insert(to_insert.0.clone(), to_insert.1.clone());
+        staging.insert(to_insert.0, to_insert.1);
 
         // Unlike normal topN, append only topN does not use the high part of the cache.
 
@@ -781,8 +747,7 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
         &mut self,
         cache_key: CacheKey,
         row_ref: RowRef<'_>,
-        res_ops: &mut Vec<Op>,
-        res_rows: &mut Vec<CompactedRow>,
+        staging: &mut TopNStaging,
         managed_state: &mut ManagedTopNState<S>,
         row_deserializer: &RowDeserializer,
     ) -> StreamExecutorResult<()> {
@@ -791,11 +756,6 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
             "Offset is not supported yet for WITH TIES, so low cache should be empty"
         );
 
-        let mut append_res = |op: Op, row: CompactedRow| {
-            res_ops.push(op);
-            res_rows.push(row);
-        };
-
         let to_insert = (cache_key, row_ref);
 
         // try insert into middle cache
@@ -803,8 +763,8 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
         if !self.middle_is_full() {
             managed_state.insert(to_insert.1);
             let row: CompactedRow = to_insert.1.into();
-            self.middle.insert(to_insert.0, row.clone());
-            append_res(Op::Insert, row);
+            self.middle.insert(to_insert.0.clone(), row.clone());
+            staging.insert(to_insert.0, row);
             return Ok(());
         }
 
@@ -833,25 +793,24 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
                         && middle_last.key().0 == middle_last_sort_key
                     {
                         let middle_last = middle_last.remove_entry();
-                        append_res(Op::Delete, middle_last.1.clone());
-
                         // we don't need to maintain the high part so just delete it from state table
                         managed_state
                             .delete(row_deserializer.deserialize(middle_last.1.row.as_ref())?);
+                        staging.delete(middle_last.0, middle_last.1);
                     }
                 }
 
                 managed_state.insert(to_insert.1);
                 let row: CompactedRow = to_insert.1.into();
-                append_res(Op::Insert, row.clone());
-                self.middle.insert(to_insert.0, row);
+                self.middle.insert(to_insert.0.clone(), row.clone());
+                staging.insert(to_insert.0, row);
             }
             Ordering::Equal => {
                 // the row is in middle and is a tie of the last row
                 managed_state.insert(to_insert.1);
                 let row: CompactedRow = to_insert.1.into();
-                append_res(Op::Insert, row.clone());
-                self.middle.insert(to_insert.0, row);
+                self.middle.insert(to_insert.0.clone(), row.clone());
+                staging.insert(to_insert.0, row);
             }
             Ordering::Greater => {
                 // the row is in high, do nothing
@@ -859,5 +818,108 @@ impl AppendOnlyTopNCacheTrait for TopNCache<true> {
         }
 
         Ok(())
+    }
+}
+
+/// Used to build diff between before and after applying an input chunk, for `TopNCache` (of one group).
+/// It should be maintained when an entry is inserted or deleted from the `middle` cache.
+#[derive(Debug, Default)]
+pub struct TopNStaging {
+    inner: ChangeBuffer<CacheKey, CompactedRow>,
+}
+
+impl TopNStaging {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    /// Insert a row into the staging changes. This method must be called when a row is
+    /// added to the `middle` cache.
+    fn insert(&mut self, cache_key: CacheKey, row: CompactedRow) {
+        self.inner.insert(cache_key, row);
+    }
+
+    /// Delete a row from the staging changes. This method must be called when a row is
+    /// removed from the `middle` cache.
+    fn delete(&mut self, cache_key: CacheKey, row: CompactedRow) {
+        self.inner.delete(cache_key, row);
+    }
+
+    /// Get the count of effective changes in the staging.
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    /// Check if the staging is empty.
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    /// Iterate over the changes in the staging, and deserialize the rows.
+    pub fn into_deserialized_changes(
+        self,
+        deserializer: &RowDeserializer,
+    ) -> impl Iterator<Item = StreamExecutorResult<Record<OwnedRow>>> + '_ {
+        self.inner.into_records().map(|record| {
+            record.try_map(|row| {
+                deserializer
+                    .deserialize(row.row.as_ref())
+                    .map_err(Into::into)
+            })
+        })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::DataType;
+
+    use super::*;
+
+    #[test]
+    fn test_topn_cache_new_uses_default_min_capacity() {
+        let cache = TopNCache::<false>::new(0, 5, vec![DataType::Int32]);
+        assert_eq!(cache.high_cache_capacity, TOPN_CACHE_MIN_CAPACITY);
+    }
+
+    #[test]
+    fn test_topn_cache_with_custom_min_capacity() {
+        let custom_min_capacity = 25;
+        let cache =
+            TopNCache::<false>::with_min_capacity(0, 5, vec![DataType::Int32], custom_min_capacity);
+        assert_eq!(cache.high_cache_capacity, custom_min_capacity);
+    }
+
+    #[test]
+    fn test_topn_cache_high_capacity_factor_respected() {
+        let custom_min_capacity = 1;
+        let offset = 2;
+        let limit = 5;
+        let expected_capacity = (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR;
+
+        let cache = TopNCache::<false>::with_min_capacity(
+            offset,
+            limit,
+            vec![DataType::Int32],
+            custom_min_capacity,
+        );
+        assert_eq!(cache.high_cache_capacity, expected_capacity);
+    }
+
+    #[test]
+    fn test_topn_cache_min_capacity_takes_precedence_when_larger() {
+        let large_min_capacity = 100;
+        let offset = 0;
+        let limit = 5;
+        let expected_from_formula = (offset + limit) * TOPN_CACHE_HIGH_CAPACITY_FACTOR; // Should be 10
+
+        let cache = TopNCache::<false>::with_min_capacity(
+            offset,
+            limit,
+            vec![DataType::Int32],
+            large_min_capacity,
+        );
+        assert_eq!(cache.high_cache_capacity, large_min_capacity);
+        assert!(cache.high_cache_capacity > expected_from_formula);
     }
 }

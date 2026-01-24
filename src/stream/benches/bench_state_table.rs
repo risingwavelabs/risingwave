@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use risingwave_common::array::{DataChunk, DataChunkTestExt, StreamChunk};
 use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
@@ -20,15 +20,14 @@ use risingwave_common::field_generator::VarcharProperty;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
-use risingwave_common::util::epoch::{test_epoch, EpochPair};
+use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_stream::common::table::state_table::WatermarkCacheParameterizedStateTable;
+use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use tokio::runtime::Runtime;
 
-type TestStateTable<const USE_WATERMARK_CACHE: bool> =
-    WatermarkCacheParameterizedStateTable<MemoryStateStore, USE_WATERMARK_CACHE>;
+type TestStateTable = StateTable<MemoryStateStore>;
 
 const FEW_DATA_TYPES: [DataType; 4] = [
     // Keys
@@ -58,10 +57,8 @@ const MANY_DATA_TYPES: [DataType; 14] = [
     DataType::Varchar,
 ];
 
-async fn create_state_table<const USE_WATERMARK_CACHE: bool>(
-    data_types: &[DataType],
-) -> TestStateTable<USE_WATERMARK_CACHE> {
-    const TEST_TABLE_ID: TableId = TableId { table_id: 233 };
+async fn create_state_table(data_types: &[DataType]) -> TestStateTable {
+    const TEST_TABLE_ID: TableId = TableId::new(233);
 
     let column_descs = data_types
         .iter()
@@ -73,7 +70,7 @@ async fn create_state_table<const USE_WATERMARK_CACHE: bool>(
     let pk_indices = (0..key_length).collect();
 
     let store = MemoryStateStore::new();
-    TestStateTable::<USE_WATERMARK_CACHE>::from_table_catalog_inconsistent_op(
+    TestStateTable::from_table_catalog_inconsistent_op(
         &gen_pbtable(TEST_TABLE_ID, column_descs, order_types, pk_indices, 0),
         store,
         None,
@@ -102,23 +99,21 @@ fn gen_stream_chunks(
     )
 }
 
-fn setup_bench_state_table<const USE_WATERMARK_CACHE: bool>(
-    data_types: &[DataType],
-) -> TestStateTable<USE_WATERMARK_CACHE> {
+fn setup_bench_state_table(data_types: &[DataType]) -> TestStateTable {
     block_on(create_state_table(data_types))
 }
 
-async fn run_bench_state_table_inserts<const USE_WATERMARK_CACHE: bool>(
-    mut state_table: TestStateTable<USE_WATERMARK_CACHE>,
-    rows: Vec<OwnedRow>,
-) {
+async fn run_bench_state_table_inserts(mut state_table: TestStateTable, rows: Vec<OwnedRow>) {
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
     for row in rows {
         state_table.insert(row);
     }
     epoch.inc_for_test();
-    state_table.commit(epoch).await.unwrap();
+    state_table
+        .commit_assert_no_update_vnode_bitmap(epoch)
+        .await
+        .unwrap();
 }
 
 fn bench_state_table_inserts(c: &mut Criterion) {
@@ -126,11 +121,11 @@ fn bench_state_table_inserts(c: &mut Criterion) {
     group.sample_size(100);
 
     let rt = Runtime::new().unwrap();
-    group.bench_function("inserts:col=2,watermark_cache=false", |b| {
+    group.bench_function("inserts:col=2", |b| {
         b.to_async(&rt).iter_batched(
             || {
                 (
-                    setup_bench_state_table::<false>(&FEW_DATA_TYPES),
+                    setup_bench_state_table(&FEW_DATA_TYPES),
                     gen_inserts(1, &FEW_DATA_TYPES),
                 )
             },
@@ -140,25 +135,11 @@ fn bench_state_table_inserts(c: &mut Criterion) {
     });
 
     let rt = Runtime::new().unwrap();
-    group.bench_function("inserts:col=7,watermark_cache=true", |b| {
+    group.bench_function("inserts:col=7", |b| {
         b.to_async(&rt).iter_batched(
             || {
                 (
-                    setup_bench_state_table::<true>(&MANY_DATA_TYPES),
-                    gen_inserts(1, &MANY_DATA_TYPES),
-                )
-            },
-            |(state_table, rows)| run_bench_state_table_inserts(state_table, rows),
-            BatchSize::SmallInput,
-        )
-    });
-
-    let rt = Runtime::new().unwrap();
-    group.bench_function("inserts:col=7,watermark_cache=false", |b| {
-        b.to_async(&rt).iter_batched(
-            || {
-                (
-                    setup_bench_state_table::<false>(&MANY_DATA_TYPES),
+                    setup_bench_state_table(&MANY_DATA_TYPES),
                     gen_inserts(1, &MANY_DATA_TYPES),
                 )
             },
@@ -168,30 +149,27 @@ fn bench_state_table_inserts(c: &mut Criterion) {
     });
 }
 
-async fn run_bench_state_table_chunks<const USE_WATERMARK_CACHE: bool>(
-    mut state_table: TestStateTable<USE_WATERMARK_CACHE>,
-    chunks: Vec<StreamChunk>,
-) {
+async fn run_bench_state_table_chunks(mut state_table: TestStateTable, chunks: Vec<StreamChunk>) {
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state_table.init_epoch(epoch);
+    state_table.init_epoch(epoch).await.unwrap();
     for chunk in chunks {
         state_table.write_chunk(chunk);
     }
     epoch.inc_for_test();
-    state_table.commit(epoch).await.unwrap();
+    state_table
+        .commit_assert_no_update_vnode_bitmap(epoch)
+        .await
+        .unwrap();
 }
 
 fn bench_state_table_write_chunk(c: &mut Criterion) {
     let visibilities = [0.5, 0.90, 0.99, 1.0];
     let inserts = [0.5, 0.90, 0.99, 1.0];
     let schemas = [&MANY_DATA_TYPES[..], &FEW_DATA_TYPES[..]];
-    let use_watermark_cache_options = [true, false];
-    for use_watermark_cache in use_watermark_cache_options {
-        for schema in schemas {
-            for visibility in visibilities {
-                for insert in inserts {
-                    bench_state_table_chunks(c, use_watermark_cache, schema, visibility, insert);
-                }
+    for schema in schemas {
+        for visibility in visibilities {
+            for insert in inserts {
+                bench_state_table_chunks(c, schema, visibility, insert);
             }
         }
     }
@@ -199,7 +177,6 @@ fn bench_state_table_write_chunk(c: &mut Criterion) {
 
 fn bench_state_table_chunks(
     c: &mut Criterion,
-    use_watermark_cache: bool,
     data_types: &[DataType],
     visibility_percent: f64,
     inserts_percent: f64,
@@ -211,45 +188,24 @@ fn bench_state_table_chunks(
     let deletes_percent = 1.0 - inserts_percent;
 
     let rt = Runtime::new().unwrap();
-    if use_watermark_cache && matches!(data_types[0], DataType::Timestamp) {
-        group.bench_function(
-            format!(
-                "write_chunk:vis={:.2},insert={:.2},delete={:.2},watermark_cache={use_watermark_cache},cols={data_types_len}",
-                visibility_percent, inserts_percent, deletes_percent
-            ),
-            |b| {
-                b.to_async(&rt).iter_batched(
-                    || {
-                        (
-                            setup_bench_state_table::<true>(data_types),
-                            gen_stream_chunks(100, data_types, visibility_percent, inserts_percent),
-                        )
-                    },
-                    |(state_table, chunks)| run_bench_state_table_chunks(state_table, chunks),
-                    BatchSize::SmallInput,
-                )
-            },
-        );
-    } else {
-        group.bench_function(
-            format!(
-                "write_chunk:vis={:.2},insert={:.2},delete={:.2},watermark_cache={use_watermark_cache},cols={data_types_len}",
-                visibility_percent, inserts_percent, deletes_percent
-            ),
-            |b| {
-                b.to_async(&rt).iter_batched(
-                    || {
-                        (
-                            setup_bench_state_table::<false>(data_types),
-                            gen_stream_chunks(100, data_types, visibility_percent, inserts_percent),
-                        )
-                    },
-                    |(state_table, chunks)| run_bench_state_table_chunks(state_table, chunks),
-                    BatchSize::SmallInput,
-                )
-            },
-        );
-    }
+    group.bench_function(
+        format!(
+            "write_chunk:vis={:.2},insert={:.2},delete={:.2},cols={data_types_len}",
+            visibility_percent, inserts_percent, deletes_percent
+        ),
+        |b| {
+            b.to_async(&rt).iter_batched(
+                || {
+                    (
+                        setup_bench_state_table(data_types),
+                        gen_stream_chunks(100, data_types, visibility_percent, inserts_percent),
+                    )
+                },
+                |(state_table, chunks)| run_bench_state_table_chunks(state_table, chunks),
+                BatchSize::SmallInput,
+            )
+        },
+    );
 }
 
 criterion_group!(

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,13 +14,13 @@
 
 use itertools::Itertools;
 
-use super::super::plan_node::*;
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
+use crate::optimizer::plan_node::*;
 use crate::utils::IndexSet;
 
 /// Merge [`LogicalAgg`] <- [`LogicalProject`] to [`LogicalAgg`].
 pub struct AggProjectMergeRule {}
-impl Rule for AggProjectMergeRule {
+impl Rule<Logical> for AggProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let agg = plan.as_logical_agg()?;
         let agg = agg.core().clone();

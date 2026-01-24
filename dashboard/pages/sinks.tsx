@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -23,8 +23,10 @@ import {
 import { getSinks } from "../lib/api/streaming"
 
 export default function Sinks() {
-  return Relations("Sinks", getSinks, [
-    connectorColumnSink,
-    ...streamingJobColumns,
-  ])
+  return Relations(
+    "Sinks",
+    getSinks,
+    [connectorColumnSink, ...streamingJobColumns],
+    { withStreamingJobs: true }
+  )
 }

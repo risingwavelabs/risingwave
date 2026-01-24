@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -17,9 +17,9 @@
 
 import {
   Column,
-  primaryKeyColumn,
   Relations,
   streamingJobColumns,
+  tableColumns,
 } from "../components/Relations"
 import { getTables } from "../lib/api/streaming"
 import { Table } from "../proto/gen/catalog"
@@ -31,9 +31,10 @@ export default function Tables() {
     content: (t) => t.optionalAssociatedSourceId?.associatedSourceId ?? "-",
   }
 
-  return Relations("Tables", getTables, [
-    associatedSourceColumn,
-    ...streamingJobColumns,
-    primaryKeyColumn,
-  ])
+  return Relations(
+    "Tables",
+    getTables,
+    [associatedSourceColumn, ...streamingJobColumns, ...tableColumns],
+    { withStreamingJobs: true }
+  )
 }

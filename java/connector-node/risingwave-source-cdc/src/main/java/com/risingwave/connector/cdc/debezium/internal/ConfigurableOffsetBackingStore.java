@@ -19,7 +19,7 @@
 package com.risingwave.connector.cdc.debezium.internal;
 
 import io.debezium.config.Instantiator;
-import io.debezium.embedded.EmbeddedEngine;
+import io.debezium.embedded.async.AsyncEngineConfig;
 import io.debezium.engine.DebeziumEngine;
 import java.io.IOException;
 import java.nio.ByteBuffer;
@@ -84,7 +84,7 @@ public class ConfigurableOffsetBackingStore implements OffsetBackingStore {
             throw new RuntimeException(e);
         }
 
-        String engineName = (String) conf.get(EmbeddedEngine.ENGINE_NAME.name());
+        String engineName = (String) conf.get(AsyncEngineConfig.ENGINE_NAME.name());
         Map<String, String> converterConfig =
                 Collections.singletonMap(JsonConverterConfig.SCHEMAS_ENABLE_CONFIG, "false");
 

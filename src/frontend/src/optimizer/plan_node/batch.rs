@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,13 +24,13 @@ use crate::optimizer::property::Order;
 ///
 /// [`GenericPlanRef`]: super::generic::GenericPlanRef
 #[auto_impl::auto_impl(&)]
-pub trait BatchPlanRef: PhysicalPlanRef {
+pub trait BatchPlanNodeMetadata: PhysicalPlanRef {
     fn order(&self) -> &Order;
 }
 
 /// Prelude for batch plan nodes.
 pub mod prelude {
-    pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
     pub use super::super::Batch;
-    pub use super::BatchPlanRef;
+    pub use super::super::generic::{GenericPlanRef, PhysicalPlanRef};
+    pub use super::BatchPlanNodeMetadata;
 }

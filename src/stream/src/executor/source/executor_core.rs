@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,10 @@
 
 use std::collections::HashMap;
 
-use risingwave_common::catalog::{ColumnId, TableId};
+use risingwave_common::catalog::ColumnId;
+use risingwave_common::id::SourceId;
 use risingwave_connector::source::reader::desc::SourceDescBuilder;
-use risingwave_connector::source::{SplitId, SplitImpl, SplitMetaData};
+use risingwave_connector::source::{BatchSourceSplitImpl, SplitId, SplitImpl, SplitMetaData};
 use risingwave_storage::StateStore;
 
 use super::SourceStateTableHandler;
@@ -24,7 +25,7 @@ use super::SourceStateTableHandler;
 /// [`StreamSourceCore`] stores the necessary information for the source executor to execute on the
 /// external connector.
 pub struct StreamSourceCore<S: StateStore> {
-    pub(crate) source_id: TableId,
+    pub(crate) source_id: SourceId,
     pub(crate) source_name: String,
 
     pub(crate) column_ids: Vec<ColumnId>,
@@ -40,7 +41,7 @@ pub struct StreamSourceCore<S: StateStore> {
     /// Stores information of the splits.
     pub(crate) split_state_store: SourceStateTableHandler<S>,
 
-    /// Contains the latests offsets for the splits that are updated *in the current epoch*.
+    /// Contains the latest offsets for the splits that are updated *in the current epoch*.
     /// It is cleared after each barrier.
     ///
     /// Source messages will only write the cache.
@@ -53,7 +54,7 @@ where
     S: StateStore,
 {
     pub fn new(
-        source_id: TableId,
+        source_id: SourceId,
         source_name: String,
         column_ids: Vec<ColumnId>,
         source_desc_builder: SourceDescBuilder,
@@ -75,5 +76,22 @@ where
             .into_iter()
             .map(|split| (split.id(), split))
             .collect();
+    }
+
+    /// # Panics
+    /// If the source is not a batch source.
+    pub fn get_batch_split(&self) -> BatchSourceSplitImpl {
+        debug_assert_eq!(
+            self.latest_split_info.len(),
+            1,
+            "batch source should have only one split"
+        );
+        self.latest_split_info
+            .values()
+            .next()
+            .unwrap()
+            .clone()
+            .into_batch_split()
+            .unwrap()
     }
 }

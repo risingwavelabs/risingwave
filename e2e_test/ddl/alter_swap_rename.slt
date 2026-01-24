@@ -1,0 +1,181 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Create initial tables and views for testing swap
+statement ok
+CREATE TABLE t1 (v1 INT primary key, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>);
+
+statement ok
+CREATE TABLE t2 (v1 INT primary key, v2 STRUCT<v1 INT, v2 STRUCT<v1 INT, v2 INT>>);
+
+# Insert some test data
+statement ok
+INSERT INTO t1 VALUES(1,(1,(1,2)));
+
+statement ok
+INSERT INTO t2 VALUES(2,(2,(2,4)));
+
+# Create materialized views referencing the tables
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS SELECT v1, (t.v2).v1 AS v21 FROM t1 t;
+
+statement ok
+CREATE MATERIALIZED VIEW mv2 AS SELECT v1, (t.v2).v1 AS v21 FROM t2 t;
+
+# Create regular views
+statement ok
+CREATE VIEW v1 AS SELECT t1.v1 FROM t1;
+
+statement ok
+CREATE VIEW v2 AS SELECT t2.v2 FROM t2;
+
+# Create sources
+statement ok
+CREATE SOURCE src1 (v INT) WITH (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '1',
+    fields.v.end = '5',
+    datagen.rows.per.second='10',
+    datagen.split.num = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+CREATE SOURCE src2 (v INT) WITH (
+    connector = 'datagen',
+    fields.v.kind = 'sequence',
+    fields.v.start = '6',
+    fields.v.end = '10',
+    datagen.rows.per.second='10',
+    datagen.split.num = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+# Create sinks
+statement ok
+CREATE SINK sink1 AS SELECT * FROM mv1 WITH (
+    connector = 'blackhole'
+);
+
+statement ok
+CREATE SINK sink2 AS SELECT * FROM mv2 WITH (
+    connector = 'blackhole'
+);
+
+# Create subscriptions
+statement ok
+CREATE SUBSCRIPTION sub1 FROM mv1 WITH (
+    retention = '1D'
+);
+
+statement ok
+CREATE SUBSCRIPTION sub2 FROM mv2 WITH (
+    retention = '1D'
+);
+
+# Test table swap
+statement ok
+ALTER TABLE t1 SWAP WITH t2;
+
+statement error Permission denied
+ALTER TABLE t1 SWAP WITH mv1;
+
+statement error not found
+ALTER TABLE mv1 SWAP WITH mv2;
+
+query II rowsort
+SELECT * FROM t1;
+----
+2 (2,"(2,4)")
+
+query II rowsort
+SELECT * FROM t2;
+----
+1 (1,"(1,2)")
+
+# Test materialized view swap
+statement ok
+ALTER MATERIALIZED VIEW mv1 SWAP WITH mv2;
+
+# Verify materialized view contents
+query II rowsort
+SELECT * FROM mv1;
+----
+2 2
+
+query II rowsort
+SELECT * FROM mv2;
+----
+1 1
+
+# Test view swap
+statement ok
+ALTER VIEW v1 SWAP WITH v2;
+
+# Verify view definitions are swapped
+query TT
+SHOW CREATE VIEW v1;
+----
+public.v1 CREATE VIEW v1 AS SELECT t2.v2 FROM t1 AS t2
+
+query TT
+SHOW CREATE VIEW v2;
+----
+public.v2 CREATE VIEW v2 AS SELECT t1.v1 FROM t2 AS t1
+
+# Test source swap
+statement ok
+ALTER SOURCE src1 SWAP WITH src2;
+
+# Verify source definitions are swapped
+query TT
+SHOW CREATE SOURCE src1;
+----
+public.src1 CREATE SOURCE src1 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '6', fields.v.end = '10', datagen.rows.per.second = '10', datagen.split.num = '1') FORMAT PLAIN ENCODE JSON
+
+query TT
+SHOW CREATE SOURCE src2;
+----
+public.src2 CREATE SOURCE src2 (v INT) WITH (connector = 'datagen', fields.v.kind = 'sequence', fields.v.start = '1', fields.v.end = '5', datagen.rows.per.second = '10', datagen.split.num = '1') FORMAT PLAIN ENCODE JSON
+
+# Test sink swap
+statement ok
+ALTER SINK sink1 SWAP WITH sink2;
+
+# Verify sink definitions are swapped
+query TT
+SHOW CREATE SINK sink1;
+----
+public.sink1 CREATE SINK sink1 AS SELECT * FROM mv1 AS mv2 WITH (connector = 'blackhole')
+
+query TT
+SHOW CREATE SINK sink2;
+----
+public.sink2 CREATE SINK sink2 AS SELECT * FROM mv2 AS mv1 WITH (connector = 'blackhole')
+
+# Test subscription swap
+statement ok
+ALTER SUBSCRIPTION sub1 SWAP WITH sub2;
+
+# Verify subscription definitions are swapped
+query TT
+SHOW CREATE SUBSCRIPTION sub1;
+----
+public.sub1 CREATE SUBSCRIPTION sub1 FROM mv1 WITH (retention = '1D')
+
+query TT
+SHOW CREATE SUBSCRIPTION sub2;
+----
+public.sub2 CREATE SUBSCRIPTION sub2 FROM mv2 WITH (retention = '1D')
+
+# Clean up
+statement ok
+DROP SOURCE src1;
+
+statement ok
+DROP SOURCE src2;
+
+statement ok
+DROP TABLE t1 CASCADE;
+
+statement ok
+DROP TABLE t2 CASCADE;

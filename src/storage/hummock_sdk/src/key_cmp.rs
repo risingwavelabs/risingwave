@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -79,8 +79,8 @@ mod tests {
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::test_epoch;
 
-    use crate::key::{FullKey, UserKey};
     use crate::KeyComparator;
+    use crate::key::{FullKey, UserKey};
 
     #[test]
     fn test_cmp_encoded_full_key() {

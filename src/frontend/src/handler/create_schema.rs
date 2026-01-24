@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,24 +15,23 @@
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::RESERVED_PG_SCHEMA_PREFIX;
-use risingwave_pb::user::grant_privilege::Object;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::catalog::{CatalogError, OwnedByUserCatalog};
 use crate::error::{ErrorCode, Result};
-use crate::handler::privilege::ObjectCheckItem;
 use crate::handler::HandlerArgs;
+use crate::handler::privilege::ObjectCheckItem;
 
 pub async fn handle_create_schema(
     handler_args: HandlerArgs,
     schema_name: ObjectName,
     if_not_exist: bool,
-    user_specified: Option<ObjectName>,
+    owner: Option<ObjectName>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let database_name = session.database();
+    let database_name = &session.database();
     let schema_name = Binder::resolve_schema_name(schema_name)?;
 
     if schema_name.starts_with(RESERVED_PG_SCHEMA_PREFIX) {
@@ -43,7 +42,7 @@ pub async fn handle_create_schema(
         .into());
     }
 
-    let (db_id, db_owner) = {
+    let (db_id, db_name, db_owner) = {
         let catalog_reader = session.env().catalog_reader();
         let reader = catalog_reader.read_guard();
         if reader
@@ -56,22 +55,22 @@ pub async fn handle_create_schema(
                     .notice(format!("schema \"{}\" exists, skipping", schema_name))
                     .into())
             } else {
-                Err(CatalogError::Duplicated("schema", schema_name).into())
+                Err(CatalogError::duplicated("schema", schema_name).into())
             };
         }
         let db = reader.get_database_by_name(database_name)?;
-        (db.id(), db.owner())
+        (db.id(), db.name.clone(), db.owner())
     };
 
-    let schema_owner = if let Some(user_specified) = user_specified {
-        let user_specified = Binder::resolve_user_name(user_specified)?;
+    let schema_owner = if let Some(owner) = owner {
+        let owner = Binder::resolve_user_name(owner)?;
         session
             .env()
             .user_info_reader()
             .read_guard()
-            .get_user_by_name(&user_specified)
+            .get_user_by_name(&owner)
             .map(|u| u.id)
-            .ok_or_else(|| CatalogError::NotFound("user", user_specified.to_string()))?
+            .ok_or_else(|| CatalogError::not_found("user", &owner))?
     } else {
         session.user_id()
     };
@@ -79,7 +78,8 @@ pub async fn handle_create_schema(
     session.check_privileges(&[ObjectCheckItem::new(
         db_owner,
         AclMode::Create,
-        Object::DatabaseId(db_id),
+        db_name,
+        db_id,
     )])?;
 
     let catalog_writer = session.catalog_writer()?;

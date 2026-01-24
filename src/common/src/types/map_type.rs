@@ -19,7 +19,7 @@ use anyhow::Context;
 use super::*;
 
 /// Refer to [`super::super::array::MapArray`] for the invariants of a map value.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct MapType(Box<(DataType, DataType)>);
 
 impl From<MapType> for DataType {
@@ -77,11 +77,15 @@ impl MapType {
     }
 
     pub fn key(&self) -> &DataType {
-        &self.0 .0
+        &self.0.0
     }
 
     pub fn value(&self) -> &DataType {
-        &self.0 .1
+        &self.0.1
+    }
+
+    pub fn into_kv(self) -> (DataType, DataType) {
+        *self.0
     }
 
     pub fn into_struct(self) -> DataType {
@@ -90,7 +94,12 @@ impl MapType {
     }
 
     pub fn into_list(self) -> DataType {
-        DataType::List(Box::new(self.into_struct()))
+        DataType::list(self.into_struct())
+    }
+
+    /// Sames as [`Self::into_list`] but returns [`ListType`].
+    pub fn into_list_type(self) -> ListType {
+        ListType::new(self.into_struct())
     }
 
     /// String and integral types are allowed.
@@ -119,6 +128,7 @@ impl MapType {
             | DataType::Jsonb
             | DataType::Serial
             | DataType::Int256
+            | DataType::Vector(_)
             | DataType::Map(_) => false,
         };
         if !ok {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use chrono::format::Parsed;
 use risingwave_common::types::{Date, Timestamp, Timestamptz};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, function};
 
 use super::timestamptz::{timestamp_at_time_zone, timestamptz_at_time_zone};
 use super::to_char::ChronoPattern;

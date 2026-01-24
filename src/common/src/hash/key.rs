@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,10 +33,10 @@ use risingwave_common_estimate_size::EstimateSize;
 use smallbitset::Set64;
 use static_assertions::const_assert_eq;
 
-use crate::array::{ListValue, MapValue, StructValue};
+use crate::array::{ListValue, MapValue, StructValue, VectorVal};
 use crate::types::{
-    DataType, Date, Decimal, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef, ScalarRefImpl, Serial,
-    Time, Timestamp, Timestamptz, F32, F64,
+    DataType, Date, Decimal, F32, F64, Int256, Int256Ref, JsonbVal, Scalar, ScalarRef,
+    ScalarRefImpl, Serial, Time, Timestamp, Timestamptz,
 };
 use crate::util::hash_util::{Crc32FastBuilder, XxHash64Builder};
 use crate::util::sort_util::OrderType;
@@ -80,7 +80,7 @@ const_assert_eq!(
 
 const_assert_eq!(
     std::mem::size_of::<HeapNullBitmap>(),
-    std::mem::size_of::<usize>() * 4,
+    std::mem::size_of::<usize>() * 3,
 );
 
 /// We use a trait for `NullBitmap` so we can parameterize structs on it.
@@ -320,8 +320,8 @@ pub trait HashKeySer<'a>: ScalarRef<'a> {
     /// Returns the estimated serialized size for this scalar.
     fn estimated_size(self) -> usize {
         Self::exact_size().unwrap_or(1) // use a default size of 1 if not known
-                                        // this should never happen in practice as we always
-                                        // implement one of these two methods
+        // this should never happen in practice as we always
+        // implement one of these two methods
     }
 }
 
@@ -480,7 +480,7 @@ impl HashKeyDe for Int256 {
     }
 }
 
-impl<'a> HashKeySer<'a> for Serial {
+impl HashKeySer<'_> for Serial {
     fn serialize_into(self, mut buf: impl BufMut) {
         buf.put_i64_ne(self.as_row_id());
     }
@@ -627,6 +627,7 @@ impl_value_encoding_hash_key_serde!(JsonbVal);
 // use the memcmp encoding for safety.
 impl_memcmp_encoding_hash_key_serde!(StructValue);
 impl_memcmp_encoding_hash_key_serde!(ListValue);
+impl_memcmp_encoding_hash_key_serde!(VectorVal);
 impl_memcmp_encoding_hash_key_serde!(MapValue);
 
 #[cfg(test)]
@@ -643,7 +644,7 @@ mod tests {
         DateArray, DecimalArray, F32Array, F64Array, I16Array, I32Array, I32ArrayBuilder, I64Array,
         TimeArray, TimestampArray, Utf8Array,
     };
-    use crate::hash::{HashKey, Key128, Key16, Key256, Key32, Key64, KeySerialized};
+    use crate::hash::{HashKey, Key16, Key32, Key64, Key128, Key256, KeySerialized};
     use crate::test_utils::rand_array::seed_rand_array_ref;
     use crate::types::Datum;
 

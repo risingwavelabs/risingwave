@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,17 +19,15 @@ use std::rc::Rc;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_sqlparser::ast::{
-    Cte, CteInner, Expr, Fetch, ObjectName, OrderByExpr, Query, SetExpr, SetOperator, Value, With,
-};
+use risingwave_sqlparser::ast::{Cte, CteInner, Expr, Fetch, OrderByExpr, Query, Value, With};
 use thiserror_ext::AsReport;
 
+use super::BoundValues;
 use super::bind_context::BindingCteState;
 use super::statement::RewriteExprsRecursive;
-use super::BoundValues;
-use crate::binder::bind_context::{BindingCte, RecursiveUnion};
+use crate::binder::bind_context::BindingCte;
 use crate::binder::{Binder, BoundSetExpr};
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{CorrelatedId, Depth, ExprImpl, ExprRewriter};
 
 /// A validated sql query, including order and union.
@@ -85,12 +83,20 @@ impl BoundQuery {
     /// * The second example is correlated, because it depend on a correlated input ref (`a1`) that
     ///   goes out.
     /// * The last example is also correlated. because it cannot be evaluated independently either.
-    pub fn is_correlated(&self, depth: Depth) -> bool {
-        self.body.is_correlated(depth + 1)
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
+        self.body.is_correlated_by_depth(depth + 1)
             || self
                 .extra_order_exprs
                 .iter()
                 .any(|e| e.has_correlated_input_ref_by_depth(depth + 1))
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        self.body.is_correlated_by_correlated_id(correlated_id)
+            || self
+                .extra_order_exprs
+                .iter()
+                .any(|e| e.has_correlated_input_ref_by_correlated_id(correlated_id))
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -143,8 +149,18 @@ impl Binder {
     /// stack and create a new context, because it may be a subquery.
     ///
     /// After finishing binding, we pop the previous context from the stack.
-    pub fn bind_query(&mut self, query: Query) -> Result<BoundQuery> {
+    pub fn bind_query(&mut self, query: &Query) -> Result<BoundQuery> {
         self.push_context();
+        let result = self.bind_query_inner(query);
+        self.pop_context()?;
+        result
+    }
+
+    /// Bind a [`Query`] for view.
+    /// TODO: support `SECURITY INVOKER` for view.
+    pub fn bind_query_for_view(&mut self, query: &Query) -> Result<BoundQuery> {
+        self.push_context();
+        self.context.disable_security_invoker = true;
         let result = self.bind_query_inner(query);
         self.pop_context()?;
         result
@@ -160,7 +176,7 @@ impl Binder {
             limit,
             offset,
             fetch,
-        }: Query,
+        }: &Query,
     ) -> Result<BoundQuery> {
         let mut with_ties = false;
         let limit = match (limit, fetch) {
@@ -172,17 +188,60 @@ impl Binder {
                     quantity,
                 }),
             ) => {
-                with_ties = fetch_with_ties;
+                with_ties = *fetch_with_ties;
                 match quantity {
-                    Some(v) => Some(parse_non_negative_i64("LIMIT", &v)? as u64),
-                    None => Some(1),
+                    Some(v) => Some(Expr::Value(Value::Number(v.clone()))),
+                    None => Some(Expr::Value(Value::Number("1".to_owned()))),
                 }
             }
-            (Some(limit), None) => Some(parse_non_negative_i64("LIMIT", &limit)? as u64),
+            (Some(limit), None) => Some(limit.clone()),
             (Some(_), Some(_)) => unreachable!(), // parse error
         };
+        let limit_expr = limit.map(|expr| self.bind_expr(&expr)).transpose()?;
+        let limit = if let Some(limit_expr) = limit_expr {
+            // wrong type error is handled here
+            let limit_cast_to_bigint = limit_expr.cast_assign(&DataType::Int64).map_err(|_| {
+                RwError::from(ErrorCode::ExprError(
+                    "expects an integer or expression that can be evaluated to an integer after LIMIT"
+                        .into(),
+                ))
+            })?;
+            let limit = match limit_cast_to_bigint.try_fold_const() {
+                Some(Ok(Some(datum))) => {
+                    let value = datum.as_int64();
+                    if *value < 0 {
+                        return Err(ErrorCode::ExprError(
+                            format!("LIMIT must not be negative, but found: {}", *value).into(),
+                        )
+                            .into());
+                    }
+                    *value as u64
+                }
+                // If evaluated to NULL, we follow PG to treat NULL as no limit
+                Some(Ok(None)) => {
+                    u64::MAX
+                }
+                // not const error
+                None => return Err(ErrorCode::ExprError(
+                    "expects an integer or expression that can be evaluated to an integer after LIMIT, but found non-const expression"
+                        .into(),
+                ).into()),
+                // eval error
+                Some(Err(e)) => {
+                    return Err(ErrorCode::ExprError(
+                        format!("expects an integer or expression that can be evaluated to an integer after LIMIT,\nbut the evaluation of the expression returns error:{}", e.as_report()
+                        ).into(),
+                    ).into())
+                }
+            };
+            Some(limit)
+        } else {
+            None
+        };
+
         let offset = offset
-            .map(|s| parse_non_negative_i64("OFFSET", &s))
+            .as_ref()
+            .map(|s| parse_non_negative_i64("OFFSET", s))
             .transpose()?
             .map(|v| v as u64);
 
@@ -195,10 +254,11 @@ impl Binder {
         let mut extra_order_exprs = vec![];
         let visible_output_num = body.schema().len();
         let order = order_by
-            .into_iter()
+            .iter()
             .map(|order_by_expr| {
                 self.bind_order_by_expr_in_query(
                     order_by_expr,
+                    &body,
                     &name_to_index,
                     &mut extra_order_exprs,
                     visible_output_num,
@@ -245,12 +305,24 @@ impl Binder {
             expr,
             asc,
             nulls_first,
-        }: OrderByExpr,
+        }: &OrderByExpr,
+        body: &BoundSetExpr,
         name_to_index: &HashMap<String, usize>,
         extra_order_exprs: &mut Vec<ExprImpl>,
         visible_output_num: usize,
     ) -> Result<ColumnOrder> {
-        let order_type = OrderType::from_bools(asc, nulls_first);
+        let order_type = OrderType::from_bools(*asc, *nulls_first);
+
+        // If the query body is a simple `SELECT`, we can reuse an existing select item by
+        // expression equality, instead of always appending a new hidden column for ORDER BY.
+        //
+        // This is only safe for pure expressions. For example, `ORDER BY random()` must not be
+        // rewritten to reuse `SELECT random()` because they should be evaluated independently.
+        let select_items_for_match = match body {
+            BoundSetExpr::Select(s) => Some(&s.select_items[..]),
+            _ => None,
+        };
+
         let column_index = match expr {
             Expr::Identifier(name) if let Some(index) = name_to_index.get(&name.real_value()) => {
                 match *index != usize::MAX {
@@ -260,7 +332,7 @@ impl Binder {
                             "ORDER BY \"{}\" is ambiguous",
                             name.real_value()
                         ))
-                        .into())
+                        .into());
                     }
                 }
             }
@@ -271,232 +343,66 @@ impl Binder {
                         "Invalid ordinal number in ORDER BY: {}",
                         number
                     ))
-                    .into())
+                    .into());
                 }
             },
             expr => {
-                extra_order_exprs.push(self.bind_expr(expr)?);
-                visible_output_num + extra_order_exprs.len() - 1
+                let bound_expr = self.bind_expr(expr)?;
+
+                if bound_expr.is_pure()
+                    && let Some(select_items) = select_items_for_match
+                    && let Some(existing_idx) = select_items.iter().position(|e| e == &bound_expr)
+                {
+                    existing_idx
+                } else {
+                    extra_order_exprs.push(bound_expr);
+                    visible_output_num + extra_order_exprs.len() - 1
+                }
             }
         };
         Ok(ColumnOrder::new(column_index, order_type))
     }
 
-    fn bind_with(&mut self, with: With) -> Result<()> {
-        for cte_table in with.cte_tables {
-            // note that the new `share_id` for the rcte is generated here
+    fn bind_with(&mut self, with: &With) -> Result<()> {
+        if with.recursive {
+            return Err(ErrorCode::BindError("RECURSIVE CTE is not supported".to_owned()).into());
+        }
+
+        for cte_table in &with.cte_tables {
             let share_id = self.next_share_id();
             let Cte { alias, cte_inner } = cte_table;
             let table_name = alias.name.real_value();
 
-            if with.recursive {
-                if let CteInner::Query(query) = cte_inner {
-                    let (
-                        SetExpr::SetOperation {
-                            op: SetOperator::Union,
-                            all,
-                            corresponding,
-                            left,
-                            right,
-                        },
-                        with,
-                    ) = Self::validate_rcte(query)?
-                    else {
-                        return Err(ErrorCode::BindError(
-                            "expect `SetOperation` as the return type of validation".into(),
-                        )
-                        .into());
-                    };
-
-                    // validated in `validate_rcte`
-                    assert!(
-                        !corresponding.is_corresponding(),
-                        "`CORRESPONDING` is not supported in recursive CTE"
-                    );
-
-                    let entry = self
-                        .context
-                        .cte_to_relation
-                        .entry(table_name)
-                        .insert_entry(Rc::new(RefCell::new(BindingCte {
+            match cte_inner {
+                CteInner::Query(query) => {
+                    let bound_query = self.bind_query(query)?;
+                    self.context.cte_to_relation.insert(
+                        table_name,
+                        Rc::new(RefCell::new(BindingCte {
                             share_id,
-                            state: BindingCteState::Init,
-                            alias,
-                        })))
-                        .get()
-                        .clone();
-
-                    self.bind_rcte(with, entry, *left, *right, all)?;
-                } else {
-                    return Err(ErrorCode::BindError(
-                        "RECURSIVE CTE only support query".to_string(),
-                    )
-                    .into());
+                            state: BindingCteState::Bound { query: bound_query },
+                            alias: alias.clone(),
+                        })),
+                    );
                 }
-            } else {
-                match cte_inner {
-                    CteInner::Query(query) => {
-                        let bound_query = self.bind_query(query)?;
-                        self.context.cte_to_relation.insert(
-                            table_name,
-                            Rc::new(RefCell::new(BindingCte {
-                                share_id,
-                                state: BindingCteState::Bound {
-                                    query: either::Either::Left(bound_query),
-                                },
-                                alias,
-                            })),
-                        );
-                    }
-                    CteInner::ChangeLog(from_table_name) => {
-                        self.push_context();
-                        let from_table_relation = self.bind_relation_by_name(
-                            ObjectName::from(vec![from_table_name]),
-                            None,
-                            None,
-                        )?;
-                        self.pop_context()?;
-                        self.context.cte_to_relation.insert(
-                            table_name,
-                            Rc::new(RefCell::new(BindingCte {
-                                share_id,
-                                state: BindingCteState::ChangeLog {
-                                    table: from_table_relation,
-                                },
-                                alias,
-                            })),
-                        );
-                    }
+                CteInner::ChangeLog(from_table_name) => {
+                    self.push_context();
+                    let from_table_relation =
+                        self.bind_relation_by_name(from_table_name, None, None, true)?;
+                    self.pop_context()?;
+                    self.context.cte_to_relation.insert(
+                        table_name,
+                        Rc::new(RefCell::new(BindingCte {
+                            share_id,
+                            state: BindingCteState::ChangeLog {
+                                table: from_table_relation,
+                            },
+                            alias: alias.clone(),
+                        })),
+                    );
                 }
             }
         }
-        Ok(())
-    }
-
-    /// syntactically validate the recursive cte ast with the current support features in rw.
-    fn validate_rcte(query: Query) -> Result<(SetExpr, Option<With>)> {
-        let Query {
-            with,
-            body,
-            order_by,
-            limit,
-            offset,
-            fetch,
-        } = query;
-
-        /// the input clause should not be supported.
-        fn should_be_empty<T>(v: Option<T>, clause: &str) -> Result<()> {
-            if v.is_some() {
-                return Err(ErrorCode::BindError(format!(
-                    "`{clause}` is not supported in recursive CTE"
-                ))
-                .into());
-            }
-            Ok(())
-        }
-
-        should_be_empty(order_by.first(), "ORDER BY")?;
-        should_be_empty(limit, "LIMIT")?;
-        should_be_empty(offset, "OFFSET")?;
-        should_be_empty(fetch, "FETCH")?;
-
-        let SetExpr::SetOperation {
-            op: SetOperator::Union,
-            all,
-            corresponding,
-            left,
-            right,
-        } = body
-        else {
-            return Err(
-                ErrorCode::BindError("`UNION` is required in recursive CTE".to_string()).into(),
-            );
-        };
-
-        if !all {
-            return Err(ErrorCode::BindError(
-                "only `UNION ALL` is supported in recursive CTE now".to_string(),
-            )
-            .into());
-        }
-
-        if corresponding.is_corresponding() {
-            return Err(ErrorCode::BindError(
-                "`CORRESPONDING` is not supported in recursive CTE".to_string(),
-            )
-            .into());
-        }
-
-        Ok((
-            SetExpr::SetOperation {
-                op: SetOperator::Union,
-                all,
-                corresponding,
-                left,
-                right,
-            },
-            with,
-        ))
-    }
-
-    fn bind_rcte(
-        &mut self,
-        with: Option<With>,
-        entry: Rc<RefCell<BindingCte>>,
-        left: SetExpr,
-        right: SetExpr,
-        all: bool,
-    ) -> Result<()> {
-        self.push_context();
-        let result = self.bind_rcte_inner(with, entry, left, right, all);
-        self.pop_context()?;
-        result
-    }
-
-    fn bind_rcte_inner(
-        &mut self,
-        with: Option<With>,
-        entry: Rc<RefCell<BindingCte>>,
-        left: SetExpr,
-        right: SetExpr,
-        all: bool,
-    ) -> Result<()> {
-        if let Some(with) = with {
-            self.bind_with(with)?;
-        }
-
-        // We assume `left` is the base term, otherwise the implementation may be very hard.
-        // The behavior is the same as PostgreSQL's.
-        // reference: <https://www.postgresql.org/docs/16/sql-select.html#:~:text=the%20recursive%20self%2Dreference%20must%20appear%20on%20the%20right%2Dhand%20side%20of%20the%20UNION>
-        let mut base = self.bind_set_expr(left)?;
-
-        entry.borrow_mut().state = BindingCteState::BaseResolved { base: base.clone() };
-
-        // Reset context for right side, but keep `cte_to_relation`.
-        let new_context = std::mem::take(&mut self.context);
-        self.context
-            .cte_to_relation
-            .clone_from(&new_context.cte_to_relation);
-        // bind the rest of the recursive cte
-        let mut recursive = self.bind_set_expr(right)?;
-        // Reset context for the set operation.
-        self.context = Default::default();
-        self.context.cte_to_relation = new_context.cte_to_relation;
-
-        Self::align_schema(&mut base, &mut recursive, SetOperator::Union)?;
-        let schema = base.schema().into_owned();
-
-        let recursive_union = RecursiveUnion {
-            all,
-            base: Box::new(base),
-            recursive: Box::new(recursive),
-            schema,
-        };
-
-        entry.borrow_mut().state = BindingCteState::Bound {
-            query: either::Either::Right(recursive_union),
-        };
-
         Ok(())
     }
 }

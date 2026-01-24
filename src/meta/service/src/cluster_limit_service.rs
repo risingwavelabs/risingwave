@@ -17,11 +17,11 @@ use std::collections::HashMap;
 use risingwave_common::util::cluster_limit::{
     ActorCountPerParallelism, ClusterLimit, WorkerActorCount,
 };
-use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
 use risingwave_meta::MetaResult;
-use risingwave_meta_model_v2::WorkerId;
-use risingwave_pb::common::worker_node::State;
+use risingwave_meta::manager::{MetaSrvEnv, MetadataManager};
+use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::common::worker_node::State;
 use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitService;
 use risingwave_pb::meta::{GetClusterLimitsRequest, GetClusterLimitsResponse};
 use tonic::{Request, Response, Status};
@@ -51,19 +51,18 @@ impl ClusterLimitServiceImpl {
             .list_worker_node(Some(WorkerType::ComputeNode), Some(State::Running))
             .await?
             .into_iter()
-            .map(|e| (e.id as _, e.parallelism()))
+            .map(|e| (e.id, e.compute_node_parallelism()))
             .collect();
-        let worker_actor_count: HashMap<u32, WorkerActorCount> = self
+        let worker_actor_count: HashMap<WorkerId, WorkerActorCount> = self
             .metadata_manager
-            .worker_actor_count()
-            .await?
+            .worker_actor_count()?
             .into_iter()
             .filter_map(|(worker_id, actor_count)| {
                 running_worker_parallelism
                     .get(&worker_id)
                     .map(|parallelism| {
                         (
-                            worker_id as _,
+                            worker_id,
                             WorkerActorCount {
                                 actor_count,
                                 parallelism: *parallelism,
@@ -89,7 +88,6 @@ impl ClusterLimitServiceImpl {
 
 #[async_trait::async_trait]
 impl ClusterLimitService for ClusterLimitServiceImpl {
-    #[cfg_attr(coverage, coverage(off))]
     async fn get_cluster_limits(
         &self,
         _request: Request<GetClusterLimitsRequest>,

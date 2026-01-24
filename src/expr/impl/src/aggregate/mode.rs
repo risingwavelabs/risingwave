@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,7 +21,7 @@ use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{
     AggCall, AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction,
 };
-use risingwave_expr::{build_aggregate, Result};
+use risingwave_expr::{Result, build_aggregate};
 
 #[build_aggregate("mode(any) -> any")]
 fn build(agg: &AggCall) -> Result<BoxedAggregateFunction> {

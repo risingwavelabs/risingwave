@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,55 +15,34 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use futures::FutureExt;
+use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnCatalog, Schema};
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::DataType;
 use risingwave_connector::match_sink_name_str;
-use risingwave_connector::sink::catalog::{SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
 use risingwave_connector::sink::file_sink::fs::FsSink;
+use risingwave_connector::sink::iceberg::ICEBERG_SINK;
 use risingwave_connector::sink::{
-    SinkError, SinkMetaClient, SinkParam, SinkWriterParam, CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_OPTION, SinkError, SinkMetaClient, SinkParam, SinkWriterParam,
+    build_sink,
 };
+use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::plan_common::PbColumnCatalog;
 use risingwave_pb::stream_plan::{SinkLogStoreType, SinkNode};
-use risingwave_pb::telemetry::{PbTelemetryDatabaseObject, PbTelemetryEventStage};
+use risingwave_storage::store::TryWaitEpochOptions;
+use url::Url;
 
 use super::*;
 use crate::common::log_store_impl::in_mem::BoundedInMemLogStoreFactory;
 use crate::common::log_store_impl::kv_log_store::{
-    KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo, KV_LOG_STORE_V2_INFO,
+    KV_LOG_STORE_V2_INFO, KvLogStoreFactory, KvLogStoreMetrics, KvLogStorePkInfo,
 };
 use crate::executor::{SinkExecutor, StreamExecutorError};
-use crate::telemetry::report_event;
 
 pub struct SinkExecutorBuilder;
-
-fn telemetry_sink_build(
-    sink_id: &SinkId,
-    connector_name: &str,
-    sink_format_desc: &Option<SinkFormatDesc>,
-) {
-    let attr = sink_format_desc.as_ref().map(|f| {
-        let mut builder = jsonbb::Builder::<Vec<u8>>::new();
-        builder.begin_object();
-        builder.add_string("format");
-        builder.add_value(jsonbb::ValueRef::String(f.format.to_string().as_str()));
-        builder.add_string("encode");
-        builder.add_value(jsonbb::ValueRef::String(f.encode.to_string().as_str()));
-        builder.end_object();
-        builder.finish()
-    });
-
-    report_event(
-        PbTelemetryEventStage::CreateStreamJob,
-        "sink",
-        sink_id.sink_id() as i64,
-        Some(connector_name.to_string()),
-        Some(PbTelemetryDatabaseObject::Sink),
-        attr,
-    )
-}
 
 fn resolve_pk_info(
     input_schema: &Schema,
@@ -101,7 +80,7 @@ fn validate_payload_schema(
     if log_store_payload_schema
         .iter()
         .zip_eq(input_schema.fields.iter())
-        .map(|(log_store_col, input_field)| {
+        .all(|(log_store_col, input_field)| {
             let log_store_col_type = DataType::from(
                 log_store_col
                     .column_desc
@@ -113,7 +92,6 @@ fn validate_payload_schema(
             );
             log_store_col_type.equals_datatype(&input_field.data_type)
         })
-        .all(|equal| equal)
     {
         Ok(())
     } else {
@@ -136,21 +114,24 @@ impl ExecutorBuilder for SinkExecutorBuilder {
     ) -> StreamResult<Executor> {
         let [input_executor]: [_; 1] = params.input.try_into().unwrap();
         let input_data_types = input_executor.info().schema.data_types();
-        let chunk_size = params.env.config().developer.chunk_size;
+        let chunk_size = params.config.developer.chunk_size;
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
-        let sink_type = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
-        let sink_id: SinkId = sink_desc.get_id().into();
+        let sink_id: SinkId = sink_desc.get_id();
         let sink_name = sink_desc.get_name().to_owned();
         let db_name = sink_desc.get_db_name().into();
         let sink_from_name = sink_desc.get_sink_from_name().into();
         let properties = sink_desc.get_properties().clone();
         let secret_refs = sink_desc.get_secret_refs().clone();
-        let downstream_pk = sink_desc
-            .downstream_pk
-            .iter()
-            .map(|i| *i as usize)
-            .collect_vec();
+        let downstream_pk = if sink_desc.downstream_pk.is_empty() {
+            None
+        } else {
+            Some(
+                (sink_desc.downstream_pk.iter())
+                    .map(|idx| *idx as usize)
+                    .collect_vec(),
+            )
+        };
         let columns = sink_desc
             .column_catalogs
             .clone()
@@ -158,47 +139,96 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             .map(ColumnCatalog::from)
             .collect_vec();
 
-        let connector = {
-            let sink_type = properties.get(CONNECTOR_TYPE_KEY).ok_or_else(|| {
-                StreamExecutorError::from((
-                    SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)),
-                    sink_id.sink_id,
-                ))
-            })?;
+        let mut properties_with_secret =
+            LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
 
+        if params.config.developer.switch_jdbc_pg_to_native
+            && let Some(connector_type) = properties_with_secret.get(CONNECTOR_TYPE_KEY)
+            && connector_type == "jdbc"
+            && let Some(url) = properties_with_secret.get("jdbc.url")
+            && url.starts_with("jdbc:postgresql:")
+        {
+            tracing::info!("switching to native postgres connector");
+            let jdbc_url = parse_jdbc_url(url)
+                .map_err(|e| StreamExecutorError::from((SinkError::Config(e), sink_id)))?;
+            properties_with_secret.insert(CONNECTOR_TYPE_KEY.to_owned(), "postgres".to_owned());
+            properties_with_secret.insert("host".to_owned(), jdbc_url.host);
+            properties_with_secret.insert("port".to_owned(), jdbc_url.port.to_string());
+            properties_with_secret.insert("database".to_owned(), jdbc_url.db_name);
+            if let Some(username) = jdbc_url.username {
+                properties_with_secret.insert("user".to_owned(), username);
+            }
+            if let Some(password) = jdbc_url.password {
+                properties_with_secret.insert("password".to_owned(), password);
+            }
+            if let Some(table_name) = properties_with_secret.get("table.name") {
+                properties_with_secret.insert("table".to_owned(), table_name.clone());
+            }
+            if let Some(schema_name) = properties_with_secret.get("schema.name") {
+                properties_with_secret.insert("schema".to_owned(), schema_name.clone());
+            }
+            // TODO(kwannoel): Do we need to handle jdbc.query.timeout?
+        }
+
+        let connector = {
+            let sink_type = properties_with_secret
+                .get(CONNECTOR_TYPE_KEY)
+                .ok_or_else(|| {
+                    StreamExecutorError::from((
+                        SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)),
+                        sink_id,
+                    ))
+                })?;
+
+            let sink_type_str = sink_type.to_lowercase();
             match_sink_name_str!(
-                sink_type.to_lowercase().as_str(),
+                sink_type_str.as_str(),
                 SinkType,
                 Ok(SinkType::SINK_NAME),
-                |other| {
+                |other: &str| {
                     Err(StreamExecutorError::from((
                         SinkError::Config(anyhow!("unsupported sink connector {}", other)),
-                        sink_id.sink_id,
+                        sink_id,
                     )))
                 }
-            )
-        }?;
+            )?
+        };
         let format_desc = match &sink_desc.format_desc {
             // Case A: new syntax `format ... encode ...`
             Some(f) => Some(
                 f.clone()
                     .try_into()
-                    .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?,
+                    .map_err(|e| StreamExecutorError::from((e, sink_id)))?,
             ),
-            None => match sink_desc.properties.get(SINK_TYPE_OPTION) {
+            None => match properties_with_secret.get(SINK_TYPE_OPTION) {
                 // Case B: old syntax `type = '...'`
                 Some(t) => SinkFormatDesc::from_legacy_type(connector, t)
-                    .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?,
+                    .map_err(|e| StreamExecutorError::from((e, sink_id)))?,
                 // Case C: no format + encode required
                 None => None,
             },
         };
 
-        let properties_with_secret =
-            LocalSecretManager::global().fill_secrets(properties, secret_refs)?;
+        let format_desc = SinkParam::fill_secret_for_format_desc(format_desc)
+            .map_err(|e| StreamExecutorError::from((e, sink_id)))?;
 
-        let format_desc_with_secret = SinkParam::fill_secret_for_format_desc(format_desc)
-            .map_err(|e| StreamExecutorError::from((e, sink_id.sink_id)))?;
+        // Backward compatibility: DEBEZIUM format should be treated as `Retract` type instead of `Upsert`.
+        let sink_type = if let Some(format_desc) = &format_desc
+            && format_desc.format == SinkFormat::Debezium
+        {
+            SinkType::Retract
+        } else {
+            let sink_type_from_proto = SinkType::from_proto(sink_desc.get_sink_type().unwrap());
+            // For backward compatibility: Iceberg sink with Upsert type should be treated as Retract type.
+            if connector.eq_ignore_ascii_case(ICEBERG_SINK)
+                && matches!(sink_type_from_proto, SinkType::Upsert)
+            {
+                SinkType::Retract
+            } else {
+                sink_type_from_proto
+            }
+        };
+        let ignore_delete = sink_desc.ignore_delete();
 
         let sink_param = SinkParam {
             sink_id,
@@ -211,7 +241,8 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                 .collect(),
             downstream_pk,
             sink_type,
-            format_desc: format_desc_with_secret,
+            ignore_delete,
+            format_desc,
             db_name,
             sink_from_name,
         };
@@ -225,31 +256,52 @@ impl ExecutorBuilder for SinkExecutorBuilder {
             actor_id: params.actor_context.id,
             sink_id,
             sink_name,
-            connector: connector.to_string(),
+            connector: connector.to_owned(),
+            streaming_config: params.config.as_ref().clone(),
         };
 
         let log_store_identity = format!(
             "sink[{}]-[{}]-executor[{}]",
-            connector, sink_id.sink_id, params.executor_id
+            connector, sink_id, params.executor_id
         );
 
-        telemetry_sink_build(&sink_id, connector, &sink_param.format_desc);
+        let sink = build_sink(sink_param.clone())
+            .map_err(|e| StreamExecutorError::from((e, sink_param.sink_id)))?;
 
         let exec = match node.log_store_type() {
             // Default value is the normal in memory log store to be backward compatible with the
             // previously unset value
             SinkLogStoreType::InMemoryLogStore | SinkLogStoreType::Unspecified => {
-                let factory = BoundedInMemLogStoreFactory::new(1);
+                let factory = BoundedInMemLogStoreFactory::new(1, {
+                    let state_store = state_store.clone();
+                    let table_id = node.table.as_ref().map(|table| table.id);
+                    move |epoch| {
+                        async move {
+                            if let Some(table_id) = table_id {
+                                state_store
+                                    .try_wait_epoch(
+                                        HummockReadEpoch::Committed(epoch.prev),
+                                        TryWaitEpochOptions { table_id },
+                                    )
+                                    .await?;
+                            }
+                            Ok(())
+                        }
+                        .boxed()
+                    }
+                });
                 SinkExecutor::new(
                     params.actor_context,
                     params.info.clone(),
                     input_executor,
                     sink_write_param,
+                    sink,
                     sink_param,
                     columns,
                     factory,
                     chunk_size,
                     input_data_types,
+                    node.rate_limit.map(|x| x as _),
                 )
                 .await?
                 .boxed()
@@ -272,6 +324,7 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     table,
                     params.vnode_bitmap.clone().map(Arc::new),
                     65536,
+                    params.config.developer.chunk_size,
                     metrics,
                     log_store_identity,
                     pk_info,
@@ -282,11 +335,13 @@ impl ExecutorBuilder for SinkExecutorBuilder {
                     params.info.clone(),
                     input_executor,
                     sink_write_param,
+                    sink,
                     sink_param,
                     columns,
                     factory,
                     chunk_size,
                     input_data_types,
+                    node.rate_limit.map(|x| x as _),
                 )
                 .await?
                 .boxed()
@@ -294,5 +349,73 @@ impl ExecutorBuilder for SinkExecutorBuilder {
         };
 
         Ok((params.info, exec).into())
+    }
+}
+
+struct JdbcUrl {
+    host: String,
+    port: u16,
+    db_name: String,
+    username: Option<String>,
+    password: Option<String>,
+}
+
+fn parse_jdbc_url(url: &str) -> anyhow::Result<JdbcUrl> {
+    if !url.starts_with("jdbc:postgresql") {
+        bail!(
+            "invalid jdbc url, to switch to postgres rust connector, we need to use the url jdbc:postgresql://..."
+        )
+    }
+
+    // trim the "jdbc:" prefix to make it a valid url
+    let url = url.replace("jdbc:", "");
+
+    // parse the url
+    let url = Url::parse(&url).map_err(|e| anyhow!(e).context("failed to parse jdbc url"))?;
+
+    let scheme = url.scheme();
+    assert_eq!("postgresql", scheme, "jdbc scheme should be postgresql");
+    let host = url
+        .host_str()
+        .ok_or_else(|| anyhow!("missing host in jdbc url"))?;
+    let port = url
+        .port()
+        .ok_or_else(|| anyhow!("missing port in jdbc url"))?;
+    let Some(db_name) = url.path().strip_prefix('/') else {
+        bail!("missing db_name in jdbc url");
+    };
+    let mut username = None;
+    let mut password = None;
+    for (key, value) in url.query_pairs() {
+        if key == "user" {
+            username = Some(value.to_string());
+        }
+        if key == "password" {
+            password = Some(value.to_string());
+        }
+    }
+
+    Ok(JdbcUrl {
+        host: host.to_owned(),
+        port,
+        db_name: db_name.to_owned(),
+        username,
+        password,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_jdbc_url() {
+        let url = "jdbc:postgresql://localhost:5432/test?user=postgres&password=postgres";
+        let jdbc_url = parse_jdbc_url(url).unwrap();
+        assert_eq!(jdbc_url.host, "localhost");
+        assert_eq!(jdbc_url.port, 5432);
+        assert_eq!(jdbc_url.db_name, "test");
+        assert_eq!(jdbc_url.username, Some("postgres".to_owned()));
+        assert_eq!(jdbc_url.password, Some("postgres".to_owned()));
     }
 }

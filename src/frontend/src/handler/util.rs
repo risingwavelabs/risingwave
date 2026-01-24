@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -30,18 +30,27 @@ use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Field;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{
-    write_date_time_tz, DataType, Interval, ScalarRefImpl, Timestamptz,
+    DataType, Interval, ScalarRefImpl, Timestamptz, write_date_time_tz,
 };
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
+use risingwave_connector::source::KAFKA_CONNECTOR;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_pb::catalog::connection_params::PbConnectionType;
 use risingwave_sqlparser::ast::{
-    CompatibleSourceSchema, ConnectorSchema, ObjectName, Query, Select, SelectItem, SetExpr,
+    CompatibleFormatEncode, FormatEncodeOptions, ObjectName, Query, Select, SelectItem, SetExpr,
     TableFactor, TableWithJoins,
 };
 use thiserror_ext::AsReport;
+use tokio::select;
+use tokio::time::{Duration, sleep};
 
-use crate::error::{ErrorCode, Result as RwResult};
-use crate::session::{current, SessionImpl};
+use crate::catalog::root_catalog::SchemaPath;
+use crate::error::ErrorCode::ProtocolError;
+use crate::error::{ErrorCode, Result as RwResult, RwError};
+use crate::session::{SessionImpl, current};
+use crate::{Binder, HashSet, TableCatalog};
 
 pin_project! {
     /// Wrapper struct that converts a stream of DataChunk to a stream of RowSet based on formatting
@@ -194,16 +203,18 @@ pub fn to_pg_field(f: &Field) -> PgFieldDescriptor {
 }
 
 #[easy_ext::ext(SourceSchemaCompatExt)]
-impl CompatibleSourceSchema {
-    /// Convert `self` to [`ConnectorSchema`] and warn the user if the syntax is deprecated.
-    pub fn into_v2_with_warning(self) -> ConnectorSchema {
+impl CompatibleFormatEncode {
+    /// Convert `self` to [`FormatEncodeOptions`] and warn the user if the syntax is deprecated.
+    pub fn into_v2_with_warning(self) -> FormatEncodeOptions {
         match self {
-            CompatibleSourceSchema::RowFormat(inner) => {
+            CompatibleFormatEncode::RowFormat(inner) => {
                 // TODO: should be warning
-                current::notice_to_user("RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.");
-                inner.into_source_schema_v2()
+                current::notice_to_user(
+                    "RisingWave will stop supporting the syntax \"ROW FORMAT\" in future versions, which will be changed to \"FORMAT ... ENCODE ...\" syntax.",
+                );
+                inner.into_format_encode_v2()
             }
-            CompatibleSourceSchema::V2(inner) => inner,
+            CompatibleFormatEncode::V2(inner) => inner,
         }
     }
 }
@@ -246,13 +257,146 @@ pub fn convert_interval_to_u64_seconds(interval: &String) -> RwResult<u64> {
     let seconds = (Interval::from_str(interval)
         .map_err(|err| {
             ErrorCode::InternalError(format!(
-                "Covert interval to u64 error, please check format, error: {:?}",
+                "Convert interval to u64 error, please check format, error: {:?}",
                 err.to_report_string()
             ))
         })?
         .epoch_in_micros()
         / 1000000) as u64;
     Ok(seconds)
+}
+
+pub fn ensure_connection_type_allowed(
+    connection_type: PbConnectionType,
+    allowed_types: &HashSet<PbConnectionType>,
+) -> RwResult<()> {
+    if !allowed_types.contains(&connection_type) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connection type {:?} is not allowed, allowed types: {:?}",
+            connection_type, allowed_types
+        ))));
+    }
+    Ok(())
+}
+
+fn connection_type_to_connector(connection_type: &PbConnectionType) -> &str {
+    match connection_type {
+        PbConnectionType::Kafka => KAFKA_CONNECTOR,
+        PbConnectionType::Iceberg => ICEBERG_CONNECTOR,
+        PbConnectionType::Elasticsearch => ES_SINK,
+        _ => unreachable!(),
+    }
+}
+
+pub fn check_connector_match_connection_type(
+    connector: &str,
+    connection_type: &PbConnectionType,
+) -> RwResult<()> {
+    if !connector.eq(connection_type_to_connector(connection_type)) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connector {} and connection type {:?} are not compatible",
+            connector, connection_type
+        ))));
+    }
+    Ok(())
+}
+
+pub fn get_table_catalog_by_table_name(
+    session: &SessionImpl,
+    table_name: &ObjectName,
+) -> RwResult<(Arc<TableCatalog>, String)> {
+    let db_name = &session.database();
+    let (schema_name, real_table_name) =
+        Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let search_path = session.config().search_path();
+    let user_name = &session.user_name();
+
+    let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
+    let reader = session.env().catalog_reader().read_guard();
+    let (table, schema_name) =
+        reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
+
+    Ok((table.clone(), schema_name.to_owned()))
+}
+
+/// Execute an async operation with a notification if it takes too long.
+/// This is useful for operations that might be delayed due to high barrier latency.
+///
+/// The notification timeout duration is controlled by the `slow_ddl_notification_secs` session variable.
+///
+/// # Arguments
+/// * `operation_fut` - The async operation to execute
+/// * `session` - The session to send notifications to
+/// * `operation_name` - The name of the operation for the notification message (e.g., "DROP TABLE")
+///
+/// # Example
+/// ```ignore
+/// execute_with_long_running_notification(
+///     catalog_writer.drop_table(source_id, table_id, cascade),
+///     &session,
+///     "DROP TABLE",
+/// ).await?;
+/// ```
+#[derive(Clone, Copy)]
+pub enum LongRunningNotificationAction {
+    SuggestRecover,
+    DiagnoseBarrierLatency,
+    MonitorBackfillJob,
+}
+
+impl LongRunningNotificationAction {
+    fn build_message(self, operation_name: &str, notify_timeout_secs: u32) -> String {
+        match self {
+            LongRunningNotificationAction::SuggestRecover => format!(
+                "{} has taken more than {} secs, likely due to high barrier latency.\n\
+                You may trigger cluster recovery to let {} take effect immediately.\n\
+                Run RECOVER in a separate session to trigger recovery.\n\
+                See: https://docs.risingwave.com/sql/commands/sql-recover#recover",
+                operation_name, notify_timeout_secs, operation_name
+            ),
+            LongRunningNotificationAction::DiagnoseBarrierLatency => format!(
+                "{} has taken more than {} secs, likely due to high barrier latency.\n\
+                See: https://docs.risingwave.com/performance/metrics#barrier-monitoring for steps to diagnose high barrier latency.",
+                operation_name, notify_timeout_secs
+            ),
+            LongRunningNotificationAction::MonitorBackfillJob => format!(
+                "{} has taken more than {} secs, barrier latency might be high. Please check barrier latency metrics to confirm.\n\
+                You can also run SHOW JOBS to track the progress of the job.\n\
+                See: https://docs.risingwave.com/performance/metrics#barrier-monitoring and https://docs.risingwave.com/sql/commands/sql-show-jobs",
+                operation_name, notify_timeout_secs
+            ),
+        }
+    }
+}
+
+pub async fn execute_with_long_running_notification<F, T>(
+    operation_fut: F,
+    session: &SessionImpl,
+    operation_name: &str,
+    action: LongRunningNotificationAction,
+) -> RwResult<T>
+where
+    F: std::future::Future<Output = RwResult<T>>,
+{
+    let notify_timeout_secs = session.config().slow_ddl_notification_secs();
+
+    // If timeout is 0, disable notifications and just execute the operation
+    if notify_timeout_secs == 0 {
+        return operation_fut.await;
+    }
+
+    let notify_fut = sleep(Duration::from_secs(notify_timeout_secs as u64));
+    tokio::pin!(operation_fut);
+
+    select! {
+        _ = notify_fut => {
+            session.notice_to_user(action.build_message(operation_name, notify_timeout_secs));
+            operation_fut.await
+        }
+        result = &mut operation_fut => {
+            result
+        }
+    }
 }
 
 #[cfg(test)]

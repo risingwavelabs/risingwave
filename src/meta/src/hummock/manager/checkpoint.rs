@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,27 +12,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ops::Bound::{Excluded, Included};
 use std::ops::{Deref, DerefMut};
 use std::sync::atomic::Ordering;
 
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::{
-    object_size_map, summarize_group_deltas,
-};
+use risingwave_hummock_sdk::compaction_group::hummock_version_ext::object_size_map;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::HummockVersionId;
+use risingwave_hummock_sdk::{HummockObjectId, HummockVersionId, get_stale_object_ids};
 use risingwave_pb::hummock::hummock_version_checkpoint::{PbStaleObjects, StaleObjects};
 use risingwave_pb::hummock::{
-    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint,
+    PbHummockVersion, PbHummockVersionArchive, PbHummockVersionCheckpoint, PbVectorIndexObject,
+    PbVectorIndexObjectType,
 };
 use thiserror_ext::AsReport;
 use tracing::warn;
 
+use crate::hummock::HummockManager;
 use crate::hummock::error::Result;
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::metrics_utils::{trigger_gc_stat, trigger_split_stat};
-use crate::hummock::HummockManager;
 
 #[derive(Default)]
 pub struct HummockVersionCheckpoint {
@@ -140,7 +139,6 @@ impl HummockManager {
             drop(versioning_guard);
             let versioning = self.versioning.read().await;
             let context_info = self.context_info.read().await;
-            versioning.mark_objects_for_deletion(&context_info, &self.delete_object_tracker);
             let min_pinned_version_id = context_info.min_pinned_version_id();
             trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
             return Ok(0);
@@ -151,54 +149,73 @@ impl HummockManager {
         // `object_sizes` is used to calculate size of stale objects.
         let mut object_sizes = object_size_map(&old_checkpoint.version);
         // The set of object ids that once exist in any hummock version
-        let mut versions_object_ids = old_checkpoint.version.get_object_ids();
+        let mut versions_object_ids: HashSet<_> =
+            old_checkpoint.version.get_object_ids(false).collect();
         for (_, version_delta) in versioning
             .hummock_version_deltas
             .range((Excluded(old_checkpoint_id), Included(new_checkpoint_id)))
         {
-            for (group_id, group_deltas) in &version_delta.group_deltas {
-                let summary = summarize_group_deltas(group_deltas, *group_id);
-                object_sizes.extend(
-                    summary
-                        .insert_table_infos
-                        .iter()
-                        .map(|t| (t.object_id, t.file_size))
-                        .chain(
-                            version_delta
-                                .change_log_delta
-                                .values()
-                                .flat_map(|change_log| {
-                                    let new_log = change_log.new_log.as_ref().unwrap();
-                                    new_log
-                                        .new_value
-                                        .iter()
-                                        .chain(new_log.old_value.iter())
-                                        .map(|t| (t.object_id, t.file_size))
-                                }),
-                        ),
-                );
+            // DO NOT REMOVE THIS LINE
+            // This is to ensure that when adding new variant to `HummockObjectId`,
+            // the compiler will warn us if we forget to handle it here.
+            match HummockObjectId::Sstable(0.into()) {
+                HummockObjectId::Sstable(_) => {}
+                HummockObjectId::VectorFile(_) => {}
+                HummockObjectId::HnswGraphFile(_) => {}
+            };
+            for (object_id, file_size) in version_delta
+                .newly_added_sst_infos(false)
+                .map(|sst| (HummockObjectId::Sstable(sst.object_id), sst.file_size))
+                .chain(
+                    version_delta
+                        .vector_index_delta
+                        .values()
+                        .flat_map(|delta| delta.newly_added_objects()),
+                )
+            {
+                object_sizes.insert(object_id, file_size);
+                versions_object_ids.insert(object_id);
             }
-            versions_object_ids.extend(version_delta.newly_added_object_ids());
         }
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock version
-        let removed_object_ids = &versions_object_ids - &current_version.get_object_ids();
+        let removed_object_ids =
+            &versions_object_ids - &current_version.get_object_ids(false).collect();
         let total_file_size = removed_object_ids
             .iter()
             .map(|t| {
                 object_sizes.get(t).copied().unwrap_or_else(|| {
-                    warn!(object_id = t, "unable to get size of removed object id");
+                    warn!(object_id = ?t, "unable to get size of removed object id");
                     0
                 })
             })
             .sum::<u64>();
-        stale_objects.insert(
-            current_version.id,
+        stale_objects.insert(current_version.id, {
+            let mut sst_ids = vec![];
+            let mut vector_files = vec![];
+            for object_id in removed_object_ids {
+                match object_id {
+                    HummockObjectId::Sstable(sst_id) => sst_ids.push(sst_id.inner()),
+                    HummockObjectId::VectorFile(vector_file_id) => {
+                        vector_files.push(PbVectorIndexObject {
+                            id: vector_file_id.inner(),
+                            object_type: PbVectorIndexObjectType::VectorIndexObjectVector as _,
+                        })
+                    }
+                    HummockObjectId::HnswGraphFile(graph_file_id) => {
+                        vector_files.push(PbVectorIndexObject {
+                            id: graph_file_id.inner(),
+                            object_type: PbVectorIndexObjectType::VectorIndexObjectHnswGraph as _,
+                        });
+                    }
+                }
+            }
             StaleObjects {
-                id: removed_object_ids.into_iter().collect(),
+                id: sst_ids,
                 total_file_size,
-            },
-        );
+                vector_files,
+            }
+        });
         if self.env.opts.enable_hummock_data_archive {
             archive = Some(PbHummockVersionArchive {
                 version: Some(PbHummockVersion::from(&old_checkpoint.version)),
@@ -209,12 +226,18 @@ impl HummockManager {
                     .collect(),
             });
         }
-        // Whenever data archive or time travel is enabled, we can directly discard reference to stale objects that will no longer be used.
-        if self.env.opts.enable_hummock_data_archive || self.time_travel_enabled().await {
-            let context_info = self.context_info.read().await;
-            let min_pinned_version_id = context_info.min_pinned_version_id();
-            stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
-        }
+        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        let may_delete_object = stale_objects
+            .iter()
+            .filter_map(|(version_id, object_ids)| {
+                if *version_id >= min_pinned_version_id {
+                    return None;
+                }
+                Some(get_stale_object_ids(object_ids))
+            })
+            .flatten();
+        self.gc_manager.add_may_delete_object_ids(may_delete_object);
+        stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
         let new_checkpoint = HummockVersionCheckpoint {
             version: current_version.clone(),
             stale_objects,
@@ -222,27 +245,21 @@ impl HummockManager {
         drop(versioning_guard);
         // 2. persist the new checkpoint without holding lock
         self.write_checkpoint(&new_checkpoint).await?;
-        if let Some(archive) = archive {
-            if let Err(e) = self.write_version_archive(&archive).await {
-                tracing::warn!(
-                    error = %e.as_report(),
-                    "failed to write version archive {}",
-                    archive.version.as_ref().unwrap().id
-                );
-            }
+        if let Some(archive) = archive
+            && let Err(e) = self.write_version_archive(&archive).await
+        {
+            tracing::warn!(
+                error = %e.as_report(),
+                "failed to write version archive {}",
+                archive.version.as_ref().unwrap().id
+            );
         }
         // 3. hold write lock and update in memory state
         let mut versioning_guard = self.versioning.write().await;
         let versioning = versioning_guard.deref_mut();
-        let context_info = self.context_info.read().await;
         assert!(new_checkpoint.version.id > versioning.checkpoint.version.id);
         versioning.checkpoint = new_checkpoint;
-        // Not delete stale objects when archive or time travel is enabled
-        if !self.env.opts.enable_hummock_data_archive && !self.time_travel_enabled().await {
-            versioning.mark_objects_for_deletion(&context_info, &self.delete_object_tracker);
-        }
-
-        let min_pinned_version_id = context_info.min_pinned_version_id();
+        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
         trigger_gc_stat(&self.metrics, &versioning.checkpoint, min_pinned_version_id);
         trigger_split_stat(&self.metrics, &versioning.current_version);
         drop(versioning_guard);

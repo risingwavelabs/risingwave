@@ -102,9 +102,7 @@
     BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
     ├─BatchExchange { order: [], dist: Single }
     │ └─BatchScan { table: b, columns: [b.b2], distribution: SomeShard }
-    └─BatchSimpleAgg { aggs: [] }
-      └─BatchExchange { order: [], dist: Single }
-        └─BatchScan { table: t, columns: [], distribution: SomeShard }
+    └─BatchValues { rows: [[]] }
 - name: in-list with non-const - correlated ref
   sql: |
     create table t (v1 int);
@@ -113,10 +111,10 @@
   logical_plan: |-
     LogicalProject { exprs: [b.b2] }
     └─LogicalApply { type: LeftSemi, on: true, correlated_id: 1 }
-      ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id] }
+      ├─LogicalScan { table: b, columns: [b.b1, b.b2, b._row_id, b._rw_timestamp] }
       └─LogicalProject { exprs: [2:Int32] }
         └─LogicalFilter { predicate: (In(t.v1::Decimal, 3:Int32::Decimal, 1.0:Decimal) OR (t.v1 = CorrelatedInputRef { index: 0, correlated_id: 1 })) }
-          └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchNestedLoopJoin { type: LeftSemi, predicate: (In(t.v1::Decimal, 3:Decimal, 1.0:Decimal) OR (t.v1 = b.b1)), output: [b.b2] }
     ├─BatchExchange { order: [], dist: Single }
@@ -304,7 +302,7 @@
     Failed to bind expression: concat_ws(v1, 1.2)
 
     Caused by:
-      Bind error: cannot cast type "integer" to "character varying" in Implicit context
+      cannot cast type "integer" to "character varying" in Implicit context
 - sql: |
     create table t (v1 int);
     select concat_ws() from t;
@@ -446,11 +444,7 @@
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  batch_plan: |-
-    BatchProject { exprs: [Some((1:Int32 < ArrayCat($expr10009, ARRAY[2]:List(Int32)))) as $expr1] }
-    └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-      ├─BatchValues { rows: [[]] }
-      └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
+  batch_plan: 'BatchValues { rows: [[true:Boolean]] }'
 - sql: |
     select 1 < ALL(array[null]::integer[]);
   logical_plan: |-
@@ -469,11 +463,7 @@
       ├─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
       └─LogicalProject { exprs: [Array(1:Int32) as $expr1] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
-  batch_plan: |-
-    BatchProject { exprs: [All((1:Int32 < ArrayCat($expr10009, ARRAY[2]:List(Int32)))) as $expr1] }
-    └─BatchNestedLoopJoin { type: LeftOuter, predicate: true, output: all }
-      ├─BatchValues { rows: [[]] }
-      └─BatchValues { rows: [[ARRAY[1]:List(Int32)]] }
+  batch_plan: 'BatchValues { rows: [[false:Boolean]] }'
 - name: now expression
   sql: |
     create table t (v1 timestamp with time zone);
@@ -481,10 +471,10 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1] }
     └─LogicalFilter { predicate: (t.v1 >= Now) }
-      └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
-    └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t._row_id], cleaned_by_watermark: true }
+    └─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [[t.v1]], output: [t.v1, t._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
         └─StreamNow { output: [now] }
@@ -495,13 +485,13 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1] }
     └─LogicalFilter { predicate: (t.v1 >= (Now - '00:00:02':Interval)) }
-      └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v1] }
-    └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [t.v1], output: [t.v1, t._row_id], cleaned_by_watermark: true }
+    └─StreamDynamicFilter { predicate: (t.v1 >= $expr1), output_watermarks: [[t.v1]], output: [t.v1, t._row_id], cleaned_by_watermark: true }
       ├─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: Broadcast }
-        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:02':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [$expr1] }
+        └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:02':Interval, 'UTC':Varchar) as $expr1], output_watermarks: [[$expr1]], noop_update_hint: true }
           └─StreamNow { output: [now] }
 - name: and of two now expression condition
   sql: |
@@ -509,8 +499,8 @@
     select * from t where v1 >= now() and v2 >= now();
   stream_plan: |-
     StreamMaterialize { columns: [v1, v2, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [v2] }
-    └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [t.v2], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
-      ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [t.v1], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
+    └─StreamDynamicFilter { predicate: (t.v2 >= now), output_watermarks: [[t.v2]], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
+      ├─StreamDynamicFilter { predicate: (t.v1 >= now), output_watermarks: [[t.v1]], output: [t.v1, t.v2, t._row_id], cleaned_by_watermark: true }
       │ ├─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       │ └─StreamExchange { dist: Broadcast }
       │   └─StreamNow { output: [now] }
@@ -527,8 +517,8 @@
     select max(v1) as max_time from t group by v2 having max(v1) >= now();
   stream_plan: |-
     StreamMaterialize { columns: [max_time, t.v2(hidden)], stream_key: [t.v2], pk_columns: [t.v2], pk_conflict: NoCheck, watermark_columns: [max_time] }
-    └─StreamProject { exprs: [max(t.v1), t.v2], output_watermarks: [max(t.v1)] }
-      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [max(t.v1)], output: [t.v2, max(t.v1)], cleaned_by_watermark: true }
+    └─StreamProject { exprs: [max(t.v1), t.v2], output_watermarks: [[max(t.v1)]] }
+      └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [[max(t.v1)]], output: [t.v2, max(t.v1)], cleaned_by_watermark: true }
         ├─StreamProject { exprs: [t.v2, max(t.v1)] }
         │ └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }
         │   └─StreamExchange { dist: HashShard(t.v2) }
@@ -626,7 +616,7 @@
         ├─BatchExchange { order: [], dist: HashShard(t.j) }
         │ └─BatchScan { table: t, columns: [t.k, t.j], distribution: SomeShard }
         └─BatchExchange { order: [], dist: HashShard(t.j) }
-          └─BatchProject { exprs: [t.j, JsonbPopulateRecord(null:Struct(StructType { field_names: ["a", "b"], field_types: [Int32, Int32] }), t.j) as $expr1] }
+          └─BatchProject { exprs: [t.j, JsonbPopulateRecord(null:Struct(StructType { fields: [("a", Int32), ("b", Int32)] }), t.j) as $expr1] }
             └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
               ├─BatchExchange { order: [], dist: Single }
               │ └─BatchHashAgg { group_key: [t.j], aggs: [] }

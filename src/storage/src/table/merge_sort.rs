@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,52 +12,71 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::binary_heap::PeekMut;
 use std::collections::BinaryHeap;
+use std::collections::binary_heap::PeekMut;
 use std::error::Error;
 
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 
-use super::KeyedRow;
+use super::{KeyedChangeLogRow, KeyedRow};
 
-struct Node<K: AsRef<[u8]>, S> {
+pub trait NodePeek {
+    fn vnode_key(&self) -> &[u8];
+}
+
+impl<K: AsRef<[u8]>> NodePeek for KeyedRow<K> {
+    fn vnode_key(&self) -> &[u8] {
+        self.key()
+    }
+}
+
+impl<K: AsRef<[u8]>> NodePeek for KeyedChangeLogRow<K> {
+    fn vnode_key(&self) -> &[u8] {
+        self.key()
+    }
+}
+
+struct Node<S, R: NodePeek> {
     stream: S,
 
     /// The next item polled from `stream` previously. Since the `eq` and `cmp` must be synchronous
     /// functions, we need to implement peeking manually.
-    peeked: KeyedRow<K>,
+    peeked: R,
 }
 
-impl<K: AsRef<[u8]>, S> PartialEq for Node<K, S> {
+impl<S, R: NodePeek> PartialEq for Node<S, R> {
     fn eq(&self, other: &Self) -> bool {
-        match self.peeked.key() == other.peeked.key() {
+        match self.peeked.vnode_key() == other.peeked.vnode_key() {
             true => unreachable!("primary key from different iters should be unique"),
             false => false,
         }
     }
 }
-impl<K: AsRef<[u8]>, S> Eq for Node<K, S> {}
+impl<S, R: NodePeek> Eq for Node<S, R> {}
 
-impl<K: AsRef<[u8]>, S> PartialOrd for Node<K, S> {
+impl<S, R: NodePeek> PartialOrd for Node<S, R> {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
         Some(self.cmp(other))
     }
 }
 
-impl<K: AsRef<[u8]>, S> Ord for Node<K, S> {
+impl<S, R: NodePeek> Ord for Node<S, R> {
     fn cmp(&self, other: &Self) -> std::cmp::Ordering {
         // The heap is a max heap, so we need to reverse the order.
-        self.peeked.key().cmp(other.peeked.key()).reverse()
+        self.peeked
+            .vnode_key()
+            .cmp(other.peeked.vnode_key())
+            .reverse()
     }
 }
 
-#[try_stream(ok=KeyedRow<K>, error=E)]
-pub async fn merge_sort<'a, K, E, R>(streams: Vec<R>)
+#[try_stream(ok=KO, error=E)]
+pub async fn merge_sort<E, KO, R>(streams: impl IntoIterator<Item = R>)
 where
-    K: AsRef<[u8]> + 'a,
-    E: Error + 'a,
-    R: Stream<Item = Result<KeyedRow<K>, E>> + 'a + Unpin,
+    KO: NodePeek + Send + Sync,
+    E: Error,
+    R: Stream<Item = Result<KO, E>> + Unpin,
 {
     let mut heap = BinaryHeap::new();
     for mut stream in streams {
@@ -79,6 +98,7 @@ where
 #[cfg(test)]
 mod tests {
     use futures_async_stream::for_await;
+    use rand::random_range;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::ScalarImpl;
@@ -88,7 +108,8 @@ mod tests {
     use crate::error::StorageResult;
 
     fn gen_pk_and_row(i: u8) -> StorageResult<KeyedRow<Vec<u8>>> {
-        let mut key = VirtualNode::ZERO.to_be_bytes().to_vec();
+        let vnode = VirtualNode::from_index(random_range(..VirtualNode::COUNT_FOR_TEST));
+        let mut key = vnode.to_be_bytes().to_vec();
         key.extend(vec![i]);
         Ok(KeyedRow::new(
             TableKey(key),

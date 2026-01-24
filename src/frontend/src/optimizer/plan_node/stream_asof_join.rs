@@ -12,42 +12,36 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_common::util::functional::SameOrElseExt;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_expr::bail;
-use risingwave_pb::expr::expr_node::PbType;
-use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType, PbAsOfJoinInequalityType};
+use risingwave_pb::plan_common::{AsOfJoinDesc, AsOfJoinType, JoinType};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::AsOfJoinNode;
+use risingwave_pb::stream_plan::{AsOfJoinNode, PbJoinEncodingType};
 
-use super::generic::GenericPlanNode;
 use super::stream::prelude::*;
 use super::utils::{
-    childless_record, plan_node_name, watermark_pretty, Distill, TableCatalogBuilder,
+    Distill, TableCatalogBuilder, childless_record, plan_node_name, watermark_pretty,
 };
 use super::{
-    generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeBinary, StreamJoinCommon, StreamNode,
+    ExprRewritable, LogicalJoin, PlanBase, PlanTreeNodeBinary, StreamJoinCommon, StreamNode,
+    StreamPlanRef as PlanRef, generic,
 };
-use crate::error::{ErrorCode, Result};
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::TableCatalog;
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::utils::IndicesDisplay;
 use crate::optimizer::plan_node::{EqJoinPredicate, EqJoinPredicateDisplay};
-use crate::optimizer::property::MonotonicityMap;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
 
 /// [`StreamAsOfJoin`] implements [`super::LogicalJoin`] with hash tables.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamAsOfJoin {
     pub base: PlanBase<Stream>,
     core: generic::Join<PlanRef>,
-
-    /// The join condition must be equivalent to `logical.on`, but separated into equal and
-    /// non-equal parts to facilitate execution later
-    eq_join_predicate: EqJoinPredicate,
 
     /// Whether can optimize for append-only stream.
     /// It is true if input of both side is append-only
@@ -58,18 +52,10 @@ pub struct StreamAsOfJoin {
 }
 
 impl StreamAsOfJoin {
-    pub fn new(
-        core: generic::Join<PlanRef>,
-        eq_join_predicate: EqJoinPredicate,
-        inequality_desc: AsOfJoinDesc,
-    ) -> Self {
+    pub fn new(core: generic::Join<PlanRef>, inequality_desc: AsOfJoinDesc) -> Result<Self> {
         assert!(core.join_type == JoinType::AsofInner || core.join_type == JoinType::AsofLeftOuter);
 
-        // Inner join won't change the append-only behavior of the stream. The rest might.
-        let append_only = match core.join_type {
-            JoinType::Inner => core.left.append_only() && core.right.append_only(),
-            _ => false,
-        };
+        let stream_kind = core.stream_kind()?;
 
         let dist = StreamJoinCommon::derive_dist(
             core.left.distribution(),
@@ -77,64 +63,64 @@ impl StreamAsOfJoin {
             &core,
         );
 
-        // TODO: derive watermarks
-        let watermark_columns = FixedBitSet::with_capacity(core.schema().len());
+        let eq_join_predicate = core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamAsOfJoin requires JoinOn::EqPredicate in core");
+
+        let watermark_columns = {
+            let l2i = core.l2i_col_mapping();
+            let r2i = core.r2i_col_mapping();
+            let mut watermark_columns = WatermarkColumns::new();
+            for (left_idx, right_idx) in
+                eq_join_predicate
+                    .eq_indexes()
+                    .into_iter()
+                    .chain(std::iter::once((
+                        inequality_desc.left_idx as usize,
+                        inequality_desc.right_idx as usize,
+                    )))
+            {
+                if let Some(l_wtmk_group) = core.left.watermark_columns().get_group(left_idx)
+                    && let Some(r_wtmk_group) = core.right.watermark_columns().get_group(right_idx)
+                {
+                    if let Some(internal) = l2i.try_map(left_idx) {
+                        watermark_columns.insert(
+                            internal,
+                            l_wtmk_group.same_or_else(r_wtmk_group, || {
+                                core.ctx().next_watermark_group_id()
+                            }),
+                        );
+                    }
+                    if let Some(internal) = r2i.try_map(right_idx) {
+                        watermark_columns.insert(
+                            internal,
+                            l_wtmk_group.same_or_else(r_wtmk_group, || {
+                                core.ctx().next_watermark_group_id()
+                            }),
+                        );
+                    }
+                }
+            }
+            watermark_columns.map_clone(&core.i2o_col_mapping())
+        };
 
         // TODO: derive from input
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            append_only,
+            stream_kind,
             false, // TODO(rc): derive EOWC property from input
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
 
-        Self {
+        Ok(Self {
             base,
             core,
-            eq_join_predicate,
-            is_append_only: append_only,
+            is_append_only: stream_kind.is_append_only(),
             inequality_desc,
-        }
-    }
-
-    pub fn get_inequality_desc_from_predicate(
-        predicate: EqJoinPredicate,
-        left_input_len: usize,
-    ) -> Result<AsOfJoinDesc> {
-        let expr: ExprImpl = predicate.other_cond().clone().into();
-        if let Some((left_input_ref, expr_type, right_input_ref)) = expr.as_comparison_cond() {
-            if left_input_ref.index() < left_input_len && right_input_ref.index() >= left_input_len
-            {
-                Ok(AsOfJoinDesc {
-                    left_idx: left_input_ref.index() as u32,
-                    right_idx: (right_input_ref.index() - left_input_len) as u32,
-                    inequality_type: Self::expr_type_to_comparison_type(expr_type)?.into(),
-                })
-            } else {
-                bail!("inequal condition from the same side should be push down in optimizer");
-            }
-        } else {
-            Err(ErrorCode::InvalidInputSyntax(
-                "AsOf join requires exactly 1 ineuquality condition".to_string(),
-            )
-            .into())
-        }
-    }
-
-    fn expr_type_to_comparison_type(expr_type: PbType) -> Result<PbAsOfJoinInequalityType> {
-        match expr_type {
-            PbType::LessThan => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeLt),
-            PbType::LessThanOrEqual => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeLe),
-            PbType::GreaterThan => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeGt),
-            PbType::GreaterThanOrEqual => Ok(PbAsOfJoinInequalityType::AsOfInequalityTypeGe),
-            _ => Err(ErrorCode::InvalidInputSyntax(format!(
-                "Invalid comparison type: {}",
-                expr_type.as_str_name()
-            ))
-            .into()),
-        }
+        })
     }
 
     /// Get join type
@@ -144,7 +130,10 @@ impl StreamAsOfJoin {
 
     /// Get a reference to the `AsOf` join's eq join predicate.
     pub fn eq_join_predicate(&self) -> &EqJoinPredicate {
-        &self.eq_join_predicate
+        self.core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamAsOfJoin should store predicate as EqJoinPredicate")
     }
 
     pub fn derive_dist_key_in_join_key(&self) -> Vec<usize> {
@@ -159,7 +148,7 @@ impl StreamAsOfJoin {
     }
 
     /// Return stream asof join internal table catalog.
-    pub fn infer_internal_table_catalog<I: StreamPlanRef>(
+    pub fn infer_internal_table_catalog<I: StreamPlanNodeMetadata>(
         input: I,
         join_key_indices: Vec<usize>,
         dk_indices_in_jk: Vec<usize>,
@@ -200,7 +189,7 @@ impl StreamAsOfJoin {
             internal_table_catalog_builder.add_order_column(*idx, OrderType::ascending())
         });
 
-        internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk.clone());
+        internal_table_catalog_builder.set_dist_key_in_pk(dk_indices_in_jk);
 
         (
             internal_table_catalog_builder.build(internal_table_dist_keys, join_key_len),
@@ -212,7 +201,7 @@ impl StreamAsOfJoin {
 impl Distill for StreamAsOfJoin {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let (ljk, rjk) = self
-            .eq_join_predicate
+            .eq_join_predicate()
             .eq_indexes()
             .first()
             .cloned()
@@ -248,7 +237,7 @@ impl Distill for StreamAsOfJoin {
     }
 }
 
-impl PlanTreeNodeBinary for StreamAsOfJoin {
+impl PlanTreeNodeBinary<Stream> for StreamAsOfJoin {
     fn left(&self) -> PlanRef {
         self.core.left.clone()
     }
@@ -261,16 +250,17 @@ impl PlanTreeNodeBinary for StreamAsOfJoin {
         let mut core = self.core.clone();
         core.left = left;
         core.right = right;
-        Self::new(core, self.eq_join_predicate.clone(), self.inequality_desc)
+
+        Self::new(core, self.inequality_desc).unwrap()
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamAsOfJoin }
+impl_plan_tree_node_for_binary! { Stream, StreamAsOfJoin }
 
 impl StreamNode for StreamAsOfJoin {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
-        let left_jk_indices = self.eq_join_predicate.left_eq_indexes();
-        let right_jk_indices = self.eq_join_predicate.right_eq_indexes();
+        let left_jk_indices = self.eq_join_predicate().left_eq_indexes();
+        let right_jk_indices = self.eq_join_predicate().right_eq_indexes();
         let left_jk_indices_prost = left_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
         let right_jk_indices_prost = right_jk_indices.iter().map(|idx| *idx as i32).collect_vec();
 
@@ -302,7 +292,7 @@ impl StreamNode for StreamAsOfJoin {
         let left_table = left_table.with_id(state.gen_table_id_wrapped());
         let right_table = right_table.with_id(state.gen_table_id_wrapped());
 
-        let null_safe_prost = self.eq_join_predicate.null_safes().into_iter().collect();
+        let null_safe_prost = self.eq_join_predicate().null_safes().into_iter().collect();
 
         let asof_join_type = match self.core.join_type {
             JoinType::AsofInner => AsOfJoinType::Inner,
@@ -310,7 +300,7 @@ impl StreamNode for StreamAsOfJoin {
             _ => unreachable!(),
         };
 
-        NodeBody::AsOfJoin(AsOfJoinNode {
+        NodeBody::AsOfJoin(Box::new(AsOfJoinNode {
             join_type: asof_join_type.into(),
             left_key: left_jk_indices_prost,
             right_key: right_jk_indices_prost,
@@ -321,11 +311,14 @@ impl StreamNode for StreamAsOfJoin {
             right_deduped_input_pk_indices,
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             asof_desc: Some(self.inequality_desc),
-        })
+            // Join encoding type should now be read from per-job config override.
+            #[allow(deprecated)]
+            join_encoding_type: PbJoinEncodingType::Unspecified as _,
+        }))
     }
 }
 
-impl ExprRewritable for StreamAsOfJoin {
+impl ExprRewritable<Stream> for StreamAsOfJoin {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -333,13 +326,18 @@ impl ExprRewritable for StreamAsOfJoin {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        let eq_join_predicate = self.eq_join_predicate.rewrite_exprs(r);
-        let desc = Self::get_inequality_desc_from_predicate(
-            eq_join_predicate.clone(),
+        let eq_join_predicate = core
+            .on
+            .as_eq_predicate_ref()
+            .expect("StreamAsOfJoin should store predicate as EqJoinPredicate")
+            .clone();
+        let desc = LogicalJoin::get_inequality_desc_from_predicate(
+            eq_join_predicate.other_cond().clone(),
             core.left.schema().len(),
         )
         .unwrap();
-        Self::new(core, eq_join_predicate, desc).into()
+
+        Self::new(core, desc).unwrap().into()
     }
 }
 

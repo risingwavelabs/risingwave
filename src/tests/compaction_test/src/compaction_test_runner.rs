@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,18 +23,21 @@ use std::time::Duration;
 use anyhow::anyhow;
 use bytes::{BufMut, Bytes, BytesMut};
 use clap::Parser;
-use foyer::CacheContext;
-use risingwave_common::catalog::TableId;
+use foyer::Hint;
+use risingwave_common::catalog::TableOption;
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, MetaConfig, NoOverride,
+    MetaConfig, NoOverride, extract_storage_memory_config, load_config,
 };
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::key::TableKey;
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
-use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockVersionId, FIRST_VERSION_ID};
+use risingwave_hummock_sdk::{
+    CompactionGroupId, FIRST_VERSION_ID, HummockEpoch, HummockReadEpoch, HummockVersionId,
+};
 use risingwave_pb::common::WorkerType;
+use risingwave_pb::id::TableId;
 use risingwave_rpc_client::{HummockMetaClient, MetaClient};
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::{CachePolicy, HummockStorage};
@@ -43,7 +46,7 @@ use risingwave_storage::monitor::{
     MonitoredStorageMetrics, ObjectStoreMetrics,
 };
 use risingwave_storage::opts::StorageOpts;
-use risingwave_storage::store::{ReadOptions, StateStoreRead};
+use risingwave_storage::store::{NewReadSnapshotOptions, ReadOptions, StateStoreRead};
 use risingwave_storage::{StateStore, StateStoreImpl, StateStoreIter};
 
 const SST_ID_SHIFT_COUNT: u32 = 1000000;
@@ -101,7 +104,7 @@ pub async fn compaction_test_main(
     );
 
     let original_meta_endpoint = "http://127.0.0.1:5690";
-    let mut table_id: u32 = opts.table_id;
+    let mut table_id = opts.table_id.into();
 
     init_metadata_for_replay(
         original_meta_endpoint,
@@ -112,7 +115,7 @@ pub async fn compaction_test_main(
     )
     .await?;
 
-    assert_ne!(0, table_id, "Invalid table_id for correctness checking");
+    assert_ne!(table_id, 0, "Invalid table_id for correctness checking");
 
     let version_deltas = pull_version_deltas(original_meta_endpoint, &advertise_addr).await?;
 
@@ -201,7 +204,7 @@ pub fn start_compactor_thread(
 
 fn start_replay_thread(
     opts: CompactionTestOpts,
-    table_id: u32,
+    table_id: TableId,
     version_deltas: Vec<HummockVersionDelta>,
 ) -> JoinHandle<()> {
     let replay_func = move || {
@@ -222,7 +225,7 @@ async fn init_metadata_for_replay(
     new_meta_endpoint: &str,
     advertise_addr: &HostAddr,
     ci_mode: bool,
-    table_id: &mut u32,
+    table_id: &mut TableId,
 ) -> anyhow::Result<()> {
     // The compactor needs to receive catalog notification from the new Meta node,
     // and we should wait the compactor finishes setup the subscription channel
@@ -237,7 +240,7 @@ async fn init_metadata_for_replay(
             tracing::info!("Ctrl+C received, now exiting");
             std::process::exit(0);
         },
-        ret = MetaClient::register_new(cluster_meta_endpoint.parse()?, WorkerType::RiseCtl, advertise_addr, Default::default(), &meta_config) => {
+        ret = MetaClient::register_new(cluster_meta_endpoint.parse()?, WorkerType::RiseCtl, advertise_addr, Default::default(), Arc::new(meta_config.clone())) => {
             (meta_client, _) = ret;
         },
     }
@@ -252,7 +255,7 @@ async fn init_metadata_for_replay(
         WorkerType::RiseCtl,
         advertise_addr,
         Default::default(),
-        &meta_config,
+        Arc::new(meta_config.clone()),
     )
     .await;
     new_meta_client.activate(advertise_addr).await.unwrap();
@@ -267,7 +270,9 @@ async fn init_metadata_for_replay(
         .await?;
 
     // shift the sst id to avoid conflict with the original meta node
-    let _ = new_meta_client.get_new_sst_ids(SST_ID_SHIFT_COUNT).await?;
+    let _ = new_meta_client
+        .get_new_object_ids(SST_ID_SHIFT_COUNT)
+        .await?;
 
     tracing::info!("Finished initializing the new Meta");
     Ok(())
@@ -284,7 +289,7 @@ async fn pull_version_deltas(
         WorkerType::RiseCtl,
         advertise_addr,
         Default::default(),
-        &MetaConfig::default(),
+        Arc::new(MetaConfig::default()),
     )
     .await;
     let worker_id = meta_client.worker_id();
@@ -308,7 +313,7 @@ async fn pull_version_deltas(
 
 async fn start_replay(
     opts: CompactionTestOpts,
-    table_to_check: u32,
+    table_to_check: TableId,
     version_delta_logs: Vec<HummockVersionDelta>,
 ) -> anyhow::Result<()> {
     let advertise_addr = "127.0.0.1:7770".parse().unwrap();
@@ -333,7 +338,7 @@ async fn start_replay(
         WorkerType::RiseCtl,
         &advertise_addr,
         Default::default(),
-        &config.meta,
+        Arc::new(config.meta.clone()),
     )
     .await;
     let worker_id = meta_client.worker_id();
@@ -376,7 +381,7 @@ async fn start_replay(
         let (version_id, committed_epoch) = (
             current_version.id,
             current_version
-                .table_committed_epoch(table_to_check.into())
+                .table_committed_epoch(table_to_check)
                 .unwrap_or_default(),
         );
         tracing::info!(
@@ -400,7 +405,8 @@ async fn start_replay(
 
         // We can custom more conditions for compaction triggering
         // For now I just use a static way here
-        if replay_count % opts.num_trigger_frequency == 0 && !modified_compaction_groups.is_empty()
+        if replay_count.is_multiple_of(opts.num_trigger_frequency)
+            && !modified_compaction_groups.is_empty()
         {
             // join previously spawned check result task
             if let Some(handle) = check_result_task {
@@ -598,19 +604,23 @@ async fn poll_compaction_tasks_status(
     (compaction_ok, cur_version)
 }
 
-type StateStoreIterType = Pin<Box<<MonitoredStateStore<HummockStorage> as StateStoreRead>::Iter>>;
+type StateStoreIterType = Pin<
+    Box<
+        <<MonitoredStateStore<HummockStorage> as StateStore>::ReadSnapshot as StateStoreRead>::Iter,
+    >,
+>;
 
 async fn open_hummock_iters(
     hummock: &MonitoredStateStore<HummockStorage>,
     snapshots: &[HummockEpoch],
-    table_id: u32,
+    table_id: TableId,
 ) -> anyhow::Result<BTreeMap<HummockEpoch, StateStoreIterType>> {
     let mut results = BTreeMap::new();
 
     // Set the `table_id` to the prefix of key, since the table_id in
     // the `ReadOptions` will not be used to filter kv pairs
     let mut buf = BytesMut::with_capacity(5);
-    buf.put_u32(table_id);
+    buf.put_u32(table_id.as_raw_id());
     let b = buf.freeze();
     let range = (
         Bound::Included(b.clone()).map(TableKey),
@@ -621,13 +631,20 @@ async fn open_hummock_iters(
     );
 
     for &epoch in snapshots {
-        let iter = hummock
+        let snapshot = hummock
+            .new_read_snapshot(
+                HummockReadEpoch::NoWait(epoch),
+                NewReadSnapshotOptions {
+                    table_id,
+                    table_option: TableOption::default(),
+                },
+            )
+            .await?;
+        let iter = snapshot
             .iter(
                 range.clone(),
-                epoch,
                 ReadOptions {
-                    table_id: TableId { table_id },
-                    cache_policy: CachePolicy::Fill(CacheContext::Default),
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
                     ..Default::default()
                 },
             )

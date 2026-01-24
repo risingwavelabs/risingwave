@@ -1,0 +1,67 @@
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
+
+statement ok
+CREATE CONNECTION CONN WITH (
+    type = 'iceberg',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://hummock001/iceberg-data',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+statement ok
+CREATE SINK sink1 from s1 WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    database.name = 'demo_db',
+    table.name = 'test_connection_table',
+    connection = conn,
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 1,
+    primary_key = 'i1,i2',
+    partition_by = 'i1'
+);
+
+statement ok
+INSERT INTO s1 (i1, i2, i3) values(1,'1','1'),(2,'2','2'),(3,'3','3'),(4,'4','4'),(5,'5','5');
+
+statement ok
+flush
+
+statement ok
+CREATE SOURCE iceberg_t1_source
+WITH (
+    connector = 'iceberg',
+    connection = conn,
+    database.name = 'demo_db',
+    table.name = 'test_connection_table',
+);
+
+
+query I retry 4 backoff 1s
+select * from iceberg_t1_source order by i1 limit 5;
+----
+1 1 1
+2 2 2
+3 3 3
+4 4 4
+5 5 5
+
+statement ok
+DROP SINK sink1;
+
+statement ok
+DROP SOURCE iceberg_t1_source;
+
+statement ok
+DROP TABLE s1 cascade;
+
+statement ok
+DROP CONNECTION conn;

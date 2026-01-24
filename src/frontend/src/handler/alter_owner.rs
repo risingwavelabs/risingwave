@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,35 +16,30 @@ use std::sync::Arc;
 
 use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
-use risingwave_pb::ddl_service::alter_owner_request::Object;
-use risingwave_pb::user::grant_privilege;
-use risingwave_sqlparser::ast::{Ident, ObjectName};
+use risingwave_common::id::SchemaId;
+use risingwave_sqlparser::ast::{Ident, ObjectName, OperateFunctionArg};
 
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::{CatalogError, OwnedByUserCatalog};
-use crate::error::ErrorCode::PermissionDenied;
+use crate::error::ErrorCode::{self, PermissionDenied};
 use crate::error::Result;
 use crate::session::SessionImpl;
+use crate::user::UserId;
 use crate::user::user_catalog::UserCatalog;
-use crate::Binder;
+use crate::{Binder, bind_data_type};
 
 pub fn check_schema_create_privilege(
     session: &Arc<SessionImpl>,
     new_owner: &UserCatalog,
-    schema_id: u32,
+    schema_id: SchemaId,
 ) -> Result<()> {
     if session.is_super_user() {
         return Ok(());
     }
-    if !new_owner.is_super
-        && !new_owner.check_privilege(
-            &grant_privilege::Object::SchemaId(schema_id),
-            AclMode::Create,
-        )
-    {
+    if !new_owner.is_super && !new_owner.has_privilege(schema_id, AclMode::Create) {
         return Err(PermissionDenied(
-            "Require new owner to have create privilege on the object.".to_string(),
+            "Require new owner to have create privilege on the object.".to_owned(),
         )
         .into());
     }
@@ -56,13 +51,13 @@ pub async fn handle_alter_owner(
     obj_name: ObjectName,
     new_owner_name: Ident,
     stmt_type: StatementType,
+    func_args: Option<Vec<OperateFunctionArg>>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
-    let (schema_name, real_obj_name) =
-        Binder::resolve_schema_qualified_name(db_name, obj_name.clone())?;
+    let db_name = &session.database();
+    let (schema_name, real_obj_name) = Binder::resolve_schema_qualified_name(db_name, &obj_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let new_owner_name = Binder::resolve_user_name(vec![new_owner_name].into())?;
@@ -71,7 +66,21 @@ pub async fn handle_alter_owner(
         let user_reader = session.env().user_info_reader().read_guard();
         let new_owner = user_reader
             .get_user_by_name(&new_owner_name)
-            .ok_or(CatalogError::NotFound("user", new_owner_name))?;
+            .ok_or(CatalogError::not_found("user", new_owner_name))?;
+
+        let check_owned_by_admin = |owner: &UserId| -> Result<()> {
+            let user_catalog = user_reader.get_user_by_id(owner).unwrap();
+            if user_catalog.is_admin {
+                return Err(PermissionDenied(format!(
+                    "Cannot change owner of {} owned by admin user {}",
+                    obj_name.real_value(),
+                    user_catalog.name
+                ))
+                .into());
+            }
+            Ok(())
+        };
+
         let owner_id = new_owner.id;
         (
             match stmt_type {
@@ -89,7 +98,8 @@ pub async fn handle_alter_owner(
                     if table.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
-                    Object::TableId(table.id.table_id)
+                    check_owned_by_admin(&table.owner)?;
+                    table.id.into()
                 }
                 StatementType::ALTER_VIEW => {
                     let (view, schema_name) =
@@ -102,7 +112,8 @@ pub async fn handle_alter_owner(
                     if view.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
-                    Object::ViewId(view.id)
+                    check_owned_by_admin(&view.owner)?;
+                    view.id.into()
                 }
                 StatementType::ALTER_SOURCE => {
                     let (source, schema_name) =
@@ -115,11 +126,15 @@ pub async fn handle_alter_owner(
                     if source.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
-                    Object::SourceId(source.id)
+                    check_owned_by_admin(&source.owner())?;
+                    source.id.into()
                 }
                 StatementType::ALTER_SINK => {
-                    let (sink, schema_name) =
-                        catalog_reader.get_sink_by_name(db_name, schema_path, &real_obj_name)?;
+                    let (sink, schema_name) = catalog_reader.get_created_sink_by_name(
+                        db_name,
+                        schema_path,
+                        &real_obj_name,
+                    )?;
                     session.check_privilege_for_drop_alter(schema_name, &**sink)?;
                     let schema_id = catalog_reader
                         .get_schema_by_name(db_name, schema_name)?
@@ -128,7 +143,8 @@ pub async fn handle_alter_owner(
                     if sink.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
-                    Object::SinkId(sink.id.sink_id)
+                    check_owned_by_admin(&sink.owner())?;
+                    sink.id.into()
                 }
                 StatementType::ALTER_SUBSCRIPTION => {
                     let (subscription, schema_name) = catalog_reader.get_subscription_by_name(
@@ -144,7 +160,8 @@ pub async fn handle_alter_owner(
                     if subscription.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
-                    Object::SubscriptionId(subscription.id.subscription_id)
+                    check_owned_by_admin(&subscription.owner())?;
+                    subscription.id.into()
                 }
                 StatementType::ALTER_DATABASE => {
                     let database = catalog_reader.get_database_by_name(&obj_name.real_value())?;
@@ -152,7 +169,8 @@ pub async fn handle_alter_owner(
                     if database.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
-                    Object::DatabaseId(database.id())
+                    check_owned_by_admin(&database.owner)?;
+                    database.id().into()
                 }
                 StatementType::ALTER_SCHEMA => {
                     let schema =
@@ -161,7 +179,64 @@ pub async fn handle_alter_owner(
                     if schema.owner() == owner_id {
                         return Ok(RwPgResponse::empty_result(stmt_type));
                     }
-                    Object::SchemaId(schema.id())
+                    check_owned_by_admin(&schema.owner)?;
+                    schema.id().into()
+                }
+                StatementType::ALTER_CONNECTION => {
+                    let (connection, schema_name) = catalog_reader.get_connection_by_name(
+                        db_name,
+                        schema_path,
+                        &real_obj_name,
+                    )?;
+                    session.check_privilege_for_drop_alter(schema_name, &**connection)?;
+                    if connection.owner() == owner_id {
+                        return Ok(RwPgResponse::empty_result(stmt_type));
+                    }
+                    check_owned_by_admin(&connection.owner)?;
+                    connection.id.into()
+                }
+                StatementType::ALTER_FUNCTION => {
+                    let (function, schema_name) = if let Some(args) = func_args {
+                        let mut arg_types = Vec::with_capacity(args.len());
+                        for arg in args {
+                            arg_types.push(bind_data_type(&arg.data_type)?);
+                        }
+                        catalog_reader.get_function_by_name_args(
+                            db_name,
+                            schema_path,
+                            &real_obj_name,
+                            &arg_types,
+                        )?
+                    } else {
+                        let (functions, old_schema_name) = catalog_reader.get_functions_by_name(
+                            db_name,
+                            schema_path,
+                            &real_obj_name,
+                        )?;
+                        if functions.len() > 1 {
+                            return Err(ErrorCode::CatalogError(format!("function name {real_obj_name:?} is not unique\nHINT: Specify the argument list to select the function unambiguously.").into()).into());
+                        }
+                        (
+                            functions.into_iter().next().expect("no functions"),
+                            old_schema_name,
+                        )
+                    };
+                    session.check_privilege_for_drop_alter(schema_name, &**function)?;
+                    if function.owner == owner_id {
+                        return Ok(RwPgResponse::empty_result(stmt_type));
+                    }
+                    check_owned_by_admin(&function.owner)?;
+                    function.id.into()
+                }
+                StatementType::ALTER_SECRET => {
+                    let (secret, schema_name) =
+                        catalog_reader.get_secret_by_name(db_name, schema_path, &real_obj_name)?;
+                    session.check_privilege_for_drop_alter(schema_name, &**secret)?;
+                    if secret.owner() == owner_id {
+                        return Ok(RwPgResponse::empty_result(stmt_type));
+                    }
+                    check_owned_by_admin(&secret.owner)?;
+                    secret.id.into()
                 }
                 _ => unreachable!(),
             },

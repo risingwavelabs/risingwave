@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,7 +23,7 @@ mod tests {
         EncodingProperties, JsonProperties, ProtocolProperties, SourceColumnDesc,
         SourceStreamChunkBuilder, SpecificParserConfig,
     };
-    use crate::source::SourceContext;
+    use crate::source::{SourceContext, SourceCtrlOpts};
 
     #[tokio::test]
     async fn test_json_parser() {
@@ -38,6 +38,10 @@ mod tests {
             encoding_config: EncodingProperties::Json(JsonProperties {
                 use_schema_registry: false,
                 timestamptz_handling: None,
+                timestamp_handling: None,
+                time_handling: None,
+                bigint_unsigned_handling: None,
+                handle_toast_columns: false,
             }),
             protocol_config: ProtocolProperties::Maxwell,
         };
@@ -45,7 +49,7 @@ mod tests {
             .await
             .unwrap();
 
-        let mut builder = SourceStreamChunkBuilder::with_capacity(descs, 4);
+        let mut builder = SourceStreamChunkBuilder::new(descs, SourceCtrlOpts::for_test());
         let payloads = vec![
             br#"{"database":"test","table":"t","type":"insert","ts":1666937996,"xid":1171,"commit":true,"data":{"id":1,"name":"tom","is_adult":0,"birthday":"2017-12-31 16:00:01"}}"#.to_vec(),
             br#"{"database":"test","table":"t","type":"insert","ts":1666938023,"xid":1254,"commit":true,"data":{"id":2,"name":"alex","is_adult":1,"birthday":"1999-12-31 16:00:01"}}"#.to_vec(),
@@ -53,11 +57,14 @@ mod tests {
         ];
 
         for payload in payloads {
-            let writer = builder.row_writer();
-            parser.parse_inner(payload, writer).await.unwrap();
+            parser
+                .parse_inner(payload, builder.row_writer())
+                .await
+                .unwrap();
         }
 
-        let chunk = builder.finish();
+        builder.finish_current_chunk();
+        let chunk = builder.consume_ready_chunks().next().unwrap();
 
         let mut rows = chunk.rows();
 

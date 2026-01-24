@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -39,7 +39,7 @@ async fn test_cordon_normal() -> Result<()> {
     let rest_worker_slots: HashSet<_> = workers
         .iter()
         .flat_map(|worker| {
-            (0..worker.parallelism).map(|idx| WorkerSlotId::new(worker.id, idx as _))
+            (0..worker.compute_node_parallelism()).map(|idx| WorkerSlotId::new(worker.id, idx as _))
         })
         .collect();
 

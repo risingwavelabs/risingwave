@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,11 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::is_system_schema;
-use risingwave_sqlparser::ast::{DropMode, ObjectName};
+use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
 use crate::binder::Binder;
-use crate::catalog::CatalogError;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
 
@@ -27,7 +25,7 @@ pub async fn handle_drop_schema(
     handler_args: HandlerArgs,
     schema_name: ObjectName,
     if_exist: bool,
-    mode: Option<DropMode>,
+    cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let catalog_reader = session.env().catalog_reader();
@@ -43,7 +41,7 @@ pub async fn handle_drop_schema(
 
     let schema = {
         let reader = catalog_reader.read_guard();
-        match reader.get_schema_by_name(session.database(), &schema_name) {
+        match reader.get_schema_by_name(&session.database(), &schema_name) {
             Ok(schema) => schema.clone(),
             Err(err) => {
                 // If `if_exist` is true, not return error.
@@ -60,64 +58,13 @@ pub async fn handle_drop_schema(
             }
         }
     };
-    match mode {
-        Some(DropMode::Restrict) | None => {
-            if let Some(table) = schema.iter_table().next() {
-                return Err(CatalogError::NotEmpty(
-                    "schema",
-                    schema_name,
-                    "table",
-                    table.name.clone(),
-                )
-                .into());
-            }
-            if let Some(source) = schema.iter_source().next() {
-                return Err(CatalogError::NotEmpty(
-                    "schema",
-                    schema_name,
-                    "source",
-                    source.name.clone(),
-                )
-                .into());
-            }
-        }
-        Some(DropMode::Cascade) => {
-            bail_not_implemented!(issue = 6773, "drop schema with cascade mode");
-        }
-    };
+
+    // Note: we don't check if the schema is empty here when drop mode is cascade.
+    // The check is done in meta `ensure_schema_empty`.
 
     session.check_privilege_for_drop_alter_db_schema(&schema)?;
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_schema(schema.id()).await?;
+    catalog_writer.drop_schema(schema.id(), cascade).await?;
     Ok(PgResponse::empty_result(StatementType::DROP_SCHEMA))
-}
-
-#[cfg(test)]
-mod tests {
-    use crate::test_utils::LocalFrontend;
-
-    #[tokio::test]
-    async fn test_drop_schema() {
-        let frontend = LocalFrontend::new(Default::default()).await;
-        let session = frontend.session_ref();
-        let catalog_reader = session.env().catalog_reader();
-
-        frontend.run_sql("CREATE SCHEMA schema").await.unwrap();
-
-        frontend.run_sql("CREATE TABLE schema.table").await.unwrap();
-
-        assert!(frontend.run_sql("DROP SCHEMA schema").await.is_err());
-
-        frontend.run_sql("DROP TABLE schema.table").await.unwrap();
-
-        frontend.run_sql("DROP SCHEMA schema").await.unwrap();
-
-        let schema = catalog_reader
-            .read_guard()
-            .get_database_by_name("schema")
-            .ok()
-            .cloned();
-        assert!(schema.is_none());
-    }
 }

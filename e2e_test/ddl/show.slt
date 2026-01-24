@@ -26,6 +26,7 @@ v1                 integer  false  turpis vehicula
 v2                 integer  false  Lorem ipsum dolor sit amet
 v3                 integer  false  NULL
 _row_id             serial   true  consectetur adipiscing elit
+_rw_timestamp timestamp with time zone true NULL
 primary key        _row_id   NULL  NULL
 distribution key   _row_id   NULL  NULL
 table description       t3   NULL  volutpat vitae
@@ -37,6 +38,7 @@ v1 integer false turpis vehicula
 v2 integer false Lorem ipsum dolor sit amet
 v3 integer false NULL
 _row_id serial true consectetur adipiscing elit
+_rw_timestamp timestamp with time zone true NULL
 
 statement ok
 create index idx1 on t3 (v1,v2);
@@ -65,6 +67,7 @@ v1                 integer  false  Nemo enim ipsam
 v2                 integer  false  NULL
 v3                 integer  false  NULL
 _row_id             serial   true  NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key        _row_id   NULL  NULL
 distribution key   _row_id   NULL  NULL
 idx1               index(v1 ASC, v2 ASC) include(v3) distributed by(v1) NULL NULL
@@ -94,41 +97,65 @@ rw_catalog
 query T
 show tables;
 ----
-t3
+public.t3
 
 query T
 show tables from public;
 ----
-t3
+public.t3
 
 query T
 show tables from public like 't_';
 ----
-t3
+public.t3
 
 query T
 show tables from public like '_t';
 ----
 
+# Test that `SHOW TABLES` shows tables from all schemas in the search path.
+statement ok
+create schema my_schema;
+
+statement ok
+create table my_schema.t4 (v1 int, v2 int, v3 int);
+
+statement ok
+set search_path to my_schema, public;
+
+query T rowsort
+show tables;
+----
+my_schema.t4
+public.t3
+
+statement ok
+set search_path to default;
+
+statement ok
+drop schema my_schema cascade;
+
+# Test search path done.
+
 query T
 show views;
 ----
-v3
+public.v3
 
 query T
 show views from public;
 ----
-v3
+public.v3
 
 query T
 show materialized views from public;
 ----
-mv3
+public.mv3
 
 query T
 show materialized views;
 ----
-mv3
+public.mv3
 
 query T
 show sources;
@@ -175,7 +202,7 @@ describe sink3;
 v1 integer false NULL
 v2 integer false NULL
 v3 integer false NULL
-t3._row_id serial true NULL
+"t3._row_id" serial true NULL
 distribution key t3._row_id NULL NULL
 table description sink3 NULL NULL
 
@@ -185,7 +212,7 @@ show columns from sink3;
 v1 integer false NULL
 v2 integer false NULL
 v3 integer false NULL
-t3._row_id serial true NULL
+"t3._row_id" serial true NULL
 
 statement ok
 drop sink sink3;
@@ -225,12 +252,18 @@ statement ok
 create table show_another_schema.t_another (v1 int);
 
 statement ok
+comment on table "show_another_schema"."t_another" IS 'test table description with schema';
+
+statement ok
+comment on column "show_another_schema"."t_another".v1 IS 'test column description with schema';
+
+statement ok
 create table t4 (v1 int);
 
 query T
 show tables;
 ----
-t4
+public.t4
 
 statement ok
 set search_path to show_another_schema, public;
@@ -238,8 +271,8 @@ set search_path to show_another_schema, public;
 query T
 show tables;
 ----
-t_another
-t4
+show_another_schema.t_another
+public.t4
 
 statement ok
 drop table t4;
@@ -249,3 +282,25 @@ drop table show_another_schema.t_another;
 
 statement ok
 drop schema show_another_schema;
+
+# Composite type should be expanded to multiple rows in `SHOW COLUMNS`.
+statement ok
+create table t5 (v struct<A int, b struct<"x.Y" int, "C" struct<d int, e int>[]>>[]);
+
+query TTTT
+show columns from t5;
+----
+v	            struct[]	                false	NULL
+v[1]	        struct	                    false	NULL
+v[1].a	        integer	                    false	NULL
+v[1].b	        struct	                    false	NULL
+v[1].b."x.Y"    integer	                    false	NULL
+v[1].b."C"	    struct[]	                false	NULL
+v[1].b."C"[1]	struct	                    false	NULL
+v[1].b."C"[1].d	integer	                    false	NULL
+v[1].b."C"[1].e	integer	                    false	NULL
+_row_id	        serial	                    true	NULL
+_rw_timestamp	timestamp with time zone	true	NULL
+
+statement ok
+drop table t5;

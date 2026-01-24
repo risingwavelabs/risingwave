@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,8 +15,8 @@
 use std::ops::Deref;
 use std::sync::Arc;
 
-use await_tree::InstrumentAwait;
-use foyer::{FetchState, HybridCacheEntry, HybridFetch};
+use await_tree::{InstrumentAwait, SpanExt};
+use foyer::{HybridCacheEntry, HybridGetOrFetch};
 use risingwave_common::config::EvictionConfig;
 
 use super::{Block, HummockResult, SstableBlockIndex};
@@ -24,7 +24,7 @@ use crate::hummock::HummockError;
 
 type HybridCachedBlockEntry = HybridCacheEntry<SstableBlockIndex, Box<Block>>;
 
-enum BlockEntry {
+pub enum BlockEntry {
     HybridCache(#[allow(dead_code)] HybridCachedBlockEntry),
     Owned(#[allow(dead_code)] Box<Block>),
     RefEntry(#[allow(dead_code)] Arc<Block>),
@@ -59,6 +59,10 @@ impl BlockHolder {
             block: ptr,
         }
     }
+
+    pub fn entry(&self) -> &BlockEntry {
+        &self._handle
+    }
 }
 
 impl Deref for BlockHolder {
@@ -81,30 +85,23 @@ pub struct BlockCacheConfig {
 
 pub enum BlockResponse {
     Block(BlockHolder),
-    Entry(HybridFetch<SstableBlockIndex, Box<Block>>),
+    Fetch(HybridGetOrFetch<SstableBlockIndex, Box<Block>>),
 }
 
 impl BlockResponse {
     pub async fn wait(self) -> HummockResult<BlockHolder> {
-        let entry = match self {
+        let fetch = match self {
             BlockResponse::Block(block) => return Ok(block),
-            BlockResponse::Entry(entry) => entry,
+            BlockResponse::Fetch(fetch) => fetch,
         };
-        match entry.state() {
-            FetchState::Hit => entry
-                .await
-                .map(BlockHolder::from_hybrid_cache_entry)
-                .map_err(HummockError::foyer_error),
-            FetchState::Wait => entry
-                .verbose_instrument_await("wait_pending_fetch_block")
-                .await
-                .map(BlockHolder::from_hybrid_cache_entry)
-                .map_err(HummockError::foyer_error),
-            FetchState::Miss => entry
-                .verbose_instrument_await("fetch_block")
-                .await
-                .map(BlockHolder::from_hybrid_cache_entry)
-                .map_err(HummockError::foyer_error),
-        }
+        let fetch = match fetch.try_unwrap() {
+            Ok(entry) => return Ok(BlockHolder::from_hybrid_cache_entry(entry)),
+            Err(fetch) => fetch,
+        };
+        fetch
+            .instrument_await("wait_pending_fetch_block".verbose())
+            .await
+            .map(BlockHolder::from_hybrid_cache_entry)
+            .map_err(HummockError::foyer_error)
     }
 }

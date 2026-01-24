@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,10 +13,18 @@
 // limitations under the License.
 
 mod actor;
+mod assignment;
 mod fragment;
 mod id;
 mod schedule;
+pub mod state_match;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
-pub use fragment::{CompleteStreamFragmentGraph, StreamFragmentGraph};
+pub use assignment::*;
+pub use fragment::{
+    CompleteStreamFragmentGraph, FragmentBackfillOrder, FragmentGraphDownstreamContext,
+    FragmentGraphUpstreamContext, StreamFragmentGraph, check_sink_fragments_support_refresh_schema,
+    fill_snapshot_backfill_epoch, rewrite_refresh_schema_sink_fragment,
+};
+pub(crate) use id::GlobalActorIdGen;
 pub use schedule::Locations;

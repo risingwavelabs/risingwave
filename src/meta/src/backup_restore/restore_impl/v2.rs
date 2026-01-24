@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp;
+
+use itertools::Itertools;
+use risingwave_backup::MetaSnapshotId;
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::meta_snapshot::MetaSnapshot;
 use risingwave_backup::meta_snapshot_v2::{MetaSnapshotV2, MetadataV2};
 use risingwave_backup::storage::{MetaSnapshotStorage, MetaSnapshotStorageRef};
-use risingwave_backup::MetaSnapshotId;
-use sea_orm::{DatabaseBackend, DbBackend, DbErr, Statement};
+use sea_orm::{DbErr, EntityTrait};
 
 use crate::backup_restore::restore_impl::{Loader, Writer};
 use crate::controller::SqlMetaStore;
@@ -35,7 +38,7 @@ impl LoaderV2 {
 #[async_trait::async_trait]
 impl Loader<MetadataV2> for LoaderV2 {
     async fn load(&self, target_id: MetaSnapshotId) -> BackupResult<MetaSnapshot<MetadataV2>> {
-        let snapshot_list = &self.backup_store.manifest().snapshot_metadata;
+        let snapshot_list = &self.backup_store.manifest().await.snapshot_metadata;
         let mut target_snapshot: MetaSnapshotV2 = self.backup_store.get(target_id).await?;
         tracing::debug!(
             "snapshot {} before rewrite:\n{}",
@@ -106,15 +109,40 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.workers.clone(), db).await?;
         insert_models(metadata.worker_properties.clone(), db).await?;
         insert_models(metadata.users.clone(), db).await?;
-        insert_models(metadata.objects.clone(), db).await?;
-        insert_models(metadata.user_privileges.clone(), db).await?;
+        // The sort is required to pass table's foreign key check.
+        use risingwave_meta_model::object::ObjectType;
+        insert_models(
+            metadata
+                .objects
+                .iter()
+                .sorted_by(|a, b| match (a.obj_type, b.obj_type) {
+                    (ObjectType::Database, ObjectType::Database) => a.oid.cmp(&b.oid),
+                    (ObjectType::Database, _) => cmp::Ordering::Less,
+                    (_, ObjectType::Database) => cmp::Ordering::Greater,
+                    (ObjectType::Schema, ObjectType::Schema) => a.oid.cmp(&b.oid),
+                    (ObjectType::Schema, _) => cmp::Ordering::Less,
+                    (_, ObjectType::Schema) => cmp::Ordering::Greater,
+                    (_, _) => a.oid.cmp(&b.oid),
+                })
+                .cloned(),
+            db,
+        )
+        .await?;
+        insert_models(
+            metadata
+                .user_privileges
+                .iter()
+                .sorted_by_key(|u| u.id)
+                .cloned(),
+            db,
+        )
+        .await?;
         insert_models(metadata.object_dependencies.clone(), db).await?;
         insert_models(metadata.databases.clone(), db).await?;
         insert_models(metadata.schemas.clone(), db).await?;
         insert_models(metadata.streaming_jobs.clone(), db).await?;
         insert_models(metadata.fragments.clone(), db).await?;
-        insert_models(metadata.actors.clone(), db).await?;
-        insert_models(metadata.actor_dispatchers.clone(), db).await?;
+        insert_models(metadata.fragment_relation.clone(), db).await?;
         insert_models(metadata.connections.clone(), db).await?;
         insert_models(metadata.sources.clone(), db).await?;
         insert_models(metadata.tables.clone(), db).await?;
@@ -127,8 +155,47 @@ impl Writer<MetadataV2> for WriterModelV2ToMetaStoreV2 {
         insert_models(metadata.subscriptions.clone(), db).await?;
         insert_models(metadata.session_parameters.clone(), db).await?;
         insert_models(metadata.secrets.clone(), db).await?;
+        insert_models(metadata.exactly_once_iceberg_sinks.clone(), db).await?;
+        insert_models(metadata.iceberg_tables.clone(), db).await?;
+        insert_models(metadata.iceberg_namespace_properties.clone(), db).await?;
+        insert_models(metadata.user_default_privilege.clone(), db).await?;
+        insert_models(metadata.fragment_splits.clone(), db).await?;
+        insert_models(metadata.pending_sink_state.clone(), db).await?;
+        insert_models(metadata.refresh_jobs.clone(), db).await?;
+        insert_models(metadata.cdc_table_snapshot_splits.clone(), db).await?;
         // update_auto_inc must be called last.
         update_auto_inc(&metadata, db).await?;
+        Ok(())
+    }
+
+    async fn overwrite(
+        &self,
+        new_storage_url: &str,
+        new_storage_dir: &str,
+        new_backup_url: &str,
+        new_backup_dir: &str,
+    ) -> BackupResult<()> {
+        use sea_orm::ActiveModelTrait;
+        let kvs = [
+            ("state_store", new_storage_url),
+            ("data_directory", new_storage_dir),
+            ("backup_storage_url", new_backup_url),
+            ("backup_storage_directory", new_backup_dir),
+        ];
+        for (k, v) in kvs {
+            let Some(model) = risingwave_meta_model::system_parameter::Entity::find_by_id(k)
+                .one(&self.meta_store.conn)
+                .await
+                .map_err(map_db_err)?
+            else {
+                return Err(BackupError::MetaStorage(
+                    anyhow::anyhow!("{k} not found in system_parameter table").into(),
+                ));
+            };
+            let mut kv: risingwave_meta_model::system_parameter::ActiveModel = model.into();
+            kv.value = sea_orm::ActiveValue::Set(v.to_owned());
+            kv.update(&self.meta_store.conn).await.map_err(map_db_err)?;
+        }
         Ok(())
     }
 }
@@ -137,60 +204,54 @@ fn map_db_err(e: DbErr) -> BackupError {
     BackupError::MetaStorage(e.into())
 }
 
-// TODO: the code snippet is similar to the one found in migration.rs
+#[macro_export]
+macro_rules! for_all_auto_increment {
+    ($metadata:ident, $db:ident, $macro:ident) => {
+        $macro! ($metadata, $db,
+            {"worker", workers, worker_id},
+            {"object", objects, oid},
+            {"user", users, user_id},
+            {"user_privilege", user_privileges, id},
+            {"fragment", fragments, fragment_id},
+            {"object_dependency", object_dependencies, id}
+        )
+    };
+}
+
+macro_rules! reset_sql_sequence {
+    ($metadata:ident, $db:ident, $( {$table:expr, $model:ident, $id_field:ident} ),*) => {
+        $(
+        match $db.get_database_backend() {
+            sea_orm::DbBackend::MySql => {
+                if let Some(v) = $metadata.$model.iter().map(|w| w.$id_field + 1).max() {
+                    $db.execute(sea_orm::Statement::from_string(
+                        sea_orm::DatabaseBackend::MySql,
+                        format!("ALTER TABLE {} AUTO_INCREMENT = {};", $table, v),
+                    ))
+                    .await
+                    .map_err(map_db_err)?;
+                }
+            }
+            sea_orm::DbBackend::Postgres => {
+                $db.execute(sea_orm::Statement::from_string(
+                    sea_orm::DatabaseBackend::Postgres,
+                    format!("SELECT setval('{}_{}_seq', (SELECT MAX({}) FROM \"{}\"));", $table, stringify!($id_field), stringify!($id_field), $table),
+                ))
+                .await
+                .map_err(map_db_err)?;
+            }
+            sea_orm::DbBackend::Sqlite => {}
+            }
+        )*
+    };
+}
+
+/// Fixes `auto_increment` fields.
 async fn update_auto_inc(
     metadata: &MetadataV2,
     db: &impl sea_orm::ConnectionTrait,
 ) -> BackupResult<()> {
-    match db.get_database_backend() {
-        DbBackend::MySql => {
-            if let Some(next_worker_id) = metadata.workers.iter().map(|w| w.worker_id + 1).max() {
-                db.execute(Statement::from_string(
-                    DatabaseBackend::MySql,
-                    format!("ALTER TABLE worker AUTO_INCREMENT = {next_worker_id};"),
-                ))
-                .await
-                .map_err(map_db_err)?;
-            }
-            if let Some(next_object_id) = metadata.objects.iter().map(|o| o.oid + 1).max() {
-                db.execute(Statement::from_string(
-                    DatabaseBackend::MySql,
-                    format!("ALTER TABLE object AUTO_INCREMENT = {next_object_id};"),
-                ))
-                .await
-                .map_err(map_db_err)?;
-            }
-            if let Some(next_user_id) = metadata.users.iter().map(|u| u.user_id + 1).max() {
-                db.execute(Statement::from_string(
-                    DatabaseBackend::MySql,
-                    format!("ALTER TABLE user AUTO_INCREMENT = {next_user_id};"),
-                ))
-                .await
-                .map_err(map_db_err)?;
-            }
-        }
-        DbBackend::Postgres => {
-            db.execute(Statement::from_string(
-                DatabaseBackend::Postgres,
-                "SELECT setval('worker_worker_id_seq', (SELECT MAX(worker_id) FROM worker));",
-            ))
-            .await
-            .map_err(map_db_err)?;
-            db.execute(Statement::from_string(
-                DatabaseBackend::Postgres,
-                "SELECT setval('object_oid_seq', (SELECT MAX(oid) FROM object) + 1);",
-            ))
-            .await
-            .map_err(map_db_err)?;
-            db.execute(Statement::from_string(
-                DatabaseBackend::Postgres,
-                "SELECT setval('user_user_id_seq', (SELECT MAX(user_id) FROM \"user\") + 1);",
-            ))
-            .await
-            .map_err(map_db_err)?;
-        }
-        DbBackend::Sqlite => {}
-    }
+    for_all_auto_increment!(metadata, db, reset_sql_sequence);
     Ok(())
 }
 

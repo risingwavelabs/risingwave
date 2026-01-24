@@ -13,18 +13,24 @@
 // limitations under the License.
 
 use std::mem::size_of;
+use std::ops::Deref;
+use std::sync::Arc;
 
+use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::{PbBloomFilterType, PbKeyRange, PbSstableInfo};
 
 use crate::key_range::KeyRange;
+use crate::version::{ObjectIdReader, SstableIdReader};
+use crate::{HummockSstableId, HummockSstableObjectId};
 
-#[derive(Debug, PartialEq, Clone, Default)]
-pub struct SstableInfo {
-    pub object_id: u64,
-    pub sst_id: u64,
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
+pub struct SstableInfoInner {
+    pub object_id: HummockSstableObjectId,
+    pub sst_id: HummockSstableId,
     pub key_range: KeyRange,
     pub file_size: u64,
-    pub table_ids: Vec<u32>,
+    pub table_ids: Vec<TableId>,
     pub meta_offset: u64,
     pub stale_key_count: u64,
     pub total_key_count: u64,
@@ -36,7 +42,7 @@ pub struct SstableInfo {
     pub sst_size: u64,
 }
 
-impl SstableInfo {
+impl SstableInfoInner {
     pub fn estimated_encode_len(&self) -> usize {
         let mut basic = size_of::<u64>() // object_id
             + size_of::<u64>() // sstable_id
@@ -61,12 +67,12 @@ impl SstableInfo {
     }
 }
 
-impl From<PbSstableInfo> for SstableInfo {
+impl From<PbSstableInfo> for SstableInfoInner {
     fn from(pb_sstable_info: PbSstableInfo) -> Self {
         assert!(pb_sstable_info.table_ids.is_sorted());
         Self {
-            object_id: pb_sstable_info.object_id,
-            sst_id: pb_sstable_info.sst_id,
+            object_id: pb_sstable_info.object_id.into(),
+            sst_id: pb_sstable_info.sst_id.into(),
             key_range: {
                 // Due to the stripped key range, the key range may be `None`
                 if let Some(pb_keyrange) = pb_sstable_info.key_range {
@@ -99,12 +105,12 @@ impl From<PbSstableInfo> for SstableInfo {
     }
 }
 
-impl From<&PbSstableInfo> for SstableInfo {
+impl From<&PbSstableInfo> for SstableInfoInner {
     fn from(pb_sstable_info: &PbSstableInfo) -> Self {
         assert!(pb_sstable_info.table_ids.is_sorted());
         Self {
-            object_id: pb_sstable_info.object_id,
-            sst_id: pb_sstable_info.sst_id,
+            object_id: pb_sstable_info.object_id.into(),
+            sst_id: pb_sstable_info.sst_id.into(),
             key_range: {
                 if let Some(pb_keyrange) = &pb_sstable_info.key_range {
                     KeyRange {
@@ -136,13 +142,12 @@ impl From<&PbSstableInfo> for SstableInfo {
     }
 }
 
-impl From<SstableInfo> for PbSstableInfo {
-    fn from(sstable_info: SstableInfo) -> Self {
-        assert!(sstable_info.sst_size > 0);
+impl From<SstableInfoInner> for PbSstableInfo {
+    fn from(sstable_info: SstableInfoInner) -> Self {
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
-            object_id: sstable_info.object_id,
-            sst_id: sstable_info.sst_id,
+            object_id: sstable_info.object_id.inner(),
+            sst_id: sstable_info.sst_id.inner(),
             key_range: {
                 let keyrange = sstable_info.key_range;
                 if keyrange.inf_key_range() {
@@ -175,13 +180,12 @@ impl From<SstableInfo> for PbSstableInfo {
     }
 }
 
-impl From<&SstableInfo> for PbSstableInfo {
-    fn from(sstable_info: &SstableInfo) -> Self {
-        assert!(sstable_info.sst_size > 0);
+impl From<&SstableInfoInner> for PbSstableInfo {
+    fn from(sstable_info: &SstableInfoInner) -> Self {
         assert!(sstable_info.table_ids.is_sorted());
         PbSstableInfo {
-            object_id: sstable_info.object_id,
-            sst_id: sstable_info.sst_id,
+            object_id: sstable_info.object_id.inner(),
+            sst_id: sstable_info.sst_id.inner(),
             key_range: {
                 let keyrange = &sstable_info.key_range;
                 if keyrange.inf_key_range() {
@@ -213,6 +217,84 @@ impl From<&SstableInfo> for PbSstableInfo {
 
 impl SstableInfo {
     pub fn remove_key_range(&mut self) {
-        self.key_range = KeyRange::default();
+        let mut sst = self.get_inner();
+        sst.key_range = KeyRange::default();
+        *self = sst.into()
+    }
+}
+
+impl SstableIdReader for SstableInfoInner {
+    fn sst_id(&self) -> HummockSstableId {
+        self.sst_id
+    }
+}
+
+impl ObjectIdReader for SstableInfoInner {
+    fn object_id(&self) -> HummockSstableObjectId {
+        self.object_id
+    }
+}
+
+#[derive(Debug, PartialEq, Clone)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
+pub struct SstableInfo(Arc<SstableInfoInner>);
+
+impl From<&PbSstableInfo> for SstableInfo {
+    fn from(s: &PbSstableInfo) -> Self {
+        SstableInfo(SstableInfoInner::from(s).into())
+    }
+}
+
+impl From<PbSstableInfo> for SstableInfo {
+    fn from(s: PbSstableInfo) -> Self {
+        SstableInfo(SstableInfoInner::from(s).into())
+    }
+}
+
+impl From<SstableInfo> for PbSstableInfo {
+    fn from(s: SstableInfo) -> Self {
+        (&s).into()
+    }
+}
+
+impl From<SstableInfoInner> for SstableInfo {
+    fn from(s: SstableInfoInner) -> Self {
+        Self(s.into())
+    }
+}
+
+impl From<&SstableInfo> for PbSstableInfo {
+    fn from(s: &SstableInfo) -> Self {
+        s.0.as_ref().into()
+    }
+}
+
+impl Deref for SstableInfo {
+    type Target = SstableInfoInner;
+
+    fn deref(&self) -> &Self::Target {
+        &self.0
+    }
+}
+
+impl SstableInfo {
+    pub fn get_inner(&self) -> SstableInfoInner {
+        (*self.0).clone()
+    }
+
+    pub fn set_inner(&mut self, inner: SstableInfoInner) {
+        self.0 = Arc::new(inner);
+    }
+}
+
+impl SstableIdReader for SstableInfo {
+    fn sst_id(&self) -> HummockSstableId {
+        self.sst_id
+    }
+}
+
+impl ObjectIdReader for SstableInfo {
+    fn object_id(&self) -> HummockSstableObjectId {
+        self.object_id
     }
 }

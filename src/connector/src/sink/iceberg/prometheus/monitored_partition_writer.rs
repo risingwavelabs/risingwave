@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,29 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use icelake::io_v2::{
-    FanoutPartitionedWriter, FanoutPartitionedWriterBuilder, FanoutPartitionedWriterMetrics,
-    IcebergWriter, IcebergWriterBuilder,
+use iceberg::Result;
+use iceberg::spec::{DataFile, PartitionKey};
+use iceberg::writer::function_writer::fanout_partition_writer::{
+    FanoutPartitionWriter, FanoutPartitionWriterBuilder,
 };
-use icelake::Result;
+use iceberg::writer::{IcebergWriter, IcebergWriterBuilder};
 use risingwave_common::array::arrow::arrow_array_iceberg;
-use risingwave_common::array::arrow::arrow_schema_iceberg::SchemaRef;
 use risingwave_common::metrics::LabelGuardedIntGauge;
 
 #[derive(Clone)]
 pub struct MonitoredFanoutPartitionedWriterBuilder<B: IcebergWriterBuilder> {
-    inner: FanoutPartitionedWriterBuilder<B>,
-    partition_num: LabelGuardedIntGauge<2>,
+    inner: FanoutPartitionWriterBuilder<B>,
+    partition_num_metrics: LabelGuardedIntGauge,
 }
 
 impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriterBuilder<B> {
+    #[expect(dead_code)]
     pub fn new(
-        inner: FanoutPartitionedWriterBuilder<B>,
-        partition_num: LabelGuardedIntGauge<2>,
+        inner: FanoutPartitionWriterBuilder<B>,
+        partition_num: LabelGuardedIntGauge,
     ) -> Self {
         Self {
             inner,
-            partition_num,
+            partition_num_metrics: partition_num,
         }
     }
 }
@@ -43,47 +44,42 @@ impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriterBuilder<B> {
 impl<B: IcebergWriterBuilder> IcebergWriterBuilder for MonitoredFanoutPartitionedWriterBuilder<B> {
     type R = MonitoredFanoutPartitionedWriter<B>;
 
-    async fn build(self, schema: &SchemaRef) -> Result<Self::R> {
-        let writer = self.inner.build(schema).await?;
+    async fn build(self, partition_key: Option<PartitionKey>) -> Result<Self::R> {
+        let writer = self.inner.build(partition_key).await?;
         Ok(MonitoredFanoutPartitionedWriter {
             inner: writer,
-            partition_num: self.partition_num,
-            current_metrics: FanoutPartitionedWriterMetrics { partition_num: 0 },
+            partition_num_metrics: self.partition_num_metrics,
+            last_partition_num: 0,
         })
     }
 }
 
 pub struct MonitoredFanoutPartitionedWriter<B: IcebergWriterBuilder> {
-    inner: FanoutPartitionedWriter<B>,
-    partition_num: LabelGuardedIntGauge<2>,
-    current_metrics: FanoutPartitionedWriterMetrics,
+    inner: FanoutPartitionWriter<B>,
+    partition_num_metrics: LabelGuardedIntGauge,
+    last_partition_num: usize,
 }
 
 impl<B: IcebergWriterBuilder> MonitoredFanoutPartitionedWriter<B> {
-    pub fn update_metrics(&mut self) -> Result<()> {
-        let last_metrics = std::mem::replace(&mut self.current_metrics, self.inner.metrics());
-        {
-            let delta =
-                self.current_metrics.partition_num as i64 - last_metrics.partition_num as i64;
-            self.partition_num.add(delta);
-            Ok(())
-        }
+    pub fn update_metrics(&mut self) {
+        let current_partition_num = self.inner.partition_num();
+        let delta = current_partition_num as i64 - self.last_partition_num as i64;
+        self.partition_num_metrics.add(delta);
+        self.last_partition_num = current_partition_num;
     }
 }
 
 #[async_trait::async_trait]
 impl<B: IcebergWriterBuilder> IcebergWriter for MonitoredFanoutPartitionedWriter<B> {
-    type R = <FanoutPartitionedWriter<B> as IcebergWriter>::R;
-
     async fn write(&mut self, batch: arrow_array_iceberg::RecordBatch) -> Result<()> {
         self.inner.write(batch).await?;
-        self.update_metrics()?;
+        self.update_metrics();
         Ok(())
     }
 
-    async fn flush(&mut self) -> Result<Vec<Self::R>> {
-        let res = self.inner.flush().await?;
-        self.update_metrics()?;
+    async fn close(&mut self) -> Result<Vec<DataFile>> {
+        self.update_metrics();
+        let res = self.inner.close().await?;
         Ok(res)
     }
 }

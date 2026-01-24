@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use risingwave_common::types::{Datum, JsonbVal};
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::AggStateDyn;
 use risingwave_expr::expr::Context;
-use risingwave_expr::{aggregate, ExprError, Result};
+use risingwave_expr::{ExprError, Result, aggregate};
 
 use crate::scalar::ToJsonb;
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{Field, Schema};
-use serde_json::{json, Map, Value};
+use serde_json::{Map, Value, json};
 use tracing::warn;
 
 use super::{Result, SinkFormatter, StreamChunk};
@@ -315,6 +315,7 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
         risingwave_common::types::DataType::Struct(_) => ("string", ""),
         risingwave_common::types::DataType::List { .. } => ("string", ""),
         risingwave_common::types::DataType::Map(_) => ("string", ""),
+        risingwave_common::types::DataType::Vector(_) => ("string", ""),
     };
 
     if name.is_empty() {
@@ -336,7 +337,7 @@ pub(crate) fn field_to_json(field: &Field) -> Value {
 #[cfg(test)]
 mod tests {
     use risingwave_common::test_prelude::StreamChunkTestExt;
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, StructType};
 
     use super::*;
     use crate::sink::utils::chunk_to_json;
@@ -363,36 +364,18 @@ mod tests {
             Field {
                 data_type: DataType::Int32,
                 name: "v1".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
             },
             Field {
                 data_type: DataType::Float32,
                 name: "v2".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
             },
             Field {
-                data_type: DataType::new_struct(
-                    vec![DataType::Int32, DataType::Float32],
-                    vec!["v4".to_string(), "v5".to_string()],
-                ),
+                data_type: StructType::new(vec![
+                    ("v4", DataType::Int32),
+                    ("v5", DataType::Float32),
+                ])
+                .into(),
                 name: "v3".into(),
-                sub_fields: vec![
-                    Field {
-                        data_type: DataType::Int32,
-                        name: "v4".into(),
-                        sub_fields: vec![],
-                        type_name: "".into(),
-                    },
-                    Field {
-                        data_type: DataType::Float32,
-                        name: "v5".into(),
-                        sub_fields: vec![],
-                        type_name: "".into(),
-                    },
-                ],
-                type_name: "".into(),
             },
         ]);
 

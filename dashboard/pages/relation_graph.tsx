@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -15,53 +15,33 @@
  *
  */
 
-import {
-  Box,
-  Button,
-  Flex,
-  FormControl,
-  FormLabel,
-  Select,
-  Text,
-  VStack,
-} from "@chakra-ui/react"
-import _, { reverse, sortBy } from "lodash"
+import { Box, Button, Flex, Text, VStack } from "@chakra-ui/react"
+import { reverse, sortBy } from "lodash"
 import Head from "next/head"
 import { parseAsInteger, useQueryState } from "nuqs"
 import { Fragment, useCallback, useEffect, useMemo, useState } from "react"
-import RelationGraph, { nodeRadius } from "../components/RelationGraph"
+import RelationGraph, { boxHeight, boxWidth } from "../components/RelationGraph"
+import TimeControls from "../components/TimeControls"
 import Title from "../components/Title"
 import useErrorToast from "../hook/useErrorToast"
 import useFetch from "../lib/api/fetch"
 import {
-  calculateBPRate,
-  calculateCumulativeBp,
-  fetchEmbeddedBackPressure,
-  fetchPrometheusBackPressure,
-} from "../lib/api/metric"
-import {
   Relation,
-  getFragmentVertexToRelationMap,
+  getFragmentToRelationMap,
   getRelationDependencies,
   getRelations,
   relationIsStreamingJob,
 } from "../lib/api/streaming"
+import {
+  TimeParams,
+  createStreamingStatsRefresh,
+} from "../lib/api/streamingStats"
 import { RelationPoint } from "../lib/layout"
-import { BackPressureInfo } from "../proto/gen/monitor_service"
+import { ChannelDeltaStats, RelationStats } from "../proto/gen/monitor_service"
+import { ChannelStatsSnapshot } from "./fragment_graph"
 
 const SIDEBAR_WIDTH = "200px"
 const INTERVAL_MS = 5000
-
-type BackPressureDataSource = "Embedded" | "Prometheus"
-
-// The state of the embedded back pressure metrics.
-// The metrics from previous fetch are stored here to calculate the rate.
-interface EmbeddedBackPressureInfo {
-  previous: BackPressureInfo[]
-  current: BackPressureInfo[]
-  totalBackpressureNs: BackPressureInfo[]
-  totalDurationNs: number
-}
 
 function buildDependencyAsEdges(
   list: Relation[],
@@ -82,8 +62,8 @@ function buildDependencyAsEdges(
           : []
         : [],
       order: r.id,
-      width: nodeRadius * 2,
-      height: nodeRadius * 2,
+      width: boxWidth,
+      height: boxHeight,
       relation: r,
     })
   }
@@ -95,17 +75,7 @@ export default function StreamingGraph() {
   // Since dependentRelations will be deprecated, we need to use getRelationDependencies here to separately obtain the dependency relationship.
   const { response: relationDeps } = useFetch(getRelationDependencies)
   const [selectedId, setSelectedId] = useQueryState("id", parseAsInteger)
-  const { response: fragmentVertexToRelationMap } = useFetch(
-    getFragmentVertexToRelationMap
-  )
-  const [resetEmbeddedBackPressures, setResetEmbeddedBackPressures] =
-    useState<boolean>(false)
-
-  const toggleResetEmbeddedBackPressures = () => {
-    setResetEmbeddedBackPressures(
-      (resetEmbeddedBackPressures) => !resetEmbeddedBackPressures
-    )
-  }
+  const { response: fragmentToRelationMap } = useFetch(getFragmentToRelationMap)
 
   const toast = useErrorToast()
 
@@ -119,116 +89,69 @@ export default function StreamingGraph() {
 
   const relationDependency = relationDependencyCallback()
 
-  const [backPressureDataSource, setBackPressureDataSource] =
-    useState<BackPressureDataSource>("Embedded")
+  // Periodically fetch fragment-level back-pressure from Meta node
+  const [channelStats, setChannelStats] =
+    useState<Map<string, ChannelDeltaStats>>()
+  const [relationStats, setRelationStats] = useState<{
+    [key: number]: RelationStats
+  }>()
 
-  // Periodically fetch Prometheus back-pressure from Meta node
-  const { response: prometheusMetrics } = useFetch(
-    fetchPrometheusBackPressure,
-    INTERVAL_MS,
-    backPressureDataSource === "Prometheus"
-  )
+  // Time parameters state
+  const [timeParams, setTimeParams] = useState<TimeParams>()
 
-  // Periodically fetch embedded back-pressure from Meta node
-  // Didn't call `useFetch()` because the `setState` way is special.
-  const [embeddedBackPressureInfo, setEmbeddedBackPressureInfo] =
-    useState<EmbeddedBackPressureInfo>()
   useEffect(() => {
-    if (resetEmbeddedBackPressures) {
-      setEmbeddedBackPressureInfo(undefined)
-      toggleResetEmbeddedBackPressures()
+    let initialSnapshot: ChannelStatsSnapshot | undefined
+
+    const refresh = createStreamingStatsRefresh(
+      {
+        setChannelStats,
+        setRelationStats,
+        toast,
+      },
+      initialSnapshot,
+      "relation",
+      timeParams
+    )
+
+    refresh() // run once immediately
+    const interval = setInterval(refresh, INTERVAL_MS) // and then run every interval
+    return () => {
+      clearInterval(interval)
     }
-    if (backPressureDataSource === "Embedded") {
-      const interval = setInterval(() => {
-        fetchEmbeddedBackPressure().then(
-          (newBP) => {
-            setEmbeddedBackPressureInfo((prev) =>
-              prev
-                ? {
-                    previous: prev.current,
-                    current: newBP,
-                    totalBackpressureNs: calculateCumulativeBp(
-                      prev.totalBackpressureNs,
-                      prev.current,
-                      newBP
-                    ),
-                    totalDurationNs:
-                      prev.totalDurationNs + INTERVAL_MS * 1000 * 1000,
-                  }
-                : {
-                    previous: newBP, // Use current value to show zero rate, but it's fine
-                    current: newBP,
-                    totalBackpressureNs: [],
-                    totalDurationNs: 0,
-                  }
-            )
-          },
-          (e) => {
-            console.error(e)
-            toast(e, "error")
-          }
-        )
-      }, INTERVAL_MS)
-      return () => {
-        clearInterval(interval)
+  }, [toast, timeParams])
+
+  // Convert fragment-level backpressure rate map to relation-level backpressure rate
+  const relationChannelStats: Map<string, ChannelDeltaStats> | undefined =
+    useMemo(() => {
+      if (!fragmentToRelationMap) {
+        return new Map<string, ChannelDeltaStats>()
       }
-    }
-  }, [backPressureDataSource, toast, resetEmbeddedBackPressures])
-
-  // Get relationId-relationId -> backpressure rate map
-  const backPressures: Map<string, number> | undefined = useMemo(() => {
-    if (!fragmentVertexToRelationMap) {
-      return new Map<string, number>()
-    }
-    let inMap = fragmentVertexToRelationMap.inMap
-    let outMap = fragmentVertexToRelationMap.outMap
-    if (prometheusMetrics || embeddedBackPressureInfo) {
-      let map = new Map<string, number>()
-
-      if (backPressureDataSource === "Embedded" && embeddedBackPressureInfo) {
-        const metrics = calculateBPRate(
-          embeddedBackPressureInfo.totalBackpressureNs,
-          embeddedBackPressureInfo.totalDurationNs
-        )
-        for (const m of metrics.outputBufferBlockingDuration) {
-          let output = Number(m.metric.fragmentId)
-          let input = Number(m.metric.downstreamFragmentId)
-          if (outMap[output] && inMap[input]) {
-            output = outMap[output]
-            input = inMap[input]
-            let key = `${output}_${input}`
-            map.set(key, m.sample[0].value)
+      let mapping = fragmentToRelationMap.fragmentToRelationMap
+      if (channelStats) {
+        let map = new Map<string, ChannelDeltaStats>()
+        for (const [key, stats] of channelStats) {
+          const [outputFragment, inputFragment] = key.split("_").map(Number)
+          let input_relation = mapping[inputFragment]
+          let output_relation = mapping[outputFragment]
+          if (
+            input_relation &&
+            output_relation &&
+            input_relation !== output_relation
+          ) {
+            let key = `${output_relation}_${input_relation}`
+            map.set(key, stats)
           }
         }
-      } else if (backPressureDataSource === "Prometheus" && prometheusMetrics) {
-        for (const m of prometheusMetrics.outputBufferBlockingDuration) {
-          if (m.sample.length > 0) {
-            // Note: We issue an instant query to Prometheus to get the most recent value.
-            // So there should be only one sample here.
-            //
-            // Due to https://github.com/risingwavelabs/risingwave/issues/15280, it's still
-            // possible that an old version of meta service returns a range-query result.
-            // So we take the one with the latest timestamp here.
-            const value = _(m.sample).maxBy((s) => s.timestamp)!.value * 100
-            let output = Number(m.metric.fragment_id)
-            let input = Number(m.metric.downstream_fragment_id)
-            if (outMap[output] && inMap[input]) {
-              output = outMap[output]
-              input = inMap[input]
-              let key = `${output}_${input}`
-              map.set(key, value)
-            }
-          }
-        }
+        return map
       }
-      return map
-    }
-  }, [
-    backPressureDataSource,
-    prometheusMetrics,
-    embeddedBackPressureInfo,
-    fragmentVertexToRelationMap,
-  ])
+    }, [channelStats, fragmentToRelationMap])
+
+  const handleTimeParamsChange = (timestamp?: number, offset?: number) => {
+    setTimeParams({
+      at: timestamp,
+      timeOffset: offset,
+    })
+  }
 
   const retVal = (
     <Flex p={3} height="calc(100vh - 20px)" flexDirection="column">
@@ -243,34 +166,8 @@ export default function StreamingGraph() {
           flexDirection="column"
         >
           <Box flex={1} overflowY="scroll">
-            <VStack width={SIDEBAR_WIDTH} align="start" spacing={1}>
-              {/* NOTE(kwannoel): No need to reset prometheus bp, because it is stateless */}
-              <Button onClick={(_) => toggleResetEmbeddedBackPressures()}>
-                Reset Back Pressures
-              </Button>
-
-              <FormControl>
-                <FormLabel fontWeight="semibold" mb={3}>
-                  Back Pressure Data Source
-                </FormLabel>
-                <Select
-                  value={backPressureDataSource}
-                  onChange={(event) =>
-                    setBackPressureDataSource(
-                      event.target.value as BackPressureDataSource
-                    )
-                  }
-                  defaultValue="Embedded"
-                >
-                  <option value="Embedded" key="Embedded">
-                    Embedded (5 secs)
-                  </option>
-                  <option value="Prometheus" key="Prometheus">
-                    Prometheus (1 min)
-                  </option>
-                </Select>
-              </FormControl>
-
+            <VStack width={SIDEBAR_WIDTH} align="start" spacing={3}>
+              <TimeControls onApply={handleTimeParamsChange} />
               <Text fontWeight="semibold" mb={3}>
                 Relations
               </Text>
@@ -307,7 +204,8 @@ export default function StreamingGraph() {
               nodes={relationDependency}
               selectedId={selectedId?.toString()}
               setSelectedId={(id) => setSelectedId(parseInt(id))}
-              backPressures={backPressures}
+              channelStats={relationChannelStats}
+              relationStats={relationStats}
             />
           )}
         </Box>

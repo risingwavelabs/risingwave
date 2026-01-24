@@ -11,6 +11,7 @@ rpk topic create test-rw-sink-upsert-schema
 rpk topic create test-rw-sink-debezium
 rpk topic create test-rw-sink-without-snapshot
 rpk topic create test-rw-sink-text-key-id
+rpk topic create test-rw-sink-bytes-key-id
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/create_sink.slt'
 sleep 2
@@ -147,10 +148,19 @@ rpk topic delete test-rw-sink-debezium
 
 # test different encoding
 echo "preparing confluent schema registry"
-python3 -m pip install --break-system-packages requests confluent-kafka
+python3 -m pip install --break-system-packages -r e2e_test/requirements.txt
 
 echo "testing protobuf"
-sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/protobuf.slt'
+risedev slt 'e2e_test/sink/kafka/protobuf.slt'
 
 echo "testing avro"
-sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/avro.slt'
+risedev slt 'e2e_test/sink/kafka/avro.slt'
+
+echo "testing avro-decimal"
+risedev slt 'e2e_test/sink/kafka/avro-decimal.slt'
+
+echo "testing avro-enum"
+risedev slt 'e2e_test/sink/kafka/avro-enum.slt'
+
+echo "testing bytes format"
+risedev slt 'e2e_test/sink/kafka/test_bytes_format.slt'

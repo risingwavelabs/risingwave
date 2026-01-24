@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,8 +31,9 @@ use crate::expr::infer_type;
 #[derive(Clone, Eq, PartialEq, Hash)]
 pub struct WindowFunction {
     pub kind: WindowFuncKind,
-    pub args: Vec<ExprImpl>,
     pub return_type: DataType,
+    pub args: Vec<ExprImpl>,
+    pub ignore_nulls: bool,
     pub partition_by: Vec<ExprImpl>,
     pub order_by: OrderBy,
     pub frame: Option<Frame>,
@@ -43,16 +44,18 @@ impl WindowFunction {
     /// `inputs`.
     pub fn new(
         kind: WindowFuncKind,
+        mut args: Vec<ExprImpl>,
+        ignore_nulls: bool,
         partition_by: Vec<ExprImpl>,
         order_by: OrderBy,
-        mut args: Vec<ExprImpl>,
         frame: Option<Frame>,
     ) -> RwResult<Self> {
         let return_type = Self::infer_return_type(&kind, &mut args)?;
         Ok(Self {
             kind,
-            args,
             return_type,
+            args,
+            ignore_nulls,
             partition_by,
             order_by,
             frame,
@@ -114,12 +117,13 @@ impl std::fmt::Debug for WindowFunction {
                 .field("kind", &self.kind)
                 .field("return_type", &self.return_type)
                 .field("args", &self.args)
+                .field("ignore_nulls", &self.ignore_nulls)
                 .field("partition_by", &self.partition_by)
                 .field("order_by", &format_args!("{}", self.order_by));
             if let Some(frame) = &self.frame {
                 builder.field("frame", &format_args!("{}", frame));
             } else {
-                builder.field("frame", &"None".to_string());
+                builder.field("frame", &"None".to_owned());
             }
             builder.finish()
         } else {
@@ -152,7 +156,7 @@ impl Expr for WindowFunction {
         self.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
-        unreachable!("Window function should not be converted to ExprNode")
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
+        Err("Window function should not be converted to ExprNode".to_owned())
     }
 }

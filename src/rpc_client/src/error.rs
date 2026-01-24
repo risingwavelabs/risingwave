@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,9 @@ macro_rules! impl_from_status {
     };
 }
 
-impl_from_status!(stream, batch, meta, compute, compactor, connector, frontend);
+impl_from_status!(
+    stream, batch, meta, compute, compactor, connector, frontend, monitor
+);
 
 impl RpcError {
     /// Returns `true` if the error is a connection error. Typically used to determine if
@@ -93,7 +95,7 @@ impl RpcError {
             RpcError::MetaAddressParse(_) => false,
             RpcError::Internal(anyhow) => anyhow
                 .downcast_ref::<Self>() // this skips all contexts attached to the error
-                .map_or(false, Self::is_connection_error),
+                .is_some_and(Self::is_connection_error),
         }
     }
 }

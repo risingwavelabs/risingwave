@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -51,13 +51,6 @@ impl Notifier {
     pub fn notify_collection_failed(self, err: MetaError) {
         if let Some(tx) = self.collected {
             tx.send(Err(err)).ok();
-        }
-    }
-
-    /// Notify when we failed to collect or finish a barrier. This function consumes `self`.
-    pub fn notify_failed(self, err: MetaError) {
-        if let Some(tx) = self.collected {
-            tx.send(Err(err.clone())).ok();
         }
     }
 }

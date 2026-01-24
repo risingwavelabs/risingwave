@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::collections::HashMap;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use itertools::Itertools;
 use yaml_rust::Yaml;
 
@@ -35,7 +35,7 @@ impl ProvideExpander {
             let id = id
                 .as_str()
                 .ok_or_else(|| anyhow!("expect id to be a string"))?;
-            all_items.insert(id.to_string(), Yaml::Hash(v.clone()));
+            all_items.insert(id.to_owned(), Yaml::Hash(v.clone()));
         }
         Ok(Self {
             all_items: Self::remove_provide(all_items)?,
@@ -88,7 +88,7 @@ impl ProvideExpander {
                             )
                         });
                         return Ok::<_, anyhow::Error>((
-                            Yaml::String(k.to_string()),
+                            Yaml::String(k.to_owned()),
                             Yaml::Array(array.try_collect()?),
                         ));
                     }

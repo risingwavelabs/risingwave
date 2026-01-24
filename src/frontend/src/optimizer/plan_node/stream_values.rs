@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
+use risingwave_pb::stream_plan::ValuesNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody as ProstStreamNode;
 use risingwave_pb::stream_plan::values_node::ExprTuple;
-use risingwave_pb::stream_plan::ValuesNode;
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode};
+use super::utils::{Distill, childless_record};
+use super::{ExprRewritable, LogicalValues, PlanBase, StreamNode, StreamPlanRef as PlanRef};
 use crate::expr::{Expr, ExprImpl, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamValues` implements `LogicalValues.to_stream()`
@@ -33,7 +32,7 @@ pub struct StreamValues {
     logical: LogicalValues,
 }
 
-impl_plan_tree_node_for_leaf! { StreamValues }
+impl_plan_tree_node_for_leaf! { Stream, StreamValues }
 
 impl StreamValues {
     /// `StreamValues` should enforce `Distribution::Single`
@@ -45,9 +44,9 @@ impl StreamValues {
             logical.stream_key().map(|v| v.to_vec()),
             logical.functional_dependency().clone(),
             Distribution::Single,
-            true,
+            StreamKind::AppendOnly,
             false,
-            FixedBitSet::with_capacity(logical.schema().len()),
+            WatermarkColumns::new(),
             MonotonicityMap::new(),
         );
         Self { base, logical }
@@ -72,7 +71,7 @@ impl Distill for StreamValues {
 
 impl StreamNode for StreamValues {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> ProstStreamNode {
-        ProstStreamNode::Values(ValuesNode {
+        ProstStreamNode::Values(Box::new(ValuesNode {
             tuples: self
                 .logical
                 .rows()
@@ -86,16 +85,16 @@ impl StreamNode for StreamValues {
                 .iter()
                 .map(|f| f.to_prost())
                 .collect(),
-        })
+        }))
     }
 }
 
-impl ExprRewritable for StreamValues {
+impl ExprRewritable<Stream> for StreamValues {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
 
-    fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> crate::PlanRef {
+    fn rewrite_exprs(&self, r: &mut dyn crate::expr::ExprRewriter) -> PlanRef {
         Self::new(
             self.logical
                 .rewrite_exprs(r)

@@ -1,0 +1,41 @@
+# https://github.com/risingwavelabs/risingwave/issues/17121
+
+statement ok
+create table t(v int);
+
+statement ok
+insert into t values (1);
+
+statement ok
+alter table t add column now1 timestamptz default now();
+
+# Epoch (then `now()`) will advance after `FLUSH`.
+statement ok
+flush;
+
+statement ok
+insert into t values (2);
+
+statement ok
+flush;
+
+query I
+select v from t order by now1;
+----
+1
+2
+
+# Add a new column again, causing the table to be replaced again.
+statement ok
+alter table t add column v2 varchar;
+
+# We show that the "snapshot value" of `now1` does not get refreshed upon the above `ALTER TABLE`.
+# Otherwise, the `now1` column of `v=1` would be greater than that of `v=2`.
+query I
+select v from t order by now1;
+----
+1
+2
+
+statement ok
+drop table t;

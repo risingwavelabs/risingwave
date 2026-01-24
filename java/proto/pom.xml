@@ -34,6 +34,11 @@
             <groupId>org.apache.tomcat</groupId>
             <artifactId>annotations-api</artifactId>
         </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf.version}</version>
+        </dependency>
     </dependencies>
 
     <build>
@@ -41,7 +46,7 @@
             <extension>
                 <groupId>kr.motd.maven</groupId>
                 <artifactId>os-maven-plugin</artifactId>
-                <version>1.6.2</version>
+                <version>1.7.1</version>
             </extension>
         </extensions>
         <plugins>
@@ -56,8 +61,9 @@
                     </protocArtifact>
                     <pluginId>grpc-java</pluginId>
                     <pluginArtifact>
-                        io.grpc:protoc-gen-grpc-java:1.49.0:exe:${os.detected.classifier}
+                        io.grpc:protoc-gen-grpc-java:${grpc.version}:exe:${os.detected.classifier}
                     </pluginArtifact>
+                    <checkStaleness>true</checkStaleness>
                 </configuration>
                 <executions>
                     <execution>

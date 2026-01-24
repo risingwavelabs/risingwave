@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::sync::LazyLock;
 
-use futures::{pin_mut, Stream, StreamExt};
+use futures::{Stream, StreamExt, pin_mut};
 use tokio::runtime::Runtime;
 use tokio::sync::mpsc;
 

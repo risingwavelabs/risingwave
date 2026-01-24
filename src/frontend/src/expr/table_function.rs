@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,30 +12,34 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
+use anyhow::Context;
 use itertools::Itertools;
+use mysql_async::consts::ColumnType as MySqlColumnType;
+use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
-use risingwave_connector::source::iceberg::{create_parquet_stream_builder, list_s3_directory};
-pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
+use risingwave_connector::connector_common::create_pg_client;
+use risingwave_connector::source::iceberg::{
+    FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
+    new_azblob_operator, new_gcs_operator, new_s3_operator,
+};
 use risingwave_pb::expr::PbTableFunction;
-use thiserror_ext::AsReport;
-use tokio::runtime::Runtime;
-use tokio_postgres;
+pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use tokio_postgres::types::Type as TokioPgType;
 
-use super::{infer_type, Expr, ExprImpl, ExprRewriter, Literal, RwResult};
+use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
+use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
+use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::BindError;
+use crate::expr::reject_impure;
+use crate::utils::FRONTEND_RUNTIME;
 
-static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
-    tokio::runtime::Builder::new_multi_thread()
-        .thread_name("rw-binder-ext-query")
-        .enable_all()
-        .build()
-        .expect("failed to build external system querying runtime")
-});
+const INLINE_ARG_LEN: usize = 6;
+const CDC_SOURCE_ARG_LEN: usize = 2;
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -83,19 +87,15 @@ impl TableFunction {
         let return_type = {
             // arguments:
             // file format e.g. parquet
-            // storage type e.g. s3
-            // s3 region
-            // s3 access key
-            // s3 secret key
-            // file location
-            if args.len() != 6 {
-                return Err(BindError("file_scan function only accepts 6 arguments: file_scan('parquet', 's3', s3 region, s3 access key, s3 secret key, file location)".to_string()).into());
-            }
+            // storage type e.g. s3, gcs, azblob
+            // For s3: file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location_or_directory)
+            // For gcs: file_scan('parquet', 'gcs', credential, file_location_or_directory)
+            // For azblob: file_scan('parquet', 'azblob', endpoint, account_name, account_key, file_location)
             let mut eval_args: Vec<String> = vec![];
             for arg in &args {
                 if arg.return_type() != DataType::Varchar {
                     return Err(BindError(
-                        "file_scan function only accepts string arguments".to_string(),
+                        "file_scan function only accepts string arguments".to_owned(),
                     )
                     .into());
                 }
@@ -103,7 +103,7 @@ impl TableFunction {
                     Some(Ok(value)) => {
                         if value.is_none() {
                             return Err(BindError(
-                                "file_scan function does not accept null arguments".to_string(),
+                                "file_scan function does not accept null arguments".to_owned(),
                             )
                             .into());
                         }
@@ -113,9 +113,9 @@ impl TableFunction {
                             }
                             _ => {
                                 return Err(BindError(
-                                    "file_scan function only accepts string arguments".to_string(),
+                                    "file_scan function only accepts string arguments".to_owned(),
                                 )
-                                .into())
+                                .into());
                             }
                         }
                     }
@@ -124,22 +124,42 @@ impl TableFunction {
                     }
                     None => {
                         return Err(BindError(
-                            "file_scan function only accepts constant arguments".to_string(),
+                            "file_scan function only accepts constant arguments".to_owned(),
                         )
                         .into());
                     }
                 }
             }
+
+            if (eval_args.len() != 4 && eval_args.len() != 6)
+                || (eval_args.len() == 4 && !"gcs".eq_ignore_ascii_case(&eval_args[1]))
+                || (eval_args.len() == 6
+                    && !"s3".eq_ignore_ascii_case(&eval_args[1])
+                    && !"azblob".eq_ignore_ascii_case(&eval_args[1]))
+            {
+                return Err(BindError(
+                "file_scan function supports three backends: s3, gcs, and azblob. Their formats are as follows: \n
+                    file_scan('parquet', 's3', s3_region, s3_access_key, s3_secret_key, file_location) \n
+                    file_scan('parquet', 'gcs', credential, service_account, file_location) \n
+                    file_scan('parquet', 'azblob', endpoint, account_name, account_key, file_location)"
+                        .to_owned(),
+                )
+                .into());
+            }
             if !"parquet".eq_ignore_ascii_case(&eval_args[0]) {
                 return Err(BindError(
-                    "file_scan function only accepts 'parquet' as file format".to_string(),
+                    "file_scan function only accepts 'parquet' as file format".to_owned(),
                 )
                 .into());
             }
 
-            if !"s3".eq_ignore_ascii_case(&eval_args[1]) {
+            if !"s3".eq_ignore_ascii_case(&eval_args[1])
+                && !"gcs".eq_ignore_ascii_case(&eval_args[1])
+                && !"azblob".eq_ignore_ascii_case(&eval_args[1])
+            {
                 return Err(BindError(
-                    "file_scan function only accepts 's3' as storage type".to_string(),
+                    "file_scan function only accepts 's3', 'gcs' or 'azblob' as storage type"
+                        .to_owned(),
                 )
                 .into());
             }
@@ -152,24 +172,72 @@ impl TableFunction {
 
             #[cfg(not(madsim))]
             {
-                let files = if eval_args[5].ends_with('/') {
-                    let files = tokio::task::block_in_place(|| {
-                        RUNTIME.block_on(async {
-                            let files = list_s3_directory(
+                let (file_scan_backend, input_file_location) =
+                    if "s3".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::S3, eval_args[5].clone())
+                    } else if "gcs".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::Gcs, eval_args[3].clone())
+                    } else if "azblob".eq_ignore_ascii_case(&eval_args[1]) {
+                        (FileScanBackend::Azblob, eval_args[5].clone())
+                    } else {
+                        unreachable!();
+                    };
+                let op = match file_scan_backend {
+                    FileScanBackend::S3 => {
+                        let (bucket, _) = extract_bucket_and_file_name(
+                            &eval_args[5].clone(),
+                            &file_scan_backend,
+                        )?;
+
+                        let (s3_region, s3_endpoint) = match eval_args[2].starts_with("http") {
+                            true => ("us-east-1".to_owned(), eval_args[2].clone()), /* for minio, hard code region as not used but needed. */
+                            false => (
                                 eval_args[2].clone(),
-                                eval_args[3].clone(),
-                                eval_args[4].clone(),
-                                eval_args[5].clone(),
+                                format!("https://{}.s3.{}.amazonaws.com", bucket, eval_args[2],),
+                            ),
+                        };
+                        new_s3_operator(
+                            s3_region,
+                            eval_args[3].clone(),
+                            eval_args[4].clone(),
+                            bucket,
+                            s3_endpoint,
+                        )?
+                    }
+                    FileScanBackend::Gcs => {
+                        let (bucket, _) =
+                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+
+                        new_gcs_operator(eval_args[2].clone(), bucket)?
+                    }
+                    FileScanBackend::Azblob => {
+                        let (bucket, _) =
+                            extract_bucket_and_file_name(&input_file_location, &file_scan_backend)?;
+
+                        new_azblob_operator(
+                            eval_args[2].clone(),
+                            eval_args[3].clone(),
+                            eval_args[4].clone(),
+                            bucket,
+                        )?
+                    }
+                };
+                let files = if input_file_location.ends_with('/') {
+                    let files = tokio::task::block_in_place(|| {
+                        FRONTEND_RUNTIME.block_on(async {
+                            let files = list_data_directory(
+                                op.clone(),
+                                input_file_location.clone(),
+                                &file_scan_backend,
                             )
                             .await?;
 
                             Ok::<Vec<String>, anyhow::Error>(files)
                         })
                     })?;
-
                     if files.is_empty() {
                         return Err(BindError(
-                            "file_scan function only accepts non-empty directory".to_string(),
+                            "file_scan function only accepts non-empty directory".to_owned(),
                         )
                         .into());
                     }
@@ -178,24 +246,21 @@ impl TableFunction {
                 } else {
                     None
                 };
-
                 let schema = tokio::task::block_in_place(|| {
-                    RUNTIME.block_on(async {
-                        let parquet_stream_builder = create_parquet_stream_builder(
-                            eval_args[2].clone(),
-                            eval_args[3].clone(),
-                            eval_args[4].clone(),
-                            match files.as_ref() {
-                                Some(files) => files[0].clone(),
-                                None => eval_args[5].clone(),
-                            },
-                        )
-                        .await?;
+                    FRONTEND_RUNTIME.block_on(async {
+                        let location = match files.as_ref() {
+                            Some(files) => files[0].clone(),
+                            None => input_file_location.clone(),
+                        };
+                        let (_, file_name) =
+                            extract_bucket_and_file_name(&location, &file_scan_backend)?;
+
+                        let fields = get_parquet_fields(op, file_name).await?;
 
                         let mut rw_types = vec![];
-                        for field in parquet_stream_builder.schema().fields() {
+                        for field in &fields {
                             rw_types.push((
-                                field.name().to_string(),
+                                field.name().clone(),
                                 IcebergArrowConvert.type_from_field(field)?,
                             ));
                         }
@@ -208,7 +273,11 @@ impl TableFunction {
 
                 if let Some(files) = files {
                     // if the file location is a directory, we need to remove the last argument and add all files in the directory as arguments
-                    args.remove(5);
+                    match file_scan_backend {
+                        FileScanBackend::S3 => args.remove(5),
+                        FileScanBackend::Gcs => args.remove(3),
+                        FileScanBackend::Azblob => args.remove(5),
+                    };
                     for file in files {
                         args.push(ExprImpl::Literal(Box::new(Literal::new(
                             Some(ScalarImpl::Utf8(file.into())),
@@ -229,45 +298,89 @@ impl TableFunction {
         })
     }
 
-    pub fn new_postgres_query(args: Vec<ExprImpl>) -> RwResult<Self> {
-        let args = {
-            if args.len() != 6 {
-                return Err(BindError("postgres_query function only accepts 6 arguments: postgres_query(hostname varchar, port varchar, username varchar, password varchar, database_name varchar, postgres_query varchar)".to_string()).into());
-            }
-            let mut cast_args = Vec::with_capacity(6);
-            for arg in args {
-                let arg = arg.cast_implicit(DataType::Varchar)?;
-                cast_args.push(arg);
-            }
-            cast_args
-        };
-        let evaled_args = {
-            let mut evaled_args: Vec<String> = Vec::with_capacity(6);
-            for arg in &args {
-                match arg.try_fold_const() {
-                    Some(Ok(value)) => {
-                        let Some(scalar) = value else {
-                            return Err(BindError(
-                                "postgres_query function does not accept null arguments"
-                                    .to_string(),
-                            )
-                            .into());
-                        };
-                        evaled_args.push(scalar.into_utf8().into());
-                    }
-                    Some(Err(err)) => {
-                        return Err(err);
-                    }
-                    None => {
-                        return Err(BindError(
-                            "postgres_query function only accepts constant arguments".to_string(),
-                        )
-                        .into());
-                    }
+    fn handle_postgres_or_mysql_query_args(
+        catalog_reader: &CatalogReadGuard,
+        db_name: &str,
+        schema_path: SchemaPath<'_>,
+        args: Vec<ExprImpl>,
+        expect_connector_name: &str,
+    ) -> RwResult<Vec<ExprImpl>> {
+        let cast_args = match args.len() {
+            INLINE_ARG_LEN => {
+                let mut cast_args = Vec::with_capacity(INLINE_ARG_LEN);
+                for arg in args {
+                    let arg = arg.cast_implicit(&DataType::Varchar)?;
+                    cast_args.push(arg);
                 }
+                cast_args
             }
-            evaled_args
+            CDC_SOURCE_ARG_LEN => {
+                let source_name = expr_impl_to_string_fn(&args[0])?;
+                let source_catalog = catalog_reader
+                    .get_source_by_name(db_name, schema_path, &source_name)?
+                    .0;
+                if !source_catalog
+                    .connector_name()
+                    .eq_ignore_ascii_case(expect_connector_name)
+                {
+                    return Err(BindError(format!("TVF function only accepts `mysql-cdc` and `postgres-cdc` source. Expected: {}, but got: {}", expect_connector_name, source_catalog.connector_name())).into());
+                }
+
+                let (props, secret_refs) = source_catalog.with_properties.clone().into_parts();
+                let secret_resolved =
+                    LocalSecretManager::global().fill_secrets(props, secret_refs)?;
+
+                let mut args_vec = vec![
+                    ExprImpl::literal_varchar(secret_resolved["hostname"].clone()),
+                    ExprImpl::literal_varchar(secret_resolved["port"].clone()),
+                    ExprImpl::literal_varchar(secret_resolved["username"].clone()),
+                    ExprImpl::literal_varchar(secret_resolved["password"].clone()),
+                    ExprImpl::literal_varchar(secret_resolved["database.name"].clone()),
+                    args.get(1)
+                        .unwrap()
+                        .clone()
+                        .cast_implicit(&DataType::Varchar)?,
+                ];
+
+                if expect_connector_name.eq_ignore_ascii_case("postgres-cdc") {
+                    args_vec.push(ExprImpl::literal_varchar(
+                        secret_resolved.get("ssl.mode").cloned().unwrap_or_default(),
+                    ));
+                    args_vec.push(ExprImpl::literal_varchar(
+                        secret_resolved
+                            .get("ssl.root.cert")
+                            .cloned()
+                            .unwrap_or_default(),
+                    ));
+                }
+
+                args_vec
+            }
+            _ => {
+                return Err(BindError("postgres_query function and mysql_query function accept either 2 arguments: (cdc_source_name varchar, query varchar) or 6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar)".to_owned()).into());
+            }
         };
+
+        Ok(cast_args)
+    }
+
+    pub fn new_postgres_query(
+        catalog_reader: &CatalogReadGuard,
+        db_name: &str,
+        schema_path: SchemaPath<'_>,
+        args: Vec<ExprImpl>,
+    ) -> RwResult<Self> {
+        let args = Self::handle_postgres_or_mysql_query_args(
+            catalog_reader,
+            db_name,
+            schema_path,
+            args,
+            "postgres-cdc",
+        )?;
+        let evaled_args = args
+            .iter()
+            .map(expr_impl_to_string_fn)
+            .collect::<RwResult<Vec<_>>>()?;
 
         #[cfg(madsim)]
         {
@@ -280,35 +393,32 @@ impl TableFunction {
         #[cfg(not(madsim))]
         {
             let schema = tokio::task::block_in_place(|| {
-                RUNTIME.block_on(async {
-                    let (client, connection) = tokio_postgres::connect(
-                        format!(
-                            "host={} port={} user={} password={} dbname={}",
-                            evaled_args[0],
-                            evaled_args[1],
-                            evaled_args[2],
-                            evaled_args[3],
-                            evaled_args[4]
-                        )
-                        .as_str(),
-                        tokio_postgres::NoTls,
+                FRONTEND_RUNTIME.block_on(async {
+                    let ssl_mode = evaled_args
+                        .get(6)
+                        .and_then(|s| s.parse().ok())
+                        .unwrap_or_default();
+
+                    let ssl_root_cert = evaled_args
+                        .get(7)
+                        .and_then(|s| if s.is_empty() { None } else { Some(s.clone()) });
+
+                    let client = create_pg_client(
+                        &evaled_args[2],
+                        &evaled_args[3],
+                        &evaled_args[0],
+                        &evaled_args[1],
+                        &evaled_args[4],
+                        &ssl_mode,
+                        &ssl_root_cert,
                     )
                     .await?;
-
-                    tokio::spawn(async move {
-                        if let Err(e) = connection.await {
-                            tracing::error!(
-                                "postgres_query_executor: connection error: {:?}",
-                                e.as_report()
-                            );
-                        }
-                    });
 
                     let statement = client.prepare(evaled_args[5].as_str()).await?;
 
                     let mut rw_types = vec![];
                     for column in statement.columns() {
-                        let name = column.name().to_string();
+                        let name = column.name().to_owned();
                         let data_type = match *column.type_() {
                             TokioPgType::BOOL => DataType::Boolean,
                             TokioPgType::INT2 => DataType::Int16,
@@ -326,10 +436,10 @@ impl TableFunction {
                             TokioPgType::JSONB => DataType::Jsonb,
                             TokioPgType::BYTEA => DataType::Bytea,
                             _ => {
-                                return Err(crate::error::ErrorCode::BindError(
-                                    format!("unsupported column type: {}", column.type_())
-                                        .to_string(),
-                                )
+                                return Err(crate::error::ErrorCode::BindError(format!(
+                                    "unsupported column type: {}",
+                                    column.type_()
+                                ))
                                 .into());
                             }
                         };
@@ -350,6 +460,198 @@ impl TableFunction {
         }
     }
 
+    pub fn new_mysql_query(
+        catalog_reader: &CatalogReadGuard,
+        db_name: &str,
+        schema_path: SchemaPath<'_>,
+        args: Vec<ExprImpl>,
+    ) -> RwResult<Self> {
+        let args = Self::handle_postgres_or_mysql_query_args(
+            catalog_reader,
+            db_name,
+            schema_path,
+            args,
+            "mysql-cdc",
+        )?;
+        let evaled_args = args
+            .iter()
+            .map(expr_impl_to_string_fn)
+            .collect::<RwResult<Vec<_>>>()?;
+
+        #[cfg(madsim)]
+        {
+            return Err(crate::error::ErrorCode::BindError(
+                "postgres_query can't be used in the madsim mode".to_string(),
+            )
+            .into());
+        }
+
+        #[cfg(not(madsim))]
+        {
+            let schema = tokio::task::block_in_place(|| {
+                FRONTEND_RUNTIME.block_on(async {
+                    let database_opts: mysql_async::Opts = {
+                        let port = evaled_args[1]
+                            .parse::<u16>()
+                            .context("failed to parse port")?;
+                        mysql_async::OptsBuilder::default()
+                            .ip_or_hostname(evaled_args[0].clone())
+                            .tcp_port(port)
+                            .user(Some(evaled_args[2].clone()))
+                            .pass(Some(evaled_args[3].clone()))
+                            .db_name(Some(evaled_args[4].clone()))
+                            .into()
+                    };
+
+                    let pool = mysql_async::Pool::new(database_opts);
+                    let mut conn = pool
+                        .get_conn()
+                        .await
+                        .context("failed to connect to mysql in binder")?;
+
+                    let query = evaled_args[5].clone();
+                    let statement = conn
+                        .prep(query)
+                        .await
+                        .context("failed to prepare mysql_query in binder")?;
+
+                    let mut rw_types = vec![];
+                    #[allow(clippy::never_loop)]
+                    for column in statement.columns() {
+                        let name = column.name_str().to_string();
+                        let data_type = match column.column_type() {
+                            // Boolean types
+                            MySqlColumnType::MYSQL_TYPE_BIT if column.column_length() == 1 => {
+                                DataType::Boolean
+                            }
+
+                            // Numeric types
+                            // NOTE(kwannoel): Although `bool/boolean` is a synonym of TINY(1) in MySQL,
+                            // we treat it as Int16 here. It is better to be straightforward in our conversion.
+                            MySqlColumnType::MYSQL_TYPE_TINY => DataType::Int16,
+                            MySqlColumnType::MYSQL_TYPE_SHORT => DataType::Int16,
+                            MySqlColumnType::MYSQL_TYPE_INT24 => DataType::Int32,
+                            MySqlColumnType::MYSQL_TYPE_LONG => DataType::Int32,
+                            MySqlColumnType::MYSQL_TYPE_LONGLONG => DataType::Int64,
+                            MySqlColumnType::MYSQL_TYPE_FLOAT => DataType::Float32,
+                            MySqlColumnType::MYSQL_TYPE_DOUBLE => DataType::Float64,
+                            MySqlColumnType::MYSQL_TYPE_NEWDECIMAL => DataType::Decimal,
+                            MySqlColumnType::MYSQL_TYPE_DECIMAL => DataType::Decimal,
+
+                            // Date time types
+                            MySqlColumnType::MYSQL_TYPE_YEAR => DataType::Int32,
+                            MySqlColumnType::MYSQL_TYPE_DATE => DataType::Date,
+                            MySqlColumnType::MYSQL_TYPE_NEWDATE => DataType::Date,
+                            MySqlColumnType::MYSQL_TYPE_TIME => DataType::Time,
+                            MySqlColumnType::MYSQL_TYPE_TIME2 => DataType::Time,
+                            MySqlColumnType::MYSQL_TYPE_DATETIME => DataType::Timestamp,
+                            MySqlColumnType::MYSQL_TYPE_DATETIME2 => DataType::Timestamp,
+                            MySqlColumnType::MYSQL_TYPE_TIMESTAMP => DataType::Timestamptz,
+                            MySqlColumnType::MYSQL_TYPE_TIMESTAMP2 => DataType::Timestamptz,
+
+                            // String types
+                            MySqlColumnType::MYSQL_TYPE_VARCHAR => DataType::Varchar,
+                            // mysql_async does not have explicit `varbinary` and `binary` types,
+                            // we need to check the `ColumnFlags` to distinguish them.
+                            MySqlColumnType::MYSQL_TYPE_STRING
+                            | MySqlColumnType::MYSQL_TYPE_VAR_STRING => {
+                                if column
+                                    .flags()
+                                    .contains(mysql_common::constants::ColumnFlags::BINARY_FLAG)
+                                {
+                                    DataType::Bytea
+                                } else {
+                                    DataType::Varchar
+                                }
+                            }
+
+                            // JSON types
+                            MySqlColumnType::MYSQL_TYPE_JSON => DataType::Jsonb,
+
+                            // Binary types
+                            MySqlColumnType::MYSQL_TYPE_BIT
+                            | MySqlColumnType::MYSQL_TYPE_BLOB
+                            | MySqlColumnType::MYSQL_TYPE_TINY_BLOB
+                            | MySqlColumnType::MYSQL_TYPE_MEDIUM_BLOB
+                            | MySqlColumnType::MYSQL_TYPE_LONG_BLOB => DataType::Bytea,
+
+                            MySqlColumnType::MYSQL_TYPE_UNKNOWN
+                            | MySqlColumnType::MYSQL_TYPE_TYPED_ARRAY
+                            | MySqlColumnType::MYSQL_TYPE_ENUM
+                            | MySqlColumnType::MYSQL_TYPE_SET
+                            | MySqlColumnType::MYSQL_TYPE_GEOMETRY
+                            | MySqlColumnType::MYSQL_TYPE_VECTOR
+                            | MySqlColumnType::MYSQL_TYPE_NULL => {
+                                return Err(crate::error::ErrorCode::BindError(format!(
+                                    "unsupported column type: {:?}",
+                                    column.column_type()
+                                ))
+                                .into());
+                            }
+                        };
+                        rw_types.push((name, data_type));
+                    }
+                    Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
+                        StructType::new(rw_types),
+                    ))
+                })
+            })?;
+
+            Ok(TableFunction {
+                args,
+                return_type: schema,
+                function_type: TableFunctionType::MysqlQuery,
+                user_defined: None,
+            })
+        }
+    }
+
+    /// This is a highly specific _internal_ table function meant to scan and aggregate
+    /// `backfill_table_id`, `row_count` for all MVs which are still being created.
+    pub fn new_internal_backfill_progress() -> Self {
+        TableFunction {
+            args: vec![],
+            return_type: DataType::Struct(StructType::new(vec![
+                ("job_id".to_owned(), DataType::Int32),
+                ("fragment_id".to_owned(), DataType::Int32),
+                ("backfill_state_table_id".to_owned(), DataType::Int32),
+                ("current_row_count".to_owned(), DataType::Int64),
+                ("min_epoch".to_owned(), DataType::Int64),
+            ])),
+            function_type: TableFunctionType::InternalBackfillProgress,
+            user_defined: None,
+        }
+    }
+
+    pub fn new_internal_source_backfill_progress() -> Self {
+        TableFunction {
+            args: vec![],
+            return_type: DataType::Struct(StructType::new(vec![
+                ("job_id".to_owned(), DataType::Int32),
+                ("fragment_id".to_owned(), DataType::Int32),
+                ("backfill_state_table_id".to_owned(), DataType::Int32),
+                ("backfill_progress".to_owned(), DataType::Jsonb),
+            ])),
+            function_type: TableFunctionType::InternalSourceBackfillProgress,
+            user_defined: None,
+        }
+    }
+
+    pub fn new_internal_get_channel_delta_stats(args: Vec<ExprImpl>) -> Self {
+        Self {
+            args,
+            return_type: DataType::Struct(StructType::new(vec![
+                ("upstream_fragment_id".to_owned(), DataType::Int32),
+                ("downstream_fragment_id".to_owned(), DataType::Int32),
+                ("backpressure_rate".to_owned(), DataType::Float64),
+                ("recv_throughput".to_owned(), DataType::Float64),
+                ("send_throughput".to_owned(), DataType::Float64),
+            ])),
+            function_type: TableFunctionType::InternalGetChannelDeltaStats,
+            user_defined: None,
+        }
+    }
+
     pub fn to_protobuf(&self) -> PbTableFunction {
         PbTableFunction {
             function_type: self.function_type as i32,
@@ -357,6 +659,27 @@ impl TableFunction {
             return_type: Some(self.return_type.to_protobuf()),
             udf: self.user_defined.as_ref().map(|c| c.as_ref().into()),
         }
+    }
+
+    /// Serialize the table function. Returns an error if this will result in an impure table
+    /// function on a retract stream, which may lead to inconsistent results.
+    pub fn to_protobuf_checked_pure(&self, retract: bool) -> crate::error::Result<PbTableFunction> {
+        if retract {
+            reject_impure(self.clone(), "table function")?;
+        }
+
+        let args = self
+            .args
+            .iter()
+            .map(|arg| arg.to_expr_proto_checked_pure(retract, "table function argument"))
+            .collect::<crate::error::Result<Vec<_>>>()?;
+
+        Ok(PbTableFunction {
+            function_type: self.function_type as i32,
+            args,
+            return_type: Some(self.return_type.to_protobuf()),
+            udf: self.user_defined.as_ref().map(|c| c.as_ref().into()),
+        })
     }
 
     /// Get the name of the table function.
@@ -403,7 +726,28 @@ impl Expr for TableFunction {
         self.return_type.clone()
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
-        unreachable!("Table function should not be converted to ExprNode")
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
+        Err("Table function should not be converted to ExprNode".to_owned())
+    }
+}
+
+fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
+    match arg.try_fold_const() {
+        Some(Ok(value)) => {
+            let Some(scalar) = value else {
+                return Err(BindError(
+                    "postgres_query function and mysql_query function do not accept null arguments"
+                        .to_owned(),
+                )
+                .into());
+            };
+            Ok(scalar.into_utf8().to_string())
+        }
+        Some(Err(err)) => Err(err),
+        None => Err(BindError(
+            "postgres_query function and mysql_query function only accept constant arguments"
+                .to_owned(),
+        )
+        .into()),
     }
 }

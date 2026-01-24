@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,7 +36,7 @@ impl DataChunkInChannel {
         let prost_data_chunk = self
             .prost_data_chunk
             .get_or_init(|| async {
-                let res = self.data_chunk.clone().compact();
+                let res = self.data_chunk.clone().compact_vis();
                 res.to_protobuf()
             })
             .await;

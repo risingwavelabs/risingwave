@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -72,22 +72,25 @@ impl ColIndexMapping {
     /// accurate distribution.
     /// HashShard(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to HashShard(1,0,2).
     /// HashShard(0,1,2), with mapping(0->1,2->0) will be rewritten to `SomeShard`.
+    ///
+    /// For non-HashShard distribution, it will return the original distribution.
     pub fn rewrite_provided_distribution(&self, dist: &Distribution) -> Distribution {
-        let mapped_dist_key = self.rewrite_dist_key(dist.dist_column_indices());
-
-        match (mapped_dist_key, dist) {
-            (None, Distribution::HashShard(_)) | (None, Distribution::UpstreamHashShard(_, _)) => {
-                Distribution::SomeShard
-            }
-            (Some(mapped_dist_key), Distribution::HashShard(_)) => {
-                Distribution::HashShard(mapped_dist_key)
-            }
-            (Some(mapped_dist_key), Distribution::UpstreamHashShard(_, table_id)) => {
-                Distribution::UpstreamHashShard(mapped_dist_key, *table_id)
-            }
-            _ => {
-                assert!(dist.dist_column_indices().is_empty());
+        match dist {
+            Distribution::Single | Distribution::SomeShard | Distribution::Broadcast => {
                 dist.clone()
+            }
+
+            Distribution::HashShard(_) => match self.rewrite_dist_key(dist.dist_column_indices()) {
+                Some(mapped_dist_key) => Distribution::HashShard(mapped_dist_key),
+                None => Distribution::SomeShard,
+            },
+            Distribution::UpstreamHashShard(_, table_id) => {
+                match self.rewrite_dist_key(dist.dist_column_indices()) {
+                    Some(mapped_dist_key) => {
+                        Distribution::UpstreamHashShard(mapped_dist_key, *table_id)
+                    }
+                    None => Distribution::SomeShard,
+                }
             }
         }
     }
@@ -96,9 +99,21 @@ impl ColIndexMapping {
     /// required distribution after the column index mapping, it will return None.
     /// ShardByKey(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to ShardByKey(1,0,2).
     /// ShardByKey(0,1,2), with mapping(0->1,2->0) will return ShardByKey(1,0).
+    /// ShardByExactKey(0,1,2), with mapping(0->1,1->0,2->2) will be rewritten to ShardByExactKey(1,0,2).
+    /// ShardByExactKey(0,1,2), with mapping(0->1,2->0) will return `Any`.
     /// ShardByKey(0,1), with mapping(2->0) will return `Any`.
     pub fn rewrite_required_distribution(&self, dist: &RequiredDist) -> RequiredDist {
         match dist {
+            RequiredDist::ShardByExactKey(keys) => {
+                assert!(!keys.is_clear());
+                let original_key_count = keys.count_ones(..);
+                let keys = self.rewrite_bitset(keys);
+                if keys.count_ones(..) != original_key_count {
+                    RequiredDist::Any
+                } else {
+                    RequiredDist::ShardByExactKey(keys)
+                }
+            }
             RequiredDist::ShardByKey(keys) => {
                 assert!(!keys.is_clear());
                 let keys = self.rewrite_bitset(keys);
@@ -127,9 +142,9 @@ impl ColIndexMapping {
                         None => RequiredDist::Any,
                     }
                 }
-                Distribution::Single => RequiredDist::PhysicalDist(Distribution::Single),
-                Distribution::Broadcast => RequiredDist::PhysicalDist(Distribution::Broadcast),
-                Distribution::SomeShard => RequiredDist::PhysicalDist(Distribution::SomeShard),
+                Distribution::Single | Distribution::Broadcast | Distribution::SomeShard => {
+                    RequiredDist::PhysicalDist(dist.clone())
+                }
             },
             RequiredDist::Any => RequiredDist::Any,
             RequiredDist::AnyShard => RequiredDist::AnyShard,
@@ -139,7 +154,7 @@ impl ColIndexMapping {
     /// Rewrite the indices in a functional dependency.
     ///
     /// If some columns in the `from` side are removed, then this fd is no longer valid. For
-    /// example, for ABC --> D, it means that A, B, and C together can determine C. But if B is
+    /// example, for ABC --> D, it means that A, B, and C together can determine D. But if B is
     /// removed, this fd is not valid. For this case, we will return [`None`]
     ///
     /// Additionally, If the `to` side of a functional dependency becomes empty after rewriting, it

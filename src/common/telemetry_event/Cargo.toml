@@ -7,18 +7,12 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
-
 [dependencies]
 jsonbb = { workspace = true }
 prost = { workspace = true }
 reqwest = { version = "0.12.2", features = ["json"] }
+risingwave_common_log = { path = "../log" }
 risingwave_pb = { workspace = true }
-thiserror = "1"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -29,4 +23,3 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
     "signal",
 ] }
 tracing = "0.1"
-uuid = { version = "1", features = ["v4"] }

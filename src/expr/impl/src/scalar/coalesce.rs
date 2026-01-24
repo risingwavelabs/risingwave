@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,7 +19,7 @@ use risingwave_common::array::{ArrayRef, DataChunk};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
 use risingwave_expr::expr::{BoxedExpression, Expression};
-use risingwave_expr::{build_function, Result};
+use risingwave_expr::{Result, build_function};
 
 #[derive(Debug)]
 pub struct CoalesceExpression {

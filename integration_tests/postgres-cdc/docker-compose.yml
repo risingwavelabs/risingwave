@@ -23,7 +23,7 @@ services:
   # Use this command to connect to the DB from outside the container:
   #   docker exec postgres psql --username=myuser --dbname=mydb
   postgres:
-    image: postgres:14-alpine
+    image: postgres:17-alpine
     environment:
       - POSTGRES_USER=myuser
       - POSTGRES_PASSWORD=123456

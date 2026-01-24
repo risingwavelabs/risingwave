@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,11 +22,11 @@ use risingwave_expr::window_function::{Frame, WindowFuncKind};
 use risingwave_pb::expr::PbWindowFunction;
 
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
+use crate::OptimizerContextRef;
 use crate::expr::{InputRef, InputRefDisplay};
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
 use crate::utils::ColIndexMappingRewriteExt;
-use crate::OptimizerContextRef;
 
 /// Rewritten version of [`crate::expr::WindowFunction`] which uses `InputRef` instead of
 /// `ExprImpl`.
@@ -35,6 +35,7 @@ pub struct PlanWindowFunction {
     pub kind: WindowFuncKind,
     pub return_type: DataType,
     pub args: Vec<InputRef>,
+    pub ignore_nulls: bool,
     pub partition_by: Vec<InputRef>,
     pub order_by: Vec<ColumnOrder>,
     pub frame: Frame,
@@ -45,7 +46,7 @@ struct PlanWindowFunctionDisplay<'a> {
     pub input_schema: &'a Schema,
 }
 
-impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
+impl std::fmt::Debug for PlanWindowFunctionDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let window_function = self.window_function;
         if f.alternate() {
@@ -53,6 +54,7 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
                 .field("kind", &window_function.kind)
                 .field("return_type", &window_function.return_type)
                 .field("args", &window_function.args)
+                .field("ignore_nulls", &window_function.ignore_nulls)
                 .field("partition_by", &window_function.partition_by)
                 .field("order_by", &window_function.order_by)
                 .field("frame", &window_function.frame)
@@ -71,6 +73,9 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
                         input_schema: self.input_schema
                     }
                 )?;
+            }
+            if window_function.ignore_nulls {
+                write!(f, " IGNORE NULLS")?;
             }
             write!(f, ") OVER(")?;
             let mut delim = "";
@@ -112,8 +117,8 @@ impl<'a> std::fmt::Debug for PlanWindowFunctionDisplay<'a> {
 
 impl PlanWindowFunction {
     pub fn to_protobuf(&self) -> PbWindowFunction {
-        use risingwave_pb::expr::window_function::{PbGeneralType, PbType};
         use WindowFuncKind::*;
+        use risingwave_pb::expr::window_function::{PbGeneralType, PbType};
 
         let r#type = match &self.kind {
             RowNumber => PbType::General(PbGeneralType::RowNumber as _),
@@ -129,6 +134,7 @@ impl PlanWindowFunction {
             args: self.args.iter().map(InputRef::to_proto).collect(),
             return_type: Some(self.return_type.to_protobuf()),
             frame: Some(self.frame.to_protobuf()),
+            ignore_nulls: self.ignore_nulls,
         }
     }
 }
@@ -143,6 +149,13 @@ impl<PlanRef: GenericPlanRef> OverWindow<PlanRef> {
     pub fn new(window_functions: Vec<PlanWindowFunction>, input: PlanRef) -> Self {
         Self {
             window_functions,
+            input,
+        }
+    }
+
+    pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> OverWindow<OtherPlanRef> {
+        OverWindow {
+            window_functions: self.window_functions.clone(),
             input,
         }
     }

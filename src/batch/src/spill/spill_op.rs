@@ -19,12 +19,12 @@ use std::sync::{Arc, LazyLock};
 use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use futures_util::AsyncReadExt;
+use opendal::Operator;
 use opendal::layers::RetryLayer;
 use opendal::services::{Fs, Memory};
-use opendal::Operator;
 use risingwave_common::array::DataChunk;
-use risingwave_pb::data::DataChunk as PbDataChunk;
 use risingwave_pb::Message;
+use risingwave_pb::data::DataChunk as PbDataChunk;
 use thiserror_ext::AsReport;
 use tokio::sync::Mutex;
 use twox_hash::XxHash64;
@@ -56,7 +56,7 @@ impl SpillOp {
         assert!(path.ends_with('/'));
 
         let spill_dir =
-            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
+            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_owned());
         let root = format!("/{}/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR, path);
 
         let op = match spill_backend {
@@ -81,7 +81,7 @@ impl SpillOp {
         let _guard = LOCK.lock().await;
 
         let spill_dir =
-            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_string());
+            std::env::var(RW_BATCH_SPILL_DIR_ENV).unwrap_or_else(|_| DEFAULT_SPILL_DIR.to_owned());
         let root = format!("/{}/{}/", spill_dir, RW_MANAGED_SPILL_DIR);
 
         let builder = Fs::default().root(&root);

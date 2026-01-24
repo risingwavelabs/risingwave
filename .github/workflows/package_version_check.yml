@@ -11,47 +11,10 @@ jobs:
 
     steps:
       - name: Checkout repository
-        uses: actions/checkout@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: List branches
-        run: |
-          git fetch --all
-          release_branches=$(git branch -r | grep -E 'origin/release-[0-9]+\.[0-9]+' | sed 's/origin\///')
-          echo "Release branches:"
-          echo "$release_branches"
-          echo "$release_branches" > release_branches.txt
-
-      - name: Pick latest release branch
-        run: |
-          release_branches=$(cat release_branches.txt)
-          latest_branch=$(echo "$release_branches" | sort -t. -k1,1 -k2,2 -Vr | head -n 1)
-          echo "Latest release branch: $latest_branch"
-          latest_version=$(echo "$latest_branch" | sed -E 's/release-([0-9]+\.[0-9]+)/\1/' | sed 's/^[ \t]*//')
-          echo "Latest release version: $latest_version"
-          echo "$latest_version" > latest_release_version.txt
-
-      - name: Read Cargo.toml version
-        run: |
-          cargo_version=$(grep -oP '(?<=^version = ")[0-9]+\.[0-9]+' Cargo.toml)
-          echo "Cargo.toml version: $cargo_version"
-          echo "$cargo_version" > cargo_version.txt
-
-      - name: Compare versions
-        run: |
-          latest_version=$(cat latest_release_version.txt)
-          cargo_version=$(cat cargo_version.txt)
-
-          latest_major=$(echo $latest_version | cut -d. -f1)
-          latest_minor=$(echo $latest_version | cut -d. -f2)
-
-          cargo_major=$(echo $cargo_version | cut -d. -f1)
-          cargo_minor=$(echo $cargo_version | cut -d. -f2)
-
-          if [ "$cargo_major" -lt "$latest_major" ] || { [ "$cargo_major" -eq "$latest_major" ] && [ "$cargo_minor" -le "$latest_minor" ]; }; then
-            echo "Error: Cargo.toml package version $cargo_version is not larger than $latest_version"
-            exit 1
-          else
-            echo "Cargo.toml version $cargo_version is larger than or equal to $latest_version"
-          fi
+      - name: Check Cargo.toml version bump for new release cycle
+        shell: bash
+        run: bash ci/scripts/package_version_check.sh --cargo-toml Cargo.toml

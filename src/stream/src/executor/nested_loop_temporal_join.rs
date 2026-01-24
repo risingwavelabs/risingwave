@@ -17,19 +17,19 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use futures_async_stream::try_stream;
-use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::StreamChunk;
+use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::types::DataType;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_hummock_sdk::{HummockEpoch, HummockReadEpoch};
-use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
 use risingwave_storage::StateStore;
+use risingwave_storage::store::PrefetchOptions;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use super::join::{JoinType, JoinTypePrimitive};
-use super::temporal_join::{align_input, apply_indices_map, phase1, InternalMessage};
+use super::temporal_join::{InternalMessage, align_input, apply_indices_map, phase1};
 use super::{Execute, ExecutorInfo, Message, StreamExecutorError};
 use crate::common::metrics::MetricsInfo;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
@@ -52,7 +52,7 @@ pub struct NestedLoopTemporalJoinExecutor<S: StateStore, const T: JoinTypePrimit
 }
 
 struct TemporalSide<S: StateStore> {
-    source: StorageTable<S>,
+    source: BatchTable<S>,
 }
 
 impl<S: StateStore> TemporalSide<S> {}
@@ -72,7 +72,7 @@ async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
     for (op, left_row) in chunk.rows() {
         let mut matched = false;
         #[for_await]
-        for keyed_row in right_table
+        for right_row in right_table
             .source
             .batch_iter(
                 HummockReadEpoch::NoWait(epoch),
@@ -81,8 +81,7 @@ async fn phase1_handle_chunk<S: StateStore, E: phase1::Phase1Evaluation>(
             )
             .await?
         {
-            let keyed_row = keyed_row?;
-            let right_row = keyed_row.row();
+            let right_row = right_row?;
             matched = true;
             if let Some(chunk) = E::append_matched_row(op, &mut builder, left_row, right_row) {
                 yield chunk;
@@ -104,7 +103,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
         info: ExecutorInfo,
         left: Executor,
         right: Executor,
-        table: StorageTable<S>,
+        table: BatchTable<S>,
         condition: Option<NonStrictExpression>,
         output_indices: Vec<usize>,
         metrics: Arc<StreamingMetrics>,
@@ -112,13 +111,13 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
     ) -> Self {
         let _metrics_info = MetricsInfo::new(
             metrics.clone(),
-            table.table_id().table_id,
+            table.table_id(),
             ctx.id,
             "nested loop temporal join",
         );
 
         Self {
-            ctx: ctx.clone(),
+            ctx,
             info,
             left,
             right,
@@ -258,7 +257,7 @@ impl<S: StateStore, const T: JoinTypePrimitive> NestedLoopTemporalJoinExecutor<S
                 InternalMessage::Barrier(chunk, barrier) => {
                     assert!(chunk.is_empty());
                     if let Some(vnodes) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        let _vnodes = self.right_table.source.update_vnode_bitmap(vnodes.clone());
+                        let _vnodes = self.right_table.source.update_vnode_bitmap(vnodes);
                     }
                     prev_epoch = Some(barrier.epoch.curr);
                     yield Message::Barrier(barrier)

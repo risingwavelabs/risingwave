@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,7 +17,7 @@
 use std::fmt::Write;
 use std::process::Command;
 
-use crate::{add_hummock_backend, Application, HummockInMemoryStrategy, ServiceConfig};
+use crate::{Application, HummockInMemoryStrategy, ServiceConfig, add_hummock_backend};
 
 /// Generate environment variables (put in file `.risingwave/config/risedev-env`)
 /// from the given service configurations to be used by future
@@ -36,6 +36,7 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                         c.provide_opendal.as_ref().unwrap(),
                         c.provide_minio.as_ref().unwrap(),
                         c.provide_aws_s3.as_ref().unwrap(),
+                        c.provide_moat.as_ref().unwrap(),
                         HummockInMemoryStrategy::Disallowed,
                         &mut cmd,
                     )
@@ -82,6 +83,23 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"RISEDEV_SCHEMA_REGISTRY_URL="{url}""#,).unwrap();
                 writeln!(env, r#"RPK_REGISTRY_HOSTS="{url}""#).unwrap();
             }
+            ServiceConfig::Pulsar(c) => {
+                // These 2 names are NOT defined by Pulsar, but by us.
+                // The `pulsar-admin` CLI uses a `PULSAR_CLIENT_CONF` file with `brokerServiceUrl` and `webServiceUrl`
+                // It may be used by our upcoming `PulsarCat` #21401
+                writeln!(
+                    env,
+                    r#"PULSAR_BROKER_URL="pulsar://{}:{}""#,
+                    c.address, c.broker_port
+                )
+                .unwrap();
+                writeln!(
+                    env,
+                    r#"PULSAR_HTTP_URL="http://{}:{}""#,
+                    c.address, c.http_port
+                )
+                .unwrap();
+            }
             ServiceConfig::MySql(c) if c.application != Application::Metastore => {
                 let host = &c.address;
                 let port = &c.port;
@@ -105,7 +123,7 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"PUBSUB_EMULATOR_HOST="{address}:{port}""#,).unwrap();
                 writeln!(env, r#"RISEDEV_PUBSUB_WITH_OPTIONS_COMMON="connector='google_pubsub',pubsub.emulator_host='{address}:{port}'""#,).unwrap();
             }
-            ServiceConfig::Postgres(c) if c.application != Application::Metastore => {
+            ServiceConfig::Postgres(c) => {
                 let host = &c.address;
                 let port = &c.port;
                 let user = &c.user;
@@ -117,6 +135,11 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"PGUSER="{user}""#,).unwrap();
                 writeln!(env, r#"PGPASSWORD="{password}""#,).unwrap();
                 writeln!(env, r#"PGDATABASE="{database}""#,).unwrap();
+                writeln!(
+                    env,
+                    r#"RISEDEV_POSTGRES_WITH_OPTIONS_COMMON="connector='postgres-cdc',hostname='{host}',port='{port}'""#,
+                )
+                .unwrap();
             }
             ServiceConfig::SqlServer(c) => {
                 let host = &c.address;
@@ -135,6 +158,21 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                     r#"RISEDEV_SQLSERVER_WITH_OPTIONS_COMMON="connector='sqlserver-cdc',hostname='{host}',port='{port}',username='{user}',password='{password}',database.name='{database}'""#,
                 )
                 .unwrap();
+            }
+            ServiceConfig::MetaNode(meta_node_config) => {
+                writeln!(
+                    env,
+                    r#"RISEDEV_RW_META_DASHBOARD_ADDR="http://{}:{}""#,
+                    meta_node_config.address, meta_node_config.dashboard_port
+                )
+                .unwrap();
+            }
+            ServiceConfig::Lakekeeper(c) => {
+                let base_url = format!("http://{}:{}", c.address, c.port);
+                let catalog_url = format!("{}/catalog", base_url);
+                writeln!(env, r#"RISEDEV_LAKEKEEPER_URL="{base_url}""#,).unwrap();
+                writeln!(env, r#"LAKEKEEPER_CATALOG_URL="{catalog_url}""#,).unwrap();
+                writeln!(env, r#"RISEDEV_LAKEKEEPER_WITH_OPTIONS_COMMON="connector='iceberg',catalog.type='rest',catalog.uri='{catalog_url}'""#,).unwrap();
             }
             _ => {}
         }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,18 +13,16 @@
 // limitations under the License.
 
 use std::sync::Arc;
-use std::time::Duration;
 
 use risingwave_backup::error::{BackupError, BackupResult};
 use risingwave_backup::storage::{MetaSnapshotStorageRef, ObjectStoreMetaSnapshotStorage};
-use risingwave_common::config::{MetaBackend, ObjectStoreConfig};
+use risingwave_common::config::{MetaBackend, MetaStoreConfig, ObjectStoreConfig};
 use risingwave_object_store::object::build_remote_object_store;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
-use sea_orm::DbBackend;
 
-use crate::backup_restore::RestoreOpts;
-use crate::controller::{SqlMetaStore, IN_MEMORY_STORE};
 use crate::MetaStoreBackend;
+use crate::backup_restore::RestoreOpts;
+use crate::controller::SqlMetaStore;
 
 // Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
 pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
@@ -32,47 +30,51 @@ pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
         MetaBackend::Mem => MetaStoreBackend::Mem,
         MetaBackend::Sql => MetaStoreBackend::Sql {
             endpoint: opts.sql_endpoint,
+            config: MetaStoreConfig::default(),
         },
         MetaBackend::Sqlite => MetaStoreBackend::Sql {
             endpoint: format!("sqlite://{}?mode=rwc", opts.sql_endpoint),
+            config: MetaStoreConfig::default(),
         },
         MetaBackend::Postgres => MetaStoreBackend::Sql {
             endpoint: format!(
-                "postgres://{}:{}@{}/{}",
-                opts.sql_username, opts.sql_password, opts.sql_endpoint, opts.sql_database
+                "postgres://{}:{}@{}/{}{}",
+                opts.sql_username,
+                opts.sql_password,
+                opts.sql_endpoint,
+                opts.sql_database,
+                if let Some(params) = &opts.sql_url_params
+                    && !params.is_empty()
+                {
+                    format!("?{}", params)
+                } else {
+                    "".to_owned()
+                }
             ),
+            config: MetaStoreConfig::default(),
         },
         MetaBackend::Mysql => MetaStoreBackend::Sql {
             endpoint: format!(
-                "mysql://{}:{}@{}/{}",
-                opts.sql_username, opts.sql_password, opts.sql_endpoint, opts.sql_database
+                "mysql://{}:{}@{}/{}{}",
+                opts.sql_username,
+                opts.sql_password,
+                opts.sql_endpoint,
+                opts.sql_database,
+                if let Some(params) = &opts.sql_url_params
+                    && !params.is_empty()
+                {
+                    format!("?{}", params)
+                } else {
+                    "".to_owned()
+                }
             ),
+            config: MetaStoreConfig::default(),
         },
     };
-    match meta_store_backend {
-        MetaStoreBackend::Mem => {
-            let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await.unwrap();
-            Ok(SqlMetaStore::new(conn))
-        }
-        MetaStoreBackend::Sql { endpoint } => {
-            let max_connection = if DbBackend::Sqlite.is_prefix_of(&endpoint) {
-                // Due to the fact that Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
-                // here we forcibly specify the number of connections as 1.
-                1
-            } else {
-                10
-            };
-            let mut options = sea_orm::ConnectOptions::new(endpoint);
-            options
-                .max_connections(max_connection)
-                .connect_timeout(Duration::from_secs(10))
-                .idle_timeout(Duration::from_secs(30));
-            let conn = sea_orm::Database::connect(options)
-                .await
-                .map_err(|e| BackupError::MetaStorage(e.into()))?;
-            Ok(SqlMetaStore::new(conn))
-        }
-    }
+
+    SqlMetaStore::connect(meta_store_backend)
+        .await
+        .map_err(|e| BackupError::MetaStorage(e.into()))
 }
 
 pub async fn get_backup_store(opts: RestoreOpts) -> BackupResult<MetaSnapshotStorageRef> {

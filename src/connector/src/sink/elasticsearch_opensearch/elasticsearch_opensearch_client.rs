@@ -19,14 +19,14 @@ use futures::{FutureExt, TryFuture};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
-use serde_json::{json, Value};
+use serde_json::{Value, json};
 
 use super::super::SinkError;
 use super::elasticsearch_opensearch_config::ElasticSearchOpenSearchConfig;
 use super::elasticsearch_opensearch_formatter::{BuildBulkPara, ElasticSearchOpenSearchFormatter};
+use crate::sink::Result;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::AsyncTruncateSinkWriter;
-use crate::sink::Result;
 
 pub enum ElasticSearchOpenSearchClient {
     ElasticSearch(elasticsearch::Elasticsearch),
@@ -160,6 +160,7 @@ pub struct ElasticSearchOpenSearchSinkWriter {
     client: Arc<ElasticSearchOpenSearchClient>,
     formatter: ElasticSearchOpenSearchFormatter,
     config: ElasticSearchOpenSearchConfig,
+    is_append_only: bool,
 }
 
 impl ElasticSearchOpenSearchSinkWriter {
@@ -168,6 +169,7 @@ impl ElasticSearchOpenSearchSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         connector: &str,
+        is_append_only: bool,
     ) -> Result<Self> {
         let client = Arc::new(config.build_client(connector)?);
         let formatter = ElasticSearchOpenSearchFormatter::new(
@@ -182,6 +184,7 @@ impl ElasticSearchOpenSearchSinkWriter {
             client,
             formatter,
             config,
+            is_append_only,
         })
     }
 }
@@ -192,6 +195,7 @@ pub type ElasticSearchOpenSearchSinkDeliveryFuture =
 impl AsyncTruncateSinkWriter for ElasticSearchOpenSearchSinkWriter {
     type DeliveryFuture = ElasticSearchOpenSearchSinkDeliveryFuture;
 
+    #[define_opaque(ElasticSearchOpenSearchSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
@@ -202,7 +206,7 @@ impl AsyncTruncateSinkWriter for ElasticSearchOpenSearchSinkWriter {
         let mut bulks: Vec<ElasticSearchOpenSearchBulk> = Vec::with_capacity(chunk_capacity);
 
         let mut bulks_size = 0;
-        for build_bulk_para in self.formatter.convert_chunk(chunk)? {
+        for build_bulk_para in self.formatter.convert_chunk(chunk, self.is_append_only)? {
             let BuildBulkPara {
                 key,
                 value,

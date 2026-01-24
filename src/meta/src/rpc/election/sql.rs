@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -58,7 +58,7 @@ pub trait SqlDriver: Send + Sync + 'static {
     async fn update_heartbeat(&self, service_name: &str, id: &str) -> MetaResult<()>;
 
     async fn try_campaign(&self, service_name: &str, id: &str, ttl: i64)
-        -> MetaResult<ElectionRow>;
+    -> MetaResult<ElectionRow>;
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>>;
 
     async fn candidates(&self, service_name: &str) -> MetaResult<Vec<ElectionRow>>;
@@ -691,7 +691,7 @@ where
 
         let mut election_ticker = time::interval(Duration::from_secs(1));
 
-        let mut prev_leader = "".to_string();
+        let mut prev_leader = "".to_owned();
 
         loop {
             tokio::select! {
@@ -720,11 +720,10 @@ where
 
                         timeout_ticker.reset();
 
-                        if is_leader {
-                            if let Err(e) = self.driver.trim_candidates(META_ELECTION_KEY, ttl * 2).await {
+                        if is_leader
+                            && let Err(e) = self.driver.trim_candidates(META_ELECTION_KEY, ttl * 2).await {
                                 tracing::warn!(error = %e.as_report(), "trim candidates failed");
                             }
-                        }
                     }
                 _ = timeout_ticker.tick() => {
                     tracing::error!("member {} election timeout", self.id);
@@ -821,7 +820,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_sql_election() {
-        let id = "test_id".to_string();
+        let id = "test_id".to_owned();
         let conn = prepare_sqlite_env().await.unwrap();
 
         let provider = SqliteDriver { conn };

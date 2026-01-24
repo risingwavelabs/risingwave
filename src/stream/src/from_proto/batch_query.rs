@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use risingwave_common::catalog::ColumnId;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_pb::stream_plan::BatchPlanNode;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 
 use super::*;
 use crate::executor::{BatchQueryExecutor, DummyExecutor};
@@ -33,7 +33,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
         if node.table_desc.is_none() {
             // used in sharing cdc source backfill as a dummy batch plan node
             let mut info = params.info;
-            info.identity = "DummyBatchQueryExecutor".to_string();
+            info.identity = "DummyBatchQueryExecutor".to_owned();
             return Ok((info, DummyExecutor).into());
         }
 
@@ -46,7 +46,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
             .map(ColumnId::from)
             .collect();
 
-        let table = StorageTable::new_partial(
+        let table = BatchTable::new_partial(
             state_store,
             column_ids,
             params.vnode_bitmap.map(Into::into),
@@ -56,7 +56,7 @@ impl ExecutorBuilder for BatchQueryExecutorBuilder {
 
         let exec = BatchQueryExecutor::new(
             table,
-            params.env.config().developer.chunk_size,
+            params.config.developer.chunk_size,
             params.info.schema.clone(),
         );
         Ok((params.info, exec).into())

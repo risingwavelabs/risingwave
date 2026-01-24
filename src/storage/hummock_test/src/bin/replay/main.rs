@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,21 +28,22 @@ use std::path::Path;
 use std::sync::Arc;
 
 use clap::Parser;
-use foyer::{Engine, HybridCacheBuilder};
-use replay_impl::{get_replay_notification_client, GlobalReplayImpl};
+use foyer::{CacheBuilder, HybridCacheBuilder};
+use replay_impl::{GlobalReplayImpl, get_replay_notification_client};
 use risingwave_common::config::{
-    extract_storage_memory_config, load_config, NoOverride, ObjectStoreConfig,
+    NoOverride, ObjectStoreConfig, extract_storage_memory_config, load_config,
 };
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_hummock_trace::{
     GlobalReplay, HummockReplay, Operation, Record, Result, TraceReader, TraceReaderImpl, USE_TRACE,
 };
-use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_meta::hummock::MockHummockMetaClient;
+use risingwave_meta::hummock::test_utils::setup_compute_env;
 use risingwave_object_store::object::build_remote_object_store;
-use risingwave_storage::filter_key_extractor::{
-    FakeRemoteTableAccessor, RpcFilterKeyExtractorManager,
+use risingwave_storage::compaction_catalog_manager::{
+    CompactionCatalogManager, FakeRemoteTableAccessor,
 };
+use risingwave_storage::hummock::none::NoneRecentFilter;
 use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
@@ -70,7 +71,7 @@ struct Args {
 async fn main() {
     let args = Args::parse();
     // disable runtime tracing when replaying
-    std::env::set_var(USE_TRACE, "false");
+    unsafe { std::env::set_var(USE_TRACE, "false") };
     run_replay(args).await.unwrap();
 }
 
@@ -87,7 +88,7 @@ async fn run_replay(args: Args) -> Result<()> {
     Ok(())
 }
 
-async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay> {
+async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalReplay + use<>> {
     let config = load_config(&args.config, NoOverride);
     let storage_memory_config = extract_storage_memory_config(&config);
     let system_params_reader =
@@ -115,28 +116,31 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
     let meta_cache = HybridCacheBuilder::new()
         .memory(storage_opts.meta_cache_capacity_mb * (1 << 20))
         .with_shards(storage_opts.meta_cache_shard_num)
-        .storage(Engine::Large)
+        .storage()
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(storage_opts.block_cache_capacity_mb * (1 << 20))
         .with_shards(storage_opts.block_cache_shard_num)
-        .storage(Engine::Large)
+        .storage()
         .build()
         .await
         .unwrap();
 
     let sstable_store = Arc::new(SstableStore::new(SstableStoreConfig {
         store: Arc::new(object_store),
-        path: storage_opts.data_directory.to_string(),
+        path: storage_opts.data_directory.clone(),
         prefetch_buffer_capacity: storage_opts.prefetch_buffer_capacity_mb * (1 << 20),
         max_prefetch_block_number: storage_opts.max_prefetch_block_number,
-        recent_filter: None,
+        recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: state_store_metrics.clone(),
         use_new_object_prefix_strategy: args.use_new_object_prefix_strategy,
+        skip_bloom_filter_in_serde: storage_opts.sst_skip_bloom_filter_in_serde,
         meta_cache,
         block_cache,
+        vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+        vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }));
 
     let (hummock_meta_client, notification_client, notifier) = {
@@ -166,16 +170,14 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         )
     };
 
-    let key_filter_manager = Arc::new(RpcFilterKeyExtractorManager::new(Box::new(
-        FakeRemoteTableAccessor {},
-    )));
-
     let storage = HummockStorage::new(
         storage_opts,
         sstable_store,
         hummock_meta_client.clone(),
         notification_client,
-        key_filter_manager,
+        Arc::new(CompactionCatalogManager::new(Box::new(
+            FakeRemoteTableAccessor {},
+        ))),
         state_store_metrics,
         compactor_metrics,
         None,

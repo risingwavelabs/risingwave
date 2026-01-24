@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ pub use client::*;
 use risingwave_pb::catalog::SchemaRegistryNameStrategy as PbSchemaRegistryNameStrategy;
 pub(crate) use util::*;
 
-use super::{invalid_option_error, InvalidOptionError};
+use super::{InvalidOptionError, invalid_option_error};
 
 pub fn name_strategy_from_str(value: &str) -> Option<PbSchemaRegistryNameStrategy> {
     match value {
@@ -51,7 +51,7 @@ pub fn get_subject_by_strategy(
         }
         PbSchemaRegistryNameStrategy::RecordNameStrategy => {
             let record_name = record.ok_or_else(build_error_lack_field)?;
-            Ok(record_name.to_string())
+            Ok(record_name.to_owned())
         }
         PbSchemaRegistryNameStrategy::TopicRecordNameStrategy => {
             let record_name = record.ok_or_else(build_error_lack_field)?;

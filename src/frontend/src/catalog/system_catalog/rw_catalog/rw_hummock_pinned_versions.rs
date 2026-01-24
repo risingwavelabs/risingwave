@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockPinnedVersio
         .await?
         .into_iter()
         .map(|s| RwHummockPinnedVersion {
-            worker_node_id: s.0 as _,
+            worker_node_id: s.0.as_i32_id(),
             min_pinned_version_id: s.1 as _,
         })
         .collect();

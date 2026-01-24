@@ -4,11 +4,13 @@ set sink_decouple = false;
 system ok
 rpk topic create test-rw-sink-upsert-avro
 
+# use jq to remove 2 fields/columns before registration
 system ok
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-upsert-avro-value' src/connector/src/test_data/all-types.avsc
+jq '.fields = (.fields | map(select(.name | test("unsupported|mon_day_sec_field") | not)))' src/connector/src/test_data/all-types.avsc | sr_register 'test-rw-sink-upsert-avro-value' AVRO
 
+# use jq to select 2 fields/columns used as key
 system ok
-python3 e2e_test/sink/kafka/register_schema.py 'http://schemaregistry:8082' 'test-rw-sink-upsert-avro-key' src/connector/src/test_data/all-types.avsc 'string_field,int32_field'
+jq '.fields = (.fields | map(select(.name | test("string_field|int32_field"))))' src/connector/src/test_data/all-types.avsc | sr_register 'test-rw-sink-upsert-avro-key' AVRO
 
 statement ok
 create table from_kafka ( *, gen_i32_field int as int32_field + 2, primary key (some_key) )
@@ -58,7 +60,7 @@ system ok
 rpk topic create test-rw-sink-plain-avro
 
 system ok
-jq '{"schema": tojson}' << EOF | curl -X POST -H 'content-type: application/json' -d @- 'http://schemaregistry:8082/subjects/test-rw-sink-plain-avro-value/versions'
+sr_register test-rw-sink-plain-avro-value AVRO << EOF
 {
   "type": "record",
   "name": "Simple",
@@ -106,7 +108,7 @@ format plain encode avro (
 key encode text;
 
 system ok
-jq '{"schema": tojson}' << EOF | curl -X POST -H 'content-type: application/json' -d @- 'http://schemaregistry:8082/subjects/test-rw-sink-plain-avro-key/versions'
+sr_register test-rw-sink-plain-avro-key AVRO << EOF
 {
   "type": "record",
   "name": "Key",
@@ -129,9 +131,8 @@ format plain encode avro (
   force_append_only = true,
   schema.registry = 'http://schemaregistry:8082');
 
-sleep 2s
 
-query ITT
+query ITT retry 4 backoff 1s
 select
   int32_field,
   string_field,
@@ -244,3 +245,6 @@ drop table from_kafka;
 
 system ok
 rpk topic delete test-rw-sink-upsert-avro
+
+statement ok
+set sink_decouple to default;

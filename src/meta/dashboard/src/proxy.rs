@@ -16,9 +16,9 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 
 use anyhow::anyhow;
-use axum::http::{header, HeaderMap, StatusCode, Uri};
-use axum::response::{IntoResponse, Response};
 use axum::Router;
+use axum::http::{HeaderMap, StatusCode, Uri, header};
+use axum::response::{IntoResponse, Response};
 use bytes::Bytes;
 use thiserror_ext::AsReport as _;
 use url::Url;
@@ -62,7 +62,7 @@ async fn proxy(
     uri: Uri,
     cache: Arc<Mutex<HashMap<String, CachedResponse>>>,
 ) -> anyhow::Result<Response> {
-    let mut path = uri.path().to_string();
+    let mut path = uri.path().to_owned();
     if path.ends_with('/') {
         path += "index.html";
     }

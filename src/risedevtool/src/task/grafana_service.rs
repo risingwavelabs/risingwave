@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::env;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 use super::{ExecuteContext, Task};
 use crate::util::stylized_risedev_subcmd;
@@ -103,7 +103,11 @@ impl Task for GrafanaService {
 
         let path = self.grafana_server_path()?;
         if !path.exists() {
-            return Err(anyhow!("grafana-server binary not found in {:?}\nDid you enable monitoring feature in `{}`?", path, stylized_risedev_subcmd("configure")));
+            return Err(anyhow!(
+                "grafana-server binary not found in {:?}\nDid you enable monitoring feature in `{}`?",
+                path,
+                stylized_risedev_subcmd("configure")
+            ));
         }
 
         Self::write_config_files(

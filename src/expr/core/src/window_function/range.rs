@@ -32,11 +32,11 @@ use super::FrameBound::{
     self, CurrentRow, Following, Preceding, UnboundedFollowing, UnboundedPreceding,
 };
 use super::FrameBoundsImpl;
-use crate::expr::{
-    build_func, BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression,
-    LiteralExpression,
-};
 use crate::Result;
+use crate::expr::{
+    BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
+    build_func,
+};
 
 #[derive(Debug, Clone, Eq, PartialEq, Hash)]
 pub struct RangeFrameBounds {
@@ -130,8 +130,10 @@ impl FrameBoundsImpl for RangeFrameBounds {
                             );
                         }
                     }
-                },
-                _ => unreachable!("other order column data types are not supported and should be banned in frontend"),
+                }
+                _ => unreachable!(
+                    "other order column data types are not supported and should be banned in frontend"
+                ),
             }
             Ok(())
         })

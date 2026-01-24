@@ -7,43 +7,38 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
+[lib]
+test = false
 
 [dependencies]
 anyhow = "1"
 bytes = "1"
-chrono = "0.4"
+chrono = { workspace = true }
 clap = { workspace = true }
 comfy-table = "7"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 hex = "0.4"
-inquire = "0.7.0"
+inquire = "0.9.1"
 itertools = { workspace = true }
-memcomparable = "0.2"
 prost = { workspace = true }
-regex = "1.10.0"
+regex = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_frontend = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
 risingwave_meta = { workspace = true }
-risingwave_meta_model_migration = { workspace = true }
-risingwave_meta_model_v2 = { workspace = true }
+risingwave_meta_model = { workspace = true }
 risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
-sea-orm = { workspace = true }
-serde = "1"
+rw-diagnose-tools = { git = "https://github.com/risingwavelabs/rw-diagnose-tools", rev = "380d1b7b23a77ee0bbb0d2b9d552de58db4490cc" }
+serde = { workspace = true }
 serde_json = "1"
 serde_yaml = "0.9.25"
-size = "0.4"
+size = "0.5"
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
@@ -66,6 +61,3 @@ risingwave_hummock_sdk = { workspace = true }
 
 [lints]
 workspace = true
-
-[lib]
-test = false

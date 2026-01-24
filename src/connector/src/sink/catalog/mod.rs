@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,95 +20,69 @@ use std::fmt::{Display, Formatter};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, Schema, SchemaId, TableId, UserId,
-    OBJECT_ID_PLACEHOLDER,
+    ColumnCatalog, ConnectionId, CreateType, DatabaseId, Field, Schema, SchemaId, StreamJobStatus,
+    TableId, UserId,
 };
+pub use risingwave_common::id::SinkId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_pb::catalog::{
     PbCreateType, PbSink, PbSinkFormatDesc, PbSinkType, PbStreamJobStatus,
 };
 use risingwave_pb::secret::PbSecretRef;
-use serde_derive::Serialize;
+use serde::Serialize;
 
 use super::{
-    SinkError, CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
-    SINK_TYPE_UPSERT,
+    CONNECTOR_TYPE_KEY, SINK_TYPE_APPEND_ONLY, SINK_TYPE_DEBEZIUM, SINK_TYPE_OPTION,
+    SINK_TYPE_UPSERT, SinkError,
 };
-
-#[derive(Clone, Copy, Debug, Default, Hash, PartialOrd, PartialEq, Eq)]
-pub struct SinkId {
-    pub sink_id: u32,
-}
-
-impl SinkId {
-    pub const fn new(sink_id: u32) -> Self {
-        SinkId { sink_id }
-    }
-
-    /// Sometimes the id field is filled later, we use this value for better debugging.
-    pub const fn placeholder() -> Self {
-        SinkId {
-            sink_id: OBJECT_ID_PLACEHOLDER,
-        }
-    }
-
-    pub fn sink_id(&self) -> u32 {
-        self.sink_id
-    }
-}
-
-impl std::fmt::Display for SinkId {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.sink_id)
-    }
-}
-
-impl From<u32> for SinkId {
-    fn from(id: u32) -> Self {
-        Self::new(id)
-    }
-}
-impl From<SinkId> for u32 {
-    fn from(id: SinkId) -> Self {
-        id.sink_id
-    }
-}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub enum SinkType {
     /// The data written into the sink connector can only be INSERT. No UPDATE or DELETE is
     /// allowed.
     AppendOnly,
-    /// The input of the sink operator can be INSERT, UPDATE, or DELETE, but it must drop any
-    /// UPDATE or DELETE and write only INSERT into the sink connector.
-    ForceAppendOnly,
-    /// The data written into the sink connector can be INSERT, UPDATE, or DELETE.
+    /// The data written into the sink connector can be INSERT or DELETE.
+    /// When updating a row, an INSERT with new value will be written.
     Upsert,
+    /// The data written into the sink connector can be INSERT, UPDATE, or DELETE.
+    /// When updating a row, an UPDATE pair (U- then U+) will be written.
+    ///
+    /// Currently only used by DEBEZIUM format.
+    Retract,
 }
 
 impl SinkType {
-    pub fn is_append_only(&self) -> bool {
-        self == &Self::AppendOnly || self == &Self::ForceAppendOnly
+    /// Whether the sink type is `AppendOnly`.
+    pub fn is_append_only(self) -> bool {
+        self == Self::AppendOnly
     }
 
-    pub fn is_upsert(&self) -> bool {
-        self == &Self::Upsert
+    /// Convert to the string specified in `type = '...'` within the WITH options.
+    pub fn type_str(self) -> &'static str {
+        match self {
+            SinkType::AppendOnly => "append-only",
+            SinkType::Upsert => "upsert",
+            SinkType::Retract => "retract",
+        }
     }
 
     pub fn to_proto(self) -> PbSinkType {
         match self {
             SinkType::AppendOnly => PbSinkType::AppendOnly,
-            SinkType::ForceAppendOnly => PbSinkType::ForceAppendOnly,
             SinkType::Upsert => PbSinkType::Upsert,
+            SinkType::Retract => PbSinkType::Retract,
         }
     }
 
     pub fn from_proto(pb: PbSinkType) -> Self {
         match pb {
             PbSinkType::AppendOnly => SinkType::AppendOnly,
-            PbSinkType::ForceAppendOnly => SinkType::ForceAppendOnly,
+            // Backward compatibility: normalize force-append-only to append-only. The associated
+            // behavior is now represented by another field `ignore_delete`.
+            PbSinkType::ForceAppendOnly => SinkType::AppendOnly,
             PbSinkType::Upsert => SinkType::Upsert,
+            PbSinkType::Retract => SinkType::Retract,
             PbSinkType::Unspecified => unreachable!(),
         }
     }
@@ -124,6 +98,7 @@ pub struct SinkFormatDesc {
     pub options: BTreeMap<String, String>,
     pub secret_refs: BTreeMap<String, PbSecretRef>,
     pub key_encode: Option<SinkEncode>,
+    pub connection_id: Option<ConnectionId>,
 }
 
 /// TODO: consolidate with [`crate::source::SourceFormat`] and [`crate::parser::ProtocolProperties`].
@@ -149,6 +124,7 @@ pub enum SinkEncode {
     Template,
     Parquet,
     Text,
+    Bytes,
 }
 
 impl Display for SinkEncode {
@@ -159,10 +135,10 @@ impl Display for SinkEncode {
 
 impl SinkFormatDesc {
     pub fn from_legacy_type(connector: &str, r#type: &str) -> Result<Option<Self>, SinkError> {
+        use crate::sink::Sink as _;
         use crate::sink::kafka::KafkaSink;
         use crate::sink::kinesis::KinesisSink;
         use crate::sink::pulsar::PulsarSink;
-        use crate::sink::Sink as _;
 
         let format = match r#type {
             SINK_TYPE_APPEND_ONLY => SinkFormat::AppendOnly,
@@ -172,7 +148,7 @@ impl SinkFormatDesc {
                 return Err(SinkError::Config(anyhow!(
                     "sink type unsupported: {}",
                     r#type
-                )))
+                )));
             }
         };
         let encode = match connector {
@@ -187,6 +163,7 @@ impl SinkFormatDesc {
             options: Default::default(),
             secret_refs: Default::default(),
             key_encode: None,
+            connection_id: None,
         }))
     }
 
@@ -205,6 +182,7 @@ impl SinkFormatDesc {
             SinkEncode::Template => E::Template,
             SinkEncode::Parquet => E::Parquet,
             SinkEncode::Text => E::Text,
+            SinkEncode::Bytes => E::Bytes,
         };
 
         let encode = mapping_encode(&self.encode);
@@ -221,6 +199,20 @@ impl SinkFormatDesc {
             options,
             key_encode,
             secret_refs: self.secret_refs.clone(),
+            connection_id: self.connection_id,
+        }
+    }
+
+    // This function is for compatibility purposes. It sets the `SinkFormatDesc`
+    // when there is no configuration provided for the snowflake sink only.
+    pub fn plain_json_for_snowflake_only() -> Self {
+        Self {
+            format: SinkFormat::AppendOnly,
+            encode: SinkEncode::Json,
+            options: Default::default(),
+            secret_refs: Default::default(),
+            key_encode: None,
+            connection_id: None,
         }
     }
 }
@@ -244,7 +236,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
                 return Err(SinkError::Config(anyhow!(
                     "sink format unsupported: {}",
                     f.as_str_name()
-                )))
+                )));
             }
         };
         let encode = match value.encode() {
@@ -253,18 +245,19 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             E::Template => SinkEncode::Template,
             E::Avro => SinkEncode::Avro,
             E::Parquet => SinkEncode::Parquet,
-            e @ (E::Unspecified | E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
+            E::Bytes => SinkEncode::Bytes,
+            e @ (E::Unspecified | E::Native | E::Csv | E::None | E::Text) => {
                 return Err(SinkError::Config(anyhow!(
                     "sink encode unsupported: {}",
                     e.as_str_name()
-                )))
+                )));
             }
         };
         let key_encode = match &value.key_encode() {
+            E::Bytes => Some(SinkEncode::Bytes),
             E::Text => Some(SinkEncode::Text),
             E::Unspecified => None,
             encode @ (E::Avro
-            | E::Bytes
             | E::Csv
             | E::Json
             | E::Protobuf
@@ -275,7 +268,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
                 return Err(SinkError::Config(anyhow!(
                     "unsupported {} as sink key encode",
                     encode.as_str_name()
-                )))
+                )));
             }
         };
 
@@ -285,6 +278,7 @@ impl TryFrom<PbSinkFormatDesc> for SinkFormatDesc {
             options: value.options,
             key_encode,
             secret_refs: value.secret_refs,
+            connection_id: value.connection_id,
         })
     }
 }
@@ -316,8 +310,8 @@ pub struct SinkCatalog {
     /// Primary keys of the sink. Derived by the frontend.
     pub plan_pk: Vec<ColumnOrder>,
 
-    /// User-defined primary key indices for upsert sink.
-    pub downstream_pk: Vec<usize>,
+    /// User-defined primary key indices for upsert sink, if any.
+    pub downstream_pk: Option<Vec<usize>>,
 
     /// Distribution key indices of the sink. For example, if `distribution_key = [1, 2]`, then the
     /// distribution keys will be `columns[1]` and `columns[2]`.
@@ -329,13 +323,12 @@ pub struct SinkCatalog {
     /// Owner of the sink.
     pub owner: UserId,
 
-    // Relations on which the sink depends.
-    pub dependent_relations: Vec<TableId>,
-
     // The append-only behavior of the physical sink connector. Frontend will determine `sink_type`
     // based on both its own derivation on the append-only attribute and other user-specified
     // options in `properties`.
     pub sink_type: SinkType,
+    /// Whether to drop DELETE and convert UPDATE to INSERT in the sink executor.
+    pub ignore_delete: bool,
 
     // The format and encode of the sink.
     pub format_desc: Option<SinkFormatDesc>,
@@ -352,12 +345,17 @@ pub struct SinkCatalog {
 
     /// Name for the table info for Debezium sink
     pub sink_from_name: String,
+    pub auto_refresh_schema_from_table: Option<TableId>,
 
     pub target_table: Option<TableId>,
 
     pub created_at_cluster_version: Option<String>,
     pub initialized_at_cluster_version: Option<String>,
     pub create_type: CreateType,
+
+    /// Indicate the stream job status, whether it is created or creating.
+    /// If it is creating, we should hide it.
+    pub stream_job_status: StreamJobStatus,
 
     /// The secret reference for the sink, mapping from property name to secret id.
     pub secret_refs: BTreeMap<String, PbSecretRef>,
@@ -369,23 +367,15 @@ pub struct SinkCatalog {
 impl SinkCatalog {
     pub fn to_proto(&self) -> PbSink {
         PbSink {
-            id: self.id.into(),
-            schema_id: self.schema_id.schema_id,
-            database_id: self.database_id.database_id,
+            id: self.id,
+            schema_id: self.schema_id,
+            database_id: self.database_id,
             name: self.name.clone(),
             definition: self.definition.clone(),
             columns: self.columns.iter().map(|c| c.to_protobuf()).collect_vec(),
             plan_pk: self.plan_pk.iter().map(|o| o.to_protobuf()).collect(),
-            downstream_pk: self
-                .downstream_pk
-                .iter()
-                .map(|idx| *idx as i32)
-                .collect_vec(),
-            dependent_relations: self
-                .dependent_relations
-                .iter()
-                .map(|id| id.table_id)
-                .collect_vec(),
+            downstream_pk: (self.downstream_pk.as_ref())
+                .map_or_else(Vec::new, |pk| pk.iter().map(|idx| *idx as _).collect_vec()),
             distribution_key: self
                 .distribution_key
                 .iter()
@@ -394,14 +384,15 @@ impl SinkCatalog {
             owner: self.owner.into(),
             properties: self.properties.clone(),
             sink_type: self.sink_type.to_proto() as i32,
+            raw_ignore_delete: self.ignore_delete,
             format_desc: self.format_desc.as_ref().map(|f| f.to_proto()),
-            connection_id: self.connection_id.map(|id| id.into()),
+            connection_id: self.connection_id,
             initialized_at_epoch: self.initialized_at_epoch.map(|e| e.0),
             created_at_epoch: self.created_at_epoch.map(|e| e.0),
             db_name: self.db_name.clone(),
             sink_from_name: self.sink_from_name.clone(),
-            stream_job_status: PbStreamJobStatus::Creating.into(),
-            target_table: self.target_table.map(|table_id| table_id.table_id()),
+            stream_job_status: self.stream_job_status.to_proto().into(),
+            target_table: self.target_table,
             created_at_cluster_version: self.created_at_cluster_version.clone(),
             initialized_at_cluster_version: self.initialized_at_cluster_version.clone(),
             create_type: self.create_type.to_proto() as i32,
@@ -411,6 +402,7 @@ impl SinkCatalog {
                 .iter()
                 .map(|c| c.to_protobuf())
                 .collect_vec(),
+            auto_refresh_schema_from_table: self.auto_refresh_schema_from_table,
         }
     }
 
@@ -444,20 +436,24 @@ impl SinkCatalog {
         Schema { fields }
     }
 
-    pub fn downstream_pk_indices(&self) -> Vec<usize> {
-        self.downstream_pk.clone()
-    }
-
     pub fn unique_identity(&self) -> String {
         // We need to align with meta here, so we've utilized the proto method.
         self.to_proto().unique_identity()
+    }
+
+    pub fn is_created(&self) -> bool {
+        self.stream_job_status == StreamJobStatus::Created
     }
 }
 
 impl From<PbSink> for SinkCatalog {
     fn from(pb: PbSink) -> Self {
         let sink_type = pb.get_sink_type().unwrap();
+        let ignore_delete = pb.ignore_delete();
         let create_type = pb.get_create_type().unwrap_or(PbCreateType::Foreground);
+        let stream_job_status = pb
+            .get_stream_job_status()
+            .unwrap_or(PbStreamJobStatus::Created);
         let format_desc = match pb.format_desc {
             Some(f) => f.try_into().ok(),
             None => {
@@ -470,10 +466,10 @@ impl From<PbSink> for SinkCatalog {
             }
         };
         SinkCatalog {
-            id: pb.id.into(),
+            id: pb.id,
             name: pb.name,
-            schema_id: pb.schema_id.into(),
-            database_id: pb.database_id.into(),
+            schema_id: pb.schema_id,
+            database_id: pb.database_id,
             definition: pb.definition,
             columns: pb
                 .columns
@@ -485,7 +481,15 @@ impl From<PbSink> for SinkCatalog {
                 .iter()
                 .map(ColumnOrder::from_protobuf)
                 .collect_vec(),
-            downstream_pk: pb.downstream_pk.into_iter().map(|k| k as _).collect_vec(),
+            downstream_pk: if pb.downstream_pk.is_empty() {
+                None
+            } else {
+                Some(
+                    (pb.downstream_pk.into_iter())
+                        .map(|idx| idx as usize)
+                        .collect_vec(),
+                )
+            },
             distribution_key: pb
                 .distribution_key
                 .into_iter()
@@ -493,22 +497,20 @@ impl From<PbSink> for SinkCatalog {
                 .collect_vec(),
             properties: pb.properties,
             owner: pb.owner.into(),
-            dependent_relations: pb
-                .dependent_relations
-                .into_iter()
-                .map(TableId::from)
-                .collect_vec(),
             sink_type: SinkType::from_proto(sink_type),
+            ignore_delete,
             format_desc,
-            connection_id: pb.connection_id.map(ConnectionId),
+            connection_id: pb.connection_id,
             created_at_epoch: pb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: pb.initialized_at_epoch.map(Epoch::from),
             db_name: pb.db_name,
             sink_from_name: pb.sink_from_name,
-            target_table: pb.target_table.map(TableId::new),
+            auto_refresh_schema_from_table: pb.auto_refresh_schema_from_table,
+            target_table: pb.target_table,
             initialized_at_cluster_version: pb.initialized_at_cluster_version,
             created_at_cluster_version: pb.created_at_cluster_version,
             create_type: CreateType::from_proto(create_type),
+            stream_job_status: StreamJobStatus::from_proto(stream_job_status),
             secret_refs: pb.secret_refs,
             original_target_columns: pb
                 .original_target_columns

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,22 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, SYS_CATALOG_START_ID};
+use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::PbView;
+use risingwave_sqlparser::ast::Statement;
+use risingwave_sqlparser::parser::Parser;
 
-use super::{OwnedByUserCatalog, ViewId};
-use crate::user::UserId;
+use super::{DatabaseId, OwnedByUserCatalog, SchemaId, ViewId};
 use crate::WithOptions;
+use crate::user::UserId;
 
 #[derive(Clone, Debug)]
 pub struct ViewCatalog {
     pub id: ViewId,
     pub name: String,
+    pub schema_id: SchemaId,
+    pub database_id: DatabaseId,
 
     pub owner: UserId,
     pub properties: WithOptions,
     pub sql: String,
     pub columns: Vec<Field>,
+    pub created_at_epoch: Option<Epoch>,
+    pub created_at_cluster_version: Option<String>,
 }
 
 impl From<&PbView> for ViewCatalog {
@@ -35,10 +42,14 @@ impl From<&PbView> for ViewCatalog {
         ViewCatalog {
             id: view.id,
             name: view.name.clone(),
+            schema_id: view.schema_id,
+            database_id: view.database_id,
             owner: view.owner,
             properties: WithOptions::new_with_options(view.properties.clone()),
             sql: view.sql.clone(),
             columns: view.columns.iter().map(|f| f.into()).collect(),
+            created_at_epoch: view.created_at_epoch.map(Epoch::from),
+            created_at_cluster_version: view.created_at_cluster_version.clone(),
         }
     }
 }
@@ -54,8 +65,24 @@ impl ViewCatalog {
     }
 
     /// Returns the SQL statement that can be used to create this view.
-    pub fn create_sql(&self) -> String {
-        format!("CREATE VIEW {} AS {}", self.name, self.sql)
+    pub fn create_sql(&self, schema: String) -> String {
+        if schema == "public" {
+            format!("CREATE VIEW {} AS {}", self.name, self.sql)
+        } else {
+            format!("CREATE VIEW {}.{} AS {}", schema, self.name, self.sql)
+        }
+    }
+
+    /// Returns the parsed SQL definition when the view was created (`CREATE VIEW` not included).
+    ///
+    /// Returns error if it's invalid.
+    pub fn sql_ast(&self) -> crate::error::Result<Statement> {
+        Ok(Parser::parse_exactly_one(&self.sql)?)
+    }
+
+    /// Returns true if this view is a system view.
+    pub fn is_system_view(&self) -> bool {
+        self.id.as_raw_id() >= SYS_CATALOG_START_ID as u32
     }
 }
 

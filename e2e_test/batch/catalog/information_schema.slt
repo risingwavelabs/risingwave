@@ -1,0 +1,63 @@
+statement ok
+create table t(a int, b bigint, key int primary key);
+
+statement ok
+create view v as select * from t;
+
+statement ok
+create materialized view mv as select * from t;
+
+query TT
+select table_schema, table_name from information_schema.views where table_schema = 'public';
+----
+public v
+
+query TT
+select table_schema, table_name from information_schema.tables where table_schema = 'public' order by table_name;
+----
+public mv
+public t
+public v
+
+query TTTTTTTT
+select constraint_schema, constraint_name, table_schema, table_name from information_schema.table_constraints where table_schema = 'public' order by table_name;
+----
+public mv_pkey public mv
+public t_pkey public t
+
+query TT
+select schema_name from information_schema.schemata order by schema_name;
+----
+information_schema
+pg_catalog
+public
+rw_catalog
+
+query TTTTTII
+select * EXCEPT(constraint_catalog, table_catalog) from information_schema.key_column_usage where table_schema = 'public' order by table_name;
+----
+public mv_pkey public mv key 3 NULL
+public t_pkey public t key 3 NULL
+
+query TTTITTT
+select table_schema, table_name, column_name, ordinal_position, data_type, udt_schema, udt_name from information_schema.columns where table_schema = 'public' order by table_name, ordinal_position;
+----
+public mv a 1 integer pg_catalog int4
+public mv b 2 bigint pg_catalog int8
+public mv key 3 integer pg_catalog int4
+public t a 1 integer pg_catalog int4
+public t b 2 bigint pg_catalog int8
+public t key 3 integer pg_catalog int4
+public v a 1 integer pg_catalog int4
+public v b 2 bigint pg_catalog int8
+public v key 3 integer pg_catalog int4
+
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop view v;
+
+statement ok
+drop table t;

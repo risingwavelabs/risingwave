@@ -1,6 +1,4 @@
-use risingwave_common::util::column_index_mapping::ColIndexMapping;
-
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,11 +11,15 @@ use risingwave_common::util::column_index_mapping::ColIndexMapping;
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
+use risingwave_common::util::column_index_mapping::ColIndexMapping;
+
 use crate::binder::{BoundSetExpr, BoundSetOperation};
 use crate::error::Result;
-use crate::optimizer::plan_node::{LogicalExcept, LogicalIntersect, LogicalProject, LogicalUnion};
+use crate::optimizer::plan_node::{
+    LogicalExcept, LogicalIntersect, LogicalPlanRef as PlanRef, LogicalProject, LogicalUnion,
+};
 use crate::planner::Planner;
-use crate::PlanRef;
 
 impl Planner {
     pub(super) fn plan_set_operation(

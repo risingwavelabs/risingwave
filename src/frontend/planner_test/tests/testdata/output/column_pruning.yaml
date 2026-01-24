@@ -4,7 +4,7 @@
     select v1 from t
   logical_plan: |-
     LogicalProject { exprs: [t.v1] }
-    └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: 'LogicalScan { table: t, columns: [t.v1] }'
 - name: filter
   sql: |
@@ -13,7 +13,7 @@
   logical_plan: |-
     LogicalProject { exprs: [t.v1] }
     └─LogicalFilter { predicate: (t.v2 > 2:Int32::Float64) }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: 'LogicalScan { table: t, output_columns: [t.v1], required_columns: [t.v1, t.v2], predicate: (t.v2 > 2:Int32::Float64) }'
 - name: join
   sql: |
@@ -23,8 +23,8 @@
   logical_plan: |-
     LogicalProject { exprs: [t1.v1, t2.v1] }
     └─LogicalJoin { type: Inner, on: (t1.v2 = t2.v2), output: all }
-      ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1._row_id] }
-      └─LogicalScan { table: t2, columns: [t2.v1, t2.v2, t2.v3, t2._row_id] }
+      ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1._row_id, t1._rw_timestamp] }
+      └─LogicalScan { table: t2, columns: [t2.v1, t2.v2, t2.v3, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: (t1.v2 = t2.v2), output: [t1.v1, t2.v1] }
     ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2] }
@@ -38,7 +38,7 @@
     └─LogicalAgg { aggs: [count(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
         └─LogicalFilter { predicate: (t.v2 > 2:Int32::Float64) }
-          └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count(t.v1)] }
     └─LogicalScan { table: t, output_columns: [t.v1], required_columns: [t.v1, t.v2], predicate: (t.v2 > 2:Int32::Float64) }
@@ -50,7 +50,7 @@
     LogicalProject { exprs: [t.v3] }
     └─LogicalTopN { order: [t.v3 ASC, t.v2 ASC], limit: 2, offset: 0 }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.v3] }
     └─LogicalTopN { order: [t.v3 ASC, t.v2 ASC], limit: 2, offset: 0 }
@@ -61,7 +61,7 @@
     select 1 from t
   logical_plan: |-
     LogicalProject { exprs: [1:Int32] }
-    └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+    └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalScan { table: t, columns: [] }
@@ -72,7 +72,7 @@
   logical_plan: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [1:Int32] }
     └─LogicalScan { table: t, output_columns: [], required_columns: [t.v2], predicate: (t.v2 > 1:Int32::Float64) }
@@ -84,7 +84,7 @@
     LogicalProject { exprs: [count(1:Int32)] }
     └─LogicalAgg { aggs: [count(1:Int32)] }
       └─LogicalProject { exprs: [1:Int32] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count(1:Int32)] }
     └─LogicalProject { exprs: [1:Int32] }
@@ -98,7 +98,7 @@
     └─LogicalAgg { aggs: [count(1:Int32)] }
       └─LogicalProject { exprs: [1:Int32] }
         └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
-          └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count(1:Int32)] }
     └─LogicalProject { exprs: [1:Int32] }
@@ -112,8 +112,8 @@
     LogicalProject { exprs: [t1.v1, t2.v1] }
     └─LogicalFilter { predicate: (t1.v3 < 1:Int32) }
       └─LogicalJoin { type: Inner, on: (t1.v2 = t2.v2), output: all }
-        ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1._row_id] }
-        └─LogicalScan { table: t2, columns: [t2.v1, t2.v2, t2.v3, t2._row_id] }
+        ├─LogicalScan { table: t1, columns: [t1.v1, t1.v2, t1.v3, t1._row_id, t1._rw_timestamp] }
+        └─LogicalScan { table: t2, columns: [t2.v1, t2.v2, t2.v3, t2._row_id, t2._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalJoin { type: Inner, on: (t1.v2 = t2.v2), output: [t1.v1, t2.v1] }
     ├─LogicalScan { table: t1, output_columns: [t1.v1, t1.v2], required_columns: [t1.v1, t1.v2, t1.v3], predicate: (t1.v3 < 1:Int32) }
@@ -128,7 +128,7 @@
       └─LogicalShare { id: 3 }
         └─LogicalProject { exprs: [t.v1, t.v2, t.v3, Unnest($4)] }
           └─LogicalProjectSet { select_list: [$0, $1, $2, Unnest($4)] }
-            └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.arr, t._row_id] }
+            └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t.v4, t.arr, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.v1, t.v2, t.v3, Unnest($3)] }
     └─LogicalFilter { predicate: (Unnest($3) = 30:Int32) }
@@ -146,15 +146,13 @@
     └─LogicalFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (t.x > 0:Int32) AND (row_number <= 3:Int32) }
       └─LogicalProject { exprs: [t.x, t.y, t.z, row_number] }
         └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─LogicalProject { exprs: [t.x, t.y, t.z, t.w, t._row_id] }
-            └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id] }
+          └─LogicalProject { exprs: [t.x, t.y, t.z, t.w, t._row_id, t._rw_timestamp] }
+            └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t.w, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [row_number] }
-    └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─LogicalProject { exprs: [t.x, t.y] }
-        └─LogicalFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) }
-          └─LogicalTopN { order: [t.y ASC], limit: 3, offset: 0, group_key: [t.x] }
-            └─LogicalScan { table: t, columns: [t.x, t.y, t.z], predicate: (t.x > 0:Int32) }
+    └─LogicalFilter { predicate: (t.z > 0:Int32) AND (t.y > 0:Int32) AND (row_number <= 3:Int32) }
+      └─LogicalOverWindow { window_functions: [row_number() OVER(PARTITION BY t.x ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t.z], predicate: (t.x > 0:Int32) }
 - name: mixed
   sql: |
     create table t (v1 bigint, v2 double precision, v3 int);
@@ -164,7 +162,7 @@
     └─LogicalAgg { aggs: [count(1:Int32), count(t.v1)] }
       └─LogicalProject { exprs: [1:Int32, t.v1] }
         └─LogicalFilter { predicate: (t.v2 > 1:Int32::Float64) }
-          └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count(1:Int32), count(t.v1)] }
     └─LogicalProject { exprs: [1:Int32, t.v1] }
@@ -177,7 +175,7 @@
     LogicalProject { exprs: [t1.a, window_end] }
     └─LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: all }
       └─LogicalFilter { predicate: IsNotNull(t1.created_at) }
-        └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.created_at, t1._row_id] }
+        └─LogicalScan { table: t1, columns: [t1.a, t1.b, t1.created_at, t1._row_id, t1._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalHopWindow { time_col: t1.created_at, slide: 00:15:00, size: 00:30:00, output: [t1.a, window_end] }
     └─LogicalScan { table: t1, columns: [t1.a, t1.created_at], predicate: IsNotNull(t1.created_at) }

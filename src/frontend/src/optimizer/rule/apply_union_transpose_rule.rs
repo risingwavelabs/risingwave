@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,9 +14,8 @@
 
 use itertools::Itertools;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalApply, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary};
-use crate::optimizer::PlanRef;
 
 /// Transpose `LogicalApply` and `LogicalUnion`.
 ///
@@ -39,9 +38,8 @@ use crate::optimizer::PlanRef;
 ///   /      \           /      \
 /// Domain   T1        Domain   T2
 /// ```
-
 pub struct ApplyUnionTransposeRule {}
-impl Rule for ApplyUnionTransposeRule {
+impl Rule<Logical> for ApplyUnionTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         if apply.max_one_row() {

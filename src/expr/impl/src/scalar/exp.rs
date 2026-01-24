@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use num_traits::Zero;
-use risingwave_common::types::{Decimal, FloatExt, F64};
-use risingwave_expr::{function, ExprError, Result};
+use risingwave_common::types::{Decimal, F64, FloatExt};
+use risingwave_expr::{ExprError, Result, function};
 
 fn err_logarithm_input() -> ExprError {
     ExprError::InvalidParam {

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -82,15 +82,6 @@ impl Scalar for StructValue {
     }
 }
 
-/// Implement `Scalar` for `ListValue`.
-impl Scalar for ListValue {
-    type ScalarRefType<'a> = ListRef<'a>;
-
-    fn as_scalar_ref(&self) -> ListRef<'_> {
-        self.into()
-    }
-}
-
 /// Implement `ScalarRef` for `Box<str>`.
 /// `Box<str>` could be converted to `&str`.
 impl<'a> ScalarRef<'a> for &'a str {
@@ -145,7 +136,7 @@ impl Scalar for bool {
 }
 
 /// Implement `ScalarRef` for `bool`.
-impl<'a> ScalarRef<'a> for bool {
+impl ScalarRef<'_> for bool {
     type ScalarType = bool;
 
     fn to_owned_scalar(&self) -> bool {
@@ -167,7 +158,7 @@ impl Scalar for Decimal {
 }
 
 /// Implement `ScalarRef` for `Decimal`.
-impl<'a> ScalarRef<'a> for Decimal {
+impl ScalarRef<'_> for Decimal {
     type ScalarType = Decimal;
 
     fn to_owned_scalar(&self) -> Decimal {
@@ -189,7 +180,7 @@ impl Scalar for Interval {
 }
 
 /// Implement `ScalarRef` for `Interval`.
-impl<'a> ScalarRef<'a> for Interval {
+impl ScalarRef<'_> for Interval {
     type ScalarType = Interval;
 
     fn to_owned_scalar(&self) -> Interval {
@@ -211,7 +202,7 @@ impl Scalar for Date {
 }
 
 /// Implement `ScalarRef` for `Date`.
-impl<'a> ScalarRef<'a> for Date {
+impl ScalarRef<'_> for Date {
     type ScalarType = Date;
 
     fn to_owned_scalar(&self) -> Date {
@@ -233,7 +224,7 @@ impl Scalar for Timestamp {
 }
 
 /// Implement `ScalarRef` for `Timestamp`.
-impl<'a> ScalarRef<'a> for Timestamp {
+impl ScalarRef<'_> for Timestamp {
     type ScalarType = Timestamp;
 
     fn to_owned_scalar(&self) -> Timestamp {
@@ -255,7 +246,7 @@ impl Scalar for Time {
 }
 
 /// Implement `ScalarRef` for `Time`.
-impl<'a> ScalarRef<'a> for Time {
+impl ScalarRef<'_> for Time {
     type ScalarType = Time;
 
     fn to_owned_scalar(&self) -> Time {
@@ -277,7 +268,7 @@ impl Scalar for Timestamptz {
 }
 
 /// Implement `ScalarRef` for `Timestamptz`.
-impl<'a> ScalarRef<'a> for Timestamptz {
+impl ScalarRef<'_> for Timestamptz {
     type ScalarType = Timestamptz;
 
     fn to_owned_scalar(&self) -> Timestamptz {
@@ -303,26 +294,13 @@ impl<'a> ScalarRef<'a> for StructRef<'a> {
     }
 }
 
-/// Implement `Scalar` for `ListValue`.
-impl<'a> ScalarRef<'a> for ListRef<'a> {
-    type ScalarType = ListValue;
-
-    fn to_owned_scalar(&self) -> ListValue {
-        (*self).into()
-    }
-
-    fn hash_scalar<H: std::hash::Hasher>(&self, state: &mut H) {
-        self.hash_scalar_inner(state)
-    }
-}
-
 impl ScalarImpl {
     pub fn get_ident(&self) -> &'static str {
         dispatch_scalar_variants!(self, [I = VARIANT_NAME], { I })
     }
 }
 
-impl<'scalar> ScalarRefImpl<'scalar> {
+impl ScalarRefImpl<'_> {
     pub fn get_ident(&self) -> &'static str {
         dispatch_scalar_ref_variants!(self, [I = VARIANT_NAME], { I })
     }

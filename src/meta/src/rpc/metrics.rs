@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,24 +19,26 @@ use std::time::Duration;
 
 use prometheus::core::{AtomicF64, GenericGaugeVec};
 use prometheus::{
+    GaugeVec, Histogram, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry,
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
     register_histogram_vec_with_registry, register_histogram_with_registry,
-    register_int_counter_vec_with_registry, register_int_counter_with_registry,
-    register_int_gauge_vec_with_registry, register_int_gauge_with_registry, Histogram,
-    HistogramVec, IntCounter, IntCounterVec, IntGauge, IntGaugeVec, Registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry,
 };
 use risingwave_common::metrics::{
     LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
+    LabelGuardedUintGaugeVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::{
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
-    register_guarded_int_gauge_vec_with_registry,
+    register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
 use risingwave_connector::source::monitor::EnumeratorMetrics as SourceEnumeratorMetrics;
-use risingwave_meta_model_v2::WorkerId;
+use risingwave_meta_model::WorkerId;
 use risingwave_object_store::object::object_metrics::{
-    ObjectStoreMetrics, GLOBAL_OBJECT_STORE_METRICS,
+    GLOBAL_OBJECT_STORE_METRICS, ObjectStoreMetrics,
 };
 use risingwave_pb::common::WorkerType;
 use thiserror_ext::AsReport;
@@ -45,6 +47,7 @@ use tokio::task::JoinHandle;
 
 use crate::controller::catalog::CatalogControllerRef;
 use crate::controller::cluster::ClusterControllerRef;
+use crate::controller::system_param::SystemParamsControllerRef;
 use crate::controller::utils::PartialFragmentStateTables;
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
@@ -65,43 +68,40 @@ pub struct MetaMetrics {
     // ********************************** Barrier ************************************
     /// The duration from barrier injection to commit
     /// It is the sum of inflight-latency, sync-latency and wait-commit-latency
-    pub barrier_latency: Histogram,
+    pub barrier_latency: LabelGuardedHistogramVec,
     /// The duration from barrier complete to commit
     pub barrier_wait_commit_latency: Histogram,
     /// Latency between each barrier send
-    pub barrier_send_latency: Histogram,
+    pub barrier_send_latency: LabelGuardedHistogramVec,
     /// The number of all barriers. It is the sum of barriers that are in-flight or completed but
     /// waiting for other barriers
-    pub all_barrier_nums: IntGauge,
+    pub all_barrier_nums: LabelGuardedIntGaugeVec,
     /// The number of in-flight barriers
-    pub in_flight_barrier_nums: IntGauge,
+    pub in_flight_barrier_nums: LabelGuardedIntGaugeVec,
     /// The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.
-    pub last_committed_barrier_time: IntGauge,
+    pub last_committed_barrier_time: IntGaugeVec,
+    /// The barrier interval of each database
+    pub barrier_interval_by_database: GaugeVec,
 
     // ********************************** Snapshot Backfill ***************************
     /// The barrier latency in second of `table_id` and snapshto backfill `barrier_type`
-    pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec<2>, // (table_id, barrier_type)
+    pub snapshot_backfill_barrier_latency: LabelGuardedHistogramVec, // (table_id, barrier_type)
     /// The latency of commit epoch of `table_id`
-    pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec<1>, // (table_id, )
-    /// The latency that the upstream waits on the snapshot backfill progress after the upstream
-    /// has collected the barrier.
-    pub snapshot_backfill_upstream_wait_progress_latency: LabelGuardedHistogramVec<1>, /* (table_id, ) */
+    pub snapshot_backfill_wait_commit_latency: LabelGuardedHistogramVec, // (table_id, )
     /// The lags between the upstream epoch and the downstream epoch.
-    pub snapshot_backfill_lag: LabelGuardedIntGaugeVec<1>, // (table_id, )
+    pub snapshot_backfill_lag: LabelGuardedIntGaugeVec, // (table_id, )
     /// The number of inflight barriers of `table_id`
-    pub snapshot_backfill_inflight_barrier_num: LabelGuardedIntGaugeVec<1>, // (table_id, _)
+    pub snapshot_backfill_inflight_barrier_num: LabelGuardedIntGaugeVec, // (table_id, _)
 
     // ********************************** Recovery ************************************
-    pub recovery_failure_cnt: IntCounter,
-    pub recovery_latency: Histogram,
+    pub recovery_failure_cnt: IntCounterVec,
+    pub recovery_latency: HistogramVec,
 
     // ********************************** Hummock ************************************
     /// Max committed epoch
     pub max_committed_epoch: IntGauge,
-    /// The smallest epoch that has not been `GCed`.
-    pub safe_epoch: IntGauge,
-    /// The smallest epoch that is being pinned.
-    pub min_pinned_epoch: IntGauge,
+    /// Min committed epoch
+    pub min_committed_epoch: IntGauge,
     /// The number of SSTs in each level
     pub level_sst_num: IntGaugeVec,
     /// The number of SSTs to be merged to next level in each level
@@ -150,6 +150,10 @@ pub struct MetaMetrics {
     pub total_object_count: IntGauge,
     /// Total size of objects that includes dangling objects.
     pub total_object_size: IntGauge,
+    /// Number of objects per table change log.
+    pub table_change_log_object_count: IntGaugeVec,
+    /// Size of objects per table change log.
+    pub table_change_log_object_size: IntGaugeVec,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -174,6 +178,7 @@ pub struct MetaMetrics {
     pub split_compaction_group_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
+    pub compact_task_trivial_move_sst_count: HistogramVec,
 
     pub compaction_event_consumed_latency: Histogram,
     pub compaction_event_loop_iteration_latency: Histogram,
@@ -184,16 +189,23 @@ pub struct MetaMetrics {
 
     // ********************************** Source ************************************
     /// supervisor for which source is still up.
-    pub source_is_up: LabelGuardedIntGaugeVec<2>,
+    pub source_is_up: LabelGuardedIntGaugeVec,
     pub source_enumerator_metrics: Arc<SourceEnumeratorMetrics>,
 
     // ********************************** Fragment ************************************
-    /// A dummpy gauge metrics with its label to be the mapping from actor id to fragment id
+    /// A dummy gauge metrics with its label to be the mapping from actor id to fragment id
     pub actor_info: IntGaugeVec,
-    /// A dummpy gauge metrics with its label to be the mapping from table id to actor id
+    /// A dummy gauge metrics with its label to be the mapping from table id to actor id
     pub table_info: IntGaugeVec,
     /// A dummy gauge metrics with its label to be the mapping from actor id to sink id
     pub sink_info: IntGaugeVec,
+    /// A dummy gauge metrics with its label to be relation info
+    pub relation_info: IntGaugeVec,
+
+    // ********************************** System Params ************************************
+    /// A dummy gauge metric with labels carrying system parameter info.
+    /// Labels: (name, value)
+    pub system_param_info: IntGaugeVec,
 
     /// Write throughput of commit epoch for each stable
     pub table_write_throughput: IntCounterVec,
@@ -202,11 +214,22 @@ pub struct MetaMetrics {
     pub merge_compaction_group_count: IntCounterVec,
 
     // ********************************** Auto Schema Change ************************************
-    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec<2>,
-    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec<2>,
-    pub auto_schema_change_latency: LabelGuardedHistogramVec<2>,
+    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec,
+    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec,
+    pub auto_schema_change_latency: LabelGuardedHistogramVec,
 
     pub time_travel_version_replay_latency: Histogram,
+
+    pub compaction_group_count: IntGauge,
+    pub compaction_group_size: IntGaugeVec,
+    pub compaction_group_file_count: IntGaugeVec,
+    pub compaction_group_throughput: IntGaugeVec,
+
+    // ********************************** Refresh Manager ************************************
+    pub refresh_job_duration: LabelGuardedUintGaugeVec,
+    pub refresh_job_finish_cnt: LabelGuardedIntCounterVec,
+    pub refresh_cron_job_trigger_cnt: LabelGuardedIntCounterVec,
+    pub refresh_cron_job_miss_cnt: LabelGuardedIntCounterVec,
 }
 
 pub static GLOBAL_META_METRICS: LazyLock<MetaMetrics> =
@@ -227,7 +250,9 @@ impl MetaMetrics {
             "barrier latency",
             exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
-        let barrier_latency = register_histogram_with_registry!(opts, registry).unwrap();
+        let barrier_latency =
+            register_guarded_histogram_vec_with_registry!(opts, &["database_id"], registry)
+                .unwrap();
 
         let opts = histogram_opts!(
             "meta_barrier_wait_commit_duration_seconds",
@@ -242,23 +267,35 @@ impl MetaMetrics {
             "barrier send latency",
             exponential_buckets(0.1, 1.5, 19).unwrap() // max 148s
         );
-        let barrier_send_latency = register_histogram_with_registry!(opts, registry).unwrap();
+        let barrier_send_latency =
+            register_guarded_histogram_vec_with_registry!(opts, &["database_id"], registry)
+                .unwrap();
+        let barrier_interval_by_database = register_gauge_vec_with_registry!(
+            "meta_barrier_interval_by_database",
+            "barrier interval of each database",
+            &["database_id"],
+            registry
+        )
+        .unwrap();
 
-        let all_barrier_nums = register_int_gauge_with_registry!(
+        let all_barrier_nums = register_guarded_int_gauge_vec_with_registry!(
             "all_barrier_nums",
             "num of of all_barrier",
+            &["database_id"],
             registry
         )
         .unwrap();
-        let in_flight_barrier_nums = register_int_gauge_with_registry!(
+        let in_flight_barrier_nums = register_guarded_int_gauge_vec_with_registry!(
             "in_flight_barrier_nums",
             "num of of in_flight_barrier",
+            &["database_id"],
             registry
         )
         .unwrap();
-        let last_committed_barrier_time = register_int_gauge_with_registry!(
+        let last_committed_barrier_time = register_int_gauge_vec_with_registry!(
             "last_committed_barrier_time",
             "The timestamp (UNIX epoch seconds) of the last committed barrier's epoch time.",
+            &["database_id"],
             registry
         )
         .unwrap();
@@ -282,13 +319,7 @@ impl MetaMetrics {
         );
         let snapshot_backfill_wait_commit_latency =
             register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
-        let opts = histogram_opts!(
-            "meta_snapshot_backfill_upstream_wait_progress_latency",
-            "snapshot backfill upstream_wait_progress_latency",
-            exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
-        );
-        let snapshot_backfill_upstream_wait_progress_latency =
-            register_guarded_histogram_vec_with_registry!(opts, &["table_id"], registry).unwrap();
+
         let snapshot_backfill_lag = register_guarded_int_gauge_vec_with_registry!(
             "meta_snapshot_backfill_upstream_lag",
             "snapshot backfill upstream_lag",
@@ -311,13 +342,9 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let safe_epoch =
-            register_int_gauge_with_registry!("storage_safe_epoch", "safe epoch", registry)
-                .unwrap();
-
-        let min_pinned_epoch = register_int_gauge_with_registry!(
-            "storage_min_pinned_epoch",
-            "min pinned epoch",
+        let min_committed_epoch = register_int_gauge_with_registry!(
+            "storage_min_committed_epoch",
+            "min committed epoch",
             registry
         )
         .unwrap();
@@ -494,6 +521,22 @@ impl MetaMetrics {
             registry
         ).unwrap();
 
+        let table_change_log_object_count = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_object_count",
+            "per table change log object count",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
+        let table_change_log_object_size = register_int_gauge_vec_with_registry!(
+            "storage_table_change_log_object_size",
+            "per table change log object size",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
         let time_travel_object_count = register_int_gauge_with_registry!(
             "storage_time_travel_object_count",
             "total number of objects that is referenced by time travel.",
@@ -572,9 +615,10 @@ impl MetaMetrics {
         .unwrap();
         let object_store_metric = Arc::new(GLOBAL_OBJECT_STORE_METRICS.clone());
 
-        let recovery_failure_cnt = register_int_counter_with_registry!(
+        let recovery_failure_cnt = register_int_counter_vec_with_registry!(
             "recovery_failure_cnt",
             "Number of failed recovery attempts",
+            &["recovery_type"],
             registry
         )
         .unwrap();
@@ -583,7 +627,8 @@ impl MetaMetrics {
             "Latency of the recovery process",
             exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
-        let recovery_latency = register_histogram_with_registry!(opts, registry).unwrap();
+        let recovery_latency =
+            register_histogram_vec_with_registry!(opts, &["recovery_type"], registry).unwrap();
 
         let auto_schema_change_failure_cnt = register_guarded_int_counter_vec_with_registry!(
             "auto_schema_change_failure_cnt",
@@ -653,10 +698,27 @@ impl MetaMetrics {
         )
         .unwrap();
 
+        let relation_info = register_int_gauge_vec_with_registry!(
+            "relation_info",
+            "Information of the database relation (table/source/sink)",
+            &["id", "database", "schema", "name", "resource_group", "type"],
+            registry
+        )
+        .unwrap();
+
         let l0_compact_level_count = register_histogram_vec_with_registry!(
             "storage_l0_compact_level_count",
             "level_count of l0 compact task",
             &["group", "type"],
+            registry
+        )
+        .unwrap();
+
+        // System parameter info
+        let system_param_info = register_int_gauge_vec_with_registry!(
+            "system_param_info",
+            "Information of system parameters",
+            &["name", "value"],
             registry
         )
         .unwrap();
@@ -749,6 +811,74 @@ impl MetaMetrics {
         let time_travel_version_replay_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let compaction_group_count = register_int_gauge_with_registry!(
+            "storage_compaction_group_count",
+            "The number of compaction groups",
+            registry,
+        )
+        .unwrap();
+
+        let compaction_group_size = register_int_gauge_vec_with_registry!(
+            "storage_compaction_group_size",
+            "The size of compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let compaction_group_file_count = register_int_gauge_vec_with_registry!(
+            "storage_compaction_group_file_count",
+            "The file count of compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let compaction_group_throughput = register_int_gauge_vec_with_registry!(
+            "storage_compaction_group_throughput",
+            "The throughput of compaction group",
+            &["group"],
+            registry
+        )
+        .unwrap();
+
+        let opts = histogram_opts!(
+            "storage_compact_task_trivial_move_sst_count",
+            "sst count of compact trivial-move task",
+            exponential_buckets(1.0, 2.0, 8).unwrap()
+        );
+        let compact_task_trivial_move_sst_count =
+            register_histogram_vec_with_registry!(opts, &["group"], registry).unwrap();
+
+        let refresh_job_duration = register_guarded_uint_gauge_vec_with_registry!(
+            "meta_refresh_job_duration",
+            "The duration of refresh job",
+            &["table_id", "status"],
+            registry
+        )
+        .unwrap();
+        let refresh_job_finish_cnt = register_guarded_int_counter_vec_with_registry!(
+            "meta_refresh_job_finish_cnt",
+            "The number of finished refresh jobs",
+            &["table_id", "status"],
+            registry
+        )
+        .unwrap();
+        let refresh_cron_job_trigger_cnt = register_guarded_int_counter_vec_with_registry!(
+            "meta_refresh_cron_job_trigger_cnt",
+            "The number of cron refresh jobs triggered",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+        let refresh_cron_job_miss_cnt = register_guarded_int_counter_vec_with_registry!(
+            "meta_refresh_cron_job_miss_cnt",
+            "The number of cron refresh jobs missed",
+            &["table_id"],
+            registry
+        )
+        .unwrap();
+
         Self {
             grpc_latency,
             barrier_latency,
@@ -757,17 +887,16 @@ impl MetaMetrics {
             all_barrier_nums,
             in_flight_barrier_nums,
             last_committed_barrier_time,
+            barrier_interval_by_database,
             snapshot_backfill_barrier_latency,
             snapshot_backfill_wait_commit_latency,
-            snapshot_backfill_upstream_wait_progress_latency,
             snapshot_backfill_lag,
             snapshot_backfill_inflight_barrier_num,
             recovery_failure_cnt,
             recovery_latency,
 
             max_committed_epoch,
-            safe_epoch,
-            min_pinned_epoch,
+            min_committed_epoch,
             level_sst_num,
             level_compact_cnt,
             compact_frequency,
@@ -785,6 +914,8 @@ impl MetaMetrics {
             current_version_object_size,
             total_object_count,
             total_object_size,
+            table_change_log_object_count,
+            table_change_log_object_size,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
@@ -809,10 +940,13 @@ impl MetaMetrics {
             actor_info,
             table_info,
             sink_info,
+            relation_info,
+            system_param_info,
             l0_compact_level_count,
             compact_task_size,
             compact_task_file_count,
             compact_task_batch_count,
+            compact_task_trivial_move_sst_count,
             table_write_throughput,
             split_compaction_group_count,
             state_table_count,
@@ -824,6 +958,14 @@ impl MetaMetrics {
             auto_schema_change_latency,
             merge_compaction_group_count,
             time_travel_version_replay_latency,
+            compaction_group_count,
+            compaction_group_size,
+            compaction_group_file_count,
+            compaction_group_throughput,
+            refresh_job_duration,
+            refresh_job_finish_cnt,
+            refresh_cron_job_trigger_cnt,
+            refresh_cron_job_miss_cnt,
         }
     }
 
@@ -835,6 +977,22 @@ impl MetaMetrics {
 impl Default for MetaMetrics {
     fn default() -> Self {
         GLOBAL_META_METRICS.clone()
+    }
+}
+
+/// Refresh `system_param_info` metrics by reading current system parameters.
+pub async fn refresh_system_param_info_metrics(
+    system_params_controller: &SystemParamsControllerRef,
+    meta_metrics: Arc<MetaMetrics>,
+) {
+    let params_info = system_params_controller.get_params().await.get_all();
+
+    meta_metrics.system_param_info.reset();
+    for info in params_info {
+        meta_metrics
+            .system_param_info
+            .with_label_values(&[info.name, &info.value])
+            .set(1);
     }
 }
 
@@ -886,7 +1044,7 @@ pub fn start_worker_info_monitor(
                     let role = if m.is_leader { "leader" } else { "follower" };
                     meta_metrics
                         .meta_type
-                        .with_label_values(&[&m.id, role])
+                        .with_label_values(&[m.id.as_str(), role])
                         .set(1);
                 });
             }
@@ -896,7 +1054,7 @@ pub fn start_worker_info_monitor(
     (join_handle, shutdown_tx)
 }
 
-pub async fn refresh_fragment_info_metrics_v2(
+pub async fn refresh_fragment_info_metrics(
     catalog_controller: &CatalogControllerRef,
     cluster_controller: &ClusterControllerRef,
     hummock_manager: &HummockManagerRef,
@@ -912,7 +1070,7 @@ pub async fn refresh_fragment_info_metrics_v2(
             return;
         }
     };
-    let actor_locations = match catalog_controller.list_actor_locations().await {
+    let actor_locations = match catalog_controller.list_actor_locations() {
         Ok(actor_locations) => actor_locations,
         Err(err) => {
             tracing::warn!(error=%err.as_report(), "fail to get actor locations");
@@ -948,7 +1106,7 @@ pub async fn refresh_fragment_info_metrics_v2(
                 Some(host) => format!("{}:{}", host.host, host.port),
                 None => "".to_owned(),
             };
-            (worker_node.id as WorkerId, addr)
+            (worker_node.id, addr)
         })
         .collect();
     let table_compaction_group_id_mapping = hummock_manager
@@ -995,11 +1153,11 @@ pub async fn refresh_fragment_info_metrics_v2(
             let (table_name, table_type) = table_name_and_type_mapping
                 .get(&table_id)
                 .cloned()
-                .unwrap_or_else(|| ("unknown".to_string(), "unknown".to_string()));
+                .unwrap_or_else(|| ("unknown".to_owned(), "unknown".to_owned()));
             let compaction_group_id = table_compaction_group_id_mapping
-                .get(&(table_id as u32))
+                .get(&table_id)
                 .map(|cg_id| cg_id.to_string())
-                .unwrap_or_else(|| "unknown".to_string());
+                .unwrap_or_else(|| "unknown".to_owned());
             meta_metrics
                 .table_info
                 .with_label_values(&[
@@ -1015,9 +1173,83 @@ pub async fn refresh_fragment_info_metrics_v2(
     }
 }
 
-pub fn start_fragment_info_monitor(
+pub async fn refresh_relation_info_metrics(
+    catalog_controller: &CatalogControllerRef,
+    meta_metrics: Arc<MetaMetrics>,
+) {
+    let table_objects = match catalog_controller.list_table_objects().await {
+        Ok(table_objects) => table_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get table objects");
+            return;
+        }
+    };
+
+    let source_objects = match catalog_controller.list_source_objects().await {
+        Ok(source_objects) => source_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get source objects");
+            return;
+        }
+    };
+
+    let sink_objects = match catalog_controller.list_sink_objects().await {
+        Ok(sink_objects) => sink_objects,
+        Err(err) => {
+            tracing::warn!(error=%err.as_report(), "fail to get sink objects");
+            return;
+        }
+    };
+
+    meta_metrics.relation_info.reset();
+
+    for (id, db, schema, name, resource_group) in table_objects {
+        meta_metrics
+            .relation_info
+            .with_label_values(&[
+                &id.to_string(),
+                &db,
+                &schema,
+                &name,
+                &resource_group,
+                &"table".to_owned(),
+            ])
+            .set(1);
+    }
+
+    for (id, db, schema, name, resource_group) in source_objects {
+        meta_metrics
+            .relation_info
+            .with_label_values(&[
+                &id.to_string(),
+                &db,
+                &schema,
+                &name,
+                &resource_group,
+                &"source".to_owned(),
+            ])
+            .set(1);
+    }
+
+    for (id, db, schema, name, resource_group) in sink_objects {
+        meta_metrics
+            .relation_info
+            .with_label_values(&[
+                &id.to_string(),
+                &db,
+                &schema,
+                &name,
+                &resource_group,
+                &"sink".to_owned(),
+            ])
+            .set(1);
+    }
+}
+
+pub fn start_info_monitor(
     metadata_manager: MetadataManager,
     hummock_manager: HummockManagerRef,
+    system_params_controller: SystemParamsControllerRef,
     meta_metrics: Arc<MetaMetrics>,
 ) -> (JoinHandle<()>, Sender<()>) {
     const COLLECT_INTERVAL_SECONDS: u64 = 60;
@@ -1033,18 +1265,29 @@ pub fn start_fragment_info_monitor(
                 _ = monitor_interval.tick() => {},
                 // Shutdown monitor
                 _ = &mut shutdown_rx => {
-                    tracing::info!("Fragment info monitor is stopped");
+                    tracing::info!("Meta info monitor is stopped");
                     return;
                 }
             }
 
-            refresh_fragment_info_metrics_v2(
+            // Fragment and relation info
+            refresh_fragment_info_metrics(
                 &metadata_manager.catalog_controller,
                 &metadata_manager.cluster_controller,
                 &hummock_manager,
                 meta_metrics.clone(),
             )
             .await;
+
+            refresh_relation_info_metrics(
+                &metadata_manager.catalog_controller,
+                meta_metrics.clone(),
+            )
+            .await;
+
+            // System parameter info
+            refresh_system_param_info_metrics(&system_params_controller, meta_metrics.clone())
+                .await;
         }
     });
 

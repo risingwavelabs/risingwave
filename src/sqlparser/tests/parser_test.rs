@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,7 +24,7 @@ use std::fmt::{Display, Write as _};
 use std::fs::File;
 use std::io::Write;
 
-use anyhow::{anyhow, bail, Context, Result};
+use anyhow::{Context, Result, anyhow, bail};
 use console::style;
 use libtest_mimic::{Arguments, Failed, Trial};
 use risingwave_sqlparser::ast::Statement;
@@ -50,7 +50,7 @@ impl Display for TestCase {
 
 fn run_test_case(c: TestCase) -> Result<()> {
     let result = Parser::parse_sql(&c.input);
-    if let Some(error_msg) = c.error_msg.map(|s| s.trim().to_string()) {
+    if let Some(error_msg) = c.error_msg.map(|s| s.trim().to_owned()) {
         if result.is_ok() {
             return Err(anyhow!("Expected failure:\n  {}", error_msg));
         }
@@ -79,7 +79,7 @@ fn run_test_case(c: TestCase) -> Result<()> {
                 style(&formatted_sql).red(),
             ));
         }
-        if let Some(expected_formatted_ast) = c.formatted_ast.map(|s| s.trim().to_string()) {
+        if let Some(expected_formatted_ast) = c.formatted_ast.map(|s| s.trim().to_owned()) {
             let formatted_ast = format!("{:?}", ast);
             if formatted_ast != expected_formatted_ast {
                 return Err(anyhow!(
@@ -180,7 +180,7 @@ fn main() {
         if !(entry
             .path()
             .extension()
-            .map_or(false, |p| p.eq_ignore_ascii_case("yaml")))
+            .is_some_and(|p| p.eq_ignore_ascii_case("yaml") || p.eq_ignore_ascii_case("yml")))
         {
             continue;
         }

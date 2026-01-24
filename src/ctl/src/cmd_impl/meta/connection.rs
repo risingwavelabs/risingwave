@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,7 +35,14 @@ pub async fn list_connections(context: &CtlContext) -> anyhow::Result<()> {
                     "PrivateLink: service_name: {}, endpoint_id: {}, dns_entries: {:?}",
                     svc.service_name, svc.endpoint_id, svc.dns_entries,
                 ),
-                None => "None".to_string(),
+                Some(Info::ConnectionParams(params)) => {
+                    format!(
+                        "CONNECTION_PARAMS_{}: {}",
+                        params.get_connection_type().unwrap().as_str_name(),
+                        serde_json::to_string(&params.get_properties()).unwrap()
+                    )
+                }
+                None => "None".to_owned(),
             }
         );
     }

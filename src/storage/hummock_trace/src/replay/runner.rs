@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,9 +16,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use super::{GlobalReplay, ReplayWorkerScheduler, WorkerScheduler};
+use crate::Operation;
 use crate::error::Result;
 use crate::read::TraceReader;
-use crate::Operation;
 
 pub struct HummockReplay<R: TraceReader, G: GlobalReplay> {
     reader: R,
@@ -57,7 +57,7 @@ impl<R: TraceReader, G: GlobalReplay + 'static> HummockReplay<R, G> {
                 _ => {
                     worker_scheduler.schedule(r);
                     total_ops += 1;
-                    if total_ops % 10000 == 0 {
+                    if total_ops.is_multiple_of(10000) {
                         println!("replayed {} ops", total_ops);
                     }
                 }
@@ -196,7 +196,7 @@ mod tests {
 
         let mut non_local: Vec<Result<Record>> = vec![
             (12, Operation::Finish),
-            (13, Operation::Sync(sync_id, vec![1, 2, 3])),
+            (13, Operation::Sync(vec![(sync_id, vec![1, 2, 3])])),
             (
                 13,
                 Operation::Result(OperationResult::Sync(TraceResult::Ok(0))),
@@ -244,9 +244,9 @@ mod tests {
 
         mock_replay
             .expect_sync()
-            .with(predicate::eq(sync_id), predicate::eq(vec![1, 2, 3]))
+            .with(predicate::eq(vec![(sync_id, vec![1, 2, 3])]))
             .times(1)
-            .returning(|_, _| Ok(0));
+            .returning(|_| Ok(0));
 
         let mut replay = HummockReplay::new(mock_reader, mock_replay);
 

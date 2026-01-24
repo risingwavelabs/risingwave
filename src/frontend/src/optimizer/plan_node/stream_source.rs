@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,22 +14,21 @@
 
 use std::rc::Rc;
 
-use fixedbitset::FixedBitSet;
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::ColumnCatalog;
-use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_connector::parser::additional_columns::source_add_partition_offset_cols;
+use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::types::DataType;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
-use risingwave_pb::stream_plan::{PbStreamSource, SourceNode};
+use risingwave_pb::stream_plan::{Columns, PbStreamSource, SourceNode};
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, StreamNode};
+use super::utils::{Distill, TableCatalogBuilder, childless_record};
+use super::{ExprRewritable, PlanBase, StreamNode, generic};
+use crate::TableCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// [`StreamSource`] represents a table/connector source at the very beginning of the graph.
@@ -37,44 +36,48 @@ use crate::stream_fragmenter::BuildFragmentGraphState;
 pub struct StreamSource {
     pub base: PlanBase<Stream>,
     pub(crate) core: generic::Source,
+    /// Downstream columns are used by list node to know which columns are needed.
+    /// For example, iceberg list node will use this info to plan files to read.
+    pub(crate) downstream_columns: Option<Vec<ColumnCatalog>>,
 }
 
 impl StreamSource {
-    pub fn new(mut core: generic::Source) -> Self {
-        // For shared sources, we will include partition and offset cols in the *output*, to be used by the SourceBackfillExecutor.
-        // XXX: If we don't add here, these cols are also added in source reader, but pruned in the SourceExecutor's output.
-        // Should we simply add them here for all sources for consistency?
-        if let Some(source_catalog) = &core.catalog
-            && source_catalog.info.is_shared()
-        {
-            let (columns_exist, additional_columns) = source_add_partition_offset_cols(
-                &core.column_catalog,
-                &source_catalog.connector_name(),
-            );
-            for (existed, c) in columns_exist.into_iter().zip_eq_fast(additional_columns) {
-                if !existed {
-                    core.column_catalog.push(ColumnCatalog::hidden(c));
-                }
-            }
-        }
-
+    pub fn new(core: generic::Source) -> Self {
         let base = PlanBase::new_stream_with_core(
             &core,
             Distribution::SomeShard,
-            core.catalog.as_ref().map_or(true, |s| s.append_only),
+            core.stream_kind(),
             false,
-            FixedBitSet::with_capacity(core.column_catalog.len()),
+            WatermarkColumns::new(),
             MonotonicityMap::new(),
         );
-        Self { base, core }
+        Self {
+            base,
+            core,
+            downstream_columns: None,
+        }
     }
 
     pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
         self.core.catalog.clone()
     }
+
+    fn infer_internal_table_catalog(&self) -> TableCatalog {
+        if !self.core.is_iceberg_connector() {
+            generic::Source::infer_internal_table_catalog(false)
+        } else {
+            // iceberg list node (singleton) stores last_snapshot (just 1 row, no pk)
+            let mut builder = TableCatalogBuilder::default();
+            builder.add_column(&Field {
+                data_type: DataType::Int64,
+                name: "last_snapshot".to_owned(),
+            });
+            builder.build(vec![], 0)
+        }
+    }
 }
 
-impl_plan_tree_node_for_leaf! { StreamSource }
+impl_plan_tree_node_for_leaf! { Stream, StreamSource }
 
 impl Distill for StreamSource {
     fn distill<'a>(&self) -> XmlNode<'a> {
@@ -92,6 +95,7 @@ impl Distill for StreamSource {
 impl StreamNode for StreamSource {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         let source_catalog = self.source_catalog();
+
         let source_inner = source_catalog.map(|source_catalog| {
             let (with_properties, secret_refs) =
                 source_catalog.with_properties.clone().into_parts();
@@ -99,7 +103,7 @@ impl StreamNode for StreamSource {
                 source_id: source_catalog.id,
                 source_name: source_catalog.name.clone(),
                 state_table: Some(
-                    generic::Source::infer_internal_table_catalog(false)
+                    self.infer_internal_table_catalog()
                         .with_id(state.gen_table_id_wrapped())
                         .to_internal_table_prost(),
                 ),
@@ -114,12 +118,17 @@ impl StreamNode for StreamSource {
                 with_properties,
                 rate_limit: source_catalog.rate_limit,
                 secret_refs,
+                downstream_columns: self.downstream_columns.as_ref().map(|cols| Columns {
+                    columns: cols.iter().map(|c| c.to_protobuf()).collect_vec(),
+                }),
+                refresh_mode: source_catalog.refresh_mode,
+                associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
             }
         });
-        PbNodeBody::Source(SourceNode { source_inner })
+        PbNodeBody::Source(Box::new(SourceNode { source_inner }))
     }
 }
 
-impl ExprRewritable for StreamSource {}
+impl ExprRewritable<Stream> for StreamSource {}
 
 impl ExprVisitable for StreamSource {}

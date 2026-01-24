@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,27 +17,35 @@ use std::collections::HashSet;
 use either::Either;
 use itertools::Itertools;
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_common::acl::AclMode;
-use risingwave_common::catalog::TableId;
-use risingwave_pb::catalog::PbTable;
+use risingwave_common::catalog::{FunctionId, ObjectId};
+use risingwave_pb::ddl_service::streaming_job_resource_type;
+use risingwave_pb::serverless_backfill_controller::{
+    ProvisionRequest, node_group_controller_service_client,
+};
+use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_sqlparser::ast::{EmitMode, Ident, ObjectName, Query};
+use thiserror_ext::AsReport;
 
-use super::privilege::resolve_relation_privileges;
 use super::RwPgResponse;
 use crate::binder::{Binder, BoundQuery, BoundSetExpr};
-use crate::catalog::check_valid_column_name;
-use crate::error::ErrorCode::ProtocolError;
+use crate::catalog::check_column_name_not_reserved;
+use crate::error::ErrorCode::{InvalidInputSyntax, ProtocolError};
 use crate::error::{ErrorCode, Result, RwError};
-use crate::handler::privilege::resolve_query_privileges;
 use crate::handler::HandlerArgs;
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
+use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::Explain;
-use crate::optimizer::{OptimizerContext, OptimizerContextRef, PlanRef, RelationCollectorVisitor};
+use crate::optimizer::plan_node::{Explain, StreamPlanRef as PlanRef};
+use crate::optimizer::{OptimizerContext, OptimizerContextRef, RelationCollectorVisitor};
 use crate::planner::Planner;
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
-use crate::session::SessionImpl;
-use crate::stream_fragmenter::build_graph;
+use crate::session::{SESSION_MANAGER, SessionImpl};
+use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
 use crate::utils::ordinal;
+use crate::{TableCatalog, WithOptions};
+
+pub const RESOURCE_GROUP_KEY: &str = "resource_group";
+pub const CLOUD_SERVERLESS_BACKFILL_ENABLED: &str = "cloud.serverless_backfill_enabled";
 
 pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
     if columns.is_empty() {
@@ -53,13 +61,12 @@ pub(super) fn parse_column_names(columns: &[Ident]) -> Option<Vec<String>> {
 /// should guarantee that the column names number are consistent with the query.
 pub(super) fn get_column_names(
     bound: &BoundQuery,
-    session: &SessionImpl,
     columns: Vec<Ident>,
 ) -> Result<Option<Vec<String>>> {
     let col_names = parse_column_names(&columns);
     if let BoundSetExpr::Select(select) = &bound.body {
         // `InputRef`'s alias will be implicitly assigned in `bind_project`.
-        // If user provide columns name (col_names.is_some()), we don't need alias.
+        // If user provides columns name (col_names.is_some()), we don't need alias.
         // For other expressions (col_names.is_none()), we require the user to explicitly assign an
         // alias.
         if col_names.is_none() {
@@ -71,11 +78,6 @@ pub(super) fn get_column_names(
                 .into());
                 }
             }
-        }
-        if let Some(relation) = &select.from {
-            let mut check_items = Vec::new();
-            resolve_relation_privileges(relation, AclMode::Select, &mut check_items);
-            session.check_privileges(&check_items)?;
         }
     }
 
@@ -90,18 +92,10 @@ pub fn gen_create_mv_plan(
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     let mut binder = Binder::new_for_stream(session);
-    let bound = binder.bind_query(query)?;
-    gen_create_mv_plan_bound(
-        session,
-        context,
-        bound,
-        binder.included_relations(),
-        name,
-        columns,
-        emit_mode,
-    )
+    let bound = binder.bind_query(&query)?;
+    gen_create_mv_plan_bound(session, context, bound, name, columns, emit_mode)
 }
 
 /// Generate create MV plan from a bound query
@@ -109,54 +103,47 @@ pub fn gen_create_mv_plan_bound(
     session: &SessionImpl,
     context: OptimizerContextRef,
     query: BoundQuery,
-    dependent_relations: HashSet<TableId>,
     name: ObjectName,
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
-) -> Result<(PlanRef, PbTable)> {
+) -> Result<(PlanRef, TableCatalog)> {
     if session.config().create_compaction_group_for_mv() {
         context.warn_to_user("The session variable CREATE_COMPACTION_GROUP_FOR_MV has been deprecated. It will not take effect.");
     }
 
-    let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, name)?;
+    let db_name = &session.database();
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &name)?;
 
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
 
     let definition = context.normalized_sql().to_owned();
 
-    let check_items = resolve_query_privileges(&query);
-    session.check_privileges(&check_items)?;
-
-    let col_names = get_column_names(&query, session, columns)?;
+    let col_names = get_column_names(&query, columns)?;
 
     let emit_on_window_close = emit_mode == Some(EmitMode::OnWindowClose);
     if emit_on_window_close {
         context.warn_to_user("EMIT ON WINDOW CLOSE is currently an experimental feature. Please use it with caution.");
     }
 
-    let mut plan_root = Planner::new(context).plan_query(query)?;
+    let mut plan_root = Planner::new_for_stream(context).plan_query(query)?;
     if let Some(col_names) = col_names {
         for name in &col_names {
-            check_valid_column_name(name)?;
+            check_column_name_not_reserved(name)?;
         }
         plan_root.set_out_names(col_names)?;
     }
-    let materialize =
-        plan_root.gen_materialize_plan(table_name, definition, emit_on_window_close)?;
-    let mut table = materialize.table().to_prost(schema_id, database_id);
+    let materialize = plan_root.gen_materialize_plan(
+        database_id,
+        schema_id,
+        table_name,
+        definition,
+        emit_on_window_close,
+    )?;
 
-    let plan: PlanRef = materialize.into();
-    let dependent_relations =
-        RelationCollectorVisitor::collect_with(dependent_relations, plan.clone());
-
+    let mut table = materialize.table().clone();
     table.owner = session.user_id();
 
-    // record dependent relations.
-    table.dependent_relations = dependent_relations
-        .into_iter()
-        .map(|t| t.table_id)
-        .collect_vec();
+    let plan: PlanRef = materialize.into();
 
     let ctx = plan.ctx();
     let explain_trace = ctx.is_explain_trace();
@@ -176,21 +163,56 @@ pub async fn handle_create_mv(
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
-    let (dependent_relations, bound) = {
+    let (dependent_relations, dependent_udfs, bound_query) = {
         let mut binder = Binder::new_for_stream(handler_args.session.as_ref());
-        let bound = binder.bind_query(query)?;
-        (binder.included_relations(), bound)
+        let bound_query = binder.bind_query(&query)?;
+        (
+            binder.included_relations().clone(),
+            binder.included_udfs().clone(),
+            bound_query,
+        )
     };
     handle_create_mv_bound(
         handler_args,
         if_not_exists,
         name,
-        bound,
+        bound_query,
         dependent_relations,
+        dependent_udfs,
         columns,
         emit_mode,
     )
     .await
+}
+
+/// Send a provision request to the serverless backfill controller
+pub async fn provision_resource_group(sbc_addr: String) -> Result<String> {
+    let request = tonic::Request::new(ProvisionRequest {});
+    let mut client =
+        node_group_controller_service_client::NodeGroupControllerServiceClient::connect(
+            sbc_addr.clone(),
+        )
+        .await
+        .map_err(|e| {
+            RwError::from(ErrorCode::InternalError(format!(
+                "unable to reach serverless backfill controller at addr {}: {}",
+                sbc_addr,
+                e.as_report()
+            )))
+        })?;
+
+    match client.provision(request).await {
+        Ok(resp) => Ok(resp.into_inner().resource_group),
+        Err(e) => Err(RwError::from(ErrorCode::InternalError(format!(
+            "serverless backfill controller returned error :{}",
+            e.as_report()
+        )))),
+    }
+}
+
+fn get_with_options(handler_args: HandlerArgs) -> WithOptions {
+    let context = OptimizerContext::from_handler_args(handler_args);
+    context.with_options().clone()
 }
 
 pub async fn handle_create_mv_bound(
@@ -198,7 +220,8 @@ pub async fn handle_create_mv_bound(
     if_not_exists: bool,
     name: ObjectName,
     query: BoundQuery,
-    dependent_relations: HashSet<TableId>,
+    dependent_relations: HashSet<ObjectId>,
+    dependent_udfs: HashSet<FunctionId>, // TODO(rc): merge with `dependent_relations`
     columns: Vec<Ident>,
     emit_mode: Option<EmitMode>,
 ) -> Result<RwPgResponse> {
@@ -215,36 +238,17 @@ pub async fn handle_create_mv_bound(
         return Ok(resp);
     }
 
-    let (table, graph) = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        if !context.with_options().is_empty() {
-            // get other useful fields by `remove`, the logic here is to reject unknown options.
-            return Err(RwError::from(ProtocolError(format!(
-                "unexpected options in WITH clause: {:?}",
-                context.with_options().keys()
-            ))));
-        }
-
-        let has_order_by = !query.order.is_empty();
-        if has_order_by {
-            context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
-It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
-"#.to_string());
-        }
-
-        let (plan, table) = gen_create_mv_plan_bound(
-            &session,
-            context.into(),
+    let (table, graph, dependencies, resource_type) = {
+        gen_create_mv_graph(
+            handler_args,
+            name,
             query,
             dependent_relations,
-            name,
+            dependent_udfs,
             columns,
             emit_mode,
-        )?;
-
-        let graph = build_graph(plan)?;
-
-        (table, graph)
+        )
+        .await?
     };
 
     // Ensure writes to `StreamJobTracker` are atomic.
@@ -259,15 +263,144 @@ It only indicates the physical clustering of the data, which may improve the per
                 table.name.clone(),
             ));
 
-    let session = session.clone();
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_materialized_view(table, graph)
-        .await?;
+    execute_with_long_running_notification(
+        catalog_writer.create_materialized_view(
+            table.to_prost(),
+            graph,
+            dependencies,
+            resource_type,
+            if_not_exists,
+        ),
+        &session,
+        "CREATE MATERIALIZED VIEW",
+        LongRunningNotificationAction::MonitorBackfillJob,
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(
         StatementType::CREATE_MATERIALIZED_VIEW,
     ))
+}
+
+pub(crate) async fn gen_create_mv_graph(
+    handler_args: HandlerArgs,
+    name: ObjectName,
+    query: BoundQuery,
+    dependent_relations: HashSet<ObjectId>,
+    dependent_udfs: HashSet<FunctionId>,
+    columns: Vec<Ident>,
+    emit_mode: Option<EmitMode>,
+) -> Result<(
+    TableCatalog,
+    PbStreamFragmentGraph,
+    HashSet<ObjectId>,
+    streaming_job_resource_type::ResourceType,
+)> {
+    let mut with_options = get_with_options(handler_args.clone());
+    let resource_group = with_options.remove(&RESOURCE_GROUP_KEY.to_owned());
+
+    if resource_group.is_some() {
+        risingwave_common::license::Feature::ResourceGroup.check_available()?;
+    }
+
+    let is_serverless_backfill = with_options
+        .remove(&CLOUD_SERVERLESS_BACKFILL_ENABLED.to_owned())
+        .unwrap_or_default()
+        .parse::<bool>()
+        .unwrap_or(false);
+
+    if resource_group.is_some() && is_serverless_backfill {
+        return Err(RwError::from(InvalidInputSyntax(
+            "Please do not specify serverless backfilling and resource group together".to_owned(),
+        )));
+    }
+
+    if !with_options.is_empty() {
+        // get other useful fields by `remove`, the logic here is to reject unknown options.
+        return Err(RwError::from(ProtocolError(format!(
+            "unexpected options in WITH clause: {:?}",
+            with_options.keys()
+        ))));
+    }
+
+    let sbc_addr = match SESSION_MANAGER.get() {
+        Some(manager) => manager.env().sbc_address(),
+        None => "",
+    }
+    .to_owned();
+
+    if is_serverless_backfill && sbc_addr.is_empty() {
+        return Err(RwError::from(InvalidInputSyntax(
+            "Serverless Backfill is disabled on-premise. Use RisingWave cloud at https://cloud.risingwave.com/auth/signup to try this feature".to_owned(),
+        )));
+    }
+
+    let resource_type = if is_serverless_backfill {
+        assert_eq!(resource_group, None);
+        match provision_resource_group(sbc_addr).await {
+            Err(e) => {
+                return Err(RwError::from(ProtocolError(format!(
+                    "failed to provision serverless backfill nodes: {}",
+                    e.as_report()
+                ))));
+            }
+            Ok(group) => {
+                tracing::info!(
+                    resource_group = group,
+                    "provisioning serverless backfill resource group"
+                );
+                streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group)
+            }
+        }
+    } else if let Some(group) = resource_group {
+        streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
+    } else {
+        streaming_job_resource_type::ResourceType::Regular(true)
+    };
+    let context = OptimizerContext::from_handler_args(handler_args);
+    let has_order_by = !query.order.is_empty();
+    if has_order_by {
+        context.warn_to_user(r#"The ORDER BY clause in the CREATE MATERIALIZED VIEW statement does not guarantee that the rows selected out of this materialized view is returned in this order.
+It only indicates the physical clustering of the data, which may improve the performance of queries issued against this materialized view.
+"#.to_owned());
+    }
+
+    if resource_type.resource_group().is_some()
+        && !context
+            .session_ctx()
+            .config()
+            .streaming_use_arrangement_backfill()
+    {
+        return Err(RwError::from(ProtocolError("The session config arrangement backfill must be enabled to use the resource_group option".to_owned())));
+    }
+
+    let context: OptimizerContextRef = context.into();
+    let session = context.session_ctx().as_ref();
+
+    let (plan, table) =
+        gen_create_mv_plan_bound(session, context.clone(), query, name, columns, emit_mode)?;
+
+    let backfill_order = plan_backfill_order(
+        session,
+        context.with_options().backfill_order_strategy(),
+        plan.clone(),
+    )?;
+
+    // TODO(rc): To be consistent with UDF dependency check, we should collect relation dependencies
+    // during binding instead of visiting the optimized plan.
+    let dependencies = RelationCollectorVisitor::collect_with(dependent_relations, plan.clone())
+        .into_iter()
+        .chain(dependent_udfs.iter().copied().map_into())
+        .collect();
+
+    let graph = build_graph_with_strategy(
+        plan,
+        Some(GraphJobType::MaterializedView),
+        Some(backfill_order),
+    )?;
+
+    Ok((table, graph, dependencies, resource_type))
 }
 
 #[cfg(test)]
@@ -275,11 +408,13 @@ pub mod tests {
     use std::collections::HashMap;
 
     use pgwire::pg_response::StatementType::CREATE_MATERIALIZED_VIEW;
-    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROWID_PREFIX};
-    use risingwave_common::types::DataType;
+    use risingwave_common::catalog::{
+        DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
+    };
+    use risingwave_common::types::{DataType, StructType};
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::{create_proto_file, LocalFrontend, PROTO_FILE_DATA};
+    use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
 
     #[tokio::test]
     async fn test_create_mv_handler() {
@@ -318,18 +453,22 @@ pub mod tests {
             .map(|col| (col.name(), col.data_type().clone()))
             .collect::<HashMap<&str, DataType>>();
 
-        let city_type = DataType::new_struct(
-            vec![DataType::Varchar, DataType::Varchar],
-            vec!["address".to_string(), "zipcode".to_string()],
-        );
+        let city_type = StructType::new(vec![
+            ("address", DataType::Varchar),
+            ("zipcode", DataType::Varchar),
+        ])
+        // .with_ids([5, 6].map(ColumnId::new))
+        .into();
         let expected_columns = maplit::hashmap! {
-            ROWID_PREFIX => DataType::Serial,
-            "country" => DataType::new_struct(
-                 vec![DataType::Varchar,city_type,DataType::Varchar],
-                 vec!["address".to_string(), "city".to_string(), "zipcode".to_string()],
+            ROW_ID_COLUMN_NAME => DataType::Serial,
+            "country" => StructType::new(
+                 vec![("address", DataType::Varchar),("city", city_type),("zipcode", DataType::Varchar)],
             )
+            // .with_ids([3, 4, 7].map(ColumnId::new))
+            .into(),
+            RW_TIMESTAMP_COLUMN_NAME => DataType::Timestamptz,
         };
-        assert_eq!(columns, expected_columns);
+        assert_eq!(columns, expected_columns, "{columns:#?}");
     }
 
     /// When creating MV, a unique column name must be specified for each column

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,25 +20,24 @@ use async_trait::async_trait;
 use futures::TryStreamExt;
 use futures_async_stream::try_stream;
 use opendal::Operator;
-use parquet::arrow::ParquetRecordBatchStreamBuilder;
+use prometheus::core::GenericCounter;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::util::tokio_util::compat::FuturesAsyncReadCompatExt;
-use tokio::io::{AsyncRead, BufReader};
-use tokio_util::io::{ReaderStream, StreamReader};
+use risingwave_common::metrics::LabelGuardedMetric;
+use tokio::io::{AsyncBufRead, AsyncBufReadExt, BufReader};
+use tokio_util::io::StreamReader;
 
-use super::opendal_enumerator::OpendalEnumerator;
 use super::OpendalSource;
+use super::opendal_enumerator::OpendalEnumerator;
 use crate::error::ConnectorResult;
-use crate::parser::{ByteStreamSourceParserImpl, EncodingProperties, ParquetParser, ParserConfig};
+use crate::parser::{ByteStreamSourceParserImpl, EncodingProperties, ParserConfig};
+use crate::source::filesystem::OpendalFsSplit;
 use crate::source::filesystem::file_common::CompressionFormat;
 use crate::source::filesystem::nd_streaming::need_nd_streaming;
-use crate::source::filesystem::{nd_streaming, OpendalFsSplit};
+use crate::source::iceberg::read_parquet_file;
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SourceMeta, SplitMetaData,
     SplitReader,
 };
-
-const STREAM_READER_CAPACITY: usize = 4096;
 
 #[derive(Debug, Clone)]
 pub struct OpendalReader<Src: OpendalSource> {
@@ -46,7 +45,9 @@ pub struct OpendalReader<Src: OpendalSource> {
     splits: Vec<OpendalFsSplit<Src>>,
     parser_config: ParserConfig,
     source_ctx: SourceContextRef,
+    columns: Option<Vec<Column>>,
 }
+
 #[async_trait]
 impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
     type Properties = Src::Properties;
@@ -57,7 +58,7 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
         splits: Vec<OpendalFsSplit<Src>>,
         parser_config: ParserConfig,
         source_ctx: SourceContextRef,
-        _columns: Option<Vec<Column>>,
+        columns: Option<Vec<Column>>,
     ) -> ConnectorResult<Self> {
         let connector = Src::new_enumerator(properties)?;
         let opendal_reader = OpendalReader {
@@ -65,11 +66,12 @@ impl<Src: OpendalSource> SplitReader for OpendalReader<Src> {
             splits,
             parser_config,
             source_ctx,
+            columns,
         };
         Ok(opendal_reader)
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         self.into_stream_inner()
     }
 }
@@ -81,136 +83,174 @@ impl<Src: OpendalSource> OpendalReader<Src> {
             let source_ctx = self.source_ctx.clone();
 
             let object_name = split.name.clone();
-
-            let msg_stream;
-
+            let actor_id = source_ctx.actor_id.to_string();
+            let fragment_id = source_ctx.fragment_id.to_string();
+            let source_id = source_ctx.source_id.to_string();
+            let source_name = source_ctx.source_name.clone();
+            let file_source_input_row_count = self
+                .source_ctx
+                .metrics
+                .file_source_input_row_count
+                .with_guarded_label_values(&[&source_id, &source_name, &actor_id, &fragment_id]);
+            let chunk_stream;
             if let EncodingProperties::Parquet = &self.parser_config.specific.encoding_config {
-                // // If the format is "parquet", use `ParquetParser` to convert `record_batch` into stream chunk.
-                let reader: tokio_util::compat::Compat<opendal::FuturesAsyncReader> = self
-                    .connector
-                    .op
-                    .reader_with(&object_name)
-                    .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
-                    .await?
-                    .into_futures_async_read(..)
-                    .await?
-                    .compat();
-                // For the Parquet format, we directly convert from a record batch to a stream chunk.
-                // Therefore, the offset of the Parquet file represents the current position in terms of the number of rows read from the file.
-                let record_batch_stream = ParquetRecordBatchStreamBuilder::new(reader)
-                    .await?
-                    .with_batch_size(self.source_ctx.source_ctrl_opts.chunk_size)
-                    .with_offset(split.offset)
-                    .build()?;
-
-                let parquet_parser = ParquetParser::new(
-                    self.parser_config.common.rw_columns.clone(),
-                    object_name,
+                let actor_id = source_ctx.actor_id.to_string();
+                let source_id = source_ctx.source_id.to_string();
+                let split_id = split.id();
+                let source_name = source_ctx.source_name.clone();
+                let parquet_source_skip_row_count_metrics: LabelGuardedMetric<
+                    GenericCounter<prometheus::core::AtomicU64>,
+                > = self
+                    .source_ctx
+                    .metrics
+                    .parquet_source_skip_row_count
+                    .with_guarded_label_values(&[
+                        actor_id.as_str(),
+                        source_id.as_str(),
+                        &split_id,
+                        source_name.as_str(),
+                    ]);
+                chunk_stream = read_parquet_file(
+                    self.connector.op.clone(),
+                    object_name.clone(),
+                    self.columns.clone(),
+                    Some(self.parser_config.common.rw_columns.clone()),
+                    self.source_ctx.source_ctrl_opts.chunk_size,
                     split.offset,
-                )?;
-                msg_stream = parquet_parser.into_stream(record_batch_stream);
+                    Some(file_source_input_row_count.clone()),
+                    Some(parquet_source_skip_row_count_metrics),
+                )
+                .await?;
             } else {
-                let data_stream = Self::stream_read_object(
+                assert!(
+                    need_nd_streaming(&self.parser_config.specific.encoding_config),
+                    "except for parquet, file source only support split by newline for now"
+                );
+
+                let line_stream = Self::stream_read_lines(
                     self.connector.op.clone(),
                     split,
                     self.source_ctx.clone(),
                     self.connector.compression_format.clone(),
+                    file_source_input_row_count.clone(),
                 );
 
                 let parser =
                     ByteStreamSourceParserImpl::create(self.parser_config.clone(), source_ctx)
                         .await?;
-                msg_stream = if need_nd_streaming(&self.parser_config.specific.encoding_config) {
-                    Box::pin(parser.into_stream(nd_streaming::split_stream(data_stream)))
-                } else {
-                    Box::pin(parser.into_stream(data_stream))
-                };
+                chunk_stream = Box::pin(parser.parse_stream(line_stream));
             }
+
             #[for_await]
-            for msg in msg_stream {
-                let msg = msg?;
-                yield msg;
+            for chunk in chunk_stream {
+                yield chunk?;
             }
         }
     }
 
     #[try_stream(boxed, ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
-    pub async fn stream_read_object(
+    pub async fn stream_read_lines(
         op: Operator,
         split: OpendalFsSplit<Src>,
         source_ctx: SourceContextRef,
         compression_format: CompressionFormat,
+        file_source_input_row_count_metrics: LabelGuardedMetric<
+            GenericCounter<prometheus::core::AtomicU64>,
+        >,
     ) {
         let actor_id = source_ctx.actor_id.to_string();
         let fragment_id = source_ctx.fragment_id.to_string();
         let source_id = source_ctx.source_id.to_string();
-        let source_name = source_ctx.source_name.to_string();
-        let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
+        let source_name = source_ctx.source_name.clone();
         let split_id = split.id();
         let object_name = split.name.clone();
-        let reader = op
-            .read_with(&object_name)
-            .range(split.offset as u64..)
-            .into_future() // Unlike `rustc`, `try_stream` seems require manual `into_future`.
-            .await?;
-        let stream_reader = StreamReader::new(
-            reader.map_err(|e| std::io::Error::new(std::io::ErrorKind::Other, e)),
-        );
+        let start_offset = split.offset;
+        // After a recovery occurs, for gzip-compressed files, it is necessary to read from the beginning each time,
+        // other files can continue reading from the last read `start_offset`.
+        let reader = match object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
+            true => op.read_with(&object_name).into_future().await?,
 
-        let buf_reader: Pin<Box<dyn AsyncRead + Send>> = match compression_format {
+            false => {
+                op.read_with(&object_name)
+                    .range(start_offset as u64..)
+                    .into_future()
+                    .await?
+            }
+        };
+
+        let stream_reader = StreamReader::new(reader.map_err(std::io::Error::other));
+
+        let mut buf_reader: Pin<Box<dyn AsyncBufRead + Send>> = match compression_format {
             CompressionFormat::Gzip => {
                 let gzip_decoder = GzipDecoder::new(stream_reader);
-                Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
+                Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncBufRead + Send>>
             }
             CompressionFormat::None => {
                 // todo: support automatic decompression of more compression types.
                 if object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
                     let gzip_decoder = GzipDecoder::new(stream_reader);
-                    Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncRead + Send>>
+                    Box::pin(BufReader::new(gzip_decoder)) as Pin<Box<dyn AsyncBufRead + Send>>
                 } else {
-                    Box::pin(BufReader::new(stream_reader)) as Pin<Box<dyn AsyncRead + Send>>
+                    Box::pin(BufReader::new(stream_reader)) as Pin<Box<dyn AsyncBufRead + Send>>
                 }
             }
         };
 
-        let mut offset: usize = split.offset;
-        let mut batch_size: usize = 0;
-        let mut batch = Vec::new();
+        let mut offset = match object_name.ends_with(".gz") || object_name.ends_with(".gzip") {
+            true => 0,
+            false => start_offset,
+        };
         let partition_input_bytes_metrics = source_ctx
             .metrics
             .partition_input_bytes
             .with_guarded_label_values(&[
-                &actor_id,
-                &source_id,
+                actor_id.as_str(),
+                source_id.as_str(),
                 &split_id,
-                &source_name,
-                &fragment_id,
+                source_name.as_str(),
+                fragment_id.as_str(),
             ]);
-        let stream = ReaderStream::with_capacity(buf_reader, STREAM_READER_CAPACITY);
-        #[for_await]
-        for read in stream {
-            let bytes = read?;
-            let len = bytes.len();
-            let msg = SourceMessage {
-                key: None,
-                payload: Some(bytes.as_ref().to_vec()),
-                offset: offset.to_string(),
-                split_id: split.id(),
-                meta: SourceMeta::Empty,
-            };
-            offset += len;
-            batch_size += len;
-            batch.push(msg);
+
+        let max_chunk_size = source_ctx.source_ctrl_opts.chunk_size;
+        let mut batch = Vec::with_capacity(max_chunk_size);
+        let mut line_buf = String::new();
+
+        loop {
+            let n_read = buf_reader.read_line(&mut line_buf).await?;
+            if n_read == 0 {
+                // EOF
+                break;
+            }
+            let msg_offset = (offset + n_read).to_string();
+            // note that the buffer contains the newline character
+            debug_assert_eq!(n_read, line_buf.len());
+            if (object_name.ends_with(".gz") || object_name.ends_with(".gzip"))
+                && offset + n_read <= start_offset
+            {
+                // For gzip compressed files, the reader needs to read from the beginning each time,
+                // but it needs to skip the previously read part and start yielding chunks from a position greater than or equal to start_offset.
+            } else {
+                batch.push(SourceMessage {
+                    key: None,
+                    payload: Some(std::mem::take(&mut line_buf).into_bytes()),
+                    offset: msg_offset,
+                    split_id: split.id(),
+                    meta: SourceMeta::Empty,
+                });
+            }
+
+            offset += n_read;
+            partition_input_bytes_metrics.inc_by(n_read as _);
 
             if batch.len() >= max_chunk_size {
-                partition_input_bytes_metrics.inc_by(batch_size as u64);
-                let yield_batch = std::mem::take(&mut batch);
-                batch_size = 0;
-                yield yield_batch;
+                file_source_input_row_count_metrics.inc_by(max_chunk_size as _);
+                yield std::mem::replace(&mut batch, Vec::with_capacity(max_chunk_size));
             }
         }
+
         if !batch.is_empty() {
-            partition_input_bytes_metrics.inc_by(batch_size as u64);
+            batch.shrink_to_fit();
+            file_source_input_row_count_metrics.inc_by(batch.len() as _);
             yield batch;
         }
     }

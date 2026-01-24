@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use chrono::{NaiveDate, NaiveDateTime, NaiveTime};
-use risingwave_common::types::{Date, FloatExt, Time, Timestamp, Timestamptz, F64};
+use risingwave_common::types::{Date, F64, FloatExt, Time, Timestamp, Timestamptz};
 use risingwave_expr::expr_context::TIME_ZONE;
-use risingwave_expr::{capture_context, function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, capture_context, function};
 
 use crate::scalar::timestamptz::timestamp_at_time_zone;
 
@@ -43,8 +43,8 @@ fn make_naive_time(hour: i32, min: i32, sec: F64) -> Result<NaiveTime> {
         });
     }
     let sec_u32 = sec.0.trunc() as u32;
-    let microsecond_u32 = ((sec.0 - sec.0.trunc()) * 1_000_000.0).round_ties_even() as u32;
-    NaiveTime::from_hms_micro_opt(hour as u32, min as u32, sec_u32, microsecond_u32).ok_or_else(
+    let nanosecond_u32 = ((sec.0 - sec.0.trunc()) * 1_000_000_000.0).round_ties_even() as u32;
+    NaiveTime::from_hms_nano_opt(hour as u32, min as u32, sec_u32, nanosecond_u32).ok_or_else(
         || ExprError::InvalidParam {
             name: "hour, min, sec",
             reason: format!("invalid time: {}:{}:{}", hour, min, sec).into(),

@@ -7,8 +7,7 @@ option go_package = "risingwavelabs.com/risingwave/proto/telemetry";
 enum MetaBackend {
   META_BACKEND_UNSPECIFIED = 0;
   META_BACKEND_MEMORY = 1;
-  reserved 2;
-  reserved "META_BACKEND_ETCD";
+  META_BACKEND_ETCD = 2;
   META_BACKEND_RDB = 3;
 }
 
@@ -103,6 +102,13 @@ message MetaReport {
 
   // The object store media type obtained from ObjectStore::store_media_type
   string object_store_media_type = 8;
+
+  // The connector usage of the cluster
+  string connector_usage_json_str = 9;
+
+  // The license information of the cluster (JSON serialized).
+  // If there's any error, it will be like `{"error": "error message"}`.
+  string license_info_json_str = 10;
 }
 
 enum PlanOptimization {
@@ -166,4 +172,8 @@ message EventMessage {
   string node = 9;
   // mark the event is a test message
   bool is_test = 11;
+}
+
+message BatchEventMessage {
+  repeated EventMessage events = 1;
 }

@@ -1,2 +1,0 @@
-statement ok
-CREATE INDEX i on t (v1);

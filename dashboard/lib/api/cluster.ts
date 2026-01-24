@@ -12,8 +12,8 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
+
 import { WorkerNode } from "../../proto/gen/common"
 import api from "./api"
 
@@ -33,5 +33,26 @@ export async function getClusterInfoComputeNode() {
   const res: WorkerNode[] = (await api.get("/clusters/2")).map(
     WorkerNode.fromJSON
   )
+  return res
+}
+
+export async function getClusterInfoCompactor() {
+  const res: WorkerNode[] = (await api.get("/clusters/4")).map(
+    WorkerNode.fromJSON
+  )
+  return res
+}
+
+export async function getClusterInfoProfileWorkers() {
+  const [computes, frontends, compactors] = await Promise.all([
+    getClusterInfoComputeNode(),
+    getClusterInfoFrontend(),
+    getClusterInfoCompactor(),
+  ])
+  return [...computes, ...frontends, ...compactors]
+}
+
+export async function getClusterVersion() {
+  const res = await api.get("/version")
   return res
 }

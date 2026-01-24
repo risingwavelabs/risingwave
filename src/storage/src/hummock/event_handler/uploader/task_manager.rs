@@ -42,10 +42,11 @@ impl TaskManager {
     ) -> &UploadingTaskStatus {
         let task_id = task.task_id;
         self.task_order.push_front(task.task_id);
-        assert!(self
-            .tasks
-            .insert(task.task_id, TaskEntry { task, status })
-            .is_none());
+        assert!(
+            self.tasks
+                .insert(task.task_id, TaskEntry { task, status })
+                .is_none()
+        );
         &self.tasks.get(&task_id).expect("should exist").status
     }
 
@@ -97,10 +98,19 @@ impl TaskManager {
         }
     }
 
-    pub(super) fn abort(self) {
+    pub(super) fn abort_all_tasks(self) {
         for task in self.tasks.into_values() {
             task.task.join_handle.abort();
         }
+    }
+
+    pub(super) fn abort_task(&mut self, task_id: UploadingTaskId) -> Option<UploadingTaskStatus> {
+        self.tasks.remove(&task_id).map(|entry| {
+            entry.task.join_handle.abort();
+            self.task_order
+                .retain(|inflight_task_id| *inflight_task_id != task_id);
+            entry.status
+        })
     }
 
     pub(super) fn spill(
@@ -125,24 +135,6 @@ impl TaskManager {
             size,
             must_match!(status, UploadingTaskStatus::Spilling(table_ids) => table_ids),
         )
-    }
-
-    pub(super) fn remove_table_spill_tasks(
-        &mut self,
-        table_id: TableId,
-        task_ids: impl Iterator<Item = UploadingTaskId>,
-    ) {
-        for task_id in task_ids {
-            let entry = self.tasks.get_mut(&task_id).expect("should exist");
-            let empty = must_match!(&mut entry.status, UploadingTaskStatus::Spilling(table_ids) => {
-                assert!(table_ids.remove(&table_id));
-                table_ids.is_empty()
-            });
-            if empty {
-                let task = self.tasks.remove(&task_id).expect("should exist").task;
-                task.join_handle.abort();
-            }
-        }
     }
 
     pub(super) fn sync(

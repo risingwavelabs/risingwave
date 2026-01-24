@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,11 +15,11 @@
 use itertools::Itertools;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{ApplyOffsetRewriter, BoxedRule, Rule};
+use super::ApplyOffsetRewriter;
+use super::prelude::{PlanRef, *};
 use crate::expr::{ExprImpl, ExprRewriter, InputRef};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalApply, LogicalProject, LogicalProjectSet};
-use crate::optimizer::PlanRef;
 
 /// Transpose `LogicalApply` and `LogicalProjectSet`.
 ///
@@ -45,7 +45,7 @@ use crate::optimizer::PlanRef;
 ///  Domain        Input
 /// ```
 pub struct ApplyProjectSetTransposeRule {}
-impl Rule for ApplyProjectSetTransposeRule {
+impl Rule<Logical> for ApplyProjectSetTransposeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         let (left, right, on, join_type, correlated_id, correlated_indices, max_one_row) =

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2025 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,15 +25,18 @@ use risingwave_common::telemetry::manager::TelemetryManager;
 use risingwave_common::telemetry::{report_scarf_enabled, report_to_scarf, telemetry_env_enabled};
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common_service::{MetricsManager, TracingExtractLayer};
+use risingwave_meta::MetaStoreBackend;
+use risingwave_meta::barrier::GlobalBarrierManager;
 use risingwave_meta::controller::catalog::CatalogController;
 use risingwave_meta::controller::cluster::ClusterController;
-use risingwave_meta::controller::IN_MEMORY_STORE;
-use risingwave_meta::manager::{MetadataManager, META_NODE_ID};
+use risingwave_meta::hummock::IcebergCompactorManager;
+use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManager;
+use risingwave_meta::manager::{META_NODE_ID, MetadataManager};
+use risingwave_meta::rpc::ElectionClientRef;
 use risingwave_meta::rpc::election::dummy::DummyElectionClient;
 use risingwave_meta::rpc::intercept::MetricsMiddlewareLayer;
-use risingwave_meta::rpc::ElectionClientRef;
-use risingwave_meta::stream::ScaleController;
-use risingwave_meta::MetaStoreBackend;
+use risingwave_meta::stream::{GlobalRefreshManager, ScaleController};
+use risingwave_meta_service::AddressInfo;
 use risingwave_meta_service::backup_service::BackupServiceImpl;
 use risingwave_meta_service::cloud_service::CloudServiceImpl;
 use risingwave_meta_service::cluster_limit_service::ClusterLimitServiceImpl;
@@ -42,8 +45,10 @@ use risingwave_meta_service::ddl_service::DdlServiceImpl;
 use risingwave_meta_service::event_log_service::EventLogServiceImpl;
 use risingwave_meta_service::health_service::HealthServiceImpl;
 use risingwave_meta_service::heartbeat_service::HeartbeatServiceImpl;
+use risingwave_meta_service::hosted_iceberg_catalog_service::HostedIcebergCatalogServiceImpl;
 use risingwave_meta_service::hummock_service::HummockServiceImpl;
 use risingwave_meta_service::meta_member_service::MetaMemberServiceImpl;
+use risingwave_meta_service::monitor_service::MonitorServiceImpl;
 use risingwave_meta_service::notification_service::NotificationServiceImpl;
 use risingwave_meta_service::scale_service::ScaleServiceImpl;
 use risingwave_meta_service::serving_service::ServingServiceImpl;
@@ -53,17 +58,18 @@ use risingwave_meta_service::stream_service::StreamServiceImpl;
 use risingwave_meta_service::system_params_service::SystemParamsServiceImpl;
 use risingwave_meta_service::telemetry_service::TelemetryInfoServiceImpl;
 use risingwave_meta_service::user_service::UserServiceImpl;
-use risingwave_meta_service::AddressInfo;
 use risingwave_pb::backup_service::backup_service_server::BackupServiceServer;
 use risingwave_pb::cloud_service::cloud_service_server::CloudServiceServer;
 use risingwave_pb::connector_service::sink_coordination_service_server::SinkCoordinationServiceServer;
 use risingwave_pb::ddl_service::ddl_service_server::DdlServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
 use risingwave_pb::hummock::hummock_manager_service_server::HummockManagerServiceServer;
+use risingwave_pb::meta::SystemParams;
 use risingwave_pb::meta::cluster_limit_service_server::ClusterLimitServiceServer;
 use risingwave_pb::meta::cluster_service_server::ClusterServiceServer;
 use risingwave_pb::meta::event_log_service_server::EventLogServiceServer;
 use risingwave_pb::meta::heartbeat_service_server::HeartbeatServiceServer;
+use risingwave_pb::meta::hosted_iceberg_catalog_service_server::HostedIcebergCatalogServiceServer;
 use risingwave_pb::meta::meta_member_service_server::MetaMemberServiceServer;
 use risingwave_pb::meta::notification_service_server::NotificationServiceServer;
 use risingwave_pb::meta::scale_service_server::ScaleServiceServer;
@@ -72,29 +78,25 @@ use risingwave_pb::meta::session_param_service_server::SessionParamServiceServer
 use risingwave_pb::meta::stream_manager_service_server::StreamManagerServiceServer;
 use risingwave_pb::meta::system_params_service_server::SystemParamsServiceServer;
 use risingwave_pb::meta::telemetry_info_service_server::TelemetryInfoServiceServer;
-use risingwave_pb::meta::SystemParams;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::user_service_server::UserServiceServer;
-use risingwave_rpc_client::ComputeClientPool;
 use sea_orm::{ConnectionTrait, DbBackend};
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
 
 use crate::backup_restore::BackupManager;
-use crate::barrier::{BarrierScheduler, GlobalBarrierManager};
-use crate::controller::system_param::SystemParamsController;
+use crate::barrier::BarrierScheduler;
 use crate::controller::SqlMetaStore;
+use crate::controller::system_param::SystemParamsController;
 use crate::hummock::HummockManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
-use crate::rpc::cloud_provider::AwsEc2Client;
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
-use crate::rpc::metrics::{
-    start_fragment_info_monitor, start_worker_info_monitor, GLOBAL_META_METRICS,
-};
+use crate::rpc::metrics::{GLOBAL_META_METRICS, start_info_monitor, start_worker_info_monitor};
 use crate::serving::ServingVnodeMapping;
 use crate::stream::{GlobalStreamManager, SourceManager};
 use crate::telemetry::{MetaReportCreator, MetaTelemetryInfoFetcher};
-use crate::{hummock, serving, MetaError, MetaResult};
+use crate::{MetaError, MetaResult, hummock, serving};
 
 /// Used for standalone mode checking the status of the meta service.
 /// This can be easier and more accurate than checking the TCP connection.
@@ -123,51 +125,25 @@ pub async fn rpc_serve(
     meta_store_backend: MetaStoreBackend,
     max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
+    server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
-    match meta_store_backend {
+    let meta_store_impl = SqlMetaStore::connect(meta_store_backend.clone()).await?;
+
+    let election_client = match meta_store_backend {
         MetaStoreBackend::Mem => {
-            let dummy_election_client = Arc::new(DummyElectionClient::new(
+            // Use a dummy election client.
+            Arc::new(DummyElectionClient::new(
                 address_info.advertise_addr.clone(),
-            ));
-            let conn = sea_orm::Database::connect(IN_MEMORY_STORE).await?;
-            rpc_serve_with_store(
-                SqlMetaStore::new(conn),
-                dummy_election_client,
-                address_info,
-                max_cluster_heartbeat_interval,
-                lease_interval_secs,
-                opts,
-                init_system_params,
-                init_session_config,
-                shutdown,
-            )
-            .await
+            ))
         }
-        MetaStoreBackend::Sql { endpoint } => {
-            let is_sqlite = DbBackend::Sqlite.is_prefix_of(&endpoint);
-            let mut options = sea_orm::ConnectOptions::new(endpoint);
-            options
-                .max_connections(10)
-                .connect_timeout(Duration::from_secs(10))
-                .idle_timeout(Duration::from_secs(30))
-                .acquire_timeout(Duration::from_secs(30));
-
-            if is_sqlite {
-                // Since Sqlite is prone to the error "(code: 5) database is locked" under concurrent access,
-                // here we forcibly specify the number of connections as 1.
-                options.max_connections(1);
-            }
-
-            let conn = sea_orm::Database::connect(options).await?;
-            let meta_store_sql = SqlMetaStore::new(conn);
-
+        MetaStoreBackend::Sql { .. } => {
             // Init election client.
             let id = address_info.advertise_addr.clone();
-            let conn = meta_store_sql.conn.clone();
+            let conn = meta_store_impl.conn.clone();
             let election_client: ElectionClientRef = match conn.get_database_backend() {
                 DbBackend::Sqlite => Arc::new(DummyElectionClient::new(id)),
                 DbBackend::Postgres => {
@@ -179,20 +155,23 @@ pub async fn rpc_serve(
             };
             election_client.init().await?;
 
-            rpc_serve_with_store(
-                meta_store_sql,
-                election_client,
-                address_info,
-                max_cluster_heartbeat_interval,
-                lease_interval_secs,
-                opts,
-                init_system_params,
-                init_session_config,
-                shutdown,
-            )
-            .await
+            election_client
         }
-    }
+    };
+
+    rpc_serve_with_store(
+        meta_store_impl,
+        election_client,
+        address_info,
+        max_cluster_heartbeat_interval,
+        lease_interval_secs,
+        server_config,
+        opts,
+        init_system_params,
+        init_session_config,
+        shutdown,
+    )
+    .await
 }
 
 /// Bootstraps the follower or leader service based on the election status.
@@ -205,6 +184,7 @@ pub async fn rpc_serve_with_store(
     address_info: AddressInfo,
     max_cluster_heartbeat_interval: Duration,
     lease_interval_secs: u64,
+    server_config: risingwave_common::config::ServerConfig,
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
@@ -272,6 +252,7 @@ pub async fn rpc_serve_with_store(
         opts,
         init_system_params,
         init_session_config,
+        server_config,
         election_client,
         shutdown,
     )
@@ -334,6 +315,7 @@ pub async fn start_service_as_election_leader(
     opts: MetaOpts,
     init_system_params: SystemParams,
     init_session_config: SessionConfig,
+    server_config: risingwave_common::config::ServerConfig,
     election_client: ElectionClientRef,
     shutdown: CancellationToken,
 ) -> MetaResult<()> {
@@ -346,6 +328,7 @@ pub async fn start_service_as_election_leader(
         meta_store_impl,
     )
     .await?;
+    tracing::info!("MetaSrvEnv started");
     let _ = env.may_start_watch_license_key_file()?;
     let system_params_reader = env.system_params_reader().await;
 
@@ -369,10 +352,17 @@ pub async fn start_service_as_election_leader(
     let metadata_manager = MetadataManager::new(cluster_controller, catalog_controller);
 
     let serving_vnode_mapping = Arc::new(ServingVnodeMapping::default());
+    let max_serving_parallelism = env
+        .session_params_manager_impl_ref()
+        .get_params()
+        .await
+        .batch_parallelism()
+        .map(|p| p.get());
     serving::on_meta_start(
         env.notification_manager_ref(),
         &metadata_manager,
         serving_vnode_mapping.clone(),
+        max_serving_parallelism,
     )
     .await;
 
@@ -381,8 +371,10 @@ pub async fn start_service_as_election_leader(
             .await
             .unwrap(),
     );
+    tracing::info!("CompactorManager started");
 
     let heartbeat_srv = HeartbeatServiceImpl::new(metadata_manager.clone());
+    tracing::info!("HeartbeatServiceImpl started");
 
     let (compactor_streams_change_tx, compactor_streams_change_rx) =
         tokio::sync::mpsc::unbounded_channel();
@@ -398,6 +390,7 @@ pub async fn start_service_as_election_leader(
     )
     .await
     .unwrap();
+    tracing::info!("HummockManager started");
     let object_store_media_type = hummock_manager.object_store_media_type();
 
     let meta_member_srv = MetaMemberServiceImpl::new(election_client.clone());
@@ -409,10 +402,13 @@ pub async fn start_service_as_election_leader(
     let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
     let diagnose_command = Arc::new(risingwave_meta::manager::diagnose::DiagnoseCommand::new(
         metadata_manager.clone(),
+        env.await_tree_reg().clone(),
         hummock_manager.clone(),
         env.event_log_manager_ref(),
         prometheus_client.clone(),
         prometheus_selector.clone(),
+        opts.redact_sql_option_keywords.clone(),
+        env.system_params_manager_impl_ref(),
     ));
 
     let trace_state = otlp_embedded::State::new(otlp_embedded::Config {
@@ -423,13 +419,21 @@ pub async fn start_service_as_election_leader(
 
     #[cfg(not(madsim))]
     let _dashboard_task = if let Some(ref dashboard_addr) = address_info.dashboard_addr {
+        use risingwave_common::config::RpcClientConfig;
+        use risingwave_rpc_client::MonitorClientPool;
+
         let dashboard_service = crate::dashboard::DashboardService {
+            await_tree_reg: env.await_tree_reg().clone(),
             dashboard_addr: *dashboard_addr,
             prometheus_client,
             prometheus_selector,
             metadata_manager: metadata_manager.clone(),
-            compute_clients: ComputeClientPool::new(1), // typically no need for plural clients
+            hummock_manager: hummock_manager.clone(),
+            monitor_clients: MonitorClientPool::new(1, RpcClientConfig::default()),
             diagnose_command,
+            profile_service: risingwave_common_service::ProfileServiceImpl::new(
+                server_config.clone(),
+            ),
             trace_state,
         };
         let task = tokio::spawn(dashboard_service.serve());
@@ -438,11 +442,9 @@ pub async fn start_service_as_election_leader(
         None
     };
 
-    let (barrier_scheduler, scheduled_barriers) = BarrierScheduler::new_pair(
-        hummock_manager.clone(),
-        meta_metrics.clone(),
-        system_params_reader.checkpoint_frequency() as usize,
-    );
+    let (barrier_scheduler, scheduled_barriers) =
+        BarrierScheduler::new_pair(hummock_manager.clone(), meta_metrics.clone());
+    tracing::info!("BarrierScheduler started");
 
     // Initialize services.
     let backup_manager = BackupManager::new(
@@ -453,12 +455,14 @@ pub async fn start_service_as_election_leader(
         system_params_reader.backup_storage_directory(),
     )
     .await?;
+    tracing::info!("BackupManager started");
 
     LocalSecretManager::init(
         opts.temp_secret_file_dir,
         env.cluster_id().to_string(),
         META_NODE_ID,
     );
+    tracing::info!("LocalSecretManager started");
 
     let notification_srv = NotificationServiceImpl::new(
         env.clone(),
@@ -468,20 +472,60 @@ pub async fn start_service_as_election_leader(
         serving_vnode_mapping.clone(),
     )
     .await?;
+    tracing::info!("NotificationServiceImpl started");
 
     let source_manager = Arc::new(
         SourceManager::new(
             barrier_scheduler.clone(),
             metadata_manager.clone(),
             meta_metrics.clone(),
+            env.clone(),
         )
-        .await
-        .unwrap(),
+        .await?,
     );
+    tracing::info!("SourceManager started");
 
-    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker();
+    let (iceberg_compaction_stat_tx, iceberg_compaction_stat_rx) =
+        tokio::sync::mpsc::unbounded_channel();
+    let (sink_manager, shutdown_handle) = SinkCoordinatorManager::start_worker(
+        env.meta_store_ref().conn.clone(),
+        hummock_manager.clone(),
+        metadata_manager.clone(),
+        iceberg_compaction_stat_tx,
+    );
+    tracing::info!("SinkCoordinatorManager started");
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.
     let mut sub_tasks = vec![shutdown_handle];
+
+    let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
+
+    // TODO: introduce compactor event stream handler to handle iceberg compaction events.
+    let (iceberg_compaction_mgr, iceberg_compactor_event_rx) = IcebergCompactionManager::build(
+        env.clone(),
+        metadata_manager.clone(),
+        iceberg_compactor_manager.clone(),
+        meta_metrics.clone(),
+    );
+
+    sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
+        iceberg_compaction_mgr.clone(),
+        iceberg_compaction_stat_rx,
+    ));
+
+    sub_tasks.push(IcebergCompactionManager::gc_loop(
+        iceberg_compaction_mgr.clone(),
+        env.opts.iceberg_gc_interval_sec,
+    ));
+
+    let refresh_scheduler_interval = Duration::from_secs(env.opts.refresh_scheduler_interval_sec);
+    let (refresh_manager, refresh_handle, refresh_shutdown) = GlobalRefreshManager::start(
+        metadata_manager.clone(),
+        barrier_scheduler.clone(),
+        &env,
+        refresh_scheduler_interval,
+    )
+    .await?;
+    sub_tasks.push((refresh_handle, refresh_shutdown));
 
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
@@ -489,17 +533,20 @@ pub async fn start_service_as_election_leader(
         env.clone(),
     ));
 
-    let barrier_manager = GlobalBarrierManager::new(
+    let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
         env.clone(),
         metadata_manager.clone(),
         hummock_manager.clone(),
         source_manager.clone(),
         sink_manager.clone(),
-        meta_metrics.clone(),
         scale_controller.clone(),
+        barrier_scheduler.clone(),
+        refresh_manager.clone(),
     )
     .await;
+    tracing::info!("GlobalBarrierManager started");
+    sub_tasks.push((join_handle, shutdown_rx));
 
     {
         let source_manager = source_manager.clone();
@@ -524,60 +571,51 @@ pub async fn start_service_as_election_leader(
         .await
         .unwrap();
 
-    let vacuum_manager = Arc::new(hummock::VacuumManager::new(
-        env.clone(),
-        hummock_manager.clone(),
-        backup_manager.clone(),
-        compactor_manager.clone(),
-    ));
-
-    let mut aws_cli = None;
-    if let Some(my_vpc_id) = &env.opts.vpc_id
-        && let Some(security_group_id) = &env.opts.security_group_id
-    {
-        let cli = AwsEc2Client::new(my_vpc_id, security_group_id).await;
-        aws_cli = Some(cli);
-    }
-
     let ddl_srv = DdlServiceImpl::new(
         env.clone(),
-        aws_cli.clone(),
         metadata_manager.clone(),
         stream_manager.clone(),
         source_manager.clone(),
-        barrier_manager.context().clone(),
+        barrier_manager.clone(),
         sink_manager.clone(),
         meta_metrics.clone(),
+        iceberg_compaction_mgr.clone(),
+        barrier_scheduler.clone(),
     )
     .await;
+
+    if env.opts.enable_legacy_table_migration {
+        sub_tasks.push(ddl_srv.start_migrate_table_fragments());
+    }
 
     let user_srv = UserServiceImpl::new(metadata_manager.clone());
 
     let scale_srv = ScaleServiceImpl::new(
         metadata_manager.clone(),
-        source_manager,
         stream_manager.clone(),
-        barrier_manager.context().clone(),
-        scale_controller.clone(),
+        barrier_manager.clone(),
+        env.clone(),
     );
 
-    let cluster_srv =
-        ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.context().clone());
+    let cluster_srv = ClusterServiceImpl::new(metadata_manager.clone(), barrier_manager.clone());
     let stream_srv = StreamServiceImpl::new(
         env.clone(),
         barrier_scheduler.clone(),
+        barrier_manager.clone(),
         stream_manager.clone(),
         metadata_manager.clone(),
+        refresh_manager.clone(),
     );
     let sink_coordination_srv = SinkCoordinationServiceImpl::new(sink_manager);
     let hummock_srv = HummockServiceImpl::new(
         hummock_manager.clone(),
-        vacuum_manager.clone(),
         metadata_manager.clone(),
+        backup_manager.clone(),
+        iceberg_compaction_mgr.clone(),
     );
 
     let health_srv = HealthServiceImpl::new();
-    let backup_srv = BackupServiceImpl::new(backup_manager);
+    let backup_srv = BackupServiceImpl::new(backup_manager.clone());
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());
     let system_params_srv = SystemParamsServiceImpl::new(
         env.system_params_manager_impl_ref(),
@@ -586,9 +624,15 @@ pub async fn start_service_as_election_leader(
     let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
     let serving_srv =
         ServingServiceImpl::new(serving_vnode_mapping.clone(), metadata_manager.clone());
-    let cloud_srv = CloudServiceImpl::new(metadata_manager.clone(), aws_cli);
+    let cloud_srv = CloudServiceImpl::new();
     let event_log_srv = EventLogServiceImpl::new(env.event_log_manager_ref());
     let cluster_limit_srv = ClusterLimitServiceImpl::new(env.clone(), metadata_manager.clone());
+    let hosted_iceberg_catalog_srv = HostedIcebergCatalogServiceImpl::new(env.clone());
+    let monitor_srv = MonitorServiceImpl::new(
+        metadata_manager.clone(),
+        env.await_tree_reg().clone(),
+        server_config,
+    );
 
     if let Some(prometheus_addr) = address_info.prometheus_addr {
         MetricsManager::boot_metrics_service(prometheus_addr.to_string())
@@ -597,8 +641,7 @@ pub async fn start_service_as_election_leader(
     // sub_tasks executed concurrently. Can be shutdown via shutdown_all
     sub_tasks.extend(hummock::start_hummock_workers(
         hummock_manager.clone(),
-        vacuum_manager,
-        // compaction_scheduler,
+        backup_manager.clone(),
         &env.opts,
     ));
     sub_tasks.push(start_worker_info_monitor(
@@ -607,34 +650,41 @@ pub async fn start_service_as_election_leader(
         Duration::from_secs(env.opts.node_num_monitor_interval_sec),
         meta_metrics.clone(),
     ));
-    sub_tasks.push(start_fragment_info_monitor(
+    sub_tasks.push(start_info_monitor(
         metadata_manager.clone(),
         hummock_manager.clone(),
+        env.system_params_manager_impl_ref(),
         meta_metrics.clone(),
     ));
     sub_tasks.push(SystemParamsController::start_params_notifier(
         env.system_params_manager_impl_ref(),
     ));
-    sub_tasks.push(HummockManager::hummock_timer_task(hummock_manager.clone()));
+    sub_tasks.push(HummockManager::hummock_timer_task(
+        hummock_manager.clone(),
+        Some(backup_manager),
+    ));
     sub_tasks.extend(HummockManager::compaction_event_loop(
-        hummock_manager,
+        hummock_manager.clone(),
         compactor_streams_change_rx,
     ));
-    sub_tasks.push(
-        serving::start_serving_vnode_mapping_worker(
-            env.notification_manager_ref(),
-            metadata_manager.clone(),
-            serving_vnode_mapping,
-        )
-        .await,
-    );
 
-    if cfg!(not(test)) {
+    sub_tasks.extend(IcebergCompactionManager::iceberg_compaction_event_loop(
+        iceberg_compaction_mgr.clone(),
+        iceberg_compactor_event_rx,
+    ));
+
+    sub_tasks.push(serving::start_serving_vnode_mapping_worker(
+        env.notification_manager_ref(),
+        metadata_manager.clone(),
+        serving_vnode_mapping,
+        env.session_params_manager_impl_ref(),
+    ));
+
+    {
         sub_tasks.push(ClusterController::start_heartbeat_checker(
             metadata_manager.cluster_controller.clone(),
             Duration::from_secs(1),
         ));
-        sub_tasks.push(GlobalBarrierManager::start(barrier_manager));
 
         if !env.opts.disable_automatic_parallelism_control {
             sub_tasks.push(stream_manager.start_auto_parallelism_monitor());
@@ -651,7 +701,7 @@ pub async fn start_service_as_election_leader(
     let notification_mgr = env.notification_manager_ref();
     let stream_abort_handler = tokio::spawn(async move {
         let _ = abort_recv.await;
-        notification_mgr.abort_all().await;
+        notification_mgr.abort_all();
         compactor_manager.abort_all_compactors();
     });
     sub_tasks.push((stream_abort_handler, abort_sender));
@@ -670,7 +720,7 @@ pub async fn start_service_as_election_leader(
     } else {
         tracing::info!("Telemetry didn't start due to meta backend or config");
     }
-    if report_scarf_enabled() {
+    if !cfg!(madsim) && report_scarf_enabled() {
         tokio::spawn(report_to_scarf());
     } else {
         tracing::info!("Scarf reporting is disabled");
@@ -705,6 +755,7 @@ pub async fn start_service_as_election_leader(
         .add_service(MetaMemberServiceServer::new(meta_member_srv))
         .add_service(DdlServiceServer::new(ddl_srv).max_decoding_message_size(usize::MAX))
         .add_service(UserServiceServer::new(user_srv))
+        .add_service(CloudServiceServer::new(cloud_srv))
         .add_service(ScaleServiceServer::new(scale_srv).max_decoding_message_size(usize::MAX))
         .add_service(HealthServer::new(health_srv))
         .add_service(BackupServiceServer::new(backup_srv))
@@ -712,10 +763,19 @@ pub async fn start_service_as_election_leader(
         .add_service(SessionParamServiceServer::new(session_params_srv))
         .add_service(TelemetryInfoServiceServer::new(telemetry_srv))
         .add_service(ServingServiceServer::new(serving_srv))
-        .add_service(CloudServiceServer::new(cloud_srv))
-        .add_service(SinkCoordinationServiceServer::new(sink_coordination_srv))
-        .add_service(EventLogServiceServer::new(event_log_srv))
-        .add_service(ClusterLimitServiceServer::new(cluster_limit_srv));
+        .add_service(
+            SinkCoordinationServiceServer::new(sink_coordination_srv)
+                .max_decoding_message_size(usize::MAX),
+        )
+        .add_service(
+            EventLogServiceServer::new(event_log_srv).max_decoding_message_size(usize::MAX),
+        )
+        .add_service(ClusterLimitServiceServer::new(cluster_limit_srv))
+        .add_service(HostedIcebergCatalogServiceServer::new(
+            hosted_iceberg_catalog_srv,
+        ))
+        .add_service(MonitorServiceServer::new(monitor_srv));
+
     #[cfg(not(madsim))] // `otlp-embedded` does not use madsim-patched tonic
     let server_builder = server_builder.add_service(TraceServiceServer::new(trace_srv));
 

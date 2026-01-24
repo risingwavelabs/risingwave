@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
+use std::sync::atomic::Ordering;
 
-use risingwave_common::sequence::{Sequence, SEQUENCE_GLOBAL};
+use risingwave_common::sequence::{SEQUENCE_GLOBAL, Sequence};
 use risingwave_jni_core::jvm_runtime::load_jvm_memory_stats;
 use risingwave_stream::executor::monitor::StreamingMetrics;
 
@@ -85,10 +85,10 @@ pub struct LruWatermarkController {
 
 impl LruWatermarkController {
     pub fn new(config: &MemoryManagerConfig) -> Self {
-        let threshold_stable = (config.total_memory as f64 * config.threshold_stable) as usize;
-        let threshold_graceful = (config.total_memory as f64 * config.threshold_graceful) as usize;
+        let threshold_stable = (config.target_memory as f64 * config.threshold_stable) as usize;
+        let threshold_graceful = (config.target_memory as f64 * config.threshold_graceful) as usize;
         let threshold_aggressive =
-            (config.total_memory as f64 * config.threshold_aggressive) as usize;
+            (config.target_memory as f64 * config.threshold_aggressive) as usize;
 
         Self {
             metrics: config.metrics.clone(),

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,14 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use await_tree::InstrumentAwait;
 use futures::{Stream, StreamExt, TryStreamExt};
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_pb::stream_service::stream_service_server::StreamService;
 use risingwave_pb::stream_service::*;
-use risingwave_storage::dispatch_state_store;
-use risingwave_storage::store::TryWaitEpochOptions;
-use risingwave_stream::error::StreamError;
 use risingwave_stream::task::{LocalStreamManager, StreamEnvironment};
 use tokio::sync::mpsc::unbounded_channel;
 use tokio_stream::wrappers::UnboundedReceiverStream;
@@ -42,33 +37,6 @@ impl StreamService for StreamServiceImpl {
     type StreamingControlStreamStream =
         impl Stream<Item = std::result::Result<StreamingControlStreamResponse, tonic::Status>>;
 
-    #[cfg_attr(coverage, coverage(off))]
-    async fn wait_epoch_commit(
-        &self,
-        request: Request<WaitEpochCommitRequest>,
-    ) -> Result<Response<WaitEpochCommitResponse>, Status> {
-        let request = request.into_inner();
-        let epoch = request.epoch;
-
-        dispatch_state_store!(self.env.state_store(), store, {
-            use risingwave_hummock_sdk::HummockReadEpoch;
-            use risingwave_storage::StateStore;
-
-            store
-                .try_wait_epoch(
-                    HummockReadEpoch::Committed(epoch),
-                    TryWaitEpochOptions {
-                        table_id: request.table_id.into(),
-                    },
-                )
-                .instrument_await(format!("wait_epoch_commit (epoch {})", epoch))
-                .await
-                .map_err(StreamError::from)?;
-        });
-
-        Ok(Response::new(WaitEpochCommitResponse { status: None }))
-    }
-
     async fn streaming_control_stream(
         &self,
         request: Request<Streaming<StreamingControlStreamRequest>>,
@@ -89,21 +57,22 @@ impl StreamService for StreamServiceImpl {
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
 
-    async fn get_min_uncommitted_sst_id(
+    async fn get_min_uncommitted_object_id(
         &self,
-        _request: Request<GetMinUncommittedSstIdRequest>,
-    ) -> Result<Response<GetMinUncommittedSstIdResponse>, Status> {
-        let min_uncommitted_sst_id = if let Some(hummock) = self.mgr.env.state_store().as_hummock()
-        {
-            hummock
-                .min_uncommitted_sst_id()
-                .await
-                .unwrap_or(HummockSstableObjectId::MAX)
-        } else {
-            HummockSstableObjectId::MAX
-        };
-        Ok(Response::new(GetMinUncommittedSstIdResponse {
-            min_uncommitted_sst_id,
+        _request: Request<GetMinUncommittedObjectIdRequest>,
+    ) -> Result<Response<GetMinUncommittedObjectIdResponse>, Status> {
+        let min_uncommitted_object_id =
+            if let Some(hummock) = self.mgr.env.state_store().as_hummock() {
+                hummock
+                    .min_uncommitted_object_id()
+                    .await
+                    .map(|object_id| object_id.inner())
+                    .unwrap_or(u64::MAX)
+            } else {
+                u64::MAX
+            };
+        Ok(Response::new(GetMinUncommittedObjectIdResponse {
+            min_uncommitted_object_id,
         }))
     }
 }

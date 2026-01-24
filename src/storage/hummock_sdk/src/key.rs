@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -292,7 +292,6 @@ pub fn prev_epoch(epoch: &[u8]) -> Vec<u8> {
 /// compute the next full key of the given full key
 ///
 /// if the `user_key` has no successor key, the result will be a empty vec
-
 pub fn next_full_key(full_key: &[u8]) -> Vec<u8> {
     let (user_key, epoch) = split_key_epoch(full_key);
     let prev_epoch = prev_epoch(epoch);
@@ -315,7 +314,6 @@ pub fn next_full_key(full_key: &[u8]) -> Vec<u8> {
 /// compute the prev full key of the given full key
 ///
 /// if the `user_key` has no predecessor key, the result will be a empty vec
-
 pub fn prev_full_key(full_key: &[u8]) -> Vec<u8> {
     let (user_key, epoch) = split_key_epoch(full_key);
     let next_epoch = next_epoch(epoch);
@@ -442,7 +440,7 @@ impl SetSlice<Bytes> for Bytes {
     }
 }
 
-pub trait CopyFromSlice {
+pub trait CopyFromSlice: Send + 'static {
     fn copy_from_slice(slice: &[u8]) -> Self;
 }
 
@@ -456,6 +454,10 @@ impl CopyFromSlice for Bytes {
     fn copy_from_slice(slice: &[u8]) -> Self {
         Bytes::copy_from_slice(slice)
     }
+}
+
+impl CopyFromSlice for () {
+    fn copy_from_slice(_: &[u8]) -> Self {}
 }
 
 /// [`TableKey`] is an internal concept in storage. It's a wrapper around the key directly from the
@@ -489,6 +491,21 @@ impl<T: AsRef<[u8]>> DerefMut for TableKey<T> {
 impl<T: AsRef<[u8]>> AsRef<[u8]> for TableKey<T> {
     fn as_ref(&self) -> &[u8] {
         self.0.as_ref()
+    }
+}
+
+impl TableKey<Bytes> {
+    pub fn split_vnode_bytes(&self) -> (VirtualNode, Bytes) {
+        debug_assert!(
+            self.0.len() >= VirtualNode::SIZE,
+            "too short table key: {:?}",
+            self.0.as_ref()
+        );
+        let (vnode, _) = self.0.split_first_chunk::<{ VirtualNode::SIZE }>().unwrap();
+        (
+            VirtualNode::from_be_bytes(*vnode),
+            self.0.slice(VirtualNode::SIZE..),
+        )
     }
 }
 
@@ -532,7 +549,7 @@ impl EstimateSize for TableKey<Bytes> {
     }
 }
 
-impl<'a> TableKey<&'a [u8]> {
+impl TableKey<&[u8]> {
     pub fn copy_into<T: CopyFromSlice + AsRef<[u8]>>(&self) -> TableKey<T> {
         TableKey(T::copy_from_slice(self.as_ref()))
     }
@@ -568,11 +585,7 @@ pub struct UserKey<T: AsRef<[u8]>> {
 
 impl<T: AsRef<[u8]>> Debug for UserKey<T> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "UserKey {{ {}, {:?} }}",
-            self.table_id.table_id, self.table_key
-        )
+        write!(f, "UserKey {{ {}, {:?} }}", self.table_id, self.table_key)
     }
 }
 
@@ -594,7 +607,7 @@ impl<T: AsRef<[u8]>> UserKey<T> {
 
     /// Encode in to a buffer.
     pub fn encode_into(&self, buf: &mut impl BufMut) {
-        buf.put_u32(self.table_id.table_id());
+        buf.put_u32(self.table_id.as_raw_id());
         buf.put_slice(self.table_key.as_ref());
     }
 
@@ -646,7 +659,7 @@ impl<'a> UserKey<&'a [u8]> {
     }
 }
 
-impl<'a, T: AsRef<[u8]> + Clone> UserKey<&'a T> {
+impl<T: AsRef<[u8]> + Clone> UserKey<&T> {
     pub fn cloned(self) -> UserKey<T> {
         UserKey {
             table_id: self.table_id,
@@ -751,12 +764,6 @@ impl<T: AsRef<[u8]>> FullKey<T> {
         );
         self.encode_into(&mut buf);
         buf
-    }
-
-    // Encode in to a buffer.
-    pub fn encode_into_without_table_id(&self, buf: &mut impl BufMut) {
-        self.user_key.encode_table_key_into(buf);
-        buf.put_u64(self.epoch_with_gap.as_u64());
     }
 
     pub fn encode_reverse_epoch(&self) -> Vec<u8> {
@@ -884,11 +891,43 @@ pub mod range_delete_backward_compatibility_serde_struct {
     pub struct TableKey(Vec<u8>);
 
     #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+    #[serde(from = "UserKeySerde", into = "UserKeySerde")]
     pub struct UserKey {
         // When comparing `UserKey`, we first compare `table_id`, then `table_key`. So the order of
         // declaration matters.
         pub table_id: TableId,
         pub table_key: TableKey,
+    }
+
+    #[derive(Deserialize, Serialize)]
+    pub struct TableIdSerde {
+        table_id: u32,
+    }
+
+    #[derive(Deserialize, Serialize)]
+    struct UserKeySerde {
+        table_id: TableIdSerde,
+        table_key: TableKey,
+    }
+
+    impl From<UserKeySerde> for UserKey {
+        fn from(value: UserKeySerde) -> Self {
+            Self {
+                table_id: TableId::new(value.table_id.table_id),
+                table_key: value.table_key,
+            }
+        }
+    }
+
+    impl From<UserKey> for UserKeySerde {
+        fn from(value: UserKey) -> Self {
+            Self {
+                table_id: TableIdSerde {
+                    table_id: value.table_id.as_raw_id(),
+                },
+                table_key: value.table_key,
+            }
+        }
     }
 
     impl UserKey {
@@ -904,7 +943,7 @@ pub mod range_delete_backward_compatibility_serde_struct {
         }
 
         pub fn encode_length_prefixed(&self, mut buf: impl BufMut) {
-            buf.put_u32(self.table_id.table_id());
+            buf.put_u32(self.table_id.as_raw_id());
             buf.put_u32(self.table_key.0.as_slice().len() as u32);
             buf.put_slice(self.table_key.0.as_slice());
         }
@@ -941,7 +980,7 @@ impl EmptySliceRef for Vec<u8> {
 }
 
 const EMPTY_SLICE: &[u8] = b"";
-impl<'a> EmptySliceRef for &'a [u8] {
+impl EmptySliceRef for &[u8] {
     fn empty_slice_ref<'b>() -> &'b Self {
         &EMPTY_SLICE
     }
@@ -962,7 +1001,7 @@ pub fn bound_table_key_range<T: AsRef<[u8]> + EmptySliceRef>(
         Included(b) => Included(UserKey::new(table_id, TableKey(&b.0))),
         Excluded(b) => Excluded(UserKey::new(table_id, TableKey(&b.0))),
         Unbounded => {
-            if let Some(next_table_id) = table_id.table_id().checked_add(1) {
+            if let Some(next_table_id) = table_id.as_raw_id().checked_add(1) {
                 Excluded(UserKey::new(
                     next_table_id.into(),
                     TableKey(T::empty_slice_ref()),
@@ -1001,7 +1040,7 @@ impl<T: AsRef<[u8]> + Ord + Eq, const SKIP_DEDUP: bool> FullKeyTracker<T, SKIP_D
     /// use risingwave_hummock_sdk::EpochWithGap;
     /// use risingwave_hummock_sdk::key::{FullKey, FullKeyTracker, TableKey};
     ///
-    /// let table_id = TableId { table_id: 1 };
+    /// let table_id = TableId::new(1);
     /// let full_key1 = FullKey::new(table_id, TableKey(Bytes::from("c")), 5 << EPOCH_AVAILABLE_BITS);
     /// let mut a: FullKeyTracker<_> = FullKeyTracker::<Bytes>::new(full_key1.clone());
     ///
@@ -1246,7 +1285,7 @@ mod tests {
     }
 
     #[test]
-    fn test_uesr_key_order() {
+    fn test_user_key_order() {
         let a = UserKey::new(TableId::new(1), TableKey(b"aaa".to_vec()));
         let b = UserKey::new(TableId::new(2), TableKey(b"aaa".to_vec()));
         let c = UserKey::new(TableId::new(2), TableKey(b"bbb".to_vec()));

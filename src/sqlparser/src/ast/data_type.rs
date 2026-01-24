@@ -10,18 +10,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#[cfg(not(feature = "std"))]
-use alloc::boxed::Box;
-use core::fmt;
+use std::fmt;
 
-#[cfg(feature = "serde")]
-use serde::{Deserialize, Serialize};
-
-use crate::ast::{display_comma_separated, Ident, ObjectName};
+use crate::ast::{Ident, ObjectName, display_comma_separated};
 
 /// SQL data types
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub enum DataType {
     /// Fixed-length character type e.g. CHAR(10)
     Char(Option<u64>),
@@ -72,6 +66,8 @@ pub enum DataType {
     Struct(Vec<StructField>),
     /// Map(key_type, value_type)
     Map(Box<(DataType, DataType)>),
+    /// Vector of f32, fixed-length
+    Vector(u64),
 }
 
 impl fmt::Display for DataType {
@@ -110,10 +106,21 @@ impl fmt::Display for DataType {
             DataType::Array(ty) => write!(f, "{}[]", ty),
             DataType::Custom(ty) => write!(f, "{}", ty),
             DataType::Struct(defs) => {
-                write!(f, "STRUCT<{}>", display_comma_separated(defs))
+                write!(f, "STRUCT<")?;
+                if defs.is_empty() {
+                    // We require a whitespace for empty(zero-field) struct to prevent `<>` from
+                    // being tokenized as a single token `Neq`.
+                    write!(f, " ")?;
+                } else {
+                    write!(f, "{}", display_comma_separated(defs))?;
+                }
+                write!(f, ">")
             }
             DataType::Map(kv) => {
                 write!(f, "MAP({},{})", kv.0, kv.1)
+            }
+            DataType::Vector(size) => {
+                write!(f, "VECTOR({})", size)
             }
         }
     }
@@ -132,7 +139,6 @@ fn format_type_with_optional_length(
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-#[cfg_attr(feature = "serde", derive(Serialize, Deserialize))]
 pub struct StructField {
     pub name: Ident,
     pub data_type: DataType,

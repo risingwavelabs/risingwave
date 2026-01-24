@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,15 +19,15 @@ use either::Either;
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt, TryStreamExt};
 
-use crate::executor::error::StreamExecutorResult;
 use crate::executor::Message;
+use crate::executor::error::StreamExecutorResult;
 
 type ExecutorMessageStream = BoxStream<'static, StreamExecutorResult<Message>>;
 type StreamReaderData<M> = StreamExecutorResult<Either<Message, M>>;
 type ReaderArm<M> = BoxStream<'static, StreamReaderData<M>>;
 
 mod stream_reader_with_pause {
-    use futures::stream::{select_with_strategy, PollNext, SelectWithStrategy};
+    use futures::stream::{PollNext, SelectWithStrategy, select_with_strategy};
 
     use crate::executor::stream_reader::ReaderArm;
 
@@ -38,6 +38,7 @@ mod stream_reader_with_pause {
         PollNext,
     >;
 
+    #[define_opaque(StreamReaderWithPauseInner)]
     pub(super) fn new_inner<M, const BIASED: bool>(
         message_stream: ReaderArm<M>,
         data_stream: ReaderArm<M>,
@@ -85,6 +86,11 @@ impl<const BIASED: bool, M: Send + 'static> StreamReaderWithPause<BIASED, M> {
             inner,
             paused: false,
         }
+    }
+
+    #[allow(dead_code)]
+    pub fn only_left(message_stream: ExecutorMessageStream) -> Self {
+        Self::new(message_stream, futures::stream::empty().boxed())
     }
 
     /// Replace the data stream with a new one for given `stream`. Used for split change.
@@ -148,7 +154,7 @@ impl<const BIASED: bool, M> Stream for StreamReaderWithPause<BIASED, M> {
 #[cfg(test)]
 mod tests {
     use assert_matches::assert_matches;
-    use futures::{pin_mut, FutureExt};
+    use futures::{FutureExt, pin_mut};
     use risingwave_common::array::StreamChunk;
     use risingwave_common::transaction::transaction_id::TxnId;
     use risingwave_common::util::epoch::test_epoch;

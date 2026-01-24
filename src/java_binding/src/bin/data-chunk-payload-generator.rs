@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::io::Write;
 use prost::Message;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, ScalarImpl, Timestamp, F32, F64};
+use risingwave_common::types::{DataType, F32, F64, ScalarImpl, Timestamp};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 
 fn build_row(index: usize) -> OwnedRow {
@@ -28,7 +28,7 @@ fn build_row(index: usize) -> OwnedRow {
     row_value.push(Some(ScalarImpl::Int64(index as i64)));
     row_value.push(Some(ScalarImpl::Float32(F32::from(index as f32))));
     row_value.push(Some(ScalarImpl::Float64(F64::from(index as f64))));
-    row_value.push(Some(ScalarImpl::Bool(index % 3 == 0)));
+    row_value.push(Some(ScalarImpl::Bool(index.is_multiple_of(3))));
     row_value.push(Some(ScalarImpl::Utf8(
         format!("{}", index).repeat((index % 10) + 1).into(),
     )));
@@ -36,7 +36,7 @@ fn build_row(index: usize) -> OwnedRow {
         Timestamp::from_timestamp_uncheck(index as _, 0),
     )));
     row_value.push(Some(ScalarImpl::Decimal(index.into())));
-    row_value.push(if index % 5 == 0 {
+    row_value.push(if index.is_multiple_of(5) {
         None
     } else {
         Some(ScalarImpl::Int64(index as i64))

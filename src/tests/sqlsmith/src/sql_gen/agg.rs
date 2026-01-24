@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::seq::SliceRandom;
 use rand::Rng;
+use rand::seq::IndexedRandom;
 use risingwave_common::types::DataType;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::sig::SigDataType;
@@ -21,10 +21,11 @@ use risingwave_sqlparser::ast::{
     Expr, Function, FunctionArg, FunctionArgExpr, FunctionArgList, Ident, ObjectName, OrderByExpr,
 };
 
+use crate::config::Syntax;
 use crate::sql_gen::types::AGG_FUNC_TABLE;
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     pub fn gen_agg(&mut self, ret: &DataType) -> Expr {
         let funcs = match AGG_FUNC_TABLE.get(ret) {
             None => return self.gen_simple_scalar(ret),
@@ -40,8 +41,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
             return self.gen_simple_scalar(ret);
         }
 
-        let context = SqlGeneratorContext::new();
-        let context = context.set_inside_agg();
+        let context = SqlGeneratorContext::new(self.should_generate(Syntax::Agg), true);
         let exprs: Vec<Expr> = func
             .inputs_type
             .iter()
@@ -57,7 +57,7 @@ impl<'a, R: Rng> SqlGenerator<'a, R> {
         let distinct = distinct_allowed && self.flip_coin();
 
         let filter = if self.flip_coin() {
-            let context = SqlGeneratorContext::new_with_can_agg(false);
+            let context = SqlGeneratorContext::new(false, false);
             // ENABLE: https://github.com/risingwavelabs/risingwave/issues/4762
             // Prevent correlated query with `FILTER`
             let old_ctxt = self.new_local_context();

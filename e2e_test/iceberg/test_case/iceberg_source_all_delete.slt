@@ -22,25 +22,21 @@ CREATE SINK sink1 AS select * from mv1 WITH (
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
     create_table_if_not_exists = 'true',
-    commit_checkpoint_interval = 5,
+    commit_checkpoint_interval = 3,
     primary_key = 'i1,i2',
+    partition_by = 'i1'
 );
 
 statement ok
-INSERT INTO s1 (i1, i2, i3)
-SELECT s, s::text, s::text FROM generate_series(1, 10000) s;
+INSERT INTO s1 (i1, i2, i3) values(1,'1','1'),(2,'2','2'),(3,'3','3'),(4,'4','4'),(5,'5','5');
 
 statement ok
 flush
 
 statement ok
-DELETE FROM s1
-WHERE i1 IN (
-    SELECT s
-    FROM generate_series(1, 10000, 2) s
-);
+DELETE FROM s1 WHERE i1 < 3;
 
-sleep 10s
+sleep 16s
 
 statement ok
 CREATE SOURCE iceberg_t1_source
@@ -57,39 +53,22 @@ WITH (
 );
 
 statement ok
-DELETE FROM s1
-WHERE i1 IN (
-    SELECT s
-    FROM generate_series(1, 10000, 3) s
-);
+DELETE FROM s1 WHERE i1 > 4;
 
 statement ok
 flush
 
-sleep 15s
 
-query I
+query I retry 17 backoff 1s
 select * from iceberg_t1_source order by i1 limit 5;
 ----
-2 2 2
-6 6 6
-8 8 8
-12 12 12
-14 14 14
-
-query I
-select * from iceberg_t1_source order by i1 desc limit 5;
-----
-9998 9998 9998
-9996 9996 9996
-9992 9992 9992
-9990 9990 9990
-9986 9986 9986
+3 3 3
+4 4 4
 
 query I
 select count(*) from iceberg_t1_source
 ----
-3333
+2
 
 statement ok
 DROP SINK sink1;

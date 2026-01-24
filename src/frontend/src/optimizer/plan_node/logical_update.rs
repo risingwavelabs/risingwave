@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::TableVersionId;
-
 use super::generic::GenericPlanRef;
 use super::utils::impl_distill_by_unit;
 use super::{
-    gen_filter_and_pushdown, generic, BatchUpdate, ColPrunable, ExprRewritable, Logical,
-    LogicalProject, PlanBase, PlanRef, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream,
+    BatchUpdate, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject,
+    PlanBase, PlanTreeNodeUnary, PredicatePushdown, ToBatch, ToStream, gen_filter_and_pushdown,
+    generic,
 };
-use crate::catalog::TableId;
 use crate::error::Result;
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::{
     ColumnPruningContext, PredicatePushdownContext, RewriteStreamContext, ToStreamContext,
@@ -46,26 +44,7 @@ impl From<generic::Update<PlanRef>> for LogicalUpdate {
     }
 }
 
-impl LogicalUpdate {
-    #[must_use]
-    pub fn table_id(&self) -> TableId {
-        self.core.table_id
-    }
-
-    pub fn exprs(&self) -> &[ExprImpl] {
-        self.core.exprs.as_ref()
-    }
-
-    pub fn has_returning(&self) -> bool {
-        self.core.returning
-    }
-
-    pub fn table_version_id(&self) -> TableVersionId {
-        self.core.table_version_id
-    }
-}
-
-impl PlanTreeNodeUnary for LogicalUpdate {
+impl PlanTreeNodeUnary<Logical> for LogicalUpdate {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -77,24 +56,24 @@ impl PlanTreeNodeUnary for LogicalUpdate {
     }
 }
 
-impl_plan_tree_node_for_unary! { LogicalUpdate }
+impl_plan_tree_node_for_unary! { Logical, LogicalUpdate }
 impl_distill_by_unit!(LogicalUpdate, core, "LogicalUpdate");
 
-impl ExprRewritable for LogicalUpdate {
+impl ExprRewritable<Logical> for LogicalUpdate {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
 
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
-        let mut new = self.core.clone();
-        new.exprs = new.exprs.into_iter().map(|e| r.rewrite_expr(e)).collect();
-        Self::from(new).into()
+        let mut core = self.core.clone();
+        core.rewrite_exprs(r);
+        Self::from(core).into()
     }
 }
 
 impl ExprVisitable for LogicalUpdate {
     fn visit_exprs(&self, v: &mut dyn ExprVisitor) {
-        self.core.exprs.iter().for_each(|e| v.visit_expr(e));
+        self.core.visit_exprs(v);
     }
 }
 
@@ -126,16 +105,26 @@ impl PredicatePushdown for LogicalUpdate {
 }
 
 impl ToBatch for LogicalUpdate {
-    fn to_batch(&self) -> Result<PlanRef> {
+    fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         let new_input = self.input().to_batch()?;
-        let mut new_logical = self.core.clone();
-        new_logical.input = new_input;
-        Ok(BatchUpdate::new(new_logical, self.schema().clone()).into())
+        let core = generic::Update {
+            table_name: self.core.table_name.clone(),
+            table_id: self.core.table_id,
+            table_version_id: self.core.table_version_id,
+            input: new_input,
+            old_exprs: self.core.old_exprs.clone(),
+            new_exprs: self.core.new_exprs.clone(),
+            returning: self.core.returning,
+        };
+        Ok(BatchUpdate::new(core, self.schema().clone()).into())
     }
 }
 
 impl ToStream for LogicalUpdate {
-    fn to_stream(&self, _ctx: &mut ToStreamContext) -> Result<PlanRef> {
+    fn to_stream(
+        &self,
+        _ctx: &mut ToStreamContext,
+    ) -> Result<crate::optimizer::plan_node::StreamPlanRef> {
         unreachable!("update should always be converted to batch plan");
     }
 

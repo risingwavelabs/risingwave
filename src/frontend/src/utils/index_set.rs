@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -106,7 +106,7 @@ impl BitAnd for IndexSet {
     }
 }
 
-impl<'a> BitAnd for &'a IndexSet {
+impl BitAnd for &IndexSet {
     type Output = IndexSet;
 
     fn bitand(self, rhs: Self) -> Self::Output {
@@ -126,7 +126,7 @@ impl BitOr for IndexSet {
     }
 }
 
-impl<'a> BitOr for &'a IndexSet {
+impl BitOr for &IndexSet {
     type Output = IndexSet;
 
     fn bitor(self, rhs: Self) -> Self::Output {

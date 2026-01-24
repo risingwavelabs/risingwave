@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
 use risingwave_expr::function;
 
 #[function("replace(varchar, varchar, varchar) -> varchar")]
-pub fn replace(s: &str, from_str: &str, to_str: &str, writer: &mut impl Write) {
+pub fn replace(s: &str, from_str: &str, to_str: &str, writer: &mut impl std::fmt::Write) {
     if from_str.is_empty() {
         writer.write_str(s).unwrap();
         return;

@@ -220,6 +220,7 @@ pub struct LevelsCommon<T> {
 
     #[deprecated]
     pub member_table_ids: Vec<u32>,
+    pub compaction_group_version_id: u64,
 }
 
 pub type Levels = LevelsCommon<SstableInfo>;
@@ -241,7 +242,7 @@ impl Levels {
         self.levels
             .last()
             .as_ref()
-            .map_or(false, |level| level.level_idx == level_idx)
+            .is_some_and(|level| level.level_idx == level_idx)
     }
 
     pub fn count_ssts(&self) -> usize {
@@ -300,6 +301,7 @@ where
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
             member_table_ids: pb_levels.member_table_ids.clone(),
+            compaction_group_version_id: pb_levels.compaction_group_version_id,
         }
     }
 }
@@ -316,6 +318,7 @@ where
             group_id: levels.group_id,
             parent_group_id: levels.parent_group_id,
             member_table_ids: levels.member_table_ids.clone(),
+            compaction_group_version_id: levels.compaction_group_version_id,
         }
     }
 }
@@ -336,6 +339,7 @@ where
             group_id: pb_levels.group_id,
             parent_group_id: pb_levels.parent_group_id,
             member_table_ids: pb_levels.member_table_ids,
+            compaction_group_version_id: pb_levels.compaction_group_version_id,
         }
     }
 }
@@ -352,6 +356,7 @@ where
             group_id: levels.group_id,
             parent_group_id: levels.parent_group_id,
             member_table_ids: levels.member_table_ids,
+            compaction_group_version_id: levels.compaction_group_version_id,
         }
     }
 }

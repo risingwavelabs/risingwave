@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::cmp::Ordering;
+use std::borrow::Cow;
+use std::cmp::{max, min};
 use std::collections::HashMap;
-use std::num::NonZeroU32;
 use std::ops::Bound;
-use std::time::Instant;
 
 use await_tree::InstrumentAwait;
-use bytes::Bytes;
+use futures::Stream;
 use futures::future::try_join_all;
-use futures::{pin_mut, Stream, StreamExt};
 use futures_async_stream::try_stream;
-use governor::clock::MonotonicClock;
-use governor::middleware::NoOpMiddleware;
-use governor::state::{InMemoryState, NotKeyed};
-use governor::{Quota, RateLimiter};
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::bail;
@@ -37,18 +31,17 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::{cmp_datum_iter, OrderType};
+use risingwave_common::util::sort_util::{OrderType, cmp_datum_iter};
 use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::source::cdc::external::{CdcOffset, CdcOffsetParseFunc};
-use risingwave_storage::row_serde::value_serde::ValueRowSerde;
-use risingwave_storage::table::{collect_data_chunk_with_builder, KeyedRow};
 use risingwave_storage::StateStore;
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
+use risingwave_storage::table::collect_data_chunk_with_builder;
 
 use crate::common::table::state_table::{ReplicatedStateTable, StateTableInner};
-use crate::executor::{
-    Message, PkIndicesRef, StreamExecutorError, StreamExecutorResult, Watermark,
-};
+use crate::executor::{Message, StreamExecutorError, StreamExecutorResult, Watermark};
 
 /// `vnode`, `is_finished`, `row_count`, all occupy 1 column each.
 pub const METADATA_STATE_LEN: usize = 3;
@@ -85,9 +78,9 @@ impl BackfillState {
         match self.inner.get(vnode) {
             Some(p) => Ok(p.current_state()),
             None => bail!(
-                    "Backfill progress for vnode {:#?} not found, backfill_state not initialized properly",
-                    vnode,
-                ),
+                "Backfill progress for vnode {:#?} not found, backfill_state not initialized properly",
+                vnode,
+            ),
         }
     }
 
@@ -307,10 +300,10 @@ impl BackfillProgressPerVnode {
 pub(crate) fn mark_chunk(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
 ) -> StreamChunk {
-    let chunk = chunk.compact();
+    let chunk = chunk.compact_vis();
     mark_chunk_inner(chunk, current_pos, pk_in_output_indices, pk_order)
 }
 
@@ -318,11 +311,11 @@ pub(crate) fn mark_cdc_chunk(
     offset_parse_func: &CdcOffsetParseFunc,
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
     last_cdc_offset: Option<CdcOffset>,
 ) -> StreamExecutorResult<StreamChunk> {
-    let chunk = chunk.compact();
+    let chunk = chunk.compact_vis();
     mark_cdc_chunk_inner(
         offset_parse_func,
         chunk,
@@ -340,38 +333,56 @@ pub(crate) fn mark_cdc_chunk(
 pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
     chunk: &StreamChunk,
     backfill_state: &BackfillState,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     upstream_table: &ReplicatedStateTable<S, SD>,
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
     let chunk = chunk.clone();
     let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
-    // Use project to avoid allocation.
-    for row in data.rows() {
+
+    let mut new_ops: Cow<'_, [Op]> = Cow::Borrowed(ops.as_ref());
+    let mut unmatched_update_delete = false;
+    let mut visible_update_delete = false;
+    for (i, (op, row)) in ops.iter().zip_eq_debug(data.rows()).enumerate() {
         let pk = row.project(pk_in_output_indices);
         let vnode = upstream_table.compute_vnode_by_pk(pk);
-        let v = match backfill_state.get_progress(&vnode)? {
+        let visible = match backfill_state.get_progress(&vnode)? {
             // We want to just forward the row, if the vnode has finished backfill.
             BackfillProgressPerVnode::Completed { .. } => true,
             // If not started, no need to forward.
             BackfillProgressPerVnode::NotStarted => false,
             // If in progress, we need to check row <= current_pos.
             BackfillProgressPerVnode::InProgress { current_pos, .. } => {
-                match cmp_datum_iter(pk.iter(), current_pos.iter(), pk_order.iter().copied()) {
-                    Ordering::Less | Ordering::Equal => true,
-                    Ordering::Greater => false,
-                }
+                cmp_datum_iter(pk.iter(), current_pos.iter(), pk_order.iter().copied()).is_le()
             }
         };
-        new_visibility.append(v);
+        if !visible {
+            tracing::trace!(
+                source = "upstream",
+                state = "process_barrier",
+                action = "mark_chunk",
+                ?vnode,
+                ?op,
+                ?pk,
+                ?row,
+                "update_filtered",
+            );
+        }
+        new_visibility.append(visible);
+
+        normalize_unmatched_updates(
+            &mut new_ops,
+            &mut unmatched_update_delete,
+            &mut visible_update_delete,
+            visible,
+            i,
+            op,
+        );
     }
     let (columns, _) = data.into_parts();
-    Ok(StreamChunk::with_visibility(
-        ops,
-        columns,
-        new_visibility.finish(),
-    ))
+    let chunk = StreamChunk::with_visibility(new_ops, columns, new_visibility.finish());
+    Ok(chunk)
 }
 
 /// Mark chunk:
@@ -380,25 +391,77 @@ pub(crate) fn mark_chunk_ref_by_vnode<S: StateStore, SD: ValueRowSerde>(
 fn mark_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
 ) -> StreamChunk {
     let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
-    // Use project to avoid allocation.
-    for v in data.rows().map(|row| {
+    let mut new_ops: Cow<'_, [Op]> = Cow::Borrowed(ops.as_ref());
+    let mut unmatched_update_delete = false;
+    let mut visible_update_delete = false;
+    for (i, (op, row)) in ops.iter().zip_eq_debug(data.rows()).enumerate() {
         let lhs = row.project(pk_in_output_indices);
         let rhs = current_pos;
-        let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-        match order {
-            Ordering::Less | Ordering::Equal => true,
-            Ordering::Greater => false,
-        }
-    }) {
-        new_visibility.append(v);
+        let visible = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied()).is_le();
+        new_visibility.append(visible);
+
+        normalize_unmatched_updates(
+            &mut new_ops,
+            &mut unmatched_update_delete,
+            &mut visible_update_delete,
+            visible,
+            i,
+            op,
+        );
     }
     let (columns, _) = data.into_parts();
-    StreamChunk::with_visibility(ops, columns, new_visibility.finish())
+    StreamChunk::with_visibility(new_ops, columns, new_visibility.finish())
+}
+
+/// We will rewrite unmatched U-/U+ into +/- ops.
+/// They can be unmatched because while they will always have the same stream key,
+/// their storage pk might be different. Here we use storage pk (`current_pos`) to filter them,
+/// as such, a U+ might be filtered out, but their corresponding U- could be kept, and vice versa.
+///
+/// This hanging U-/U+ can lead to issues downstream, since we work with an assumption in the
+/// system that there's never hanging U-/U+.
+fn normalize_unmatched_updates(
+    normalized_ops: &mut Cow<'_, [Op]>,
+    unmatched_update_delete: &mut bool,
+    visible_update_delete: &mut bool,
+    current_visibility: bool,
+    current_op_index: usize,
+    current_op: &Op,
+) {
+    if *unmatched_update_delete {
+        assert_eq!(*current_op, Op::UpdateInsert);
+        let visible_update_insert = current_visibility;
+        match (visible_update_delete, visible_update_insert) {
+            (true, false) => {
+                // Lazily clone the ops here.
+                let ops = normalized_ops.to_mut();
+                ops[current_op_index - 1] = Op::Delete;
+            }
+            (false, true) => {
+                // Lazily clone the ops here.
+                let ops = normalized_ops.to_mut();
+                ops[current_op_index] = Op::Insert;
+            }
+            (true, true) | (false, false) => {}
+        }
+        *unmatched_update_delete = false;
+    } else {
+        match current_op {
+            Op::UpdateDelete => {
+                *unmatched_update_delete = true;
+                *visible_update_delete = current_visibility;
+            }
+            Op::UpdateInsert => {
+                unreachable!("UpdateInsert should not be present without UpdateDelete")
+            }
+            _ => {}
+        }
+    }
 }
 
 fn mark_cdc_chunk_inner(
@@ -406,7 +469,7 @@ fn mark_cdc_chunk_inner(
     chunk: StreamChunk,
     current_pos: &OwnedRow,
     last_cdc_offset: Option<CdcOffset>,
-    pk_in_output_indices: PkIndicesRef<'_>,
+    pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
 ) -> StreamExecutorResult<StreamChunk> {
     let (data, ops) = chunk.into_parts();
@@ -428,11 +491,7 @@ fn mark_cdc_chunk_inner(
             if in_binlog_range {
                 let lhs = row.project(pk_in_output_indices);
                 let rhs = current_pos;
-                let order = cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied());
-                match order {
-                    Ordering::Less | Ordering::Equal => true,
-                    Ordering::Greater => false,
-                }
+                cmp_datum_iter(lhs.iter(), rhs.iter(), pk_order.iter().copied()).is_le()
             } else {
                 false
             }
@@ -579,7 +638,7 @@ pub(crate) async fn flush_data<S: StateStore, const IS_REPLICATED: bool>(
             })
         });
     }
-    table.commit(epoch).await
+    table.commit_assert_no_update_vnode_bitmap(epoch).await
 }
 
 /// We want to avoid allocating a row for every vnode.
@@ -663,19 +722,6 @@ pub(crate) fn compute_bounds(
         Some((Bound::Excluded(current_pos), Bound::Unbounded))
     } else {
         Some((Bound::Unbounded, Bound::Unbounded))
-    }
-}
-
-#[try_stream(ok = OwnedRow, error = StreamExecutorError)]
-pub(crate) async fn owned_row_iter<S, E>(storage_iter: S)
-where
-    StreamExecutorError: From<E>,
-    S: Stream<Item = Result<KeyedRow<Bytes>, E>>,
-{
-    pin_mut!(storage_iter);
-    while let Some(row) = storage_iter.next().await {
-        let row = row?;
-        yield row.into_owned_row()
     }
 }
 
@@ -777,7 +823,7 @@ pub(crate) async fn persist_state_per_vnode<S: StateStore, const IS_REPLICATED: 
         backfill_state.mark_committed(vnode);
     }
 
-    table.commit(epoch).await?;
+    table.commit_assert_no_update_vnode_bitmap(epoch).await?;
     Ok(())
 }
 
@@ -801,37 +847,135 @@ pub(crate) async fn persist_state<S: StateStore, const IS_REPLICATED: bool>(
         flush_data(table, epoch, old_state, current_state).await?;
         *old_state = Some(current_state.into());
     } else {
-        table.commit(epoch).await?;
+        table.commit_assert_no_update_vnode_bitmap(epoch).await?;
     }
     Ok(())
 }
-
-pub type BackfillRateLimiter =
-    RateLimiter<NotKeyed, InMemoryState, MonotonicClock, NoOpMiddleware<Instant>>;
 
 /// Creates a data chunk builder for snapshot read.
 /// If the `rate_limit` is smaller than `chunk_size`, it will take precedence.
 /// This is so we can partition snapshot read into smaller chunks than chunk size.
 pub fn create_builder(
-    rate_limit: Option<usize>,
+    rate_limit: RateLimit,
     chunk_size: usize,
     data_types: Vec<DataType>,
 ) -> DataChunkBuilder {
-    if let Some(rate_limit) = rate_limit
-        && rate_limit < chunk_size
-        && rate_limit > 0
-    {
-        DataChunkBuilder::new(data_types, rate_limit)
-    } else {
-        DataChunkBuilder::new(data_types, chunk_size)
-    }
+    let batch_size = match rate_limit {
+        RateLimit::Disabled | RateLimit::Pause => chunk_size,
+        RateLimit::Fixed(limit) => min(limit.get() as usize, chunk_size),
+    };
+    // Ensure that the batch size is at least 2, to have enough space for two rows in a single update.
+    let batch_size = max(2, batch_size);
+    DataChunkBuilder::new(data_types, batch_size)
 }
 
-pub fn create_limiter(rate_limit: usize) -> Option<BackfillRateLimiter> {
-    if rate_limit == 0 {
-        return None;
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::*;
+
+    #[test]
+    fn test_normalizing_unmatched_updates() {
+        let ops = vec![
+            Op::UpdateDelete,
+            Op::UpdateInsert,
+            Op::UpdateDelete,
+            Op::UpdateInsert,
+        ];
+        let ops: Arc<[Op]> = ops.into();
+
+        {
+            let mut new_ops: Cow<'_, [Op]> = Cow::Borrowed(ops.as_ref());
+            let mut unmatched_update_delete = true;
+            let mut visible_update_delete = true;
+            let current_visibility = true;
+            normalize_unmatched_updates(
+                &mut new_ops,
+                &mut unmatched_update_delete,
+                &mut visible_update_delete,
+                current_visibility,
+                1,
+                &Op::UpdateInsert,
+            );
+            assert_eq!(
+                &new_ops[..],
+                vec![
+                    Op::UpdateDelete,
+                    Op::UpdateInsert,
+                    Op::UpdateDelete,
+                    Op::UpdateInsert
+                ]
+            );
+        }
+        {
+            let mut new_ops: Cow<'_, [Op]> = Cow::Borrowed(ops.as_ref());
+            let mut unmatched_update_delete = true;
+            let mut visible_update_delete = false;
+            let current_visibility = false;
+            normalize_unmatched_updates(
+                &mut new_ops,
+                &mut unmatched_update_delete,
+                &mut visible_update_delete,
+                current_visibility,
+                1,
+                &Op::UpdateInsert,
+            );
+            assert_eq!(
+                &new_ops[..],
+                vec![
+                    Op::UpdateDelete,
+                    Op::UpdateInsert,
+                    Op::UpdateDelete,
+                    Op::UpdateInsert
+                ]
+            );
+        }
+        {
+            let mut new_ops: Cow<'_, [Op]> = Cow::Borrowed(ops.as_ref());
+            let mut unmatched_update_delete = true;
+            let mut visible_update_delete = true;
+            let current_visibility = false;
+            normalize_unmatched_updates(
+                &mut new_ops,
+                &mut unmatched_update_delete,
+                &mut visible_update_delete,
+                current_visibility,
+                1,
+                &Op::UpdateInsert,
+            );
+            assert_eq!(
+                &new_ops[..],
+                vec![
+                    Op::Delete,
+                    Op::UpdateInsert,
+                    Op::UpdateDelete,
+                    Op::UpdateInsert
+                ]
+            );
+        }
+        {
+            let mut new_ops: Cow<'_, [Op]> = Cow::Borrowed(ops.as_ref());
+            let mut unmatched_update_delete = true;
+            let mut visible_update_delete = false;
+            let current_visibility = true;
+            normalize_unmatched_updates(
+                &mut new_ops,
+                &mut unmatched_update_delete,
+                &mut visible_update_delete,
+                current_visibility,
+                1,
+                &Op::UpdateInsert,
+            );
+            assert_eq!(
+                &new_ops[..],
+                vec![
+                    Op::UpdateDelete,
+                    Op::Insert,
+                    Op::UpdateDelete,
+                    Op::UpdateInsert
+                ]
+            );
+        }
     }
-    let quota = Quota::per_second(NonZeroU32::new(rate_limit as u32).unwrap());
-    let clock = MonotonicClock;
-    Some(RateLimiter::direct_with_clock(quota, &clock))
 }

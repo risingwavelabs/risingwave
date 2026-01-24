@@ -13,14 +13,15 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use risingwave_common::array::{Op, StreamChunk};
+use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
+use risingwave_common::util::iter_util::ZipEqDebug;
 use serde_json::{Map, Value};
 
+use super::super::SinkError;
 use super::super::encoder::template::TemplateEncoder;
 use super::super::encoder::{JsonEncoder, RowEncoder};
-use super::super::SinkError;
 use crate::sink::Result;
 
 pub struct ElasticSearchOpenSearchFormatter {
@@ -102,8 +103,9 @@ impl ElasticSearchOpenSearchFormatter {
         } else {
             None
         };
-        let key_encoder = TemplateEncoder::new(schema.clone(), col_indices.clone(), key_format);
-        let value_encoder = JsonEncoder::new_with_es(schema.clone(), col_indices.clone());
+        let key_encoder =
+            TemplateEncoder::new_string(schema.clone(), col_indices.clone(), key_format);
+        let value_encoder = JsonEncoder::new_with_es(schema.clone(), col_indices);
         Ok(Self {
             key_encoder,
             value_encoder,
@@ -113,7 +115,12 @@ impl ElasticSearchOpenSearchFormatter {
         })
     }
 
-    pub fn convert_chunk(&self, chunk: StreamChunk) -> Result<Vec<BuildBulkPara>> {
+    pub fn convert_chunk(
+        &self,
+        chunk: StreamChunk,
+        is_append_only: bool,
+    ) -> Result<Vec<BuildBulkPara>> {
+        let mut update_delete_row: Option<(String, RowRef<'_>)> = None;
         let mut result_vec = Vec::with_capacity(chunk.capacity());
         for (op, rows) in chunk.rows() {
             let index = if let Some(index_column) = self.index_column {
@@ -140,16 +147,45 @@ impl ElasticSearchOpenSearchFormatter {
                                 ))
                             })?
                             .into_utf8()
-                            .to_string(),
+                            .to_owned(),
                     )
                 })
                 .transpose()?;
             match op {
-                Op::Insert | Op::UpdateInsert => {
-                    let key = self.key_encoder.encode(rows)?;
+                Op::Insert => {
+                    let key = self.key_encoder.encode(rows)?.into_string()?;
                     let value = self.value_encoder.encode(rows)?;
                     result_vec.push(BuildBulkPara {
-                        index: index.to_string(),
+                        index: index.to_owned(),
+                        key,
+                        value: Some(value),
+                        mem_size_b: rows.value_estimate_size(),
+                        routing_column,
+                    });
+                }
+                Op::UpdateInsert => {
+                    let key = self.key_encoder.encode(rows)?.into_string()?;
+                    let mut modified_col_indices = Vec::with_capacity(rows.len());
+                    let (delete_key, delete_row) =
+                        update_delete_row.take().expect("update_delete_row is None");
+                    if delete_key == key {
+                        delete_row
+                            .iter()
+                            .enumerate()
+                            .zip_eq_debug(rows.iter())
+                            .for_each(|((index, delete_column), insert_column)| {
+                                if insert_column == delete_column {
+                                    // do nothing
+                                } else {
+                                    modified_col_indices.push(index);
+                                }
+                            });
+                    }
+                    let value = self
+                        .value_encoder
+                        .encode_cols(rows, modified_col_indices.into_iter())?;
+                    result_vec.push(BuildBulkPara {
+                        index: index.to_owned(),
                         key,
                         value: Some(value),
                         mem_size_b: rows.value_estimate_size(),
@@ -157,17 +193,31 @@ impl ElasticSearchOpenSearchFormatter {
                     });
                 }
                 Op::Delete => {
-                    let key = self.key_encoder.encode(rows)?;
+                    if is_append_only {
+                        return Err(SinkError::ElasticSearchOpenSearch(anyhow!(
+                            "`Delete` operation is not supported in `append_only` mode"
+                        )));
+                    }
+                    let key = self.key_encoder.encode(rows)?.into_string()?;
                     let mem_size_b = std::mem::size_of_val(&key);
                     result_vec.push(BuildBulkPara {
-                        index: index.to_string(),
+                        index: index.to_owned(),
                         key,
                         value: None,
                         mem_size_b,
                         routing_column,
                     });
                 }
-                Op::UpdateDelete => continue,
+                Op::UpdateDelete => {
+                    if is_append_only {
+                        return Err(SinkError::ElasticSearchOpenSearch(anyhow!(
+                            "`UpdateDelete` operation is not supported in `append_only` mode"
+                        )));
+                    } else {
+                        let key = self.key_encoder.encode(rows)?.into_string()?;
+                        update_delete_row = Some((key, rows));
+                    }
+                }
             }
         }
         Ok(result_vec)

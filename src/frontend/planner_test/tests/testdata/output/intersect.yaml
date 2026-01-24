@@ -34,7 +34,7 @@
             └─StreamTableScan { table: t2, columns: [t2.a, t2.b, t2.c, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
   stream_dist_plan: |+
     Fragment 0
-    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck } { tables: [ Materialize: 4294967294 ] }
+    StreamMaterialize { columns: [a, b, c], stream_key: [a, b, c], pk_columns: [a, b, c], pk_conflict: NoCheck }
     └── StreamProject { exprs: [t1.a, t1.b, t1.c], noop_update_hint: true }
         └── StreamHashAgg { group_key: [t1.a, t1.b, t1.c], aggs: [count] } { tables: [ HashAggState: 0 ] }
             └── StreamHashJoin { type: LeftSemi, predicate: t1.a IS NOT DISTINCT FROM t2.a AND t1.b IS NOT DISTINCT FROM t2.b AND t1.c IS NOT DISTINCT FROM t2.c, output: all }
@@ -54,38 +54,38 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t1_a, t1_b, t1_c, count ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 0 { columns: [ t1_a, t1_b, t1_c, count, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 3 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
     Table 1
-    ├── columns: [ t1_a, t1_b, t1_c, t1__row_id ]
+    ├── columns: [ t1_a, t1_b, t1_c, t1__row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
     Table 2
-    ├── columns: [ t1_a, t1_b, t1_c, t1__row_id, _degree ]
+    ├── columns: [ t1_a, t1_b, t1_c, t1__row_id, _degree, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 4 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
     Table 3
-    ├── columns: [ t2_a, t2_b, t2_c, t2__row_id ]
+    ├── columns: [ t2_a, t2_b, t2_c, t2__row_id, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 0, 1, 2, 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
     Table 4
-    ├── columns: [ t2_a, t2_b, t2_c, t2__row_id, _degree ]
+    ├── columns: [ t2_a, t2_b, t2_c, t2__row_id, _degree, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC, $3 ASC ]
     ├── value indices: [ 4 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
     Table 5
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -93,14 +93,14 @@
     └── vnode column idx: 0
 
     Table 6
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a, b, c ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
+    Table 4294967294 { columns: [ a, b, c, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC, $2 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0, 1, 2 ], read pk prefix len hint: 3 }
 
 - sql: |
     create table t1 (a int, b numeric, c bigint, primary key(a));
@@ -130,7 +130,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [a, b, c], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [t1.a, internal_last_seen_value(t1.b), internal_last_seen_value(t1.c)] }
         └── StreamHashAgg { group_key: [t1.a], aggs: [internal_last_seen_value(t1.b), internal_last_seen_value(t1.c), count] }
             ├── tables: [ HashAggState: 0 ]
@@ -155,42 +154,42 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ t1_a, internal_last_seen_value(t1_b), internal_last_seen_value(t1_c), count ]
+    ├── columns: [ t1_a, internal_last_seen_value(t1_b), internal_last_seen_value(t1_c), count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     └── read pk prefix len hint: 1
 
     Table 1
-    ├── columns: [ t1_a, t1_b, t1_c ]
+    ├── columns: [ t1_a, t1_b, t1_c, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
     Table 2
-    ├── columns: [ t1_a, t1_b, t1_c, _degree ]
+    ├── columns: [ t1_a, t1_b, t1_c, _degree, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
     Table 3
-    ├── columns: [ t2_a, t2_b, t2_c ]
+    ├── columns: [ t2_a, t2_b, t2_c, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 0, 1, 2 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
     Table 4
-    ├── columns: [ t2_a, t2_b, t2_c, _degree ]
+    ├── columns: [ t2_a, t2_b, t2_c, _degree, _rw_timestamp ]
     ├── primary key: [ $0 ASC, $1 ASC, $2 ASC ]
     ├── value indices: [ 3 ]
     ├── distribution key: [ 0, 1, 2 ]
     └── read pk prefix len hint: 3
 
     Table 5
-    ├── columns: [ vnode, a, backfill_finished, row_count ]
+    ├── columns: [ vnode, a, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
@@ -198,14 +197,19 @@
     └── vnode column idx: 0
 
     Table 6
-    ├── columns: [ vnode, a, backfill_finished, row_count ]
+    ├── columns: [ vnode, a, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ a, b, c ], primary key: [ $0 ASC ], value indices: [ 0, 1, 2 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4294967294
+    ├── columns: [ a, b, c, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 0 ]
+    └── read pk prefix len hint: 1
 
 - sql: |
     create table t1 (a int, b numeric, c bigint);

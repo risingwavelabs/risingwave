@@ -16,23 +16,26 @@
 
 mod json_common;
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::executor::block_on;
 use json_common::*;
 use paste::paste;
 use rand::Rng;
 use risingwave_connector::parser::{DebeziumParser, SourceStreamChunkBuilder};
+use risingwave_connector::source::SourceCtrlOpts;
 
 fn generate_debezium_json_row(rng: &mut impl Rng, change_event: &str) -> String {
     let source = r#"{"version":"1.7.1.Final","connector":"mysql","name":"dbserver1","ts_ms":1639547113601,"snapshot":"true","db":"inventory","sequence":null,"table":"products","server_id":0,"gtid":null,"file":"mysql-bin.000003","pos":156,"row":0,"thread":null,"query":null}"#;
     let (before, after) = match change_event {
-        "c" => ("null".to_string(), generate_json_row(rng)),
-        "r" => ("null".to_string(), generate_json_row(rng)),
+        "c" => ("null".to_owned(), generate_json_row(rng)),
+        "r" => ("null".to_owned(), generate_json_row(rng)),
         "u" => (generate_json_row(rng), generate_json_row(rng)),
-        "d" => (generate_json_row(rng), "null".to_string()),
+        "d" => (generate_json_row(rng), "null".to_owned()),
         _ => unreachable!(),
     };
-    format!("{{\"before\": {before}, \"after\": {after}, \"source\": {source}, \"op\": \"{change_event}\", \"ts_ms\":1639551564960, \"transaction\":null}}")
+    format!(
+        "{{\"before\": {before}, \"after\": {after}, \"source\": {source}, \"op\": \"{change_event}\", \"ts_ms\":1639551564960, \"transaction\":null}}"
+    )
 }
 
 macro_rules! create_debezium_bench_helpers {
@@ -45,7 +48,7 @@ macro_rules! create_debezium_bench_helpers {
                     .unwrap();
 
                 // Generate records
-                let mut rng = rand::thread_rng();
+                let mut rng = rand::rng();
                 let mut records = Vec::with_capacity(NUM_RECORDS);
                 for _ in 0..NUM_RECORDS {
                     let json_row = generate_debezium_json_row(&mut rng, $op_sym);
@@ -57,7 +60,10 @@ macro_rules! create_debezium_bench_helpers {
                         || (block_on(DebeziumParser::new_for_test(get_descs())).unwrap(), records.clone()) ,
                         | (mut parser, records) | async move {
                             let mut builder =
-                                SourceStreamChunkBuilder::with_capacity(get_descs(), NUM_RECORDS);
+                                SourceStreamChunkBuilder::new(get_descs(), SourceCtrlOpts {
+                                    chunk_size: NUM_RECORDS,
+                                    split_txn: false,
+                                });
                             for record in records {
                                 let writer = builder.row_writer();
                                 parser.parse_inner(None, record, writer).await.unwrap();

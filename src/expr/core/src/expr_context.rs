@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,25 @@
 
 use std::future::Future;
 
-use risingwave_expr::{define_context, Result as ExprResult};
+use risingwave_common::id::FragmentId;
+use risingwave_expr::{Result as ExprResult, define_context};
 use risingwave_pb::plan_common::ExprContext;
 
 // For all execution mode.
 define_context! {
     pub TIME_ZONE: String,
-    pub FRAGMENT_ID: u32,
+    pub FRAGMENT_ID: FragmentId,
     pub VNODE_COUNT: usize,
+    pub STRICT_MODE: bool,
 }
 
 pub fn capture_expr_context() -> ExprResult<ExprContext> {
     let time_zone = TIME_ZONE::try_with(ToOwned::to_owned)?;
-    Ok(ExprContext { time_zone })
+    let strict_mode = STRICT_MODE::try_with(|v| *v)?;
+    Ok(ExprContext {
+        time_zone,
+        strict_mode,
+    })
 }
 
 /// Get the vnode count from the context.
@@ -36,9 +42,23 @@ pub fn vnode_count() -> ExprResult<usize> {
     VNODE_COUNT::try_with(|&x| x)
 }
 
+/// Get the strict mode from expr context
+///
+/// The return value depends on session variable. Default is true for batch query.
+///
+/// Conceptually, streaming always use non-strict mode. Our implementation doesn't read this value,
+/// although it's set to false as a placeholder.
+pub fn strict_mode() -> ExprResult<bool> {
+    STRICT_MODE::try_with(|&v| v)
+}
+
 pub async fn expr_context_scope<Fut>(expr_context: ExprContext, future: Fut) -> Fut::Output
 where
     Fut: Future,
 {
-    TIME_ZONE::scope(expr_context.time_zone.to_owned(), future).await
+    TIME_ZONE::scope(
+        expr_context.time_zone.clone(),
+        STRICT_MODE::scope(expr_context.strict_mode, future),
+    )
+    .await
 }

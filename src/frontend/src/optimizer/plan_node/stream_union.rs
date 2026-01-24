@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,16 +16,16 @@ use std::ops::BitAnd;
 
 use fixedbitset::FixedBitSet;
 use pretty_xmlish::XmlNode;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::UnionNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, watermark_pretty, Distill};
-use super::{generic, ExprRewritable, PlanRef};
+use super::utils::{Distill, childless_record, watermark_pretty};
+use super::{ExprRewritable, StreamPlanRef as PlanRef, generic};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanNode;
 use crate::optimizer::plan_node::{PlanBase, PlanTreeNode, StreamNode};
-use crate::optimizer::property::{Distribution, MonotonicityMap};
+use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamUnion` implements [`super::LogicalUnion`]
@@ -44,21 +44,60 @@ impl StreamUnion {
     }
 
     pub fn new_with_dist(core: generic::Union<PlanRef>, dist: Distribution) -> Self {
-        let inputs = &core.inputs;
-
-        let watermark_columns = inputs.iter().fold(
-            {
-                let mut bitset = FixedBitSet::with_capacity(core.schema().len());
-                bitset.toggle_range(..);
-                bitset
-            },
-            |acc_watermark_columns, input| acc_watermark_columns.bitand(input.watermark_columns()),
+        assert!(
+            core.all,
+            "After UnionToDistinctRule, union should become union all"
         );
+        assert!(!core.inputs.is_empty());
+
+        let inputs = &core.inputs;
+        let ctx = core.ctx();
+
+        let watermark_indices = inputs
+            .iter()
+            .map(|x| x.watermark_columns().index_set().to_bitset())
+            .fold(
+                {
+                    let mut bitset = FixedBitSet::with_capacity(core.schema().len());
+                    bitset.toggle_range(..);
+                    bitset
+                },
+                |acc, x| acc.bitand(&x),
+            );
+        let mut watermark_columns = WatermarkColumns::new();
+        for idx in watermark_indices.ones() {
+            // XXX(rc): for the sake of simplicity, we assign each watermark column a new group
+            watermark_columns.insert(idx, ctx.next_watermark_group_id());
+        }
+
+        let kind = if core.source_col.is_some() {
+            // There's no handling on key conflict in executor implementation. However, in most cases
+            // there's a `source_col` as a part of stream key, indicating which input the row comes from,
+            // there won't be actual key conflict and we can safely call `merge`.
+            (inputs.iter().map(|i| i.stream_kind()))
+                .reduce(StreamKind::merge)
+                .unwrap()
+        } else {
+            // No `source_col`, typically used in a `TABLE` plan to merge inputs from external source,
+            // upstream sink-into-table jobs, and DML.
+            if inputs.len() == 1 {
+                // Single input. Follow the input's kind.
+                inputs[0].stream_kind()
+            } else if inputs.iter().all(|x| x.stream_kind().is_append_only()) {
+                // Special case for append-only table. Either there will be a `RowIdGen` following the `Union`,
+                // or there will be a `Materialize` with conflict handling enabled. In both cases there
+                // will be no key conflict, so we can treat the merged stream as append-only here.
+                StreamKind::AppendOnly
+            } else {
+                // Otherwise we must treat it as upsert.
+                StreamKind::Upsert
+            }
+        };
 
         let base = PlanBase::new_stream_with_core(
             &core,
             dist,
-            inputs.iter().all(|x| x.append_only()),
+            kind,
             inputs.iter().all(|x| x.emit_on_window_close()),
             watermark_columns,
             MonotonicityMap::new(),
@@ -78,12 +117,12 @@ impl Distill for StreamUnion {
     }
 }
 
-impl PlanTreeNode for StreamUnion {
-    fn inputs(&self) -> smallvec::SmallVec<[crate::optimizer::PlanRef; 2]> {
+impl PlanTreeNode<Stream> for StreamUnion {
+    fn inputs(&self) -> smallvec::SmallVec<[PlanRef; 2]> {
         smallvec::SmallVec::from_vec(self.core.inputs.clone())
     }
 
-    fn clone_with_inputs(&self, inputs: &[crate::optimizer::PlanRef]) -> PlanRef {
+    fn clone_with_inputs(&self, inputs: &[PlanRef]) -> PlanRef {
         let mut new = self.core.clone();
         new.inputs = inputs.to_vec();
         let dist = self.distribution().clone();
@@ -97,6 +136,6 @@ impl StreamNode for StreamUnion {
     }
 }
 
-impl ExprRewritable for StreamUnion {}
+impl ExprRewritable<Stream> for StreamUnion {}
 
 impl ExprVisitable for StreamUnion {}

@@ -1,0 +1,17 @@
+- id: explain parameters
+  sql: |
+    explain select $1
+  expected_outputs:
+    - explain_output
+- id: explain parameters in in-expr
+  sql: |
+    create table t (id int primary key, a int);
+    explain select * from t where id in($1)
+  expected_outputs:
+    - explain_output
+- id: explain parameters in in-expr
+  sql: |
+    create table t (id int primary key, a int);
+    explain select * from t where id in($1, 123)
+  expected_outputs:
+    - explain_output

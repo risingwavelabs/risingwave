@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -55,11 +55,11 @@ pub struct BoundWindowTableFunction {
 impl RewriteExprsRecursive for BoundWindowTableFunction {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         self.input.rewrite_exprs_recursive(rewriter);
-        let new_agrs = std::mem::take(&mut self.args)
+        let new_args = std::mem::take(&mut self.args)
             .into_iter()
             .map(|expr| rewriter.rewrite_expr(expr))
             .collect::<Vec<_>>();
-        self.args = new_agrs;
+        self.args = new_args;
     }
 }
 
@@ -70,11 +70,11 @@ const ERROR_2ND_ARG_TYPE: &str = "The 2st arg of window table function should be
 impl Binder {
     pub(super) fn bind_window_table_function(
         &mut self,
-        alias: Option<TableAlias>,
+        alias: Option<&TableAlias>,
         kind: WindowTableFunctionKind,
-        args: Vec<FunctionArg>,
+        args: &[FunctionArg],
     ) -> Result<BoundWindowTableFunction> {
-        let mut args = args.into_iter();
+        let mut args = args.iter();
 
         self.push_context();
 
@@ -83,7 +83,7 @@ impl Binder {
         let time_col = self.bind_column_by_function_args(args.next(), ERROR_2ND_ARG_EXPR)?;
 
         let Some(output_type) = DataType::window_of(&time_col.data_type) else {
-            return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_string()).into());
+            return Err(ErrorCode::BindError(ERROR_2ND_ARG_TYPE.to_owned()).into());
         };
 
         let base_columns = std::mem::take(&mut self.context.columns);
@@ -110,7 +110,7 @@ impl Binder {
                 .into_iter(),
             ).collect::<Result<Vec<_>>>()?;
 
-        let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, table_name)?;
+        let (_, table_name) = Self::resolve_schema_qualified_name(&self.db_name, &table_name)?;
         self.bind_table_to_context(columns, table_name, alias)?;
 
         // Other arguments are validated in `plan_window_table_function`

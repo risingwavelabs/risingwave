@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalShare, PlanTreeNodeUnary};
-use crate::optimizer::PlanRef;
 
 pub struct DagToTreeRule {}
-impl Rule for DagToTreeRule {
+impl Rule<Logical> for DagToTreeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let mut inputs = plan.inputs();
         let mut has_share = false;
@@ -30,7 +29,7 @@ impl Rule for DagToTreeRule {
         }
 
         if has_share {
-            Some(plan.clone_with_inputs(&inputs))
+            Some(plan.clone_root_with_inputs(&inputs))
         } else {
             None
         }

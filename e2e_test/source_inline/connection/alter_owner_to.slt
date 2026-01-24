@@ -1,0 +1,41 @@
+control substitution on
+
+# for non-shared source
+statement ok
+set streaming_use_shared_source to false;
+
+statement ok
+create secret sec_broker with (backend = 'meta') as '${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}';
+
+statement ok
+create connection conn with (type = 'kafka', properties.bootstrap.server = secret sec_broker, properties.security.protocol = 'plaintext');
+
+statement ok
+CREATE USER user1;
+
+statement ok
+ALTER CONNECTION conn OWNER TO user1;
+
+query TT
+SELECT
+    pg_class.relname AS rel_name,
+    pg_roles.rolname AS owner
+FROM
+    pg_class
+    JOIN pg_namespace ON pg_namespace.oid = pg_class.relnamespace
+    JOIN pg_roles ON pg_roles.oid = pg_class.relowner
+WHERE
+    pg_namespace.nspname NOT LIKE 'pg_%'
+    AND pg_namespace.nspname != 'information_schema'
+    AND pg_class.relname = 'conn';
+----
+conn user1
+
+statement ok
+drop connection conn;
+
+statement ok
+drop secret sec_broker;
+
+statement ok
+set streaming_use_shared_source to true;

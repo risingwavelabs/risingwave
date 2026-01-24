@@ -64,6 +64,16 @@ psql -c "
     INSERT INTO test_default(id,name,age) VALUES (1, 'name1', 20), (2, 'name2', 21), (3, 'name3', 22);
     "
 
+system ok
+psql -c "
+    -- Use a deterministic publication/slot name to avoid cross-test interference.
+    DROP PUBLICATION IF EXISTS rw_publication_auto_schema_map_pg;
+    CREATE PUBLICATION rw_publication_auto_schema_map_pg FOR ALL TABLES;
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'pg_slot_auto_schema_map_pg';
+"
+
 statement ok
 create source pg_source with (
  connector = 'postgres-cdc',
@@ -72,7 +82,9 @@ create source pg_source with (
  username = '${PGUSER:$USER}',
  password = '${PGPASSWORD:}',
  database.name = '${PGDATABASE:postgres}',
- slot.name = 'pg_slot'
+ slot.name = 'pg_slot_auto_schema_map_pg',
+ publication.name = 'rw_publication_auto_schema_map_pg',
+ publication.create.enable = 'false'
 );
 
 statement ok
@@ -99,10 +111,9 @@ SELECT * from test_default order by id;
 statement ok
 create table rw_postgres_types_test (*) from pg_source table 'public.postgres_types_test';
 
-sleep 3s
 
 # Name, Type, Is Hidden, Description
-query TTTT
+query TTTT retry 4 backoff 1s
 describe rw_postgres_types_test;
 ----
 c_boolean boolean false NULL
@@ -139,11 +150,12 @@ c_interval_array interval[] false NULL
 c_jsonb_array jsonb[] false NULL
 c_uuid_array character varying[] false NULL
 c_enum_array character varying[] false NULL
+_rw_timestamp timestamp with time zone true NULL
 primary key c_boolean, c_bigint, c_date NULL NULL
 distribution key c_boolean, c_bigint, c_date NULL NULL
 table description rw_postgres_types_test NULL NULL
 
-query TTTTTTT
+query TTTTTTT retry 4 backoff 1s
 SELECT
     c_boolean,
     c_smallint,
@@ -158,7 +170,7 @@ SELECT
 f -32767 -2147483647 -9223372036854775807 -10.0 -10000 -10000 d \x3030
 f 1 123 1234567890 123.45 123.45 123.456 a_varchar \x4445414442454546
 
-query TTTTT
+query TTTTT retry 4 backoff 1s
 SELECT
     c_date,
     c_time,
@@ -169,7 +181,7 @@ SELECT
 0001-01-01 00:00:00 2001-01-01 00:00:00 2001-01-01 08:00:00+00:00 00:00:00
 0024-01-01 12:34:56 2024-05-19 12:34:56 2024-05-19 12:34:56+00:00 1 day
 
-query TTTTTTT
+query TTTTTTT retry 4 backoff 1s
 SELECT
     c_jsonb,
     c_uuid,
@@ -182,7 +194,7 @@ SELECT
 {} bb488f9b-330d-4012-b849-12adeb49e57e happy {f} {-32767} {-2147483647} {-9223372036854775807}
 "hello" 123e4567-e89b-12d3-a456-426614174000 happy {NULL,t} {NULL,1} {NULL,123} {NULL,1234567890}
 
-query TTTTTTTTTTTTT
+query TTTTTTTTTTTTT retry 4 backoff 1s
 SELECT
     c_decimal_array,
     c_real_array,

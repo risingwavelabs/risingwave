@@ -28,7 +28,7 @@ message RowSeqScanNode {
 
   // The pushed down `batch_limit`. Max rows needed to return.
   optional uint64 limit = 6;
-  optional plan_common.AsOf as_of = 7;
+  common.BatchQueryEpoch query_epoch = 7;
 }
 
 message SysRowSeqScanNode {
@@ -48,7 +48,7 @@ message ScanRange {
 
   // `None` represent unbounded.
   message Bound {
-    bytes value = 1;
+    repeated bytes value = 1;
     bool inclusive = 2;
   }
   //  The lower bound of the next PK column subsequent to those in `eq_conds`.
@@ -67,10 +67,18 @@ message SourceNode {
 }
 
 message IcebergScanNode {
+  enum IcebergScanType {
+    ICEBERG_SCAN_TYPE_UNSPECIFIED = 0;
+    ICEBERG_SCAN_TYPE_DATA_SCAN = 1;
+    ICEBERG_SCAN_TYPE_EQUALITY_DELETE_SCAN = 2;
+    ICEBERG_SCAN_TYPE_POSITION_DELETE_SCAN = 3;
+    ICEBERG_SCAN_TYPE_COUNT_STAR = 4 [deprecated = true];
+  }
   repeated plan_common.ColumnCatalog columns = 1;
   map<string, string> with_properties = 2;
   repeated bytes split = 3;
   map<string, secret.SecretRef> secret_refs = 4;
+  IcebergScanType iceberg_scan_type = 5;
 }
 
 message FileScanNode {
@@ -82,6 +90,8 @@ message FileScanNode {
   enum StorageType {
     STORAGE_TYPE_UNSPECIFIED = 0;
     S3 = 1;
+    GCS = 2;
+    AZBLOB = 3;
   }
 
   repeated plan_common.ColumnDesc columns = 1;
@@ -91,10 +101,51 @@ message FileScanNode {
   string s3_access_key = 5;
   string s3_secret_key = 6;
   repeated string file_location = 7;
+  string s3_endpoint = 8;
+}
+
+message GcsFileScanNode {
+  enum FileFormat {
+    FILE_FORMAT_UNSPECIFIED = 0;
+    PARQUET = 1;
+  }
+
+  repeated plan_common.ColumnDesc columns = 1;
+  FileFormat file_format = 2;
+  string credential = 3;
+  repeated string file_location = 4;
+}
+
+message AzblobFileScanNode {
+  enum FileFormat {
+    FILE_FORMAT_UNSPECIFIED = 0;
+    PARQUET = 1;
+  }
+
+  repeated plan_common.ColumnDesc columns = 1;
+  FileFormat file_format = 2;
+  string account_name = 3;
+  string account_key = 4;
+  string endpoint = 5;
+
+  repeated string file_location = 6;
 }
 
 // NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.
 message PostgresQueryNode {
+  repeated plan_common.ColumnDesc columns = 1;
+  string hostname = 2;
+  string port = 3;
+  string username = 4;
+  string password = 5;
+  string database = 6;
+  string query = 7;
+  string ssl_mode = 8;
+  string ssl_root_cert = 9;
+}
+
+// NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.
+message MySqlQueryNode {
   repeated plan_common.ColumnDesc columns = 1;
   string hostname = 2;
   string port = 3;
@@ -122,6 +173,8 @@ message LogRowSeqScanNode {
   common.Buffer vnode_bitmap = 3;
   common.BatchQueryEpoch old_epoch = 4;
   common.BatchQueryEpoch new_epoch = 5;
+  bool ordered = 6;
+  ScanRange scan_range = 7;
 }
 
 message InsertNode {
@@ -151,7 +204,11 @@ message DeleteNode {
   uint32 table_id = 1;
   // Version of the table.
   uint64 table_version_id = 3;
+  // Primary key indices of the table.
+  repeated uint32 pk_indices = 5;
   bool returning = 2;
+  // If enabled, only key columns are kept and the rest are NULL.
+  bool upsert = 6;
 
   // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
   uint32 session_id = 4;
@@ -161,11 +218,14 @@ message UpdateNode {
   // Id of the table to perform updating.
   uint32 table_id = 1;
   // Version of the table.
-  uint64 table_version_id = 4;
-  repeated expr.ExprNode exprs = 2;
-  bool returning = 3;
-  // The columns indices in the input schema, representing the columns need to send to streamDML exeuctor.
-  repeated uint32 update_column_indices = 5;
+  uint64 table_version_id = 2;
+  // Expressions to generate `U-` records.
+  repeated expr.ExprNode old_exprs = 3;
+  // Expressions to generate `U+` records.
+  repeated expr.ExprNode new_exprs = 4;
+  bool returning = 5;
+  // If enabled, only `Insert` records are emitted for new rows.
+  bool upsert = 7;
 
   // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
   uint32 session_id = 6;
@@ -239,6 +299,7 @@ message HashJoinNode {
   // Null safe means it treats `null = null` as true.
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 6;
+  optional plan_common.AsOfJoinDesc asof_desc = 7;
 }
 
 message SortMergeJoinNode {
@@ -279,7 +340,8 @@ message TaskOutputId {
 
 message LocalExecutePlan {
   batch_plan.PlanFragment plan = 1;
-  common.BatchQueryEpoch epoch = 2;
+  reserved "epoch";
+  reserved 2;
   map<string, string> tracing_context = 3;
 }
 
@@ -318,7 +380,8 @@ message LocalLookupJoinNode {
   // Null safe means it treats `null = null` as true.
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 11;
-  optional plan_common.AsOf as_of = 12;
+  common.BatchQueryEpoch query_epoch = 12;
+  optional plan_common.AsOfJoinDesc asof_desc = 13;
 }
 
 // RFC: A new schedule way for distributed lookup join
@@ -335,7 +398,8 @@ message DistributedLookupJoinNode {
   // Null safe means it treats `null = null` as true.
   // Each key pair can be null safe independently. (left_key, right_key, null_safe)
   repeated bool null_safe = 9;
-  optional plan_common.AsOf as_of = 10;
+  common.BatchQueryEpoch query_epoch = 10;
+  optional plan_common.AsOfJoinDesc asof_desc = 11;
 }
 
 message UnionNode {}
@@ -347,6 +411,19 @@ message SortOverWindowNode {
 }
 
 message MaxOneRowNode {}
+
+message VectorIndexNearestNode {
+  plan_common.VectorIndexReaderDesc reader_desc = 1;
+  uint32 vector_column_idx = 2;
+  common.BatchQueryEpoch query_epoch = 8;
+}
+
+message GetChannelDeltaStatsNode {
+  // Optional timestamp to get channel stats at a specific time
+  optional uint64 at_time = 1;
+  // Time offset in seconds for the query window
+  optional uint64 time_offset = 2;
+}
 
 message PlanNode {
   repeated PlanNode children = 1;
@@ -385,6 +462,11 @@ message PlanNode {
     FileScanNode file_scan = 38;
     IcebergScanNode iceberg_scan = 39;
     PostgresQueryNode postgres_query = 40;
+    MySqlQueryNode mysql_query = 41;
+    GcsFileScanNode gcs_file_scan = 42;
+    AzblobFileScanNode azblob_file_scan = 43;
+    VectorIndexNearestNode vector_index_nearest = 44;
+    GetChannelDeltaStatsNode get_channel_delta_stats = 45;
     // The following nodes are used for testing.
     bool block_executor = 100;
     bool busy_loop_executor = 101;

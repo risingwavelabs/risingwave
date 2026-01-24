@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -25,11 +25,11 @@ use risingwave_pb::expr::agg_call::PbKind as PbAggKind;
 use risingwave_pb::expr::expr_node::PbType as ScalarFunctionType;
 use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 
+use crate::ExprError;
 use crate::aggregate::{AggCall, BoxedAggregateFunction};
 use crate::error::Result;
 use crate::expr::BoxedExpression;
 use crate::table_function::BoxedTableFunction;
-use crate::ExprError;
 
 mod udf;
 
@@ -124,7 +124,7 @@ impl FunctionRegistry {
                 args.iter().format(", "),
                 ret,
                 if candidates.is_empty() {
-                    "".to_string()
+                    "".to_owned()
                 } else {
                     format!(
                         "\nHINT: Supported functions:\n{}",
@@ -414,7 +414,7 @@ impl FuncName {
 }
 
 /// An extended data type that can be used to declare a function's argument or result type.
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum SigDataType {
     /// Exact data type
     Exact(DataType),
@@ -426,6 +426,9 @@ pub enum SigDataType {
     AnyStruct,
     /// TODO: not all type can be used as a map key.
     AnyMap,
+    /// Vector of a certain size
+    /// Named without `Any` prefix to align with PostgreSQL
+    Vector,
 }
 
 impl From<DataType> for SigDataType {
@@ -442,6 +445,7 @@ impl std::fmt::Display for SigDataType {
             Self::AnyArray => write!(f, "anyarray"),
             Self::AnyStruct => write!(f, "anystruct"),
             Self::AnyMap => write!(f, "anymap"),
+            Self::Vector => write!(f, "vector"),
         }
     }
 }
@@ -455,6 +459,7 @@ impl SigDataType {
             Self::AnyArray => dt.is_array(),
             Self::AnyStruct => dt.is_struct(),
             Self::AnyMap => dt.is_map(),
+            Self::Vector => matches!(dt, DataType::Vector(_)),
         }
     }
 

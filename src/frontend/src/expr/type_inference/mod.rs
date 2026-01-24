@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@
 mod cast;
 mod func;
 pub use cast::{
-    align_types, cast_map_array, cast_ok, cast_ok_base, cast_sigs, CastContext, CastSig,
+    CAST_TABLE, CastContext, CastError, CastErrorInner, CastSig, align_types, bail_cast_error,
+    cast, cast_error, cast_ok, cast_ok_base, cast_sigs,
 };
-pub use func::{infer_some_all, infer_type, infer_type_name, infer_type_with_sigmap, FuncSign};
+pub use func::{FuncSign, infer_some_all, infer_type, infer_type_name, infer_type_with_sigmap};

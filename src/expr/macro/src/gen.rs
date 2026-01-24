@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ impl FunctionAttr {
                 FunctionAttr {
                     args: {
                         let mut args = self.args.clone();
-                        *args.last_mut().unwrap() = "...".to_string();
+                        *args.last_mut().unwrap() = "...".to_owned();
                         args
                     },
                     ..self.clone()
@@ -68,7 +68,7 @@ impl FunctionAttr {
             }
             let attr = FunctionAttr {
                 args: args.iter().map(|s| s.to_string()).collect(),
-                ret: ret.to_string(),
+                ret: ret.to_owned(),
                 ..self.clone()
             };
             attrs.push(attr);
@@ -94,7 +94,7 @@ impl FunctionAttr {
             }
             if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
                 // infer as the element type of "anyarray" argument
-                return Ok(quote! { |args| Ok(args[#i].as_list().clone()) });
+                return Ok(quote! { |args| Ok(args[#i].as_list_elem().clone()) });
             }
         } else if self.ret == "anyarray" {
             if let Some(i) = self.args.iter().position(|t| t == "anyarray") {
@@ -103,7 +103,7 @@ impl FunctionAttr {
             }
             if let Some(i) = self.args.iter().position(|t| t == "any") {
                 // infer as the array type of "any" argument
-                return Ok(quote! { |args| Ok(DataType::List(Box::new(args[#i].clone()))) });
+                return Ok(quote! { |args| Ok(DataType::list(args[#i].clone())) });
             }
         } else if self.ret == "struct" {
             if let Some(i) = self.args.iter().position(|t| t == "struct") {
@@ -349,7 +349,10 @@ impl FunctionAttr {
         };
         let variadic_args = variadic.then(|| quote! { &variadic_row, });
         let context = user_fn.context.then(|| quote! { &self.context, });
-        let writer = user_fn.write.then(|| quote! { &mut writer, });
+        let writer = user_fn
+            .writer_type_kind
+            .is_some()
+            .then(|| quote! { &mut writer, });
         let await_ = user_fn.async_.then(|| quote! { .await });
 
         let record_error = {
@@ -450,34 +453,63 @@ impl FunctionAttr {
             };
         };
         // now the `output` is: Option<impl ScalarRef or Scalar>
-        let append_output = match user_fn.write {
-            true => quote! {{
-                let mut writer = builder.writer().begin();
+        let append_output = match user_fn.writer_type_kind {
+            Some(WriterTypeKind::FmtWrite)
+            | Some(WriterTypeKind::IoWrite)
+            | Some(WriterTypeKind::ListWrite) => quote! {{
+                let mut writer = builder.writer();
                 if #output.is_some() {
                     writer.finish();
                 } else {
-                    drop(writer);
+                    writer.rollback();
                     builder.append_null();
                 }
             }},
-            false if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
+            Some(WriterTypeKind::JsonbbBuilder) => quote! {{
+                let mut writer_wrapper = builder.writer();
+                let mut writer = writer_wrapper.inner();
+                if #output.is_some() {
+                    writer_wrapper.finish();
+                } else {
+                    writer_wrapper.rollback();
+                    builder.append_null();
+                }
+            }},
+            None if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
                 builder.append(#output.as_ref().map(|s| s.as_ref()));
             },
-            false => quote! {
+            None => quote! {
                 let output #annotation = #output;
                 builder.append(output.as_ref().map(|s| s.as_scalar_ref()));
             },
         };
         // the output expression in `eval_row`
-        let row_output = match user_fn.write {
-            true => quote! {{
+        let row_output = match user_fn.writer_type_kind {
+            Some(WriterTypeKind::FmtWrite) => quote! {{
                 let mut writer = String::new();
                 #output.map(|_| writer.into())
             }},
-            false if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
+            Some(WriterTypeKind::IoWrite) => quote! {{
+                let mut writer = Vec::new();
+                #output.map(|_| writer.into())
+            }},
+            Some(WriterTypeKind::JsonbbBuilder) => quote! {{
+                let mut writer = jsonbb::Builder::<Vec<u8>>::new();
+                #output.map(|_| JsonbVal::from(writer.finish()).into())
+            }},
+            Some(WriterTypeKind::ListWrite) => quote! {{
+                let mut writer = {
+                    let DataType::List(list_ty) = &self.context.return_type else {
+                        panic!("data type must be DataType::List");
+                    };
+                    list_ty.elem().create_array_builder(1)
+                };
+                #output.map(|_| ListValue::new(writer.finish()).into())
+            }},
+            None if user_fn.core_return_type == "impl AsRef < [u8] >" => quote! {
                 #output.map(|s| s.as_ref().into())
             },
-            false => quote! {{
+            None => quote! {{
                 let output #annotation = #output;
                 output.map(|s| s.into())
             }},
@@ -503,7 +535,7 @@ impl FunctionAttr {
             match self.args.len() {
                 0 => quote! {
                     let c = #ret_array_type::from_iter_bitmap(
-                        std::iter::repeat_with(|| #fn_name()).take(input.capacity())
+                        std::iter::repeat_with(|| #fn_name()).take(input.capacity()),
                         Bitmap::ones(input.capacity()),
                     );
                     Arc::new(c.into())
@@ -538,7 +570,7 @@ impl FunctionAttr {
             quote! {
                 let mut builder = #builder_type::with_type(input.capacity(), self.context.return_type.clone());
 
-                if input.is_compacted() {
+                if input.is_vis_compacted() {
                     for i in 0..input.capacity() {
                         #(let #inputs = unsafe { #arrays.value_at_unchecked(i) };)*
                         #let_variadic
@@ -962,7 +994,7 @@ impl FunctionAttr {
                         assert!(range.end <= input.capacity());
                         #(#let_arrays)*
                         #downcast_state
-                        if input.is_compacted() {
+                        if input.is_vis_compacted() {
                             for row_id in range {
                                 let op = unsafe { *input.ops().get_unchecked(row_id) };
                                 #(#let_values)*
@@ -1308,6 +1340,7 @@ fn sig_data_type(ty: &str) -> TokenStream2 {
         "any" => quote! { SigDataType::Any },
         "anyarray" => quote! { SigDataType::AnyArray },
         "anymap" => quote! { SigDataType::AnyMap },
+        "vector" => quote! { SigDataType::Vector },
         "struct" => quote! { SigDataType::AnyStruct },
         _ if ty.starts_with("struct") && ty.contains("any") => quote! { SigDataType::AnyStruct },
         _ => {
@@ -1320,7 +1353,7 @@ fn sig_data_type(ty: &str) -> TokenStream2 {
 fn data_type(ty: &str) -> TokenStream2 {
     if let Some(ty) = ty.strip_suffix("[]") {
         let inner_type = data_type(ty);
-        return quote! { DataType::List(Box::new(#inner_type)) };
+        return quote! { DataType::list(#inner_type) };
     }
     if ty.starts_with("struct<") {
         return quote! { DataType::Struct(#ty.parse().expect("invalid struct type")) };

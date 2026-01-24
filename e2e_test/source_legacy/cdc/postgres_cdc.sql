@@ -149,3 +149,32 @@ INSERT INTO partitioned_timestamp_table (c_int, c_boolean, c_timestamp) VALUES
 
 -- Here we create this publication without `WITH ( publish_via_partition_root = true )` only for tests. Normally, it should be added.
 create publication rw_publication_pubviaroot_false for TABLE partitioned_timestamp_table;
+
+
+CREATE TABLE test_pg_default_value (
+    "id" int,
+    "name" varchar(64),
+    "city" varchar(200) default 'Shanghai',
+    PRIMARY KEY ("id")
+);
+
+INSERT INTO test_pg_default_value(id, name) VALUES (1, 'bugen');
+
+CREATE TABLE json_table(
+    id INT,
+    c_json JSON,
+    c_jsonb JSONB,
+    c_json_array JSON[],
+    c_jsonb_array JSONB[],
+    PRIMARY KEY (id)
+);
+
+INSERT INTO
+  json_table
+VALUES
+  (1, '{"id": 1, "name": "alice"}', '{"id": 1, "name": "alice"}', ARRAY['{"id": 1, "name": "alice"}'::json], ARRAY['{"id": 1, "name": "alice"}'::jsonb]),
+  (2, '{}', '{}', ARRAY['{}'::json], ARRAY['{}'::jsonb]),
+  (3, '{}', '{}', array[]::json[], array[]::jsonb[]),
+  (4, NULL, NULL, NULL, NULL);
+
+

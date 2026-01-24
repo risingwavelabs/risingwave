@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ import {
   getClusterInfoComputeNode,
   getClusterInfoFrontend,
   getClusterMetrics,
+  getClusterVersion,
 } from "../lib/api/cluster"
 import { WorkerNode } from "../proto/gen/common"
 
@@ -142,6 +143,7 @@ export default function Cluster() {
   const [frontendList, setFrontendList] = useState<WorkerNode[]>([])
   const [computeNodeList, setComputeNodeList] = useState<WorkerNode[]>([])
   const [metrics, setMetrics] = useState<ClusterNodeMetrics>()
+  const [version, setVersion] = useState<string>()
   const toast = useErrorToast()
 
   useEffect(() => {
@@ -149,6 +151,7 @@ export default function Cluster() {
       try {
         setFrontendList(await getClusterInfoFrontend())
         setComputeNodeList(await getClusterInfoComputeNode())
+        setVersion(await getClusterVersion())
       } catch (e: any) {
         toast(e)
       }
@@ -182,6 +185,9 @@ export default function Cluster() {
   const retVal = (
     <Box p={3}>
       <Title>Cluster Overview</Title>
+      <Text textColor="gray.500" m={0}>
+        Version: {version}
+      </Text>
       <Grid my={3} templateColumns="repeat(3, 1fr)" gap={6} width="full">
         {frontendList.map((frontend) => (
           <GridItem

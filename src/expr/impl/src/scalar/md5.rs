@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
+use md5::{Digest as _, Md5};
 use risingwave_expr::function;
 
 #[function("md5(varchar) -> varchar")]
-pub fn md5(s: &str, writer: &mut impl Write) {
-    write!(writer, "{:x}", ::md5::compute(s)).unwrap();
+pub fn md5(s: &str, writer: &mut impl std::fmt::Write) {
+    write!(writer, "{:x}", Md5::digest(s)).unwrap();
 }
 
 #[function("md5(bytea) -> varchar")]
-pub fn md5_from_bytea(s: &[u8], writer: &mut impl Write) {
-    writer
-        .write_str(&::hex::encode(::md5::compute(s).0))
-        .unwrap();
+pub fn md5_from_bytea(s: &[u8], writer: &mut impl std::fmt::Write) {
+    writer.write_str(&::hex::encode(Md5::digest(s))).unwrap();
 }
 
 #[cfg(test)]

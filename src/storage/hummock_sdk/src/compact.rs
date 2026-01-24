@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::LevelType;
 
 use crate::compact_task::CompactTask;
@@ -60,12 +61,9 @@ pub fn compact_task_to_string(compact_task: &CompactTask) -> String {
     )
     .unwrap();
     s.push_str("Input: \n");
-    let existing_table_ids: HashSet<u32> = compact_task
-        .existing_table_ids
-        .clone()
-        .into_iter()
-        .collect();
-    let mut input_sst_table_ids: HashSet<u32> = HashSet::new();
+    let existing_table_ids: HashSet<TableId> =
+        compact_task.existing_table_ids.iter().copied().collect();
+    let mut input_sst_table_ids: HashSet<TableId> = HashSet::new();
     let mut dropped_table_ids = HashSet::new();
     for level_entry in &compact_task.input_ssts {
         let tables: Vec<String> = level_entry
@@ -123,12 +121,12 @@ pub fn append_sstable_info_to_string(s: &mut String, sstable_info: &SstableInfo)
 
     let key_range = &sstable_info.key_range;
     let left_str = if key_range.left.is_empty() {
-        "-inf".to_string()
+        "-inf".to_owned()
     } else {
         hex::encode(&key_range.left)
     };
     let right_str = if key_range.right.is_empty() {
-        "+inf".to_string()
+        "+inf".to_owned()
     } else {
         hex::encode(&key_range.right)
     };

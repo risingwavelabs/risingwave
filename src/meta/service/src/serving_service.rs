@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ impl ServingService for ServingServiceImpl {
             .fragment_job_mapping()
             .await?
             .into_iter()
-            .map(|(fragment_id, job_id)| (fragment_id as u32, job_id as u32))
+            .map(|(fragment_id, job_id)| (fragment_id, job_id.as_raw_id()))
             .collect();
         Ok(Response::new(GetServingVnodeMappingsResponse {
             fragment_to_table,

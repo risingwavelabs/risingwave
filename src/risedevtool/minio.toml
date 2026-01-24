@@ -2,14 +2,22 @@ extend = "common.toml"
 
 [env]
 MINIO_SYSTEM = "${SYSTEM}"
-MCLI_DOWNLOAD_BIN = { value = "https://dl.min.io/client/mc/release/${MINIO_SYSTEM}/mc", condition = { env_not_set = [ "MCLI_DOWNLOAD_BIN" ] } }
-MINIO_DOWNLOAD_BIN = { value = "https://dl.min.io/server/minio/release/${MINIO_SYSTEM}/minio", condition = { env_not_set = [ "MINIO_DOWNLOAD_BIN" ] } }
+MCLI_DOWNLOAD_BIN = { value = "https://dl.min.io/client/mc/release/${MINIO_SYSTEM}/mc", condition = { env_not_set = [
+    "MCLI_DOWNLOAD_BIN",
+] } }
+MINIO_DOWNLOAD_BIN = { value = "https://dl.min.io/server/minio/release/${MINIO_SYSTEM}/minio", condition = { env_not_set = [
+    "MINIO_DOWNLOAD_BIN",
+] } }
 
 [tasks.download-minio]
 private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_MINIO" ] }
+condition = { env_set = [
+    "ENABLE_MINIO",
+], files_not_exist = [
+    "${PREFIX_BIN}/minio",
+] }
 description = "Download and extract MinIO"
 script = '''
 #!/usr/bin/env bash
@@ -29,7 +37,11 @@ mv "${PREFIX_TMP}/minio" "${PREFIX_BIN}/minio"
 private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_MINIO" ] }
+condition = { env_set = [
+    "ENABLE_MINIO",
+], files_not_exist = [
+    "${PREFIX_BIN}/mcli",
+] }
 description = "Download and extract MinIO Client"
 script = '''
 #!/usr/bin/env bash
@@ -44,3 +56,18 @@ mv "${PREFIX_TMP}/mcli" "${PREFIX_BIN}/mcli"
 
 "${PREFIX_BIN}/mcli" --version
 '''
+
+[tasks.mcli]
+category = "RiseDev - External Systems"
+dependencies = ["prepare"]
+condition = { env_set = [ "ENABLE_MINIO" ] }
+description = "Run MinIO Client"
+script = '''
+#!/usr/bin/env bash
+set -e
+
+${PREFIX_BIN}/mcli -C ${PREFIX}/config/mcli "$@"
+'''
+
+[tasks.mc]
+alias = "mcli"

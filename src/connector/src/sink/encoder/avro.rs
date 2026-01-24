@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,24 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
-use apache_avro::schema::{RecordSchema, Schema as AvroSchema};
+use apache_avro::schema::{Name, RecordSchema, Schema as AvroSchema};
 use apache_avro::types::{Record, Value};
+use risingwave_common::array::VECTOR_AS_LIST_TYPE;
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
-use risingwave_common::types::{DataType, DatumRef, ScalarRefImpl, StructType};
+use risingwave_common::types::{DataType, DatumRef, ListType, ScalarRefImpl, StructType};
 use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_connector_codec::decoder::utils::rust_decimal_to_scaled_bigint;
 use thiserror_ext::AsReport;
 
 use super::{FieldEncodeError, Result as SinkResult, RowEncoder, SerTo};
 
 type Result<T> = std::result::Result<T, FieldEncodeError>;
+struct NamesRef(HashMap<Name, AvroSchema>);
 
 pub struct AvroEncoder {
     schema: Schema,
     col_indices: Option<Vec<usize>>,
     avro_schema: Arc<AvroSchema>,
+    refs: NamesRef,
     header: AvroHeader,
 }
 
@@ -52,6 +57,12 @@ pub enum AvroHeader {
     /// * 00
     /// * 4-byte big-endian schema ID
     ConfluentSchemaRegistry(i32),
+    /// <https://github.com/awslabs/aws-glue-schema-registry/blob/v1.1.20/common/src/main/java/com/amazonaws/services/schemaregistry/utils/AWSSchemaRegistryConstants.java#L59-L61>
+    ///
+    /// * 03
+    /// * 00
+    /// * 16-byte UUID identifying a specific schema version
+    GlueSchemaRegistry(uuid::Uuid),
 }
 
 impl AvroEncoder {
@@ -61,6 +72,7 @@ impl AvroEncoder {
         avro_schema: Arc<AvroSchema>,
         header: AvroHeader,
     ) -> SinkResult<Self> {
+        let refs = NamesRef::new(&avro_schema)?;
         match &col_indices {
             Some(col_indices) => validate_fields(
                 col_indices.iter().map(|idx| {
@@ -68,6 +80,7 @@ impl AvroEncoder {
                     (f.name.as_str(), &f.data_type)
                 }),
                 &avro_schema,
+                &refs,
             )?,
             None => validate_fields(
                 schema
@@ -75,6 +88,7 @@ impl AvroEncoder {
                     .iter()
                     .map(|f| (f.name.as_str(), &f.data_type)),
                 &avro_schema,
+                &refs,
             )?,
         };
 
@@ -82,8 +96,28 @@ impl AvroEncoder {
             schema,
             col_indices,
             avro_schema,
+            refs,
             header,
         })
+    }
+}
+
+impl NamesRef {
+    fn new(root: &AvroSchema) -> std::result::Result<Self, apache_avro::Error> {
+        let resolved = apache_avro::schema::ResolvedSchema::try_from(root)?;
+        let refs = resolved
+            .get_names()
+            .iter()
+            .map(|(k, v)| (k.to_owned(), (*v).to_owned()))
+            .collect();
+        Ok(Self(refs))
+    }
+
+    fn lookup<'a>(&'a self, avro: &'a AvroSchema) -> &'a AvroSchema {
+        match avro {
+            AvroSchema::Ref { name } => &self.0[name],
+            _ => avro,
+        }
     }
 }
 
@@ -115,6 +149,7 @@ impl RowEncoder for AvroEncoder {
                 ((f.name.as_str(), &f.data_type), row.datum_at(idx))
             }),
             &self.avro_schema,
+            &self.refs,
         )?;
         Ok(AvroEncoded {
             value: record.into(),
@@ -128,17 +163,32 @@ impl SerTo<Vec<u8>> for AvroEncoded {
     fn ser_to(self) -> SinkResult<Vec<u8>> {
         use bytes::BufMut as _;
 
-        let AvroHeader::ConfluentSchemaRegistry(schema_id) = self.header else {
-            return Err(crate::sink::SinkError::Encode(format!(
-                "{:?} unsupported yet",
-                self.header
-            )));
+        let header = match self.header {
+            AvroHeader::ConfluentSchemaRegistry(schema_id) => {
+                let mut buf = Vec::with_capacity(1 + 4);
+                buf.put_u8(0);
+                buf.put_i32(schema_id);
+                buf
+            }
+            AvroHeader::GlueSchemaRegistry(schema_version_id) => {
+                let mut buf = Vec::with_capacity(1 + 1 + 16);
+                buf.put_u8(3);
+                buf.put_u8(0);
+                buf.put_slice(schema_version_id.as_bytes());
+                buf
+            }
+            AvroHeader::None | AvroHeader::SingleObject | AvroHeader::ContainerFile => {
+                return Err(crate::sink::SinkError::Encode(format!(
+                    "{:?} unsupported yet",
+                    self.header
+                )));
+            }
         };
+
         let raw = apache_avro::to_avro_datum(&self.schema, self.value)
             .map_err(|e| crate::sink::SinkError::Encode(e.to_report_string()))?;
-        let mut buf = Vec::with_capacity(1 + 4 + raw.len());
-        buf.put_u8(0);
-        buf.put_i32(schema_id);
+        let mut buf = Vec::with_capacity(header.len() + raw.len());
+        buf.put_slice(&header);
         buf.put_slice(&raw);
 
         Ok(buf)
@@ -160,18 +210,23 @@ enum OptIdx {
 /// * For `validate`, the inputs are (RisingWave type, ProtoBuf type).
 /// * For `encode`, the inputs are (RisingWave type, RisingWave data, ProtoBuf type).
 ///
-/// Thus we impl [`MaybeData`] for both [`()`] and [`DatumRef`].
+/// Thus we impl [`MaybeData`] for both `()` and [`DatumRef`].
 trait MaybeData: std::fmt::Debug {
     type Out;
 
     fn on_base(self, f: impl FnOnce(ScalarRefImpl<'_>) -> Result<Value>) -> Result<Self::Out>;
 
     /// Switch to `RecordSchema` after #12562
-    fn on_struct(self, st: &StructType, avro: &AvroSchema) -> Result<Self::Out>;
+    fn on_struct(self, st: &StructType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
 
-    fn on_list(self, elem: &DataType, avro: &AvroSchema) -> Result<Self::Out>;
+    fn on_list(self, lt: &ListType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out>;
 
-    fn on_map(self, value_type: &DataType, avro_value_schema: &AvroSchema) -> Result<Self::Out>;
+    fn on_map(
+        self,
+        value_type: &DataType,
+        avro_value_schema: &AvroSchema,
+        refs: &NamesRef,
+    ) -> Result<Self::Out>;
 
     fn handle_nullable_union(out: Self::Out, opt_idx: OptIdx) -> Result<Self::Out>;
 }
@@ -183,16 +238,16 @@ impl MaybeData for () {
         Ok(self)
     }
 
-    fn on_struct(self, st: &StructType, avro: &AvroSchema) -> Result<Self::Out> {
-        validate_fields(st.iter(), avro)
+    fn on_struct(self, st: &StructType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
+        validate_fields(st.iter(), avro, refs)
     }
 
-    fn on_list(self, elem: &DataType, avro: &AvroSchema) -> Result<Self::Out> {
-        on_field(elem, (), avro)
+    fn on_list(self, lt: &ListType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
+        on_field(lt.elem(), (), avro, refs)
     }
 
-    fn on_map(self, elem: &DataType, avro: &AvroSchema) -> Result<Self::Out> {
-        on_field(elem, (), avro)
+    fn on_map(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
+        on_field(elem, (), avro, refs)
     }
 
     fn handle_nullable_union(out: Self::Out, _: OptIdx) -> Result<Self::Out> {
@@ -210,25 +265,28 @@ impl MaybeData for DatumRef<'_> {
         }
     }
 
-    fn on_struct(self, st: &StructType, avro: &AvroSchema) -> Result<Self::Out> {
+    fn on_struct(self, st: &StructType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
         let d = match self {
             Some(s) => s.into_struct(),
             None => return Ok(Value::Null),
         };
-        let record = encode_fields(st.iter().zip_eq_debug(d.iter_fields_ref()), avro)?;
+        let record = encode_fields(st.iter().zip_eq_debug(d.iter_fields_ref()), avro, refs)?;
         Ok(record.into())
     }
 
-    fn on_list(self, elem: &DataType, avro: &AvroSchema) -> Result<Self::Out> {
+    fn on_list(self, lt: &ListType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
         let d = match self {
             Some(s) => s.into_list(),
             None => return Ok(Value::Null),
         };
-        let vs = d.iter().map(|d| on_field(elem, d, avro)).try_collect()?;
+        let vs = d
+            .iter()
+            .map(|d| on_field(lt.elem(), d, avro, refs))
+            .try_collect()?;
         Ok(Value::Array(vs))
     }
 
-    fn on_map(self, elem: &DataType, avro: &AvroSchema) -> Result<Self::Out> {
+    fn on_map(self, elem: &DataType, avro: &AvroSchema, refs: &NamesRef) -> Result<Self::Out> {
         let d = match self {
             Some(s) => s.into_map(),
             None => return Ok(Value::Null),
@@ -236,8 +294,8 @@ impl MaybeData for DatumRef<'_> {
         let vs = d
             .iter()
             .map(|(k, v)| {
-                let k = k.into_utf8().to_string();
-                let v = on_field(elem, v, avro)?;
+                let k = k.into_utf8().to_owned();
+                let v = on_field(elem, v, avro, refs)?;
                 Ok((k, v))
             })
             .try_collect()?;
@@ -251,7 +309,7 @@ impl MaybeData for DatumRef<'_> {
             true => {
                 let ni = match opt_idx {
                     NotUnion | Single => {
-                        return Err(FieldEncodeError::new("found null but required"))
+                        return Err(FieldEncodeError::new("found null but required"));
                     }
                     NullLeft => 0,
                     NullRight => 1,
@@ -273,7 +331,9 @@ impl MaybeData for DatumRef<'_> {
 fn validate_fields<'rw>(
     rw_fields: impl Iterator<Item = (&'rw str, &'rw DataType)>,
     avro: &AvroSchema,
+    refs: &NamesRef,
 ) -> Result<()> {
+    let avro = refs.lookup(avro);
     let AvroSchema::Record(RecordSchema { fields, lookup, .. }) = avro else {
         return Err(FieldEncodeError::new(format!(
             "expect avro record but got {}",
@@ -287,7 +347,7 @@ fn validate_fields<'rw>(
         };
         present[idx] = true;
         let avro_field = &fields[idx];
-        on_field(t, (), &avro_field.schema).map_err(|e| e.with_name(name))?;
+        on_field(t, (), &avro_field.schema, refs).map_err(|e| e.with_name(name))?;
     }
     for (p, avro_field) in present.into_iter().zip_eq_fast(fields) {
         if p {
@@ -305,7 +365,9 @@ fn validate_fields<'rw>(
 fn encode_fields<'avro, 'rw>(
     fields_with_datums: impl Iterator<Item = ((&'rw str, &'rw DataType), DatumRef<'rw>)>,
     schema: &'avro AvroSchema,
+    refs: &'avro NamesRef,
 ) -> Result<Record<'avro>> {
+    let schema = refs.lookup(schema);
     let mut record = Record::new(schema).unwrap();
     let AvroSchema::Record(RecordSchema { fields, lookup, .. }) = schema else {
         unreachable!()
@@ -315,7 +377,7 @@ fn encode_fields<'avro, 'rw>(
         let idx = lookup[name];
         present[idx] = true;
         let avro_field = &fields[idx];
-        let value = on_field(t, d, &avro_field.schema).map_err(|e| e.with_name(name))?;
+        let value = on_field(t, d, &avro_field.schema, refs).map_err(|e| e.with_name(name))?;
         record.put(name, value);
     }
     // Unfortunately, the upstream `apache_avro` does not handle missing fields as nullable correctly.
@@ -346,7 +408,12 @@ fn encode_fields<'avro, 'rw>(
 
 /// Handles both `validate` (without actual data) and `encode`.
 /// See [`MaybeData`] for more info.
-fn on_field<D: MaybeData>(data_type: &DataType, maybe: D, expected: &AvroSchema) -> Result<D::Out> {
+fn on_field<D: MaybeData>(
+    data_type: &DataType,
+    maybe: D,
+    expected: &AvroSchema,
+    refs: &NamesRef,
+) -> Result<D::Out> {
     use risingwave_common::types::Interval;
 
     let no_match_err = || {
@@ -356,10 +423,6 @@ fn on_field<D: MaybeData>(data_type: &DataType, maybe: D, expected: &AvroSchema)
             expected.canonical_form()
         )))
     };
-
-    if let AvroSchema::Ref { .. } = expected {
-        return Err(FieldEncodeError::new("avro name ref unsupported yet"));
-    }
 
     // For now, we only support optional single type, rather than general union.
     // For example, how do we encode int16 into avro `["int", "long"]`?
@@ -374,6 +437,8 @@ fn on_field<D: MaybeData>(data_type: &DataType, maybe: D, expected: &AvroSchema)
         _ => (expected, OptIdx::NotUnion),
     };
 
+    let inner = refs.lookup(inner);
+
     let value = match &data_type {
         // Group A: perfect match between RisingWave types and Avro types
         DataType::Boolean => match inner {
@@ -382,6 +447,25 @@ fn on_field<D: MaybeData>(data_type: &DataType, maybe: D, expected: &AvroSchema)
         },
         DataType::Varchar => match inner {
             AvroSchema::String => maybe.on_base(|s| Ok(Value::String(s.into_utf8().into())))?,
+
+            // Add enum support
+            AvroSchema::Enum(enum_schema) => maybe.on_base(|s| {
+                let str_value = s.into_utf8();
+
+                if let Some(position) = enum_schema
+                    .symbols
+                    .iter()
+                    .position(|symbol| symbol == str_value)
+                {
+                    Ok(Value::Enum(position as u32, str_value.to_owned()))
+                } else {
+                    Err(FieldEncodeError::new(format!(
+                        "Value '{}' is not a valid enum symbol. Valid symbols are: {:?}",
+                        str_value, enum_schema.symbols
+                    )))
+                }
+            })?,
+
             _ => return no_match_err(),
         },
         DataType::Bytea => match inner {
@@ -409,11 +493,11 @@ fn on_field<D: MaybeData>(data_type: &DataType, maybe: D, expected: &AvroSchema)
             _ => return no_match_err(),
         },
         DataType::Struct(st) => match inner {
-            AvroSchema::Record { .. } => maybe.on_struct(st, inner)?,
+            AvroSchema::Record { .. } => maybe.on_struct(st, inner, refs)?,
             _ => return no_match_err(),
         },
-        DataType::List(elem) => match inner {
-            AvroSchema::Array(avro_elem) => maybe.on_list(elem, avro_elem)?,
+        DataType::List(lt) => match inner {
+            AvroSchema::Array(avro_elem) => maybe.on_list(lt, avro_elem, refs)?,
             _ => return no_match_err(),
         },
         DataType::Map(m) => {
@@ -421,7 +505,9 @@ fn on_field<D: MaybeData>(data_type: &DataType, maybe: D, expected: &AvroSchema)
                 return no_match_err();
             }
             match inner {
-                AvroSchema::Map(avro_value_type) => maybe.on_map(m.value(), avro_value_type)?,
+                AvroSchema::Map(avro_value_type) => {
+                    maybe.on_map(m.value(), avro_value_type, refs)?
+                }
                 _ => return no_match_err(),
             }
         }
@@ -476,9 +562,51 @@ fn on_field<D: MaybeData>(data_type: &DataType, maybe: D, expected: &AvroSchema)
             _ => return no_match_err(),
         },
         // Group C: experimental
-        DataType::Int16 => return no_match_err(),
-        DataType::Decimal => return no_match_err(),
-        DataType::Jsonb => return no_match_err(),
+        DataType::Int16 => match inner {
+            AvroSchema::Int => maybe.on_base(|s| Ok(Value::Int(s.into_int16() as i32)))?,
+            _ => return no_match_err(),
+        },
+        DataType::Decimal => match inner {
+            AvroSchema::Decimal(decimal_schema) => {
+                maybe.on_base(|s| {
+                    match s.into_decimal() {
+                        risingwave_common::types::Decimal::Normalized(decimal) => {
+                            // convert to bigint with scale
+                            // rescale the rust_decimal to the scale of the avro decimal
+                            //
+                            // From bigdecimal::BigDecimal::with_scale:
+                            // If the new_scale is lower than the current value (indicating a larger
+                            // power of 10), digits will be dropped (as precision is lower)
+                            let signed_bigint_bytes =
+                                rust_decimal_to_scaled_bigint(decimal, decimal_schema.scale)
+                                    .map_err(FieldEncodeError::new)?;
+                            Ok(Value::Decimal(apache_avro::Decimal::from(
+                                &signed_bigint_bytes,
+                            )))
+                        }
+                        d @ risingwave_common::types::Decimal::NaN
+                        | d @ risingwave_common::types::Decimal::NegativeInf
+                        | d @ risingwave_common::types::Decimal::PositiveInf => {
+                            Err(FieldEncodeError::new(format!(
+                                "Avro Decimal does not support NaN or Inf, but got {}",
+                                d
+                            )))
+                        }
+                    }
+                })?
+            }
+            _ => return no_match_err(),
+        },
+        DataType::Jsonb => match inner {
+            AvroSchema::String => {
+                maybe.on_base(|s| Ok(Value::String(s.into_jsonb().to_string())))?
+            }
+            _ => return no_match_err(),
+        },
+        DataType::Vector(_) => match inner {
+            AvroSchema::Array(avro_elem) => maybe.on_list(&VECTOR_AS_LIST_TYPE, avro_elem, refs)?,
+            _ => return no_match_err(),
+        },
         // Group D: unsupported
         DataType::Int256 => {
             return no_match_err();
@@ -499,8 +627,8 @@ mod tests {
     use risingwave_common::catalog::Field;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{
-        Date, Datum, Interval, ListValue, MapType, MapValue, Scalar, ScalarImpl, StructValue, Time,
-        Timestamptz, ToDatumRef,
+        Date, Datum, Interval, JsonbVal, ListValue, MapType, MapValue, Scalar, ScalarImpl,
+        StructValue, Time, Timestamptz, ToDatumRef,
     };
 
     use super::*;
@@ -508,7 +636,8 @@ mod tests {
     #[track_caller]
     fn test_ok(rw_type: &DataType, rw_datum: Datum, avro_type: &str, expected: Value) {
         let avro_schema = AvroSchema::parse_str(avro_type).unwrap();
-        let actual = on_field(rw_type, rw_datum.to_datum_ref(), &avro_schema).unwrap();
+        let refs = NamesRef::new(&avro_schema).unwrap();
+        let actual = on_field(rw_type, rw_datum.to_datum_ref(), &avro_schema, &refs).unwrap();
         assert_eq!(actual, expected);
     }
 
@@ -518,21 +647,23 @@ mod tests {
         D::Out: std::fmt::Debug,
     {
         let avro_schema = AvroSchema::parse_str(avro).unwrap();
-        let err = on_field(t, d, &avro_schema).unwrap_err();
+        let refs = NamesRef::new(&avro_schema).unwrap();
+        let err = on_field(t, d, &avro_schema, &refs).unwrap_err();
         assert_eq!(err.to_string(), expected);
     }
 
     #[track_caller]
     fn test_v2(rw_type: &str, rw_scalar: &str, avro_type: &str, expected: expect_test::Expect) {
         let avro_schema = AvroSchema::parse_str(avro_type).unwrap();
+        let refs = NamesRef::new(&avro_schema).unwrap();
         let rw_type = DataType::from_str(rw_type).unwrap();
         let rw_datum = ScalarImpl::from_text_for_test(rw_scalar, &rw_type).unwrap();
 
-        if let Err(validate_err) = on_field(&rw_type, (), &avro_schema) {
+        if let Err(validate_err) = on_field(&rw_type, (), &avro_schema, &refs) {
             expected.assert_debug_eq(&validate_err);
             return;
         }
-        let actual = on_field(&rw_type, Some(rw_datum).to_datum_ref(), &avro_schema);
+        let actual = on_field(&rw_type, Some(rw_datum).to_datum_ref(), &avro_schema, &refs);
         match actual {
             Ok(v) => expected.assert_eq(&print_avro_value(&v)),
             Err(e) => expected.assert_debug_eq(&e),
@@ -542,7 +673,7 @@ mod tests {
     fn print_avro_value(v: &Value) -> String {
         match v {
             Value::Map(m) => {
-                let mut res = "Map({".to_string();
+                let mut res = "Map({".to_owned();
                 for (k, v) in m.iter().sorted_by_key(|x| x.0) {
                     res.push_str(&format!("{}: {}, ", k, print_avro_value(v)));
                 }
@@ -703,6 +834,29 @@ mod tests {
         );
 
         test_ok(
+            &DataType::Int16,
+            Some(ScalarImpl::Int16(i16::MAX)),
+            r#""int""#,
+            Value::Int(i16::MAX as i32),
+        );
+
+        test_ok(
+            &DataType::Int16,
+            Some(ScalarImpl::Int16(i16::MIN)),
+            r#""int""#,
+            Value::Int(i16::MIN as i32),
+        );
+
+        test_ok(
+            &DataType::Jsonb,
+            Some(ScalarImpl::Jsonb(
+                JsonbVal::from_str(r#"{"a": 1}"#).unwrap(),
+            )),
+            r#""string""#,
+            Value::String(r#"{"a": 1}"#.into()),
+        );
+
+        test_ok(
             &DataType::Interval,
             Some(ScalarImpl::Interval(Interval::from_month_day_usec(
                 13, 2, 1000000,
@@ -766,11 +920,8 @@ mod tests {
                 ),
             ])),
         );
-    }
 
-    #[test]
-    fn test_encode_avro_err() {
-        test_err(
+        test_ok(
             &DataType::Struct(StructType::new(vec![
                 (
                     "p",
@@ -796,8 +947,7 @@ mod tests {
                     Some(ScalarImpl::Int32(2)),
                     Some(ScalarImpl::Int32(1)),
                 ]))),
-            ])))
-            .to_datum_ref(),
+            ]))),
             r#"{
                 "type": "record",
                 "name": "Segment",
@@ -825,9 +975,96 @@ mod tests {
                     }
                 ]
             }"#,
-            "encode 'q' error: avro name ref unsupported yet",
+            Value::Record(vec![
+                (
+                    "p".to_owned(),
+                    Value::Record(vec![
+                        ("x".to_owned(), Value::Int(-2)),
+                        ("y".to_owned(), Value::Int(-1)),
+                    ]),
+                ),
+                (
+                    "q".to_owned(),
+                    Value::Record(vec![
+                        ("x".to_owned(), Value::Int(2)),
+                        ("y".to_owned(), Value::Int(1)),
+                    ]),
+                ),
+            ]),
         );
 
+        // NEW: Varchar to Enum tests
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("RED".into())),
+            r#"{"type": "enum", "name": "Color", "symbols": ["RED", "GREEN", "BLUE"]}"#,
+            Value::Enum(0, "RED".to_owned()),
+        );
+
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("BLUE".into())),
+            r#"{"type": "enum", "name": "Color", "symbols": ["RED", "GREEN", "BLUE"]}"#,
+            Value::Enum(2, "BLUE".to_owned()),
+        );
+
+        test_ok(
+            &DataType::Varchar,
+            Some(ScalarImpl::Utf8("ACTIVE".into())),
+            r#"{"type": "enum", "name": "Status", "symbols": ["ACTIVE", "INACTIVE"]}"#,
+            Value::Enum(0, "ACTIVE".to_owned()),
+        );
+
+        // Test complex JSON with nested structures - using serde_json::Value comparison
+        let complex_json = r#"{
+            "person": {
+                "name": "John Doe",
+                "age": 30,
+                "address": {
+                    "street": "123 Main St.",
+                    "city": "New York",
+                    "coordinates": [40.7128, -74.0060]
+                },
+                "contacts": [
+                    {"type": "email", "value": "john@example.com"},
+                    {"type": "phone", "value": "+1-555-123-4567"}
+                ],
+                "active": true,
+                "preferences": {
+                    "notifications": true,
+                    "theme": "dark",
+                    "languages": ["en", "es"],
+                    "lastLogin": null
+                },
+                "tags": ["premium", "verified"],
+                "unicode_test": "Hello, 世界! 🌍"
+            }
+        }"#;
+
+        let input_json = JsonbVal::from_str(complex_json).unwrap();
+        let result = on_field(
+            &DataType::Jsonb,
+            Some(ScalarImpl::Jsonb(input_json)).to_datum_ref(),
+            &AvroSchema::parse_str(r#""string""#).unwrap(),
+            &NamesRef::new(&AvroSchema::parse_str(r#""string""#).unwrap()).unwrap(),
+        )
+        .unwrap();
+
+        // Compare as parsed JSON values to handle key order randomness
+        if let Value::String(result_str) = result {
+            let expected_json: serde_json::Value = serde_json::from_str(complex_json).unwrap();
+            let actual_json: serde_json::Value = serde_json::from_str(&result_str).unwrap();
+            assert_eq!(
+                expected_json, actual_json,
+                "JSON values should be equivalent regardless of key order"
+            );
+        } else {
+            panic!("Expected String value");
+        };
+    }
+
+    #[test]
+    fn test_encode_avro_err() {
         test_err(
             &DataType::Interval,
             Some(ScalarRefImpl::Interval(Interval::from_month_day_usec(
@@ -919,7 +1156,7 @@ mod tests {
             Field::with_name(DataType::Int32, "req"),
             Field::with_name(DataType::Varchar, "extra"),
         ]);
-        let Err(err) = AvroEncoder::new(schema, None, avro_schema.clone(), header) else {
+        let Err(err) = AvroEncoder::new(schema, None, avro_schema, header) else {
             panic!()
         };
         assert_eq!(
@@ -953,21 +1190,21 @@ mod tests {
         }"#;
 
         test_ok(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::Int32.list(),
             Some(ScalarImpl::List(ListValue::from_iter([4, 5]))),
             avro_schema,
             Value::Array(vec![Value::Int(4), Value::Int(5)]),
         );
 
         test_err(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::Int32.list(),
             Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))).to_datum_ref(),
             avro_schema,
             "encode '' error: found null but required",
         );
 
         test_ok(
-            &DataType::List(DataType::Int32.into()),
+            &DataType::Int32.list(),
             Some(ScalarImpl::List(ListValue::from_iter([Some(4), None]))),
             r#"{
                 "type": "array",
@@ -980,7 +1217,7 @@ mod tests {
         );
 
         test_ok(
-            &DataType::List(DataType::List(DataType::Int32.into()).into()),
+            &DataType::Int32.list().list(),
             Some(ScalarImpl::List(ListValue::from_iter([
                 ListValue::from_iter([26, 29]),
                 ListValue::from_iter([46, 49]),
@@ -999,7 +1236,7 @@ mod tests {
         );
 
         test_err(
-            &DataType::List(DataType::Boolean.into()),
+            &DataType::Boolean.list(),
             (),
             r#"{"type": "array", "items": "int"}"#,
             "encode '' error: cannot encode boolean column as \"int\" field",
@@ -1056,7 +1293,7 @@ mod tests {
 
         test_ok(
             t,
-            datum.clone(),
+            datum,
             right,
             Value::Union(0, Value::TimestampMillis(1).into()),
         );

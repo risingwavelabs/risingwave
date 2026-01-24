@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,17 +19,17 @@ use anyhow::anyhow;
 use risingwave_common::system_param::common::CommonHandler;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::system_param::{
-    check_missing_params, default, derive_missing_fields, set_system_param,
+    check_missing_params, derive_missing_fields, set_system_param, validate_init_system_params,
 };
 use risingwave_common::{for_all_params, key_of};
-use risingwave_meta_model_v2::prelude::SystemParameter;
-use risingwave_meta_model_v2::system_parameter;
-use risingwave_pb::meta::subscribe_response::{Info, Operation};
+use risingwave_meta_model::prelude::SystemParameter;
+use risingwave_meta_model::system_parameter;
 use risingwave_pb::meta::PbSystemParams;
+use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
-use tokio::sync::oneshot::Sender;
 use tokio::sync::RwLock;
+use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::controller::SqlMetaStore;
@@ -132,18 +132,6 @@ for_all_params!(impl_system_params_from_db);
 for_all_params!(impl_merge_params);
 for_all_params!(impl_system_params_to_models);
 
-fn apply_hard_code_override(params: &mut PbSystemParams) {
-    if params
-        .time_travel_retention_ms
-        .map(|v| v == 0)
-        .unwrap_or(true)
-    {
-        let default_v = default::time_travel_retention_ms();
-        tracing::info!("time_travel_retention_ms has been overridden to {default_v}");
-        params.time_travel_retention_ms = Some(default_v);
-    }
-}
-
 impl SystemParamsController {
     pub async fn new(
         sql_meta_store: SqlMetaStore,
@@ -152,10 +140,10 @@ impl SystemParamsController {
     ) -> MetaResult<Self> {
         let db = sql_meta_store.conn;
         let params = SystemParameter::find().all(&db).await?;
-        let mut params = merge_params(system_params_from_db(params)?, init_params);
-        apply_hard_code_override(&mut params);
+        let params = merge_params(system_params_from_db(params)?, init_params);
         tracing::info!(initial_params = ?SystemParamsReader::new(&params), "initialize system parameters");
         check_missing_params(&params).map_err(|e| anyhow!(e))?;
+        validate_init_system_params(&params).map_err(|e| anyhow!(e))?;
         let ctl = Self {
             db,
             notification_manager,
@@ -191,7 +179,7 @@ impl SystemParamsController {
     pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<PbSystemParams> {
         let mut params_guard = self.params.write().await;
 
-        let Some(param) = SystemParameter::find_by_id(name.to_string())
+        let Some(param) = SystemParameter::find_by_id(name.to_owned())
             .one(&self.db)
             .await?
         else {
@@ -220,8 +208,7 @@ impl SystemParamsController {
 
         // Sync params to other managers on the meta node only once, since it's infallible.
         self.notification_manager
-            .notify_local_subscribers(LocalNotification::SystemParamsChange(params.clone().into()))
-            .await;
+            .notify_local_subscribers(LocalNotification::SystemParamsChange(params.clone().into()));
 
         // Sync params to worker nodes.
         self.notify_workers(&params);
@@ -315,11 +302,13 @@ mod tests {
         .await
         .unwrap();
         // check deprecated params are cleaned up.
-        assert!(SystemParameter::find_by_id("deprecated_param".to_string())
-            .one(&system_param_ctl.db)
-            .await
-            .unwrap()
-            .is_none());
+        assert!(
+            SystemParameter::find_by_id("deprecated_param".to_owned())
+                .one(&system_param_ctl.db)
+                .await
+                .unwrap()
+                .is_none()
+        );
         // check new params are set.
         let params = system_param_ctl.get_pb_params().await;
         assert_eq!(params, new_params);

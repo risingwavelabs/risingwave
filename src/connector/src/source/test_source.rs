@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,13 +19,14 @@ use async_trait::async_trait;
 use parking_lot::Mutex;
 use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use with_options::WithOptions;
 
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::parser::ParserConfig;
 use crate::source::{
-    BoxChunkSourceStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
+    BoxSourceChunkStream, Column, SourceContextRef, SourceEnumeratorContextRef, SourceProperties,
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, TryFromBTreeMap,
 };
 
@@ -45,7 +46,7 @@ pub type BoxIntoSourceStream = Box<
             ParserConfig,
             SourceContextRef,
             Option<Vec<Column>>,
-        ) -> BoxChunkSourceStream
+        ) -> BoxSourceChunkStream
         + Send
         + 'static,
 >;
@@ -58,20 +59,20 @@ pub struct BoxSource {
 impl BoxSource {
     pub fn new(
         list_splits: impl FnMut(
-                TestSourceProperties,
-                SourceEnumeratorContextRef,
-            ) -> ConnectorResult<Vec<TestSourceSplit>>
-            + Send
-            + 'static,
+            TestSourceProperties,
+            SourceEnumeratorContextRef,
+        ) -> ConnectorResult<Vec<TestSourceSplit>>
+        + Send
+        + 'static,
         into_source_stream: impl FnMut(
-                TestSourceProperties,
-                Vec<TestSourceSplit>,
-                ParserConfig,
-                SourceContextRef,
-                Option<Vec<Column>>,
-            ) -> BoxChunkSourceStream
-            + Send
-            + 'static,
+            TestSourceProperties,
+            Vec<TestSourceSplit>,
+            ParserConfig,
+            SourceContextRef,
+            Option<Vec<Column>>,
+        ) -> BoxSourceChunkStream
+        + Send
+        + 'static,
     ) -> BoxSource {
         BoxSource {
             list_split: Box::new(list_splits),
@@ -105,12 +106,14 @@ impl Drop for TestSourceRegistryGuard {
     }
 }
 
-pub fn registry_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
-    assert!(get_registry()
-        .box_source
-        .lock()
-        .replace(box_source)
-        .is_none());
+pub fn register_test_source(box_source: BoxSource) -> TestSourceRegistryGuard {
+    assert!(
+        get_registry()
+            .box_source
+            .lock()
+            .replace(box_source)
+            .is_none()
+    );
     TestSourceRegistryGuard
 }
 
@@ -120,6 +123,8 @@ pub const TEST_CONNECTOR: &str = "test";
 pub struct TestSourceProperties {
     properties: BTreeMap<String, String>,
 }
+
+impl EnforceSecret for TestSourceProperties {}
 
 impl TryFromBTreeMap for TestSourceProperties {
     fn try_from_btreemap(
@@ -219,7 +224,7 @@ impl SplitReader for TestSourceSplitReader {
         })
     }
 
-    fn into_stream(self) -> BoxChunkSourceStream {
+    fn into_stream(self) -> BoxSourceChunkStream {
         (get_registry()
             .box_source
             .lock()

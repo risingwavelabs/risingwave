@@ -16,7 +16,7 @@
     <name>risingwave-sink-iceberg</name>
 
     <properties>
-        <iceberg.version>1.5.2</iceberg.version>
+        <iceberg.version>1.9.2</iceberg.version>
         <maven.compiler.source>11</maven.compiler.source>
         <maven.compiler.target>11</maven.compiler.target>
         <maven.javadoc.skip>true</maven.javadoc.skip>
@@ -57,16 +57,6 @@
         </dependency>
         <dependency>
             <groupId>org.apache.iceberg</groupId>
-            <artifactId>iceberg-parquet</artifactId>
-            <version>${iceberg.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.iceberg</groupId>
-            <artifactId>iceberg-data</artifactId>
-            <version>${iceberg.version}</version>
-        </dependency>
-        <dependency>
-            <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-hive-metastore</artifactId>
             <version>${iceberg.version}</version>
         </dependency>
@@ -75,29 +65,33 @@
             <artifactId>hive-metastore</artifactId>
         </dependency>
         <dependency>
-            <groupId>org.apache.parquet</groupId>
-            <artifactId>parquet-avro</artifactId>
-            <version>1.12.3</version>
-        </dependency>
-        <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-common</artifactId>
+            <version>${hadoop.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-mapreduce-client-core</artifactId>
+            <version>${hadoop.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-mapreduce-client-common</artifactId>
+            <version>${hadoop.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.hadoop</groupId>
             <artifactId>hadoop-mapreduce-client-jobclient</artifactId>
+            <version>${hadoop.version}</version>
         </dependency>
         <dependency>
             <groupId>org.apache.iceberg</groupId>
             <artifactId>iceberg-aws</artifactId>
+            <version>${iceberg.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-gcp</artifactId>
             <version>${iceberg.version}</version>
         </dependency>
         <dependency>
@@ -136,8 +130,13 @@
         <dependency>
             <groupId>org.assertj</groupId>
             <artifactId>assertj-core</artifactId>
-            <version>3.24.2</version>
             <scope>test</scope>
+        </dependency>
+        <!-- https://mvnrepository.com/artifact/org.apache.iceberg/iceberg-snowflake -->
+        <dependency>
+            <groupId>org.apache.iceberg</groupId>
+            <artifactId>iceberg-snowflake</artifactId>
+            <version>1.9.2</version>
         </dependency>
     </dependencies>
 </project>

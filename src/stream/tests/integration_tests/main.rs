@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ risingwave_expr_impl::enable!();
 mod eowc_over_window;
 mod hash_agg;
 mod hop_window;
+mod materialized_exprs;
 mod over_window;
 mod project_set;
 

@@ -26,9 +26,6 @@ set STREAMING_ENABLE_DELTA_JOIN to false;
 statement ok
 set RW_STREAMING_ENABLE_DELTA_JOIN to true;
 
-statement error session param query_mode cannot be altered system wide
-alter system set query_mode to auto;
-
 connection other1
 query T
 show RW_STREAMING_ENABLE_DELTA_JOIN;
@@ -41,11 +38,10 @@ set RW_STREAMING_ENABLE_DELTA_JOIN to false;
 statement ok
 alter system set rw_streaming_enable_delta_join to true;
 
-# Alter system won't change the current session's params.
 query T
 show RW_STREAMING_ENABLE_DELTA_JOIN;
 ----
-false
+true
 
 sleep 1s
 
@@ -57,3 +53,6 @@ true
 
 statement ok
 alter system set RW_STREAMING_ENABLE_DELTA_JOIN to default;
+
+statement error Catalog error
+SET iceberg_engine_connection = 'public.no_such_conn';

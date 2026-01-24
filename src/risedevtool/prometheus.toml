@@ -12,7 +12,11 @@ PROMETHEUS_DOWNLOAD_TAR_GZ = "https://github.com/prometheus/prometheus/releases/
 private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_PROMETHEUS_GRAFANA" ] }
+condition = { env_set = [
+    "ENABLE_PROMETHEUS_GRAFANA",
+], files_not_exist = [
+    "${PREFIX_BIN}/prometheus",
+] }
 description = "Download and extract Prometheus"
 script = '''
 #!/usr/bin/env bash

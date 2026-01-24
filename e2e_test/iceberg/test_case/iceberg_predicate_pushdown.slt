@@ -1,0 +1,144 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+drop table if exists s1 cascade;
+
+statement ok
+CREATE TABLE s1 (i1 int, i2 varchar, i3 varchar);
+
+statement ok
+insert into s1 select x, 'some str', 'another str' from generate_series(1, 500) t(x);
+
+statement ok
+insert into s1 select x, null as y, null as z from generate_series(501, 1000) t(x);
+
+statement ok
+flush;
+
+statement ok
+CREATE MATERIALIZED VIEW mv1 AS SELECT * FROM s1;
+
+statement ok
+CREATE SINK sink1 AS select * from mv1 WITH (
+    connector = 'iceberg',
+    type = 'append-only',
+    force_append_only = 'true',
+    database.name = 'demo_db',
+    table.name = 't1',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    commit_checkpoint_interval = 1,
+    create_table_if_not_exists = 'true',
+    partition_by = 'i1'
+);
+
+statement ok
+drop source if exists iceberg_t1_source;
+
+statement ok
+CREATE SOURCE iceberg_t1_source
+WITH (
+    connector = 'iceberg',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    s3.path.style.access = 'true',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 't1',
+);
+
+statement ok
+flush;
+
+query I
+select * from iceberg_t1_source order by i1 limit 1;
+----
+1 some str another str
+
+query I
+select count(*) from iceberg_t1_source;
+----
+1000
+
+query I
+select * from iceberg_t1_source where i1 > 990 order by i1;
+----
+991 NULL NULL
+992 NULL NULL
+993 NULL NULL
+994 NULL NULL
+995 NULL NULL
+996 NULL NULL
+997 NULL NULL
+998 NULL NULL
+999 NULL NULL
+1000 NULL NULL
+
+query I
+explain select * from iceberg_t1_source where i1 > 500 and i1 < 600 and i1 >= 550 and i1 <= 590 and i1 != 570 and i1 = 580;
+----
+   BatchExchange { order: [], dist: Single }
+   └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], iceberg_scan_type: DataScan, predicate: (((((i1 = 580) AND (i1 > 500)) AND (i1 < 600)) AND (i1 >= 550)) AND (i1 <= 590)) AND (i1 != 570) }
+
+query I
+select i1 from iceberg_t1_source where i1 > 500 and i1 < 600 and i1 >= 550 and i1 <= 590 and i1 != 570 and i1 = 580;
+----
+580
+
+query I
+explain select * from iceberg_t1_source where i1 in (1, 2, 3, 4, 5);
+----
+   BatchExchange { order: [], dist: Single }
+   └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], iceberg_scan_type: DataScan, predicate: i1 IN (5, 4, 1, 3, 2) }
+
+query I
+select i1 from iceberg_t1_source where i1 in (1, 2, 3, 4, 5) order by i1;
+----
+1
+2
+3
+4
+5
+
+query I
+select count(*), i2, i3 from iceberg_t1_source where i2 = 'some str' and i3 = 'another str' group by i2, i3;
+----
+500 some str another str
+
+query I
+explain select i1 from iceberg_t1_source where i1 > 500 and i2 = i3;
+----
+   BatchExchange { order: [], dist: Single }
+   └─BatchProject { exprs: [i1] }
+     └─BatchFilter { predicate: (i2 = i3) }
+       └─BatchIcebergScan { source: iceberg_t1_source, columns: [i1, i2, i3], iceberg_scan_type: DataScan, predicate: i1 > 500 }
+
+query I
+select i1 from iceberg_t1_source where i1 > 500 and i2 = i3;
+----
+
+# Empty splits should not panic
+query I
+select i1 from iceberg_t1_source where i1 > 1001;
+----
+
+statement ok
+DROP SINK sink1;
+
+statement ok
+DROP SOURCE iceberg_t1_source;
+
+statement ok
+DROP TABLE s1 cascade;

@@ -17,19 +17,19 @@ use std::ops::Deref;
 use std::sync::LazyLock;
 
 use anyhow::anyhow;
-use futures::future::{try_join_all, TryJoinAll};
-use futures::prelude::TryFuture;
 use futures::TryFutureExt;
+use futures::future::{TryJoinAll, try_join_all};
+use futures::prelude::TryFuture;
 use itertools::Itertools;
-use mongodb::bson::{bson, doc, Array, Bson, Document};
+use mongodb::bson::{Array, Bson, Document, bson, doc};
 use mongodb::{Client, Namespace};
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
-use risingwave_common::log::LogSuppresser;
+use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::Row;
 use risingwave_common::types::ScalarRefImpl;
-use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde::Deserialize;
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror_ext::AsReport;
 use with_options::WithOptions;
 
@@ -40,23 +40,25 @@ use super::writer::{
 };
 use crate::connector_common::MongodbCommon;
 use crate::deserialize_bool_from_string;
+use crate::enforce_secret::EnforceSecret;
 use crate::sink::encoder::RowEncoder;
 use crate::sink::{
-    DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
+    Result, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink, SinkError, SinkParam,
+    SinkWriterParam,
 };
 
 mod send_bulk_write_command_future {
     use core::future::Future;
 
     use anyhow::anyhow;
-    use mongodb::bson::Document;
     use mongodb::Database;
+    use mongodb::bson::Document;
 
     use crate::sink::{Result, SinkError};
 
     pub(super) type SendBulkWriteCommandFuture = impl Future<Output = Result<()>> + 'static;
 
+    #[define_opaque(SendBulkWriteCommandFuture)]
     pub(super) fn send_bulk_write_commands(
         db: Database,
         upsert: Option<Document>,
@@ -74,12 +76,18 @@ mod send_bulk_write_command_future {
     }
 
     async fn send_bulk_write_command(db: Database, command: Document) -> Result<()> {
-        let result = db.run_command(command, None).await.map_err(|err| {
+        let result = db.run_command(command).await.map_err(|err| {
             SinkError::Mongodb(anyhow!(err).context(format!(
                 "sending bulk write command failed, database: {}",
                 db.name()
             )))
         })?;
+
+        if let Ok(ok) = result.get_i32("ok")
+            && ok != 1
+        {
+            return Err(SinkError::Mongodb(anyhow!("bulk write write errors")));
+        }
 
         if let Ok(write_errors) = result.get_array("writeErrors") {
             return Err(SinkError::Mongodb(anyhow!(
@@ -88,15 +96,10 @@ mod send_bulk_write_command_future {
             )));
         }
 
-        let n = result.get_i32("n").map_err(|err| {
-            SinkError::Mongodb(
-                anyhow!(err).context("can't extract field n from bulk write response"),
-            )
-        })?;
-        if n < 1 {
+        if let Ok(write_concern_error) = result.get_array("writeConcernError") {
             return Err(SinkError::Mongodb(anyhow!(
-                "bulk write respond with an abnormal state, n = {}",
-                n
+                "bulk write respond with write errors: {:?}",
+                write_concern_error,
             )));
         }
 
@@ -109,7 +112,7 @@ const MONGODB_SEND_FUTURE_BUFFER_MAX_SIZE: usize = 4096;
 
 pub const MONGODB_PK_NAME: &str = "_id";
 
-static LOG_SUPPERSSER: LazyLock<LogSuppresser> = LazyLock::new(LogSuppresser::default);
+static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 
 const fn _default_bulk_write_max_entries() -> usize {
     1024
@@ -146,6 +149,12 @@ pub struct MongodbConfig {
     #[serde_as(as = "DisplayFromStr")]
     #[deprecated]
     pub bulk_write_max_entries: usize,
+}
+
+impl EnforceSecret for MongodbConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        MongodbCommon::enforce_one(prop)
+    }
 }
 
 impl MongodbConfig {
@@ -212,10 +221,21 @@ pub struct MongodbSink {
     is_append_only: bool,
 }
 
+impl EnforceSecret for MongodbSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::sink::ConnectorResult<()> {
+        for prop in prop_iter {
+            MongodbConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 impl MongodbSink {
     pub fn new(param: SinkParam) -> Result<Self> {
         let config = MongodbConfig::from_btreemap(param.properties.clone())?;
-        let pk_indices = param.downstream_pk.clone();
+        let pk_indices = param.downstream_pk_or_empty();
         let is_append_only = param.sink_type.is_append_only();
         let schema = param.schema();
         Ok(Self {
@@ -237,7 +257,6 @@ impl TryFrom<SinkParam> for MongodbSink {
 }
 
 impl Sink for MongodbSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<MongodbSinkWriter>;
 
     const SINK_NAME: &'static str = MONGODB_SINK;
@@ -246,7 +265,8 @@ impl Sink for MongodbSink {
         if !self.is_append_only {
             if self.pk_indices.is_empty() {
                 return Err(SinkError::Config(anyhow!(
-                    "Primary key not defined for upsert mongodb sink (please define in `primary_key` field)")));
+                    "Primary key not defined for upsert mongodb sink (please define in `primary_key` field)"
+                )));
             }
 
             // checking if there is a non-pk field's name is `_id`
@@ -295,7 +315,7 @@ impl Sink for MongodbSink {
         let client = ClientGuard::new(self.param.sink_name.clone(), client);
         client
             .database("admin")
-            .run_command(doc! {"hello":1}, None)
+            .run_command(doc! {"hello":1})
             .await
             .map_err(|err| {
                 SinkError::Mongodb(anyhow!(err).context("failed to send hello command to mongodb"))
@@ -303,8 +323,8 @@ impl Sink for MongodbSink {
 
         if self.config.drop_collection_name_field && self.config.collection_name_field.is_none() {
             return Err(SinkError::Config(anyhow!(
-                    "collection.name.field must be specified when collection.name.field.drop is enabled"
-                )));
+                "collection.name.field must be specified when collection.name.field.drop is enabled"
+            )));
         }
 
         // checking dynamic collection name settings
@@ -333,7 +353,7 @@ impl Sink for MongodbSink {
                 )));
             }
 
-            if !self.is_append_only && self.pk_indices.iter().any(|idx| *idx == coll_field_index) {
+            if !self.is_append_only && self.pk_indices.contains(&coll_field_index) {
                 return Err(SinkError::Config(anyhow!(
                     "collection.name.field {} must not be equal to the primary key field",
                     coll_field
@@ -427,7 +447,7 @@ impl MongodbSinkWriter {
         let mut insert_builder: HashMap<MongodbNamespace, InsertCommandBuilder> = HashMap::new();
         for (op, row) in chunk.rows() {
             if op != Op::Insert {
-                if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                     tracing::warn!(
                         suppressed_count,
                         ?op,
@@ -460,6 +480,7 @@ pub type MongodbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> 
 impl AsyncTruncateSinkWriter for MongodbSinkWriter {
     type DeliveryFuture = MongodbSinkDeliveryFuture;
 
+    #[define_opaque(MongodbSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
@@ -529,7 +550,9 @@ impl UpsertCommandBuilder {
 
         self.updates.push(bson!( {
             "q": pk,
-            "u": row,
+            "u": bson!( {
+                "$set": row,
+            }),
             "upsert": true,
             "multi": false,
         }));
@@ -614,7 +637,7 @@ impl MongodbPayloadWriter {
                 Some(ScalarRefImpl::Utf8(v)) => match v.parse::<Namespace>() {
                     Ok(ns) => Some(ns),
                     Err(err) => {
-                        if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                             tracing::warn!(
                                 suppressed_count,
                                 error = %err.as_report(),
@@ -626,7 +649,7 @@ impl MongodbPayloadWriter {
                     }
                 },
                 _ => {
-                    if let Ok(suppressed_count) = LOG_SUPPERSSER.check() {
+                    if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
                         tracing::warn!(
                             suppressed_count,
                             "the value of collection.name.field is null, fallback to use default collection.name"

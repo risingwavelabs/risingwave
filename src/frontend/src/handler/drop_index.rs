@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,13 +13,16 @@
 // limitations under the License.
 
 use pgwire::pg_response::{PgResponse, StatementType};
+use risingwave_common::catalog::StreamJobStatus;
+use risingwave_pb::meta::cancel_creating_jobs_request::{CreatingJobIds, PbJobs};
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::RwPgResponse;
+use super::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::binder::Binder;
+use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::table_catalog::TableType;
-use crate::catalog::CatalogError;
 use crate::error::ErrorCode::PermissionDenied;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
@@ -31,29 +34,32 @@ pub async fn handle_drop_index(
     cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
-    let (schema_name, index_name) = Binder::resolve_schema_qualified_name(db_name, index_name)?;
+    let db_name = &session.database();
+    let (schema_name, index_name) = Binder::resolve_schema_qualified_name(db_name, &index_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let index_id = {
+    let index = {
         let reader = session.env().catalog_reader().read_guard();
-        match reader.get_index_by_name(db_name, schema_path, &index_name) {
+        match reader.get_any_index_by_name(db_name, schema_path, &index_name) {
             Ok((index, _)) => {
-                if session.user_id() != index.index_table.owner {
-                    return Err(PermissionDenied("Do not have the privilege".to_string()).into());
+                if !session.is_super_user() && session.user_id() != index.index_table().owner {
+                    return Err(PermissionDenied(format!(
+                        "must be owner of index \"{}\"",
+                        index.name
+                    ))
+                    .into());
                 }
 
-                index.id
+                index.clone()
             }
             Err(err) => {
-                match err {
-                    CatalogError::NotFound("index", _) => {
-                        // index not found, try to find table below to give a better error message
-                    }
-                    _ => return Err(err.into()),
-                };
+                if err.is_not_found("index") {
+                    // index not found, try to find table below to give a better error message
+                } else {
+                    return Err(err.into());
+                }
                 return match reader.get_created_table_by_name(db_name, schema_path, &index_name) {
                     Ok((table, _)) => match table.table_type() {
                         TableType::Index => unreachable!(),
@@ -67,13 +73,10 @@ pub async fn handle_drop_index(
                                     index_name
                                 ))
                                 .into())
+                        } else if e.is_not_found("table") {
+                            Err(CatalogError::not_found("index", index_name).into())
                         } else {
-                            match e {
-                                CatalogError::NotFound("table", name) => {
-                                    Err(CatalogError::NotFound("index", name).into())
-                                }
-                                _ => Err(e.into()),
-                            }
+                            Err(e.into())
                         }
                     }
                 };
@@ -81,8 +84,28 @@ pub async fn handle_drop_index(
         }
     };
 
-    let catalog_writer = session.catalog_writer()?;
-    catalog_writer.drop_index(index_id, cascade).await?;
+    let index_id = index.id;
+
+    // If the index is being created, use cancel RPC instead of normal drop
+    if index.index_table().stream_job_status == StreamJobStatus::Creating {
+        let canceled_jobs = session
+            .env()
+            .meta_client()
+            .cancel_creating_jobs(PbJobs::Ids(CreatingJobIds {
+                job_ids: vec![index_id.as_job_id()],
+            }))
+            .await?;
+        tracing::info!(?canceled_jobs, "cancelled creating index job");
+    } else {
+        let catalog_writer = session.catalog_writer()?;
+        execute_with_long_running_notification(
+            catalog_writer.drop_index(index_id, cascade),
+            &session,
+            "DROP INDEX",
+            LongRunningNotificationAction::SuggestRecover,
+        )
+        .await?;
+    }
 
     Ok(PgResponse::empty_result(StatementType::DROP_INDEX))
 }

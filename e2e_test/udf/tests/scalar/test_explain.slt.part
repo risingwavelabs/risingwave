@@ -1,0 +1,74 @@
+statement ok
+create table t (a int, b real, c decimal, d varchar, e jsonb);
+
+
+query T
+explain
+select 42 as i42, gcd(a, 20) as gcd, decimal_add(1.23, c) as add from t;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchProject { exprs: [42:Int32, gcd(t.a, 20:Int32) as $expr1, decimal_add(1.23:Decimal, t.c) as $expr2] }
+  └─BatchScan { table: t, columns: [a, c] }
+
+
+query T
+explain create materialized view v1 as
+select 42 as i42, gcd(a, 20) as gcd, decimal_add(1.23, c) as add from t;
+----
+StreamMaterialize { columns: [i42, gcd, add, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck }
+└─StreamProject { exprs: [42:Int32, $expr1, $expr2, t._row_id] }
+  └─StreamMaterializedExprs { exprs: [gcd(t.a, 20:Int32) as $expr1, decimal_add(1.23:Decimal, t.c) as $expr2] }
+    └─StreamTableScan { table: t, columns: [a, c, _row_id] }
+
+
+
+query T
+explain
+select
+    a,
+    sum(foo::int) as foo_sum,
+    aggregate:sum_array(foo::int) as foo_sum_2
+from (
+    select
+        *,
+        int_42() as i42, -- should be col-pruned
+        decimal_add( int_42()::decimal, gcd( a, jsonb_access(e, 1)::int ) ) as foo,
+        jsonb_access(e, 0) as bar -- should be col-pruned
+    from t
+)
+group by a;
+----
+BatchExchange { order: [], dist: Single }
+└─BatchHashAgg { group_key: [t.a], aggs: [sum($expr1), wrap_scalar($expr1)] }
+  └─BatchExchange { order: [], dist: HashShard(t.a) }
+    └─BatchProject { exprs: [t.a, decimal_add(int_42::Decimal, gcd(t.a, jsonb_access(t.e, 1:Int32)::Int32)::Decimal)::Int32 as $expr1] }
+      └─BatchScan { table: t, columns: [a, e] }
+
+
+query T
+explain create materialized view v2 as
+select
+    a,
+    sum(foo::int) as foo_sum,
+    aggregate:sum_array(foo::int) as foo_sum_2
+from (
+    select
+        *,
+        int_42() as i42, -- should be col-pruned
+        decimal_add( int_42()::decimal, gcd( a, jsonb_access(e, 1)::int ) ) as foo,
+        jsonb_access(e, 0) as bar -- should be col-pruned
+    from t
+)
+group by a;
+----
+StreamMaterialize { columns: [a, foo_sum, foo_sum_2], stream_key: [a], pk_columns: [a], pk_conflict: NoCheck }
+└─StreamProject { exprs: [t.a, sum($expr1), wrap_scalar($expr1)] }
+  └─StreamHashAgg { group_key: [t.a], aggs: [sum($expr1), wrap_scalar($expr1), count] }
+    └─StreamExchange { dist: HashShard(t.a) }
+      └─StreamProject { exprs: [t.a, $expr1, t._row_id] }
+        └─StreamMaterializedExprs { exprs: [decimal_add(int_42::Decimal, gcd(t.a, jsonb_access(t.e, 1:Int32)::Int32)::Decimal)::Int32 as $expr1] }
+          └─StreamTableScan { table: t, columns: [a, e, _row_id] }
+
+
+statement ok
+drop table t;

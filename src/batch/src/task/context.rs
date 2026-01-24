@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::sync::Arc;
 
 use prometheus::core::Atomic;
@@ -18,7 +19,8 @@ use risingwave_common::catalog::SysCatalogReaderRef;
 use risingwave_common::config::BatchConfig;
 use risingwave_common::memory::MemoryContext;
 use risingwave_common::metrics::TrAdderAtomic;
-use risingwave_common::util::addr::{is_local_address, HostAddr};
+use risingwave_common::metrics_reader::MetricsReader;
+use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::ComputeClientPoolRef;
@@ -32,7 +34,7 @@ use crate::worker_manager::worker_node_manager::WorkerNodeManagerRef;
 /// Context for batch task execution.
 ///
 /// This context is specific to one task execution, and should *not* be shared by different tasks.
-pub trait BatchTaskContext: Clone + Send + Sync + 'static {
+pub trait BatchTaskContext: Send + Sync + 'static {
     /// Get task output identified by `task_output_id`.
     ///
     /// Returns error if the task of `task_output_id` doesn't run in same worker as current task.
@@ -66,6 +68,9 @@ pub trait BatchTaskContext: Clone + Send + Sync + 'static {
     fn create_executor_mem_context(&self, executor_id: &str) -> MemoryContext;
 
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef>;
+
+    /// Get metrics reader for reading channel delta stats and other metrics.
+    fn metrics_reader(&self) -> Arc<dyn MetricsReader>;
 }
 
 /// Batch task context on compute node.
@@ -129,29 +134,32 @@ impl BatchTaskContext for ComputeNodeContext {
     fn worker_node_manager(&self) -> Option<WorkerNodeManagerRef> {
         None
     }
+
+    fn metrics_reader(&self) -> Arc<dyn MetricsReader> {
+        unimplemented!("metrics_reader not supported in compute node context")
+    }
 }
 
 impl ComputeNodeContext {
-    #[cfg(test)]
-    pub fn for_test() -> Self {
-        Self {
+    pub fn for_test() -> Arc<dyn BatchTaskContext> {
+        Arc::new(Self {
             env: BatchEnvironment::for_test(),
             batch_metrics: BatchMetricsInner::for_test(),
             mem_context: MemoryContext::none(),
-        }
+        })
     }
 
-    pub fn new(env: BatchEnvironment) -> Self {
+    pub fn create(env: BatchEnvironment) -> Arc<dyn BatchTaskContext> {
         let mem_context = env.task_manager().memory_context_ref();
         let batch_metrics = Arc::new(BatchMetricsInner::new(
             env.task_manager().metrics(),
             env.executor_metrics(),
             env.iceberg_scan_metrics(),
         ));
-        Self {
+        Arc::new(Self {
             env,
             batch_metrics,
             mem_context,
-        }
+        })
     }
 }

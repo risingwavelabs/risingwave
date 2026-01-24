@@ -1,3 +1,5 @@
+SET enable_json_type = 1;
+
 CREATE table demo_test(
     user_id Int32,
     target_id String,
@@ -28,6 +30,7 @@ CREATE table ck_types (
   c_date_array Array(Date32),
   c_timestamptz_array Array(DateTime64(6)),
   c_struct Nested(s_int Int32, s_boolean Bool),
+  c_jsonb: Json,
 )ENGINE = ReplacingMergeTree
 PRIMARY KEY (types_id);
 

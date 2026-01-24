@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,8 +20,8 @@ use bincode::{config, encode_into_std_write};
 use mockall::{automock, mock};
 
 use super::record::Record;
-use crate::error::Result;
 use crate::TraceError;
+use crate::error::Result;
 
 pub(crate) type MagicBytes = u32;
 pub(crate) static MAGIC_BYTES: MagicBytes = 0x484D5452; // HMTR

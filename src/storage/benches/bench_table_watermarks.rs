@@ -17,18 +17,18 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use itertools::Itertools;
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::test_epoch;
+use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::table_watermark::{
-    TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection,
+    TableWatermarks, TableWatermarksIndex, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
 };
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionStateTableInfo};
-use risingwave_hummock_sdk::HummockEpoch;
 use risingwave_pb::hummock::{PbHummockVersion, StateTableInfoDelta};
 use risingwave_storage::hummock::local_version::pinned_version::PinnedVersion;
 use spin::Mutex;
@@ -101,6 +101,7 @@ fn gen_committed_table_watermarks(
             })
             .collect(),
         direction: WatermarkDirection::Ascending,
+        watermark_type: WatermarkSerdeType::PkPrefix,
     }
 }
 
@@ -180,6 +181,7 @@ fn bench_table_watermarks(c: &mut Criterion) {
         gen_committed_table_watermarks(safe_epoch_idx, committed_epoch_idx, vnode_part_count)
             .into(),
         test_epoch(committed_epoch_idx as u64),
+        WatermarkSerdeType::PkPrefix,
     );
     for i in 0..staging_epoch_count {
         let (epoch, watermarks) =

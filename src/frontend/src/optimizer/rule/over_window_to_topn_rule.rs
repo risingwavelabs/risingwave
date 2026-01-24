@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,16 +13,18 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::window_function::WindowFuncKind;
 
-use super::Rule;
-use crate::expr::{collect_input_refs, ExprImpl, ExprType};
+use super::prelude::{PlanRef, *};
+use crate::expr::{
+    Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, collect_input_refs,
+};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalFilter, LogicalProject, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;
-use crate::PlanRef;
+use crate::utils::Condition;
 
 /// Transforms the following pattern to group `TopN` (No Ranking Output).
 ///
@@ -42,15 +44,18 @@ use crate::PlanRef;
 /// FROM ..
 /// WHERE rank [ < | <= | > | >= | = ] ..;
 /// ```
+///
+/// Also optimizes filter arithmetic expressions in the `Project <- Filter <- OverWindow` pattern,
+/// such as simplifying `(row_number - 1) = 0` to `row_number = 1`.
 pub struct OverWindowToTopNRule;
 
 impl OverWindowToTopNRule {
-    pub fn create() -> Box<dyn Rule> {
+    pub fn create() -> BoxedRule {
         Box::new(OverWindowToTopNRule)
     }
 }
 
-impl Rule for OverWindowToTopNRule {
+impl Rule<Logical> for OverWindowToTopNRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let ctx = plan.ctx();
         let (project, plan) = {
@@ -65,12 +70,19 @@ impl Rule for OverWindowToTopNRule {
         // The filter is directly on top of the over window after predicate pushdown.
         let over_window = plan.as_logical_over_window()?;
 
+        // First try to simplify filter arithmetic expressions
+        let filter = if let Some(simplified) = self.simplify_filter_arithmetic(filter) {
+            simplified
+        } else {
+            filter.clone()
+        };
+
         if over_window.window_functions().len() != 1 {
             // Queries with multiple window function calls are not supported yet.
             return None;
         }
         let window_func = &over_window.window_functions()[0];
-        if !window_func.kind.is_rank() {
+        if !window_func.kind.is_numbering() {
             // Only rank functions can be converted to TopN.
             return None;
         }
@@ -110,7 +122,7 @@ impl Rule for OverWindowToTopNRule {
             offset,
             with_ties,
             Order {
-                column_orders: window_func.order_by.to_vec(),
+                column_orders: window_func.order_by.clone(),
             },
             window_func.partition_by.iter().map(|i| i.index).collect(),
         )
@@ -124,16 +136,142 @@ impl Rule for OverWindowToTopNRule {
                 project.clone_with_input(filter).into()
             } else {
                 // Ranking Output, with project
-                project
-                    .clone_with_input(over_window.clone_with_input(filter).into())
-                    .into()
+                let over_window = over_window.clone_with_input(filter).into();
+                let over_window =
+                    add_rank_offset_if_needed(over_window, offset, window_func_pos, output_len);
+                project.clone_with_input(over_window).into()
             }
         } else {
             // Ranking Output, without project
             ctx.warn_to_user("It can be inefficient to output ranking number in Top-N, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
-            over_window.clone_with_input(filter).into()
+            let over_window = over_window.clone_with_input(filter).into();
+            add_rank_offset_if_needed(over_window, offset, window_func_pos, output_len)
         };
         Some(plan)
+    }
+}
+
+impl OverWindowToTopNRule {
+    /// Simplify arithmetic expressions in filter conditions before TopN optimization
+    /// For example: `(row_number - 1) = 0` -> `row_number = 1`
+    fn simplify_filter_arithmetic(&self, filter: &LogicalFilter) -> Option<LogicalFilter> {
+        let new_predicate = self.simplify_filter_arithmetic_condition(filter.predicate())?;
+        Some(LogicalFilter::new(filter.input(), new_predicate))
+    }
+
+    /// Simplify arithmetic expressions in the filter condition
+    fn simplify_filter_arithmetic_condition(&self, predicate: &Condition) -> Option<Condition> {
+        let expr = predicate.as_expr_unless_true()?;
+        let mut rewriter = FilterArithmeticRewriter {};
+        let new_expr = rewriter.rewrite_expr(expr.clone());
+
+        if new_expr != expr {
+            Some(Condition::with_expr(new_expr))
+        } else {
+            None
+        }
+    }
+}
+
+/// Filter arithmetic simplification rewriter: simplifies `(col op const) = const2` to `col = (const2 reverse_op const)`
+struct FilterArithmeticRewriter {}
+
+impl ExprRewriter for FilterArithmeticRewriter {
+    fn rewrite_function_call(&mut self, func_call: FunctionCall) -> ExprImpl {
+        use ExprType::{
+            Equal, GreaterThan, GreaterThanOrEqual, LessThan, LessThanOrEqual, NotEqual,
+        };
+
+        // Check if this is a comparison operation
+        match func_call.func_type() {
+            Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
+                let inputs = func_call.inputs();
+                if inputs.len() == 2 {
+                    // Check if left operand is an arithmetic expression and right operand is a constant
+                    if let ExprImpl::FunctionCall(left_func) = &inputs[0]
+                        && inputs[1].is_const()
+                        && let Some(simplified) = self.simplify_arithmetic_comparison(
+                            left_func,
+                            &inputs[1],
+                            func_call.func_type(),
+                        )
+                    {
+                        return simplified;
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        // Recursively handle sub-expressions
+        let (func_type, inputs, ret_type) = func_call.decompose();
+        let new_inputs: Vec<_> = inputs
+            .into_iter()
+            .map(|input| self.rewrite_expr(input))
+            .collect();
+
+        FunctionCall::new_unchecked(func_type, new_inputs, ret_type).into()
+    }
+}
+
+impl FilterArithmeticRewriter {
+    /// Simplify arithmetic comparison: `(col op const1) comp const2` -> `col comp (const2 reverse_op const1)`
+    fn simplify_arithmetic_comparison(
+        &self,
+        arithmetic_func: &FunctionCall,
+        comparison_const: &ExprImpl,
+        comparison_op: ExprType,
+    ) -> Option<ExprImpl> {
+        use ExprType::{Add, Subtract};
+
+        // Check arithmetic operation
+        match arithmetic_func.func_type() {
+            Add | Subtract => {
+                let inputs = arithmetic_func.inputs();
+                if inputs.len() == 2 {
+                    // Find column reference and constant
+                    let (column_ref, arith_const, reverse_op) = if inputs[1].is_const() {
+                        // col op const
+                        let reverse_op = match arithmetic_func.func_type() {
+                            Add => Subtract,
+                            Subtract => Add,
+                            _ => unreachable!(),
+                        };
+                        (&inputs[0], &inputs[1], reverse_op)
+                    } else if inputs[0].is_const() && arithmetic_func.func_type() == Add {
+                        // const + col
+                        (&inputs[1], &inputs[0], Subtract)
+                    } else {
+                        return None;
+                    };
+
+                    // Calculate new constant value
+                    if let Ok(new_const_func) = FunctionCall::new(
+                        reverse_op,
+                        vec![comparison_const.clone(), arith_const.clone()],
+                    ) {
+                        let new_const_expr: ExprImpl = new_const_func.into();
+                        // Try constant folding
+                        if let Some(Ok(Some(folded_value))) = new_const_expr.try_fold_const() {
+                            let new_const =
+                                Literal::new(Some(folded_value), new_const_expr.return_type())
+                                    .into();
+
+                            // Construct new comparison expression
+                            if let Ok(new_comparison) = FunctionCall::new(
+                                comparison_op,
+                                vec![column_ref.clone(), new_const],
+                            ) {
+                                return Some(new_comparison.into());
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+
+        None
     }
 }
 
@@ -153,7 +291,11 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
     for cond in rank_preds {
         if let Some((input_ref, cmp, v)) = cond.as_comparison_const() {
             assert_eq!(input_ref.index, window_func_pos);
-            let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
+            let v = v
+                .cast_implicit(&DataType::Int64)
+                .ok()?
+                .fold_const()
+                .ok()??;
             let v = *v.as_int64();
             match cmp {
                 ExprType::LessThanOrEqual => ub = ub.map_or(Some(v), |ub| Some(ub.min(v))),
@@ -164,7 +306,11 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             }
         } else if let Some((input_ref, v)) = cond.as_eq_const() {
             assert_eq!(input_ref.index, window_func_pos);
-            let v = v.cast_implicit(DataType::Int64).ok()?.fold_const().ok()??;
+            let v = v
+                .cast_implicit(&DataType::Int64)
+                .ok()?
+                .fold_const()
+                .ok()??;
             let v = *v.as_int64();
             if let Some(eq) = eq
                 && eq != v
@@ -206,4 +352,34 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             (None, None) => unreachable!(),
         }
     }
+}
+
+fn add_rank_offset_if_needed(
+    plan: PlanRef,
+    offset: u64,
+    window_func_pos: usize,
+    output_len: usize,
+) -> PlanRef {
+    if offset == 0 {
+        return plan;
+    }
+
+    let schema = plan.schema();
+    let mut exprs = Vec::with_capacity(output_len);
+
+    for idx in 0..output_len {
+        let input: ExprImpl = InputRef::new(idx, schema.fields()[idx].data_type().clone()).into();
+        if idx == window_func_pos {
+            let offset_expr: ExprImpl =
+                Literal::new(Some(ScalarImpl::Int64(offset as i64)), DataType::Int64).into();
+            let adjusted = FunctionCall::new(ExprType::Add, vec![input, offset_expr])
+                .unwrap()
+                .into();
+            exprs.push(adjusted);
+        } else {
+            exprs.push(input);
+        }
+    }
+
+    LogicalProject::create(plan, exprs)
 }

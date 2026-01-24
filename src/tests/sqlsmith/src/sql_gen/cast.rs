@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use rand::seq::SliceRandom;
 use rand::Rng;
+use rand::seq::IndexedRandom;
 use risingwave_common::types::DataType;
 use risingwave_frontend::expr::CastContext;
 use risingwave_sqlparser::ast::Expr;
 
-use crate::sql_gen::types::{data_type_to_ast_data_type, EXPLICIT_CAST_TABLE};
+use crate::sql_gen::types::{EXPLICIT_CAST_TABLE, data_type_to_ast_data_type};
 use crate::sql_gen::{SqlGenerator, SqlGeneratorContext};
 
-impl<'a, R: Rng> SqlGenerator<'a, R> {
+impl<R: Rng> SqlGenerator<'_, R> {
     pub(crate) fn gen_explicit_cast(
         &mut self,
         ret: &DataType,

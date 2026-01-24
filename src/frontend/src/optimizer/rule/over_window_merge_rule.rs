@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,21 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use super::Rule;
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalOverWindow, PlanTreeNodeUnary};
-use crate::PlanRef;
 
 /// Merge chaining `LogicalOverWindow`s with same `PARTITION BY` and `ORDER BY`.
 /// Should be applied after `OverWindowSplitRule`.
 pub struct OverWindowMergeRule;
 
 impl OverWindowMergeRule {
-    pub fn create() -> Box<dyn Rule> {
+    pub fn create() -> BoxedRule {
         Box::new(OverWindowMergeRule)
     }
 }
 
-impl Rule for OverWindowMergeRule {
+impl Rule<Logical> for OverWindowMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let over_window = plan.as_logical_over_window()?;
         let mut window_functions_rev = over_window

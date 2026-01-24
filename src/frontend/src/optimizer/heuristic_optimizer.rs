@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::fmt;
 
 use itertools::Itertools;
 
-use crate::optimizer::plan_node::PlanTreeNode;
-use crate::optimizer::rule::BoxedRule;
-use crate::optimizer::PlanRef;
+use super::ApplyResult;
 #[cfg(debug_assertions)]
 use crate::Explain;
+use crate::error::Result;
+use crate::optimizer::plan_node::ConventionMarker;
+use crate::optimizer::rule::BoxedRule;
+use crate::optimizer::{PlanRef, PlanTreeNode};
 
 /// Traverse order of [`HeuristicOptimizer`]
 pub enum ApplyOrder {
@@ -33,14 +35,14 @@ pub enum ApplyOrder {
 // TODO: we should have a builder of HeuristicOptimizer here
 /// A rule-based heuristic optimizer, which traverses every plan nodes and tries to
 /// apply each rule on them.
-pub struct HeuristicOptimizer<'a> {
+pub struct HeuristicOptimizer<'a, C: ConventionMarker> {
     apply_order: &'a ApplyOrder,
-    rules: &'a [BoxedRule],
+    rules: &'a [BoxedRule<C>],
     stats: Stats,
 }
 
-impl<'a> HeuristicOptimizer<'a> {
-    pub fn new(apply_order: &'a ApplyOrder, rules: &'a [BoxedRule]) -> Self {
+impl<'a, C: ConventionMarker> HeuristicOptimizer<'a, C> {
+    pub fn new(apply_order: &'a ApplyOrder, rules: &'a [BoxedRule<C>]) -> Self {
         Self {
             apply_order,
             rules,
@@ -48,41 +50,46 @@ impl<'a> HeuristicOptimizer<'a> {
         }
     }
 
-    fn optimize_node(&mut self, mut plan: PlanRef) -> PlanRef {
+    fn optimize_node(&mut self, mut plan: PlanRef<C>) -> Result<PlanRef<C>> {
         for rule in self.rules {
-            if let Some(applied) = rule.apply(plan.clone()) {
-                #[cfg(debug_assertions)]
-                Self::check_equivalent_plan(rule.description(), &plan, &applied);
+            match rule.apply(plan.clone()) {
+                ApplyResult::Ok(applied) => {
+                    #[cfg(debug_assertions)]
+                    Self::check_equivalent_plan(rule.description(), &plan, &applied);
 
-                plan = applied;
-                self.stats.count_rule(rule);
+                    plan = applied;
+                    self.stats.count_rule(rule);
+                }
+                ApplyResult::NotApplicable => {}
+                ApplyResult::Err(error) => return Err(error),
             }
         }
-        plan
+        Ok(plan)
     }
 
-    fn optimize_inputs(&mut self, plan: PlanRef) -> PlanRef {
+    fn optimize_inputs(&mut self, plan: PlanRef<C>) -> Result<PlanRef<C>> {
         let pre_applied = self.stats.total_applied();
-        let inputs = plan
+        let inputs: Vec<_> = plan
             .inputs()
             .into_iter()
             .map(|sub_tree| self.optimize(sub_tree))
-            .collect_vec();
-        if pre_applied != self.stats.total_applied() {
-            plan.clone_with_inputs(&inputs)
+            .try_collect()?;
+
+        Ok(if pre_applied != self.stats.total_applied() {
+            plan.clone_root_with_inputs(&inputs)
         } else {
             plan
-        }
+        })
     }
 
-    pub fn optimize(&mut self, mut plan: PlanRef) -> PlanRef {
+    pub fn optimize(&mut self, mut plan: PlanRef<C>) -> Result<PlanRef<C>> {
         match self.apply_order {
             ApplyOrder::TopDown => {
-                plan = self.optimize_node(plan);
+                plan = self.optimize_node(plan)?;
                 self.optimize_inputs(plan)
             }
             ApplyOrder::BottomUp => {
-                plan = self.optimize_inputs(plan);
+                plan = self.optimize_inputs(plan)?;
                 self.optimize_node(plan)
             }
         }
@@ -93,15 +100,22 @@ impl<'a> HeuristicOptimizer<'a> {
     }
 
     #[cfg(debug_assertions)]
-    pub fn check_equivalent_plan(rule_desc: &str, input_plan: &PlanRef, output_plan: &PlanRef) {
+    pub fn check_equivalent_plan(
+        rule_desc: &str,
+        input_plan: &PlanRef<C>,
+        output_plan: &PlanRef<C>,
+    ) {
+        use crate::optimizer::plan_node::generic::GenericPlanRef;
         if !input_plan.schema().type_eq(output_plan.schema()) {
-            panic!("{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
-                   rule_desc,
-                   input_plan.schema(),
-                   input_plan.explain_to_string(),
-                   output_plan.schema(),
-                   output_plan.explain_to_string(),
-                   output_plan.ctx().sql());
+            panic!(
+                "{} fails to generate equivalent plan.\nInput schema: {:?}\nInput plan: \n{}\nOutput schema: {:?}\nOutput plan: \n{}\nSQL: {}",
+                rule_desc,
+                input_plan.schema(),
+                input_plan.explain_to_string(),
+                output_plan.schema(),
+                output_plan.explain_to_string(),
+                output_plan.ctx().sql()
+            );
         }
     }
 }
@@ -119,9 +133,9 @@ impl Stats {
         }
     }
 
-    pub fn count_rule(&mut self, rule: &BoxedRule) {
+    pub fn count_rule(&mut self, rule: &BoxedRule<impl ConventionMarker>) {
         self.total_applied += 1;
-        match self.rule_counter.entry(rule.description().to_string()) {
+        match self.rule_counter.entry(rule.description().to_owned()) {
             Entry::Occupied(mut entry) => {
                 *entry.get_mut() += 1;
             }

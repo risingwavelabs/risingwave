@@ -15,7 +15,7 @@
 use std::io::{Read as _, Seek as _, SeekFrom};
 use std::time::Duration;
 
-use anyhow::{bail, Context, Result};
+use anyhow::{Context, Result, bail};
 use fs_err::File;
 
 use super::{ExecuteContext, Task};
@@ -84,7 +84,7 @@ where
             &mut self.log,
             self.status_file.as_ref().unwrap(),
             self.id.as_ref().unwrap(),
-            Some(Duration::from_secs(30)),
+            Some(Duration::from_secs(60)),
             true,
         )?;
 

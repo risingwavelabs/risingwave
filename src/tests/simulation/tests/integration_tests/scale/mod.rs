@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod adaptive_strategy;
+mod alter_fragment;
 mod auto_parallelism;
+mod backfill_parallelism;
+mod background_ddl;
 mod cascade_materialized_view;
 mod dynamic_filter;
+mod isolation;
 mod nexmark_chaos;
 mod nexmark_q4;
 mod nexmark_source;
 mod no_shuffle;
+mod parallelism_exceeds_cores;
+mod resource_group;
 mod schedulability;
 mod shared_source;
 mod singleton_migration;

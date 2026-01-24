@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,16 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::fmt::Write;
-
-use risingwave_expr::{capture_context, function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, capture_context, function};
 use thiserror_ext::AsReport;
 
 use super::context::{CATALOG_READER, DB_NAME};
 use crate::catalog::CatalogReader;
 
 #[function("pg_get_indexdef(int4) -> varchar")]
-fn pg_get_indexdef(oid: i32, writer: &mut impl Write) -> Result<()> {
+fn pg_get_indexdef(oid: i32, writer: &mut impl std::fmt::Write) -> Result<()> {
     pg_get_indexdef_impl_captured(oid, 0, writer)
 }
 
@@ -30,7 +28,7 @@ fn pg_get_indexdef_col(
     oid: i32,
     column_no: i32,
     _pretty_bool: bool,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     pg_get_indexdef_impl_captured(oid, column_no, writer)
 }
@@ -41,7 +39,7 @@ fn pg_get_indexdef_impl(
     db_name: &str,
     oid: i32,
     column_no: i32,
-    writer: &mut impl Write,
+    writer: &mut impl std::fmt::Write,
 ) -> Result<()> {
     let ans = if column_no == 0 {
         catalog
@@ -51,7 +49,7 @@ fn pg_get_indexdef_impl(
                 name: "oid",
                 reason: e.to_report_string().into(),
             })?
-            .index_table
+            .index_table()
             .create_sql()
     } else {
         catalog

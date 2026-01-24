@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -431,6 +431,39 @@ pub fn acosd_f64(input: F64) -> F64 {
         90.0 + asind_q1(-arg1)
     };
 
+    if result.is_infinite() {
+        return F64::from(f64::NAN);
+    }
+    result.into()
+}
+
+// return the inverse tangent of x in degrees, the inverse tangent function maps all inputs to
+// values in the range [-90, 90]. For the 5 special case inputs (0, 1, -1, +INF and -INF), this
+// function will return exact values (0, 45, -45, 90 and -90 degrees respectively).
+#[function("atand(float8) -> float8")]
+pub fn atand_f64(input: F64) -> F64 {
+    let arg1 = input.0;
+    if arg1.is_nan() {
+        return F64::from(f64::NAN);
+    }
+    let atan_arg1 = f64::atan(arg1);
+    let result = (atan_arg1 / f64::atan(DEGREE_ONE)) * 45.0;
+    if result.is_infinite() {
+        return F64::from(f64::NAN);
+    }
+    result.into()
+}
+
+/// Inverse tangent of y/x, result in degrees, the inverse tangent of y/x maps all inputs to
+/// values in the range [-180, 180].
+#[function("atan2d(float8, float8) -> float8")]
+pub fn atan2d_f64(input_x: F64, input_y: F64) -> F64 {
+    let (arg1, arg2) = (input_x.0, input_y.0);
+    if arg1.is_nan() || arg2.is_nan() {
+        return F64::from(f64::NAN);
+    }
+    let atan2_arg1_arg2 = f64::atan2(arg1, arg2);
+    let result = (atan2_arg1_arg2 / f64::atan(DEGREE_ONE)) * 45.0;
     if result.is_infinite() {
         return F64::from(f64::NAN);
     }

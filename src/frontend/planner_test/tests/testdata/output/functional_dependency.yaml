@@ -6,7 +6,7 @@
   logical_plan: |-
     LogicalTopN { order: [t1.id ASC], limit: 2, offset: 0 }
     └─LogicalProject { exprs: [t1.id, t1.i] }
-      └─LogicalScan { table: t1, columns: [t1.id, t1.i] }
+      └─LogicalScan { table: t1, columns: [t1.id, t1.i, t1._rw_timestamp] }
   batch_plan: |-
     BatchTopN { order: [t1.id ASC], limit: 2, offset: 0 }
     └─BatchExchange { order: [], dist: Single }
@@ -27,7 +27,7 @@
   logical_plan: |-
     LogicalTopN { order: [t1.i ASC, t1.id ASC], limit: 2, offset: 0 }
     └─LogicalProject { exprs: [t1.id, t1.i] }
-      └─LogicalScan { table: t1, columns: [t1.id, t1.i] }
+      └─LogicalScan { table: t1, columns: [t1.id, t1.i, t1._rw_timestamp] }
   batch_plan: |-
     BatchTopN { order: [t1.i ASC, t1.id ASC], limit: 2, offset: 0 }
     └─BatchExchange { order: [], dist: Single }
@@ -48,7 +48,7 @@
     select cnt from v order by cnt;
   logical_plan: |-
     LogicalProject { exprs: [v.cnt] }
-    └─LogicalScan { table: v, columns: [v.cnt], cardinality: 0..=1 }
+    └─LogicalScan { table: v, columns: [v.cnt, v._rw_timestamp], cardinality: 0..=1 }
   batch_plan: |-
     BatchExchange { order: [v.cnt ASC], dist: Single }
     └─BatchSort { order: [v.cnt ASC] }
@@ -62,7 +62,7 @@
     create materialized view v as select count(*) cnt from t1;
     explain (verbose) create index mv_idx on v(cnt);
   explain_output: |
-    StreamMaterialize { columns: [cnt], stream_key: [], pk_columns: [cnt], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [cnt], stream_key: [cnt], pk_columns: [cnt], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(v.cnt) }
       └─StreamTableScan { table: v, columns: [v.cnt], stream_scan_type: ArrangementBackfill, stream_key: [], pk: [], dist: Single }
 - name: test functional dependency for order key pruning (index 2)
@@ -78,7 +78,7 @@
     create table t1 (v1 int primary key, v2 int);
     explain (verbose) create index mv_idx on t1(v2, v1);
   explain_output: |
-    StreamMaterialize { columns: [v2, v1], stream_key: [v1], pk_columns: [v2, v1], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [v2, v1], stream_key: [v2, v1], pk_columns: [v2, v1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t1.v2) }
       └─StreamProject { exprs: [t1.v2, t1.v1] }
         └─StreamTableScan { table: t1, columns: [t1.v1, t1.v2], stream_scan_type: ArrangementBackfill, stream_key: [t1.v1], pk: [v1], dist: UpstreamHashShard(t1.v1) }

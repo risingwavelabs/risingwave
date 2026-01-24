@@ -24,6 +24,7 @@ fn main() {
         .collect();
     prost_build::Config::new()
         .out_dir("./tests/integration_tests/protobuf")
+        .type_attribute("ComplexRecursiveMessage", "#[allow(dead_code)]")
         .compile_protos(&protos, &Vec::<String>::new())
         .unwrap();
 }

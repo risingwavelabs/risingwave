@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,8 +14,8 @@
 
 use std::time::Duration;
 
+use indexmap::IndexMap;
 use itertools::Itertools;
-use lru::{Iter, LruCache};
 use risingwave_sqlparser::ast::Statement;
 use risingwave_sqlparser::parser::Parser;
 use sqllogictest::{DBOutput, DefaultColumnType};
@@ -33,33 +33,10 @@ pub struct RisingWave {
 
 /// `SetStmts` stores and compacts all `SET` statements that have been executed in the client
 /// history.
+#[derive(Default)]
 pub struct SetStmts {
-    stmts_cache: LruCache<String, String>,
-}
-
-impl Default for SetStmts {
-    fn default() -> Self {
-        Self {
-            stmts_cache: LruCache::unbounded(),
-        }
-    }
-}
-
-struct SetStmtsIterator<'a, 'b>
-where
-    'a: 'b,
-{
-    _stmts: &'a SetStmts,
-    stmts_iter: core::iter::Rev<Iter<'b, String, String>>,
-}
-
-impl<'a, 'b> SetStmtsIterator<'a, 'b> {
-    fn new(stmts: &'a SetStmts) -> Self {
-        Self {
-            _stmts: stmts,
-            stmts_iter: stmts.stmts_cache.iter().rev(),
-        }
-    }
+    // variable name -> last set statement
+    stmts: IndexMap<String, String>,
 }
 
 impl SetStmts {
@@ -78,19 +55,14 @@ impl SetStmts {
             } => {
                 let key = variable.real_value().to_lowercase();
                 // store complete sql as value.
-                self.stmts_cache.put(key, sql.to_string());
+                self.stmts.insert(key, sql.to_owned());
             }
             _ => unreachable!(),
         }
     }
-}
 
-impl Iterator for SetStmtsIterator<'_, '_> {
-    type Item = String;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let (_, stmt) = self.stmts_iter.next()?;
-        Some(stmt.clone())
+    fn replay_iter(&self) -> impl Iterator<Item = &str> + '_ {
+        self.stmts.values().map(|s| s.as_str())
     }
 }
 
@@ -130,8 +102,8 @@ impl RisingWave {
             }
         });
         // replay all SET statements
-        for stmt in SetStmtsIterator::new(set_stmts) {
-            client.simple_query(&stmt).await?;
+        for stmt in set_stmts.replay_iter() {
+            client.simple_query(stmt).await?;
         }
         Ok((client, task))
     }
@@ -184,12 +156,12 @@ impl sqllogictest::AsyncDB for RisingWave {
                         match row.get(i) {
                             Some(v) => {
                                 if v.is_empty() {
-                                    row_vec.push("(empty)".to_string());
+                                    row_vec.push("(empty)".to_owned());
                                 } else {
-                                    row_vec.push(v.to_string());
+                                    row_vec.push(v.to_owned());
                                 }
                             }
-                            None => row_vec.push("NULL".to_string()),
+                            None => row_vec.push("NULL".to_owned()),
                         }
                     }
                 }
@@ -211,6 +183,8 @@ impl sqllogictest::AsyncDB for RisingWave {
             })
         }
     }
+
+    async fn shutdown(&mut self) {}
 
     fn engine_name(&self) -> &str {
         "risingwave"

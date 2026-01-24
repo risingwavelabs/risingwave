@@ -1,0 +1,83 @@
+control substitution on
+
+# Note either `./risedev rpk` or `rpk` is ok here.
+# risedev-env contains env var RPK_BROKERS, which is read by rpk
+system ok
+rpk topic create test_consumer_group -p 3
+
+system ok
+cat <<EOF | rpk topic produce test_consumer_group -f "%p %v\\n" -p 0
+0 {"x":"a"}
+1 {"x":"b"}
+2 {"x":"c"}
+EOF
+
+# custom group id prefix
+statement ok
+CREATE SOURCE s(x varchar)
+WITH(
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_consumer_group',
+    scan.startup.mode = 'earliest',
+    group.id.prefix = 'my_group'
+) FORMAT PLAIN ENCODE JSON;
+
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS SELECT * from s;
+
+query ?
+SELECT * FROM s order by x;
+----
+a
+b
+c
+
+sleep 2s
+
+query ?
+SELECT * FROM mv order by x;
+----
+a
+b
+c
+
+
+# shared source starts from latest, so we produce more data to ensure consumer group is created.
+system ok
+cat <<EOF | rpk topic produce test_consumer_group -f "%p %v\\n" -p 0
+0 {"x":"d"}
+1 {"x":"e"}
+2 {"x":"f"}
+EOF
+
+
+# There are 2 consumer groups, 1 for batch query (not listed below), 1 for Source.
+# All of them are "Empty" state with 0 members, because we manually `assign` partitions to them.
+# At the beginning, the Source's consumer group will not occur. They will be created after committing offset to Kafka.
+# (enable.auto.commit defaults to true, and auto.commit.interval.ms defaults to 5s)
+sleep 5s
+
+# Test delete consumer group on drop
+
+# my_group: 1 source fragment, 1 batch query, (1 backfill fragment's group is already dropped after backfill finished)
+# We only check my_group to avoid interfering with other tests.
+system ok retry 3 backoff 5s
+./e2e_test/source_inline/kafka/consumer_group.mjs count-groups | grep my_group
+----
+my_group: 2
+
+
+statement ok
+DROP SOURCE s CASCADE;
+
+sleep 1s
+
+system ok retry 3 backoff 5s
+./e2e_test/source_inline/kafka/consumer_group.mjs count-groups | grep my_group
+----
+my_group: 1
+
+
+system ok
+rpk topic delete test_consumer_group

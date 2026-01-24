@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use crate::error::RwError;
-use crate::expr::{default_rewrite_expr, Expr, ExprImpl, ExprRewriter, Literal};
+use crate::expr::{Expr, ExprImpl, ExprRewriter, Literal, default_rewrite_expr};
 
 pub(crate) struct ConstEvalRewriter {
     pub(crate) error: Option<RwError>,
@@ -31,8 +31,6 @@ impl ExprRewriter for ConstEvalRewriter {
                     expr
                 }
             }
-        } else if let ExprImpl::Parameter(_) = expr {
-            unreachable!("Parameter should not appear here. It will be replaced by a literal before this step.")
         } else {
             default_rewrite_expr(self, expr)
         }

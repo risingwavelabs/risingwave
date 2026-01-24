@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,19 +23,20 @@ use pulsar::{Producer, ProducerOptions, Pulsar, TokioExecutor};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 
 use super::catalog::{SinkFormat, SinkFormatDesc};
 use super::{Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::{AwsAuthProps, PulsarCommon, PulsarOauthCommon};
+use crate::enforce_secret::EnforceSecret;
+use crate::sink::Result;
 use crate::sink::encoder::SerTo;
 use crate::sink::formatter::{SinkFormatter, SinkFormatterImpl};
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 use crate::sink::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
-use crate::sink::{DummySinkCommitCoordinator, Result};
 use crate::{deserialize_duration_from_string, dispatch_sink_formatter_str_key_impl};
 
 pub const PULSAR_SINK: &str = "pulsar";
@@ -124,6 +125,13 @@ pub struct PulsarConfig {
     pub producer_properties: PulsarPropertiesProducer,
 }
 
+impl EnforceSecret for PulsarConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        PulsarCommon::enforce_one(prop)?;
+        AwsAuthProps::enforce_one(prop)?;
+        Ok(())
+    }
+}
 impl PulsarConfig {
     pub fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<PulsarConfig>(serde_json::to_value(values).unwrap())
@@ -143,16 +151,28 @@ pub struct PulsarSink {
     sink_from_name: String,
 }
 
+impl EnforceSecret for PulsarSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            PulsarConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 impl TryFrom<SinkParam> for PulsarSink {
     type Error = SinkError;
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let downstream_pk = param.downstream_pk_or_empty();
         let config = PulsarConfig::from_btreemap(param.properties)?;
         Ok(Self {
             config,
             schema,
-            downstream_pk: param.downstream_pk,
+            downstream_pk,
             format_desc: param
                 .format_desc
                 .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?,
@@ -163,7 +183,6 @@ impl TryFrom<SinkParam> for PulsarSink {
 }
 
 impl Sink for PulsarSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<PulsarSinkWriter>;
 
     const SINK_NAME: &'static str = PULSAR_SINK;
@@ -182,7 +201,7 @@ impl Sink for PulsarSink {
     }
 
     async fn validate(&self) -> Result<()> {
-        // For upsert Pulsar sink, the primary key must be defined.
+        // For non-append-only Pulsar sink, the primary key must be defined.
         if self.format_desc.format != SinkFormat::AppendOnly && self.downstream_pk.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "primary key not defined for {:?} pulsar sink (please define in `primary_key` field)",
@@ -230,6 +249,7 @@ mod opaque_type {
     use super::*;
     pub type PulsarDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError> + Unpin + 'static;
 
+    #[define_opaque(PulsarDeliveryFuture)]
     pub(super) fn may_delivery_future(future: SendFuture) -> PulsarDeliveryFuture {
         future.map(|result| {
             result
@@ -238,8 +258,8 @@ mod opaque_type {
         })
     }
 }
-use opaque_type::may_delivery_future;
 pub use opaque_type::PulsarDeliveryFuture;
+use opaque_type::may_delivery_future;
 
 impl PulsarSinkWriter {
     pub async fn new(
@@ -273,7 +293,7 @@ impl PulsarSinkWriter {
     }
 }
 
-impl<'w> PulsarPayloadWriter<'w> {
+impl PulsarPayloadWriter<'_> {
     async fn send_message(&mut self, message: Message) -> Result<()> {
         let mut success_flag = false;
         let mut connection_err = None;
@@ -282,7 +302,7 @@ impl<'w> PulsarPayloadWriter<'w> {
             if retry_num > 0 {
                 tracing::warn!("Failed to send message, at retry no. {retry_num}");
             }
-            match self.producer.send_non_blocking(message.clone()).await {
+            match Box::pin(self.producer.send_non_blocking(message.clone())).await {
                 // If the message is sent successfully,
                 // a SendFuture holding the message receipt
                 // or error after sending is returned
@@ -330,7 +350,7 @@ impl<'w> PulsarPayloadWriter<'w> {
     }
 }
 
-impl<'w> FormattedSink for PulsarPayloadWriter<'w> {
+impl FormattedSink for PulsarPayloadWriter<'_> {
     type K = String;
     type V = Vec<u8>;
 
@@ -347,26 +367,39 @@ impl AsyncTruncateSinkWriter for PulsarSinkWriter {
         chunk: StreamChunk,
         add_future: DeliveryFutureManagerAddFuture<'a, Self::DeliveryFuture>,
     ) -> Result<()> {
-        dispatch_sink_formatter_str_key_impl!(&self.formatter, formatter, {
-            let mut payload_writer = PulsarPayloadWriter {
-                producer: &mut self.producer,
-                add_future,
-                config: &self.config,
-            };
-            // TODO: we can call `payload_writer.write_chunk(chunk, formatter)`,
-            // but for an unknown reason, this will greatly increase the compile time,
-            // by nearly 4x. May investigate it later.
-            for r in formatter.format_chunk(&chunk) {
-                let (key, value) = r?;
-                payload_writer
-                    .write_inner(
-                        key.map(SerTo::ser_to).transpose()?,
-                        value.map(SerTo::ser_to).transpose()?,
-                    )
-                    .await?;
-            }
-            Ok(())
-        })
+        // Structured to avoid `clippy::large_stack_frames` and `large_futures`
+        let iter = {
+            dispatch_sink_formatter_str_key_impl!(
+                &self.formatter,
+                formatter,
+                {
+                    // Convert items to owned, concrete types before any `.await`,
+                    // so the future doesn't capture formatter/iterator generics.
+                    formatter.format_chunk(&chunk).map(|r| {
+                        let (key, value) = r?;
+                        let key: Option<String> = key.map(SerTo::ser_to).transpose()?;
+                        let value: Option<Vec<u8>> = value.map(SerTo::ser_to).transpose()?;
+                        Ok((key, value)) as Result<_>
+                    })
+                },
+                // Produce a single iterator type for all formatter variants.
+                auto_enums::auto_enum(Iterator)
+            )
+        };
+
+        // Only concrete state is held across `.await`, keeping the future small.
+        let mut payload_writer = PulsarPayloadWriter {
+            producer: &mut self.producer,
+            add_future,
+            config: &self.config,
+        };
+
+        for r in iter {
+            let (key, value): (Option<String>, Option<Vec<u8>>) = r?;
+            payload_writer.write_inner(key, value).await?;
+        }
+
+        Ok(())
     }
 
     async fn barrier(&mut self, is_checkpoint: bool) -> Result<()> {

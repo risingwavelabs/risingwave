@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,10 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use criterion::{criterion_group, criterion_main, Criterion};
+use criterion::{Criterion, criterion_group, criterion_main};
 use itertools::Itertools;
 use risingwave_common::array::{ArrayBuilderImpl, DataChunk};
-use risingwave_common::hash::{calc_hash_key_kind, HashKey, HashKeyDispatcher};
+use risingwave_common::hash::{HashKey, HashKeyDispatcher, calc_hash_key_kind};
 use risingwave_common::test_utils::rand_chunk;
 use risingwave_common::types::DataType;
 
@@ -92,14 +92,14 @@ impl<K: HashKey> HashKeyBenchCase<K> {
     }
 
     pub fn bench_vec_ser(&self, c: &mut Criterion) {
-        let vectorize_serialize_id = "vec ser ".to_string() + &self.id;
+        let vectorize_serialize_id = "vec ser ".to_owned() + &self.id;
         c.bench_function(&vectorize_serialize_id, |b| {
             b.iter(|| K::build_many(&self.col_idxes, &self.input_chunk))
         });
     }
 
     pub fn bench_vec_deser(&self, c: &mut Criterion) {
-        let vectorize_deserialize_id = "vec deser ".to_string() + &self.id;
+        let vectorize_deserialize_id = "vec deser ".to_owned() + &self.id;
         c.bench_function(&vectorize_deserialize_id, |b| {
             let mut array_builders = self
                 .input_chunk
@@ -117,7 +117,7 @@ impl<K: HashKey> HashKeyBenchCase<K> {
     }
 
     pub fn bench_deser(&self, c: &mut Criterion) {
-        let vectorize_deserialize_id = "row deser ".to_string() + &self.id;
+        let vectorize_deserialize_id = "row deser ".to_owned() + &self.id;
         c.bench_function(&vectorize_deserialize_id, |b| {
             b.iter(|| {
                 for key in &self.keys {
@@ -139,43 +139,43 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
     vec![
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Serial],
-            describe: "Serial".to_string(),
+            describe: "Serial".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32],
-            describe: "int32".to_string(),
+            describe: "int32".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64],
-            describe: "int64".to_string(),
+            describe: "int64".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Varchar],
-            describe: "varchar".to_string(),
+            describe: "varchar".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Varchar, DataType::Varchar],
-            describe: "composite varchar".to_string(),
+            describe: "composite varchar".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int32, DataType::Int32],
-            describe: "composite fixed, case 1".to_string(),
+            describe: "composite fixed, case 1".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Int64, DataType::Int32],
-            describe: "composite fixed, case 2".to_string(),
+            describe: "composite fixed, case 2".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int32, DataType::Varchar],
-            describe: "mix fixed and not fixed, case 1".to_string(),
+            describe: "mix fixed and not fixed, case 1".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64, DataType::Varchar],
-            describe: "mix fixed and not fixed, case 2".to_string(),
+            describe: "mix fixed and not fixed, case 2".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64; 8],
-            describe: "medium fixed".to_string(),
+            describe: "medium fixed".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: {
@@ -183,11 +183,11 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
                 v[7] = DataType::Varchar;
                 v
             },
-            describe: "medium mixed".to_string(),
+            describe: "medium mixed".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64; 16],
-            describe: "large fixed".to_string(),
+            describe: "large fixed".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: {
@@ -195,7 +195,7 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
                 v[15] = DataType::Varchar;
                 v
             },
-            describe: "large mixed".to_string(),
+            describe: "large mixed".to_owned(),
         },
         // These benchmark cases will test unaligned key sizes.
         // For instance five keys of Int64 cannot fit within Key256 (5 * 64 = 320 > 256),
@@ -203,15 +203,15 @@ fn case_builders() -> Vec<HashKeyBenchCaseBuilder> {
         // This means 24 bytes of wasted memory.
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64; 5],
-            describe: "unaligned small fixed".to_string(),
+            describe: "unaligned small fixed".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64; 9],
-            describe: "unaligned medium fixed".to_string(),
+            describe: "unaligned medium fixed".to_owned(),
         },
         HashKeyBenchCaseBuilder {
             data_types: vec![DataType::Int64; 17],
-            describe: "unaligned large fixed".to_string(),
+            describe: "unaligned large fixed".to_owned(),
         },
     ]
 }

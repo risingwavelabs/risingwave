@@ -2,4 +2,4 @@
 hummock_time_travel_snapshot_interval = 30
 
 [system]
-time_travel_retention_ms = 300000
+time_travel_retention_ms = 600000

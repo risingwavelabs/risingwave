@@ -1,0 +1,131 @@
+control substitution on
+
+system ok
+rpk topic delete -r tpch-* || true
+
+system ok
+rpk topic create tpch-supplier -p 4 &&
+rpk topic create tpch-part -p 4 &&
+rpk topic create tpch-partsupp -p 4 &&
+rpk topic create tpch-customer -p 4 &&
+rpk topic create tpch-orders -p 4 &&
+rpk topic create tpch-lineitem -p 4 &&
+rpk topic create tpch-nation -p 4 &&
+rpk topic create tpch-region -p 4
+
+include ./create_tables.slt.part
+
+include ./insert_supplier.slt.part
+include ./insert_part.slt.part
+include ./insert_partsupp.slt.part
+include ./insert_customer.slt.part
+include ./insert_orders.slt.part
+include ./insert_lineitem.slt.part
+include ./insert_nation.slt.part
+include ./insert_region.slt.part
+
+statement ok
+flush;
+
+statement ok
+create sink kafka_supplier FROM supplier
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-supplier'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+statement ok
+create sink kafka_part FROM part
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-part'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+statement ok
+create sink kafka_partsupp FROM partsupp
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-partsupp'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+statement ok
+create sink kafka_customer FROM customer
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-customer'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+# note: In source, Date format is days_since_unix_epoch. In sink, it's num_days_from_ce.
+# https://github.com/risingwavelabs/risingwave/issues/16467
+
+statement ok
+create sink kafka_orders AS select * except(o_orderdate), o_orderdate::varchar as o_orderdate FROM orders
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-orders'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+statement ok
+create sink kafka_lineitem AS select * except(l_shipdate, l_commitdate, l_receiptdate), l_shipdate::varchar as l_shipdate, l_commitdate::varchar as l_commitdate, l_receiptdate::varchar as l_receiptdate FROM lineitem
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-lineitem'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+statement ok
+create sink kafka_nation FROM nation
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-nation'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+statement ok
+create sink kafka_region FROM region
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'tpch-region'
+) FORMAT PLAIN ENCODE JSON (
+    force_append_only='true'
+);
+
+sleep 5s
+
+statement ok
+DROP SINK kafka_supplier;
+
+statement ok
+DROP SINK kafka_part;
+
+statement ok
+DROP SINK kafka_partsupp;
+
+statement ok
+DROP SINK kafka_customer;
+
+statement ok
+DROP SINK kafka_orders;
+
+statement ok
+DROP SINK kafka_lineitem;
+
+statement ok
+DROP SINK kafka_nation;
+
+statement ok
+DROP SINK kafka_region;
+
+include ./drop_tables.slt.part

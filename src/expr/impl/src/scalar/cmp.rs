@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,12 @@
 
 use std::fmt::Debug;
 
+use constant_time_eq::constant_time_eq;
 use risingwave_common::array::{Array, BoolArray};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::row::Row;
 use risingwave_common::types::{Scalar, ScalarRef, ScalarRefImpl};
-use risingwave_expr::function;
+use risingwave_expr::{ExprError, Result, function};
 
 #[function("equal(boolean, boolean) -> boolean", batch_fn = "boolarray_eq")]
 #[function("equal(*int, *int) -> boolean")]
@@ -210,6 +211,7 @@ where
 #[function("is_distinct_from(interval, interval) -> boolean")]
 #[function("is_distinct_from(timestamp, timestamp) -> boolean")]
 #[function("is_distinct_from(timestamptz, timestamptz) -> boolean")]
+#[function("is_distinct_from(jsonb, jsonb) -> boolean")]
 #[function("is_distinct_from(date, timestamp) -> boolean")]
 #[function("is_distinct_from(timestamp, date) -> boolean")]
 #[function("is_distinct_from(time, interval) -> boolean")]
@@ -241,6 +243,7 @@ where
 #[function("is_not_distinct_from(interval, interval) -> boolean")]
 #[function("is_not_distinct_from(timestamp, timestamp) -> boolean")]
 #[function("is_not_distinct_from(timestamptz, timestamptz) -> boolean")]
+#[function("is_not_distinct_from(jsonb, jsonb) -> boolean")]
 #[function("is_not_distinct_from(date, timestamp) -> boolean")]
 #[function("is_not_distinct_from(timestamp, date) -> boolean")]
 #[function("is_not_distinct_from(time, interval) -> boolean")]
@@ -425,11 +428,31 @@ fn batch_is_not_null(a: &impl Array) -> BoolArray {
     BoolArray::new(a.null_bitmap().clone(), Bitmap::ones(a.len()))
 }
 
+#[function("secure_compare(varchar, varchar) -> boolean")]
+pub fn secure_compare(left: &str, right: &str) -> bool {
+    constant_time_eq(left.as_bytes(), right.as_bytes())
+}
+
+#[function("check_not_null(any, varchar, varchar) -> any")]
+fn check_not_null<'a>(
+    v: Option<ScalarRefImpl<'a>>,
+    col_name: &str,
+    relation_name: &str,
+) -> Result<Option<ScalarRefImpl<'a>>> {
+    if v.is_none() {
+        return Err(ExprError::NotNullViolation {
+            col_name: col_name.into(),
+            table_name: relation_name.into(),
+        });
+    }
+    Ok(v)
+}
+
 #[cfg(test)]
 mod tests {
     use std::str::FromStr;
 
-    use risingwave_common::types::{Decimal, Timestamp, F32, F64};
+    use risingwave_common::types::{Decimal, F32, F64, Timestamp};
     use risingwave_expr::expr::build_from_pretty;
 
     use super::*;
@@ -603,7 +626,7 @@ mod tests {
         const NAME: &'static str = "boolean";
 
         fn test_from(i: usize) -> Self {
-            i % 2 == 0
+            i.is_multiple_of(2)
         }
     }
 

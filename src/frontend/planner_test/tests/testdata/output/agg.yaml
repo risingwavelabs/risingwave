@@ -116,7 +116,7 @@
     LogicalProject { exprs: [min(t.v1), sum($expr1)] }
     └─LogicalAgg { group_key: [$expr1], aggs: [min(t.v1), sum($expr1)] }
       └─LogicalProject { exprs: [(t.v1 + t.v2) as $expr1, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: test logical_agg with complex group expression
   sql: |
     create table t(v1 int, v2 int, v3 int);
@@ -125,7 +125,7 @@
     LogicalProject { exprs: [t.v1, sum($expr2)] }
     └─LogicalAgg { group_key: [$expr1, t.v1], aggs: [sum($expr2)] }
       └─LogicalProject { exprs: [((t.v1 + t.v2) / t.v3) as $expr1, t.v1, (t.v1 * t.v2) as $expr2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
 - name: test logical_agg with complex group expression
   sql: |
     create table t(v1 int, v2 int);
@@ -134,7 +134,7 @@
     LogicalProject { exprs: [$expr1] }
     └─LogicalAgg { group_key: [$expr1], aggs: [] }
       └─LogicalProject { exprs: [(t.v1 + t.v2) as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: "test logical_agg with complex group expression \nshould complain about nested agg call \n"
   sql: |
     create table t(v1 int, v2 int);
@@ -150,7 +150,7 @@
     LogicalProject { exprs: [(t.v1 + t.v2) as $expr1] }
     └─LogicalAgg { group_key: [t.v1, t.v2], aggs: [] }
       └─LogicalProject { exprs: [t.v1, t.v2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - sql: |
     create table t(v1 int, v2 int);
     select v1 from t group by v1 + v2;
@@ -229,7 +229,7 @@
     LogicalProject { exprs: [(4:Int32 + 5:Int32) as $expr1, (2:Int32 + 3:Int32) as $expr2] }
     └─LogicalAgg { group_key: [t.a], aggs: [] }
       └─LogicalProject { exprs: [t.a] }
-        └─LogicalScan { table: t, columns: [t.a, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.a, t._row_id, t._rw_timestamp] }
 - name: group by output column name expr disallowed
   sql: |
     select 4 + 5 as a group by a + 1;
@@ -274,7 +274,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [cnt, sum], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum0(count($expr1)), sum(sum($expr1))] }
-      └─StreamSimpleAgg { aggs: [sum0(count($expr1)), sum(sum($expr1)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum0(count($expr1)), sum(sum($expr1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count($expr1), sum($expr1)] }
             └─StreamProject { exprs: [(t.v1 + t.v2) as $expr1, t._row_id] }
@@ -437,7 +437,7 @@
     └─LogicalFilter { predicate: (t.v1 > 5:Int32::Float64) }
       └─LogicalAgg { group_key: [t.v1], aggs: [] }
         └─LogicalProject { exprs: [t.v1] }
-          └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
 - name: having with non-group column
   sql: |
     create table t (v1 real, v2 int);
@@ -450,7 +450,7 @@
   logical_plan: |-
     LogicalAgg { group_key: [t.v1], aggs: [] }
     └─LogicalProject { exprs: [t.v1] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [v1], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.v1], noop_update_hint: true }
@@ -466,7 +466,7 @@
     └─LogicalProject { exprs: [sum(t.v1)] }
       └─LogicalAgg { group_key: [t.v2], aggs: [sum(t.v1)] }
         └─LogicalProject { exprs: [t.v2, t.v1] }
-          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [sum], stream_key: [sum], pk_columns: [sum], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(t.v1)], noop_update_hint: true }
@@ -484,7 +484,7 @@
     LogicalProject { exprs: [t.v1, t.v2] }
     └─LogicalTopN { order: [t.v3 ASC, t.v1 ASC], limit: 1, offset: 0, group_key: [t.v1, t.v3] }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchProject { exprs: [t.v1, t.v2] }
     └─BatchExchange { order: [t.v3 ASC, t.v1 ASC], dist: Single }
@@ -492,7 +492,7 @@
         └─BatchGroupTopN { order: [t.v3 ASC, t.v1 ASC], limit: 1, offset: 0, group_key: [t.v1, t.v3] }
           └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
             └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
-- name: distinct on
+- name: distinct on order by distinct columns
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select distinct on (v1, v3) v1, v2 from t order by v1, v3;
@@ -500,7 +500,7 @@
     LogicalProject { exprs: [t.v1, t.v2] }
     └─LogicalTopN { order: [t.v1 ASC, t.v3 ASC], limit: 1, offset: 0, group_key: [t.v1, t.v3] }
       └─LogicalProject { exprs: [t.v1, t.v2, t.v3] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchProject { exprs: [t.v1, t.v2] }
     └─BatchExchange { order: [t.v1 ASC, t.v3 ASC], dist: Single }
@@ -508,15 +508,23 @@
         └─BatchGroupTopN { order: [t.v1 ASC, t.v3 ASC], limit: 1, offset: 0, group_key: [t.v1, t.v3] }
           └─BatchExchange { order: [], dist: HashShard(t.v1, t.v3) }
             └─BatchScan { table: t, columns: [t.v1, t.v2, t.v3], distribution: SomeShard }
-- name: distinct on
+- name: distinct on order by part of the distinct columns
   sql: |
     create table t (v1 int, v2 int);
     select distinct on (v1) v1, v2 from t order by v1;
   logical_plan: |-
     LogicalTopN { order: [t.v1 ASC], limit: 1, offset: 0, group_key: [t.v1] }
     └─LogicalProject { exprs: [t.v1, t.v2] }
-      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
-- name: distinct on
+      └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
+- name: distinct on order by distinct columns and additional sorting columns
+  sql: |
+    create table t (id int, ts timestamp, foo int, bar varchar);
+    select distinct on (id) * from t order by id, ts desc;
+  logical_plan: |-
+    LogicalTopN { order: [t.id ASC, t.ts DESC], limit: 1, offset: 0, group_key: [t.id] }
+    └─LogicalProject { exprs: [t.id, t.ts, t.foo, t.bar] }
+      └─LogicalScan { table: t, columns: [t.id, t.ts, t.foo, t.bar, t._row_id, t._rw_timestamp] }
+- name: distinct on with expression
   sql: |
     create table t (v1 int, v2 int, v3 int);
     select distinct on(v1) v2 + v3 from t order by v1;
@@ -524,7 +532,7 @@
     LogicalProject { exprs: [$expr1] }
     └─LogicalTopN { order: [t.v1 ASC], limit: 1, offset: 0, group_key: [t.v1] }
       └─LogicalProject { exprs: [(t.v2 + t.v3) as $expr1, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchProject { exprs: [$expr1] }
     └─BatchExchange { order: [t.v1 ASC], dist: Single }
@@ -541,7 +549,7 @@
     LogicalProject { exprs: [count(t.v3), min(t.v2), max(t.v1)] }
     └─LogicalAgg { aggs: [count(t.v3), min(t.v2), max(t.v1)] }
       └─LogicalProject { exprs: [t.v3, t.v2, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count(t.v3), min(t.v2), max(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3] }
@@ -558,7 +566,7 @@
     LogicalProject { exprs: [(min(t.v1) + (max(t.v3) * count(t.v2))) as $expr1] }
     └─LogicalAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
       └─LogicalProject { exprs: [t.v1, t.v3, t.v2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [(min(t.v1) + (max(t.v3) * count(t.v2))) as $expr1] }
     └─LogicalAgg { aggs: [min(t.v1), max(t.v3), count(t.v2)] }
@@ -585,7 +593,7 @@
     LogicalProject { exprs: [t.v1] }
     └─LogicalAgg { group_key: [t.v1], aggs: [] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { group_key: [t.v1], aggs: [] }
     └─LogicalScan { table: t, columns: [t.v1] }
@@ -603,7 +611,7 @@
     LogicalProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
     └─LogicalAgg { group_key: [t.v3, t.v2], aggs: [min(t.v1), max(t.v1)] }
       └─LogicalProject { exprs: [t.v3, t.v2, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [t.v2, min(t.v1), t.v3, max(t.v1)] }
     └─LogicalAgg { group_key: [t.v2, t.v3], aggs: [min(t.v1), max(t.v1)] }
@@ -622,14 +630,14 @@
     LogicalProject { exprs: [sum(t.v1)] }
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |-
     StreamMaterialize { columns: [s1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1))] }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -641,14 +649,14 @@
     LogicalProject { exprs: [sum(t.v1)] }
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |-
     StreamMaterialize { columns: [s1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1))] }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -660,14 +668,14 @@
     LogicalProject { exprs: [sum(t.v1)] }
     └─LogicalAgg { aggs: [sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(t.v1)] }
     └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |-
     StreamMaterialize { columns: [s1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1))] }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -679,14 +687,14 @@
     LogicalProject { exprs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
     └─LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
     └─LogicalScan { table: t, columns: [t.v1] }
   stream_plan: |-
     StreamMaterialize { columns: [sa], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1) filter((t.v1 > 0:Int32)))] }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v1) filter((t.v1 > 0:Int32))), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1) filter((t.v1 > 0:Int32))), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1) filter((t.v1 > 0:Int32))] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -700,7 +708,7 @@
     LogicalProject { exprs: [sum($expr1) filter(((t.a * t.b) > 0:Int32))] }
     └─LogicalAgg { aggs: [sum($expr1) filter(((t.a * t.b) > 0:Int32))] }
       └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum($expr1) filter(((t.a * t.b) > 0:Int32))] }
     └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
@@ -713,7 +721,7 @@
     LogicalProject { exprs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
     └─LogicalAgg { aggs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
       └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))] }
     └─LogicalProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1] }
@@ -723,8 +731,8 @@
     └─StreamProject { exprs: [max(max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))))] }
       └─StreamSimpleAgg { aggs: [max(max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32)))), count] }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr2], aggs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))), count] }
-            └─StreamProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1, t._row_id, Vnode(t._row_id) as $expr2] }
+          └─StreamHashAgg { group_key: [_vnode], aggs: [max($expr1) filter((t.a < t.b) AND ((t.a + t.b) < 100:Int32) AND ((t.a * t.b) <> ((t.a + t.b) - 1:Int32))), count] }
+            └─StreamProject { exprs: [t.a, t.b, (t.a * t.b) as $expr1, t._row_id, Vnode(t._row_id) as _vnode] }
               └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: avg filter clause + group by
   sql: |
@@ -734,7 +742,7 @@
     LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))::Decimal) as $expr1] }
     └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
       └─LogicalProject { exprs: [t.b, t.a] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [(sum(t.a) filter((t.a > t.b))::Decimal / count(t.a) filter((t.a > t.b))::Decimal) as $expr1] }
     └─LogicalAgg { group_key: [t.b], aggs: [sum(t.a) filter((t.a > t.b)), count(t.a) filter((t.a > t.b))] }
@@ -753,14 +761,14 @@
     LogicalProject { exprs: [count filter((t.a > t.b))] }
     └─LogicalAgg { aggs: [count filter((t.a > t.b))] }
       └─LogicalProject { exprs: [t.a, t.b] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [count filter((t.a > t.b))] }
     └─LogicalScan { table: t, columns: [t.a, t.b] }
   stream_plan: |-
     StreamMaterialize { columns: [cnt_agb], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum0(count filter((t.a > t.b)))] }
-      └─StreamSimpleAgg { aggs: [sum0(count filter((t.a > t.b))), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum0(count filter((t.a > t.b))), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count filter((t.a > t.b))] }
             └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -814,7 +822,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [b], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v2) filter((t.v2 < 5:Int32)))] }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v2) filter((t.v2 < 5:Int32))), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v2) filter((t.v2 < 5:Int32))), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v2) filter((t.v2 < 5:Int32))] }
             └─StreamTableScan { table: t, columns: [t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -888,7 +896,7 @@
     LogicalProject { exprs: [string_agg(t.y, ',':Varchar), count(distinct t.x)] }
     └─LogicalAgg { aggs: [string_agg(t.y, ',':Varchar), count(distinct t.x)] }
       └─LogicalProject { exprs: [t.y, ',':Varchar, t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [string_agg(t.y, ',':Varchar), count(distinct t.x)] }
     └─BatchExchange { order: [], dist: Single }
@@ -909,7 +917,7 @@
     LogicalProject { exprs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
     └─LogicalAgg { aggs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
       └─LogicalProject { exprs: [t.y, ',':Varchar, t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [string_agg(t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
     └─BatchExchange { order: [], dist: Single }
@@ -930,7 +938,7 @@
     LogicalProject { exprs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
     └─LogicalAgg { aggs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
       └─LogicalProject { exprs: [t.y, ',':Varchar, t.x] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [string_agg(distinct t.y, ',':Varchar order_by(t.y ASC)), count(distinct t.x)] }
     └─BatchExchange { order: [], dist: Single }
@@ -999,7 +1007,7 @@
     LogicalProject { exprs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
     └─LogicalAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
       └─LogicalProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1] }
-        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.a, t.b, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
     └─LogicalProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1] }
@@ -1007,7 +1015,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [s1], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32)))] }
-      └─StreamSimpleAgg { aggs: [sum(sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum($expr1) filter((t.b < 100:Int32) AND ((t.b * 2:Int32) > 10:Int32))] }
             └─StreamProject { exprs: [t.b, (Length(t.a) * t.b) as $expr1, t._row_id] }
@@ -1033,7 +1041,7 @@
     StreamMaterialize { columns: [cnt, i.x(hidden)], stream_key: [i.x], pk_columns: [i.x], pk_conflict: NoCheck }
     └─StreamProject { exprs: [count, i.x] }
       └─StreamHashAgg { group_key: [i.x], aggs: [count] }
-        └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i.t._row_id], pk: [x, t._row_id], dist: UpstreamHashShard(i.x) }
+        └─StreamTableScan { table: i, columns: [i.x, i.t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [i.x, i.t._row_id], pk: [x, t._row_id], dist: UpstreamHashShard(i.x) }
 - name: distinct aggregates only have one distinct argument doesn't need expand
   sql: |
     create table t(x int, y int);
@@ -1075,7 +1083,7 @@
     LogicalAgg { aggs: [count(t.x_expanded) filter((flag = 0:Int64)), sum(t.y_expanded) filter((flag = 1:Int64))] }
     └─LogicalAgg { group_key: [t.x_expanded, t.y_expanded, flag], aggs: [] }
       └─LogicalExpand { column_subsets: [[t.x], [t.y]] }
-        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.x, t.y, t._row_id, t._rw_timestamp] }
   with_config_map:
     RW_FORCE_SPLIT_DISTINCT_AGG: 'true'
 - name: remove unnecessary distinct for max and min
@@ -1227,7 +1235,7 @@
     └─LogicalProjectSet { select_list: [$0, Unnest(Array(2:Int32, $1))] }
       └─LogicalAgg { aggs: [min(t.v1), max(t.v2)] }
         └─LogicalProject { exprs: [t.v1, t.v2] }
-          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: post-agg project set - error
   sql: |
     create table t (v1 int, v2 int);
@@ -1242,7 +1250,7 @@
     └─LogicalProjectSet { select_list: [$1, Unnest(Array(2:Int32, $0))] }
       └─LogicalAgg { group_key: [t.v2], aggs: [min(t.v1)] }
         └─LogicalProject { exprs: [t.v2, t.v1] }
-          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+          └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
 - name: min/max on index
   sql: |
     create table t (v1 varchar, v2 int);
@@ -1252,7 +1260,7 @@
     LogicalProject { exprs: [max(t.v2)] }
     └─LogicalAgg { aggs: [max(t.v2)] }
       └─LogicalProject { exprs: [t.v2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [max(idx.v2)] }
     └─LogicalTopN { order: [idx.v2 DESC], limit: 1, offset: 0 }
@@ -1267,7 +1275,7 @@
     LogicalProject { exprs: [max(t.v2)] }
     └─LogicalAgg { group_key: [t.v1], aggs: [max(t.v2)] }
       └─LogicalProject { exprs: [t.v1, t.v2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalProject { exprs: [max(t.v2)] }
     └─LogicalAgg { group_key: [t.v1], aggs: [max(t.v2)] }
@@ -1280,7 +1288,7 @@
     LogicalProject { exprs: [min(t.v1)] }
     └─LogicalAgg { aggs: [min(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1] }
+        └─LogicalScan { table: t, columns: [t.v1, t._rw_timestamp] }
   optimized_logical_plan_for_batch: |-
     LogicalAgg { aggs: [min(t.v1)] }
     └─LogicalTopN { order: [t.v1 ASC], limit: 1, offset: 0 }
@@ -1291,39 +1299,36 @@
     create table t (v1 int);
     select stddev_samp(v1), stddev_pop(v1) from t;
   logical_plan: |-
-    LogicalProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)) / (count(t.v1) - 1:Int64)::Decimal))) as $expr2, Sqrt(((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)) / count(t.v1)::Decimal)) as $expr3] }
+    LogicalProject { exprs: [Case((count(t.v1) <= 1:Int32), null:Decimal, Sqrt((Greatest((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)), 0:Int32::Decimal) / (count(t.v1) - 1:Int32)::Decimal))) as $expr2, Case((count(t.v1) = 0:Int32), null:Decimal, Sqrt((Greatest((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)), 0:Int32::Decimal) / count(t.v1)::Decimal))) as $expr3] }
     └─LogicalAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
       └─LogicalProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   batch_plan: |-
-    BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr4, Sqrt(((sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) / $expr3)) as $expr5] }
-    └─BatchProject { exprs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), sum(sum(t.v1))::Decimal as $expr2, sum0(count(t.v1))::Decimal as $expr3] }
-      └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
-        └─BatchExchange { order: [], dist: Single }
-          └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
-            └─BatchProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1] }
-              └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
-  batch_local_plan: |-
-    BatchProject { exprs: [Case((count(t.v1) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - (($expr2 * $expr2) / $expr3)) / (count(t.v1) - 1:Int64)::Decimal))) as $expr4, Sqrt(((sum($expr1)::Decimal - (($expr2 * $expr2) / $expr3)) / $expr3)) as $expr5] }
-    └─BatchProject { exprs: [sum($expr1), sum(t.v1), count(t.v1), sum(t.v1)::Decimal as $expr2, count(t.v1)::Decimal as $expr3] }
-      └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
-        └─BatchExchange { order: [], dist: Single }
+    BatchProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int32), null:Decimal, Sqrt((Greatest((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)), 0:Decimal) / (sum0(count(t.v1)) - 1:Int32)::Decimal))) as $expr2, Case((sum0(count(t.v1)) = 0:Int32), null:Decimal, Sqrt((Greatest((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)), 0:Decimal) / sum0(count(t.v1))::Decimal))) as $expr3] }
+    └─BatchSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1))] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
           └─BatchProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1] }
             └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
+  batch_local_plan: |-
+    BatchProject { exprs: [Case((count(t.v1) <= 1:Int32), null:Decimal, Sqrt((Greatest((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)), 0:Decimal) / (count(t.v1) - 1:Int32)::Decimal))) as $expr2, Case((count(t.v1) = 0:Int32), null:Decimal, Sqrt((Greatest((sum($expr1)::Decimal - ((sum(t.v1)::Decimal * sum(t.v1)::Decimal) / count(t.v1)::Decimal)), 0:Decimal) / count(t.v1)::Decimal))) as $expr3] }
+    └─BatchSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1] }
+          └─BatchScan { table: t, columns: [t.v1], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [stddev_samp, stddev_pop], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int64), null:Decimal, Sqrt(((sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) / (sum0(count(t.v1)) - 1:Int64)::Decimal))) as $expr4, Sqrt(((sum(sum($expr1))::Decimal - (($expr2 * $expr2) / $expr3)) / $expr3)) as $expr5] }
-      └─StreamProject { exprs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), sum(sum(t.v1))::Decimal as $expr2, sum0(count(t.v1))::Decimal as $expr3] }
-        └─StreamSimpleAgg { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), count] }
-          └─StreamExchange { dist: Single }
-            └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
-              └─StreamProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1, t._row_id] }
-                └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    └─StreamProject { exprs: [Case((sum0(count(t.v1)) <= 1:Int32), null:Decimal, Sqrt((Greatest((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)), 0:Decimal) / (sum0(count(t.v1)) - 1:Int32)::Decimal))) as $expr2, Case((sum0(count(t.v1)) = 0:Int32), null:Decimal, Sqrt((Greatest((sum(sum($expr1))::Decimal - ((sum(sum(t.v1))::Decimal * sum(sum(t.v1))::Decimal) / sum0(count(t.v1))::Decimal)), 0:Decimal) / sum0(count(t.v1))::Decimal))) as $expr3] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum($expr1)), sum(sum(t.v1)), sum0(count(t.v1)), count] }
+        └─StreamExchange { dist: Single }
+          └─StreamStatelessSimpleAgg { aggs: [sum($expr1), sum(t.v1), count(t.v1)] }
+            └─StreamProject { exprs: [(t.v1 * t.v1) as $expr1, t.v1, t._row_id] }
+              └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: stddev_samp with other columns
   sql: |
     select count(''), stddev_samp(1);
   logical_plan: |-
-    LogicalProject { exprs: [count('':Varchar), Case((count(1:Int32) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(1:Int32)::Decimal * sum(1:Int32)::Decimal) / count(1:Int32)::Decimal)) / (count(1:Int32) - 1:Int64)::Decimal))) as $expr2] }
+    LogicalProject { exprs: [count('':Varchar), Case((count(1:Int32) <= 1:Int32), null:Decimal, Sqrt((Greatest((sum($expr1)::Decimal - ((sum(1:Int32)::Decimal * sum(1:Int32)::Decimal) / count(1:Int32)::Decimal)), 0:Int32::Decimal) / (count(1:Int32) - 1:Int32)::Decimal))) as $expr2] }
     └─LogicalAgg { aggs: [count('':Varchar), sum($expr1), sum(1:Int32), count(1:Int32)] }
       └─LogicalProject { exprs: ['':Varchar, (1:Int32 * 1:Int32) as $expr1, 1:Int32] }
         └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
@@ -1332,10 +1337,10 @@
     create table t(v int, w float);
     select stddev_samp(v) from t group by w;
   logical_plan: |-
-    LogicalProject { exprs: [Case((count(t.v) <= 1:Int64), null:Decimal, Sqrt(((sum($expr1)::Decimal - ((sum(t.v)::Decimal * sum(t.v)::Decimal) / count(t.v)::Decimal)) / (count(t.v) - 1:Int64)::Decimal))) as $expr2] }
+    LogicalProject { exprs: [Case((count(t.v) <= 1:Int32), null:Decimal, Sqrt((Greatest((sum($expr1)::Decimal - ((sum(t.v)::Decimal * sum(t.v)::Decimal) / count(t.v)::Decimal)), 0:Int32::Decimal) / (count(t.v) - 1:Int32)::Decimal))) as $expr2] }
     └─LogicalAgg { group_key: [t.w], aggs: [sum($expr1), sum(t.v), count(t.v)] }
       └─LogicalProject { exprs: [t.w, (t.v * t.v) as $expr1, t.v] }
-        └─LogicalScan { table: t, columns: [t.v, t.w, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v, t.w, t._row_id, t._rw_timestamp] }
 - name: force two phase aggregation should succeed with UpstreamHashShard and SomeShard (batch only).
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1432,8 +1437,8 @@
     └─StreamProject { exprs: [max(max(internal_last_seen_value(lineitem.l_commitdate))), internal_last_seen_value(lineitem.l_commitdate)] }
       └─StreamHashAgg { group_key: [internal_last_seen_value(lineitem.l_commitdate)], aggs: [max(max(internal_last_seen_value(lineitem.l_commitdate))), count] }
         └─StreamExchange { dist: HashShard(internal_last_seen_value(lineitem.l_commitdate)) }
-          └─StreamHashAgg { group_key: [internal_last_seen_value(lineitem.l_commitdate), $expr1], aggs: [max(internal_last_seen_value(lineitem.l_commitdate)), count] }
-            └─StreamProject { exprs: [lineitem.l_orderkey, internal_last_seen_value(lineitem.l_commitdate), Vnode(lineitem.l_orderkey) as $expr1] }
+          └─StreamHashAgg { group_key: [internal_last_seen_value(lineitem.l_commitdate), _vnode], aggs: [max(internal_last_seen_value(lineitem.l_commitdate)), count] }
+            └─StreamProject { exprs: [lineitem.l_orderkey, internal_last_seen_value(lineitem.l_commitdate), Vnode(lineitem.l_orderkey) as _vnode] }
               └─StreamHashAgg { group_key: [lineitem.l_orderkey], aggs: [internal_last_seen_value(lineitem.l_commitdate), count] }
                 └─StreamTableScan { table: lineitem, columns: [lineitem.l_orderkey, lineitem.l_commitdate], stream_scan_type: ArrangementBackfill, stream_key: [lineitem.l_orderkey], pk: [l_orderkey], dist: UpstreamHashShard(lineitem.l_orderkey) }
 - name: two phase agg on hop window input should use two phase agg
@@ -1472,8 +1477,8 @@
     └─StreamProject { exprs: [max(max(sum0(count))), window_start] }
       └─StreamHashAgg { group_key: [window_start], aggs: [max(max(sum0(count))), count] }
         └─StreamExchange { dist: HashShard(window_start) }
-          └─StreamHashAgg { group_key: [window_start, $expr1], aggs: [max(sum0(count)), count] }
-            └─StreamProject { exprs: [bid.auction, window_start, sum0(count), Vnode(bid.auction, window_start) as $expr1] }
+          └─StreamHashAgg { group_key: [window_start, _vnode], aggs: [max(sum0(count)), count] }
+            └─StreamProject { exprs: [bid.auction, window_start, sum0(count), Vnode(bid.auction, window_start) as _vnode] }
               └─StreamHashAgg { group_key: [bid.auction, window_start], aggs: [sum0(count), count] }
                 └─StreamExchange { dist: HashShard(bid.auction, window_start) }
                   └─StreamHashAgg { group_key: [bid.auction, window_start, _vnode], aggs: [count] }
@@ -1497,10 +1502,12 @@
             └─BatchScan { table: idx, columns: [idx.id], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [count, idx.id(hidden)], stream_key: [idx.id], pk_columns: [idx.id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [count, idx.id] }
-      └─StreamHashAgg { group_key: [idx.id], aggs: [count] }
+    └─StreamProject { exprs: [sum0(count), idx.id] }
+      └─StreamHashAgg { group_key: [idx.id], aggs: [sum0(count), count] }
         └─StreamExchange { dist: HashShard(idx.id) }
-          └─StreamTableScan { table: idx, columns: [idx.id], stream_scan_type: ArrangementBackfill, stream_key: [idx.id], pk: [col, id], dist: SomeShard }
+          └─StreamHashAgg { group_key: [idx.id, _vnode], aggs: [count] }
+            └─StreamProject { exprs: [idx.id, idx.col, Vnode(idx.col) as _vnode] }
+              └─StreamTableScan { table: idx, columns: [idx.id, idx.col], stream_scan_type: ArrangementBackfill, stream_key: [idx.col, idx.id], pk: [col, id], dist: UpstreamHashShard(idx.col) }
 - name: two phase agg with stream SomeShard (via index) but pk does not satisfy output dist should use two phase agg
   sql: |
     SET QUERY_MODE TO DISTRIBUTED;
@@ -1684,7 +1691,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [first_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [first_value(t.x order_by(t.y ASC))] }
         └── StreamSimpleAgg { aggs: [first_value(t.x order_by(t.y ASC)), count] }
             ├── tables: [ SimpleAggState: 1, SimpleAggCall0: 0 ]
@@ -1696,19 +1702,19 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t_y, t__row_id, t_x ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ t_y, t__row_id, t_x, _rw_timestamp ], primary key: [ $0 ASC, $1 ASC ], value indices: [ 0, 1, 2 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ first_value(t_x order_by(t_y ASC)), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1 { columns: [ first_value(t_x order_by(t_y ASC)), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
     Table 2
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ first_value ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ first_value, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - sql: |
     create table t (x int, y int);
@@ -1716,7 +1722,6 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [first_value], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [first_value(distinct t.x order_by(t.x ASC))] }
         └── StreamSimpleAgg { aggs: [first_value(distinct t.x order_by(t.x ASC)), count] }
             ├── tables: [ SimpleAggState: 1, SimpleAggCall0: 0, SimpleAggDedupForCol0: 2 ]
@@ -1728,21 +1733,26 @@
     ├── Upstream
     └── BatchPlanNode
 
-    Table 0 { columns: [ t_x ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ t_x, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ first_value(distinct t_x order_by(t_x ASC)), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 1
+    ├── columns: [ first_value(distinct t_x order_by(t_x ASC)), count, _rw_timestamp ]
+    ├── primary key: []
+    ├── value indices: [ 0, 1 ]
+    ├── distribution key: []
+    └── read pk prefix len hint: 0
 
-    Table 2 { columns: [ t_x, count_for_agg_call_0 ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [], read pk prefix len hint: 1 }
+    Table 2 { columns: [ t_x, count_for_agg_call_0, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [], read pk prefix len hint: 1 }
 
     Table 3
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ first_value ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ first_value, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - sql: |
     create table t (x int, y int);
@@ -1871,11 +1881,11 @@
     LogicalProject { exprs: [sum(t.v1), count(t.v1), sum(t.v1), count(t.v1)] }
     └─LogicalAgg { aggs: [sum(t.v1), count(t.v1)] }
       └─LogicalProject { exprs: [t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, z, w], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum(sum(t.v1)), sum0(count(t.v1)), sum(sum(t.v1)), sum0(count(t.v1))] }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count(t.v1)), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), sum0(count(t.v1)), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count(t.v1)] }
             └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -1887,7 +1897,7 @@
     LogicalProject { exprs: [approx_percentile($expr1)] }
     └─LogicalAgg { aggs: [approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [approx_percentile($expr1)] }
     └─BatchExchange { order: [], dist: Single }
@@ -1908,7 +1918,7 @@
     LogicalProject { exprs: [approx_percentile($expr1), sum(t.v1)] }
     └─LogicalAgg { aggs: [approx_percentile($expr1), sum(t.v1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [approx_percentile($expr1), sum(t.v1)] }
     └─BatchExchange { order: [], dist: Single }
@@ -1923,7 +1933,7 @@
       │     └─StreamShare { id: 2 }
       │       └─StreamProject { exprs: [t.v1::Float64 as $expr1, t.v1, t._row_id] }
       │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count], must_output_per_barrier: true }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), count], must_output_per_barrier: true }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamShare { id: 2 }
@@ -1937,7 +1947,7 @@
     LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), sum(t.v1), count(t.v1)] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count(t.v1)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), sum(t.v1), count(t.v1)] }
     └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count(t.v1)] }
@@ -1954,7 +1964,7 @@
         │     └─StreamShare { id: 2 }
         │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
         │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count(t.v1)), count], must_output_per_barrier: true }
+        └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), sum0(count(t.v1)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count(t.v1)] }
               └─StreamShare { id: 2 }
@@ -1968,7 +1978,7 @@
     LogicalProject { exprs: [approx_percentile($expr1), approx_percentile($expr1)] }
     └─LogicalAgg { aggs: [approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   stream_plan: |-
     StreamMaterialize { columns: [x, y], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [approx_percentile, approx_percentile] }
@@ -1985,7 +1995,7 @@
     LogicalProject { exprs: [approx_percentile($expr1), approx_percentile($expr2)] }
     └─LogicalAgg { aggs: [approx_percentile($expr1), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1, t.v2::Float64 as $expr2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [approx_percentile($expr1), approx_percentile($expr2)] }
     └─BatchExchange { order: [], dist: Single }
@@ -2014,7 +2024,7 @@
     LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
     └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
@@ -2038,7 +2048,7 @@
         │       └─StreamShare { id: 2 }
         │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
         │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count], must_output_per_barrier: true }
+        └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count, sum(t.v2)] }
               └─StreamShare { id: 2 }
@@ -2052,7 +2062,7 @@
     LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchProject { exprs: [sum(t.v1), approx_percentile($expr1), count, (sum(t.v2)::Float64 + approx_percentile($expr2)) as $expr3] }
     └─BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, sum(t.v2), approx_percentile($expr2)] }
@@ -2076,7 +2086,7 @@
         │       └─StreamShare { id: 2 }
         │         └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2, t._row_id] }
         │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count], must_output_per_barrier: true }
+        └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), sum0(count), sum(sum(t.v2)), count], must_output_per_barrier: true }
           └─StreamExchange { dist: Single }
             └─StreamStatelessSimpleAgg { aggs: [sum(t.v1), count, sum(t.v2)] }
               └─StreamShare { id: 2 }
@@ -2090,7 +2100,7 @@
     LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1)] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1)] }
     └─BatchExchange { order: [], dist: Single }
@@ -2105,7 +2115,7 @@
       │     └─StreamShare { id: 2 }
       │       └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr1, t._row_id] }
       │         └─StreamTableScan { table: t, columns: [t.v1, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-      └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), count], must_output_per_barrier: true }
+      └─StreamSimpleAgg [append_only] { aggs: [sum(sum(t.v1)), count], must_output_per_barrier: true }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [sum(t.v1)] }
             └─StreamShare { id: 2 }
@@ -2119,7 +2129,7 @@
     LogicalProject { exprs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
     └─LogicalAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
       └─LogicalProject { exprs: [t.v1, t.v1::Float64 as $expr1, t.v2, t.v2::Float64 as $expr2] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [sum(t.v1), approx_percentile($expr1), count, max(t.v2), approx_percentile($expr2)] }
     └─BatchExchange { order: [], dist: Single }
@@ -2143,8 +2153,8 @@
       │           └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamSimpleAgg { aggs: [sum(sum(t.v1)), sum0(count), max(max(t.v2)), count], must_output_per_barrier: true }
         └─StreamExchange { dist: Single }
-          └─StreamHashAgg { group_key: [$expr5], aggs: [sum(t.v1), count, max(t.v2)] }
-            └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr3, t.v2, t.v2::Float64 as $expr4, t._row_id, Vnode(t._row_id) as $expr5] }
+          └─StreamHashAgg { group_key: [_vnode], aggs: [sum(t.v1), count, max(t.v2)] }
+            └─StreamProject { exprs: [t.v1, t.v1::Float64 as $expr3, t.v2, t.v2::Float64 as $expr4, t._row_id, Vnode(t._row_id) as _vnode] }
               └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: test hash approx_percentile
   sql: |
@@ -2154,7 +2164,7 @@
     LogicalProject { exprs: [approx_percentile($expr1)] }
     └─LogicalAgg { group_key: [t.v2], aggs: [approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v2, t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t.v2, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [approx_percentile($expr1)] }
@@ -2185,7 +2195,7 @@
     LogicalProject { exprs: [approx_percentile($expr1)] }
     └─LogicalAgg { aggs: [approx_percentile($expr1)] }
       └─LogicalProject { exprs: [t.v1::Float64 as $expr1] }
-        └─LogicalScan { table: t, columns: [t.v1, t._row_id] }
+        └─LogicalScan { table: t, columns: [t.v1, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchSimpleAgg { aggs: [approx_percentile($expr1)] }
     └─BatchExchange { order: [], dist: Single }
@@ -2225,3 +2235,44 @@
 
     Caused by:
       relative_error=1 does not satisfy 0.0 < relative_error < 1.0
+- name: test empty agg
+  sql: |
+    WITH with_0 AS (
+        WITH with_1 AS (
+            SELECT
+                TIMESTAMP '2025-05-05 16:18:55' AS col_0,
+                avg((INT '813')) AS col_1, ((BIGINT '371') / (INT '-2147483648')) AS col_2,
+                (SMALLINT '460') AS col_3
+            FROM generate_series(TIMESTAMP '2020-01-01 00:07:42', TIMESTAMP '2020-01-01 00:46:33', INTERVAL '2706 seconds') AS generate_series_2
+            WHERE true
+        )
+        SELECT
+            true AS col_0,
+            (REAL '-2147483648') AS col_1,
+            (SMALLINT '-10773') AS col_2
+        FROM with_1
+    )
+    SELECT
+        CAST(NULL AS STRUCT<a SMALLINT, b DOUBLE, c TIME>) AS col_0,
+        (INT '995') AS col_1,
+        (INTERVAL '-604800') AS col_2,
+        (FLOAT '294') AS col_3
+    FROM with_0
+    WHERE false;
+  logical_plan: |-
+    LogicalProject { exprs: [null:Struct(StructType { fields: [("a", Int16), ("b", Float64), ("c", Time)] }), 995:Int32, '-168:00:00':Interval, 294:Float64] }
+    └─LogicalFilter { predicate: false:Boolean }
+      └─LogicalShare { id: 7 }
+        └─LogicalProject { exprs: [true:Boolean, -2147483600:Float32, -10773:Int16] }
+          └─LogicalShare { id: 5 }
+            └─LogicalProject { exprs: ['2025-05-05 16:18:55':Timestamp, (sum(813:Int32)::Decimal / count(813:Int32)::Decimal) as $expr1, (371:Int64 / -2147483648:Int32) as $expr2, 460:Int16] }
+              └─LogicalAgg { aggs: [sum(813:Int32), count(813:Int32)] }
+                └─LogicalProject { exprs: [813:Int32] }
+                  └─LogicalFilter { predicate: true }
+                    └─LogicalTableFunction { table_function: GenerateSeries('2020-01-01 00:07:42':Timestamp, '2020-01-01 00:46:33':Timestamp, '00:45:06':Interval) }
+  batch_plan: 'BatchValues { rows: [] }'
+  stream_plan: |-
+    StreamMaterialize { columns: [col_0, col_1, col_2, col_3, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [null:Struct(StructType { fields: [("a", Int16), ("b", Float64), ("c", Time)] }), 995:Int32, '-168:00:00':Interval, 294:Float64, _row_id] }
+      └─StreamFilter { predicate: false:Boolean }
+        └─StreamValues { rows: [[0:Int64]] }

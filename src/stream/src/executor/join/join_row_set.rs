@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
-use std::collections::btree_map::OccupiedError as BTreeMapOccupiedError;
 use std::collections::BTreeMap;
+use std::collections::btree_map::OccupiedError as BTreeMapOccupiedError;
 use std::fmt::Debug;
 use std::mem;
 use std::ops::{Bound, RangeBounds};
@@ -60,7 +60,7 @@ impl<K: Ord, V> JoinRowSet<K, V> {
             && inner.len() >= MAX_VEC_SIZE
         {
             let btree = BTreeMap::from_iter(inner.drain(..));
-            mem::swap(self, &mut Self::BTree(btree));
+            *self = Self::BTree(btree);
         }
 
         match self {
@@ -100,7 +100,7 @@ impl<K: Ord, V> JoinRowSet<K, V> {
         {
             let btree = mem::take(inner);
             let vec = Vec::from_iter(btree);
-            mem::swap(self, &mut Self::Vec(vec));
+            *self = Self::Vec(vec);
         }
         ret
     }

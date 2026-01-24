@@ -7,31 +7,22 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack", "num-traits"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
+[features]
+test = []
 
 [dependencies]
 bytes = "1"
-easy-ext = "1"
 hex = "0.4"
 itertools = { workspace = true }
 parse-display = "0.10"
-prost = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_estimate_size = { workspace = true }
 risingwave_pb = { workspace = true }
-serde = { version = "1", features = ["derive"] }
-serde_bytes = "0.11"
+serde = { workspace = true }
 tracing = "0.1"
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../../workspace-hack" }
-
-[features]
-test = []
 
 [lints]
 workspace = true

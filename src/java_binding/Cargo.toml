@@ -1,19 +1,16 @@
 [package]
 name = "risingwave_java_binding"
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
+[lib]
+crate-type = ["cdylib"]
 
 [dependencies]
 anyhow = "1"
 bytes = "1"
 cfg-or-panic = "0.2"
-foyer ={ workspace = true }
+foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 jni = "0.21.1"
 prost = { workspace = true }
@@ -24,7 +21,7 @@ risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_storage = { workspace = true }
 rw_futures_util = { workspace = true }
-serde = { version = "1.0", features = ["derive"] }
+serde = { workspace = true }
 serde_json = "1.0"
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
@@ -39,9 +36,6 @@ tracing = "0.1"
 
 [dev-dependencies]
 risingwave_expr = { workspace = true }
-
-[lib]
-crate-type = ["cdylib"]
 
 [[bin]]
 name = "data-chunk-payload-generator"

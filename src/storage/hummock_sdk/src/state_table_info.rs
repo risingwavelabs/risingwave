@@ -17,7 +17,9 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Serialize, Deserialize, Clone)]
 pub struct StateTableInfo {
+    #[serde(default)]
     pub committed_epoch: u64,
+    #[serde(default)]
     pub compaction_group_id: u64,
 }
 

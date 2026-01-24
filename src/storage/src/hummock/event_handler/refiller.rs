@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::future::poll_fn;
 use std::ops::Range;
 use std::sync::{Arc, LazyLock};
-use std::task::{ready, Poll};
+use std::task::Poll;
 use std::time::{Duration, Instant};
 
 use foyer::{HybridCacheEntry, RangeBoundsExt};
@@ -25,9 +25,10 @@ use futures::{Future, FutureExt};
 use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
-    register_int_gauge_with_registry, Histogram, HistogramVec, IntGauge, Registry,
+    Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_with_registry,
 };
+use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
@@ -37,7 +38,8 @@ use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::{
-    Block, HummockError, HummockResult, Sstable, SstableBlockIndex, SstableStoreRef, TableHolder,
+    Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
+    SstableStoreRef, TableHolder,
 };
 use crate::monitor::StoreLocalStatistic;
 use crate::opts::StorageOpts;
@@ -196,20 +198,32 @@ pub struct CacheRefillConfig {
     ///
     /// Only units whose admit rate > threshold will be refilled.
     pub threshold: f64,
+
+    /// Skip recent filter.
+    pub skip_recent_filter: bool,
 }
 
 impl CacheRefillConfig {
     pub fn from_storage_opts(options: &StorageOpts) -> Self {
-        Self {
-            timeout: Duration::from_millis(options.cache_refill_timeout_ms),
-            data_refill_levels: options
+        let data_refill_levels = match Feature::ElasticDiskCache.check_available() {
+            Ok(_) => options
                 .cache_refill_data_refill_levels
                 .iter()
                 .copied()
                 .collect(),
+            Err(e) => {
+                tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
+                HashSet::new()
+            }
+        };
+
+        Self {
+            timeout: Duration::from_millis(options.cache_refill_timeout_ms),
+            data_refill_levels,
             concurrency: options.cache_refill_concurrency,
             unit: options.cache_refill_unit,
             threshold: options.cache_refill_threshold,
+            skip_recent_filter: options.cache_refill_skip_recent_filter,
         }
     }
 }
@@ -287,33 +301,30 @@ impl CacheRefiller {
     pub(crate) fn last_new_pinned_version(&self) -> Option<&PinnedVersion> {
         self.queue.back().map(|item| &item.event.new_pinned_version)
     }
-
-    /// Clear the queue for cache refill and return an event that merges all pending cache refill events
-    /// into a single event that takes the earliest and latest version.
-    pub(crate) fn clear(&mut self) -> Option<CacheRefillerEvent> {
-        let last_item = self.queue.pop_back()?;
-        let mut event = last_item.event;
-        while let Some(item) = self.queue.pop_back() {
-            assert_eq!(
-                event.pinned_version.id(),
-                item.event.new_pinned_version.id()
-            );
-            event.pinned_version = item.event.pinned_version;
-        }
-        Some(event)
-    }
 }
 
 impl CacheRefiller {
-    pub(crate) fn next_event(&mut self) -> impl Future<Output = CacheRefillerEvent> + '_ {
+    pub(crate) fn next_events(&mut self) -> impl Future<Output = Vec<CacheRefillerEvent>> + '_ {
         poll_fn(|cx| {
-            if let Some(item) = self.queue.front_mut() {
-                ready!(item.handle.poll_unpin(cx)).unwrap();
+            const MAX_BATCH_SIZE: usize = 16;
+            let mut events = None;
+            while let Some(item) = self.queue.front_mut()
+                && let Poll::Ready(result) = item.handle.poll_unpin(cx)
+            {
+                result.unwrap();
                 let item = self.queue.pop_front().unwrap();
                 GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.sub(1);
-                return Poll::Ready(item.event);
+                let events = events.get_or_insert_with(|| Vec::with_capacity(MAX_BATCH_SIZE));
+                events.push(item.event);
+                if events.len() >= MAX_BATCH_SIZE {
+                    break;
+                }
             }
-            Poll::Pending
+            if let Some(events) = events {
+                Poll::Ready(events)
+            } else {
+                Poll::Pending
+            }
         })
     }
 }
@@ -391,9 +402,7 @@ impl CacheRefillTask {
     ) -> HashSet<SstableUnit> {
         let mut res = HashSet::default();
 
-        let Some(filter) = context.sstable_store.data_recent_filter() else {
-            return res;
-        };
+        let recent_filter = context.sstable_store.recent_filter();
 
         let units = {
             let unit = context.config.unit;
@@ -445,7 +454,8 @@ impl CacheRefillTask {
                     if res.contains(&unit) {
                         continue;
                     }
-                    if filter.contains(&(psst.id, pblk)) {
+                    if context.config.skip_recent_filter || recent_filter.contains(&(psst.id, pblk))
+                    {
                         res.insert(unit);
                     }
                 }
@@ -464,32 +474,43 @@ impl CacheRefillTask {
         res
     }
 
+    /// Data cache refill entry point.
     async fn data_cache_refill(
         context: &CacheRefillContext,
         delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
     ) {
-        // return if data file cache is disabled
-        let Some(filter) = context.sstable_store.data_recent_filter() else {
+        // Skip data cache refill if data disk cache is not enabled.
+        if !context.sstable_store.block_cache().is_hybrid() {
             return;
-        };
+        }
 
-        // return if no data to refill
+        // Return if no data to refill.
         if delta.insert_sst_infos.is_empty() || delta.delete_sst_object_ids.is_empty() {
             return;
         }
 
-        // return if recent filter miss
+        // Return if the target level is not in the refill levels
         if !context
             .config
             .data_refill_levels
             .contains(&delta.insert_sst_level)
-            || !delta
-                .delete_sst_object_ids
-                .iter()
-                .any(|&id| filter.contains(&(id, usize::MAX)))
         {
-            GLOBAL_CACHE_REFILL_METRICS.data_refill_filtered_total.inc();
+            return;
+        }
+
+        let recent_filter = context.sstable_store.recent_filter();
+
+        // Return if recent filter is required and no deleted sst ids are in the recent filter.
+        let targets = delta
+            .delete_sst_object_ids
+            .iter()
+            .map(|id| (*id, usize::MAX))
+            .collect_vec();
+        if !context.config.skip_recent_filter && !recent_filter.contains_any(targets.iter()) {
+            GLOBAL_CACHE_REFILL_METRICS
+                .data_refill_filtered_total
+                .inc_by(delta.delete_sst_object_ids.len() as _);
             return;
         }
 
@@ -502,14 +523,14 @@ impl CacheRefillTask {
                     .sum::<u64>(),
             );
 
-        if delta.insert_sst_level == 0 {
-            Self::data_file_cache_refill_l0_impl(context, delta, holders).await;
+        if delta.insert_sst_level == 0 || context.config.skip_recent_filter {
+            Self::data_file_cache_refill_full_impl(context, delta, holders).await;
         } else {
             Self::data_file_cache_impl(context, delta, holders).await;
         }
     }
 
-    async fn data_file_cache_refill_l0_impl(
+    async fn data_file_cache_refill_full_impl(
         context: &CacheRefillContext,
         _delta: &SstDeltaInfo,
         holders: Vec<TableHolder>,
@@ -558,7 +579,7 @@ impl CacheRefillTask {
         let parent_ssts = match try_join_all(futures).await {
             Ok(parent_ssts) => parent_ssts.into_iter().flatten(),
             Err(e) => {
-                return tracing::error!(error = %e.as_report(), "get old meta from cache error")
+                return tracing::error!(error = %e.as_report(), "get old meta from cache error");
             }
         };
         let units = Self::get_units_to_refill_by_inheritance(context, &holders, parent_ssts);
@@ -584,11 +605,10 @@ impl CacheRefillTask {
     ) -> HummockResult<()> {
         let sstable_store = &context.sstable_store;
         let threshold = context.config.threshold;
+        let recent_filter = sstable_store.recent_filter();
 
         // update filter for sst id only
-        if let Some(filter) = sstable_store.data_recent_filter() {
-            filter.insert((sst.id, usize::MAX));
-        }
+        recent_filter.insert((sst.id, usize::MAX));
 
         let blocks = unit.blks.size().unwrap();
 
@@ -600,9 +620,11 @@ impl CacheRefillTask {
         let (range_last, _) = sst.calculate_block_info(unit.blks.end - 1);
         let range = range_first.start..range_last.end;
 
+        let size = range.size().unwrap();
+
         GLOBAL_CACHE_REFILL_METRICS
             .data_refill_ideal_bytes
-            .inc_by(range.size().unwrap() as u64);
+            .inc_by(size as _);
 
         for blk in unit.blks {
             let (range, uncompressed_capacity) = sst.calculate_block_info(blk);
@@ -613,7 +635,7 @@ impl CacheRefillTask {
 
             let mut writer = sstable_store.block_cache().storage_writer(key);
 
-            if writer.pick() {
+            if writer.filter(size).is_admitted() {
                 admits += 1;
             }
 
@@ -732,6 +754,11 @@ impl<'a> Unit<'a> {
     }
 
     fn units(sst: &Sstable, unit: usize) -> usize {
-        sst.block_count() / unit + if sst.block_count() % unit == 0 { 0 } else { 1 }
+        sst.block_count() / unit
+            + if sst.block_count().is_multiple_of(unit) {
+                0
+            } else {
+                1
+            }
     }
 }

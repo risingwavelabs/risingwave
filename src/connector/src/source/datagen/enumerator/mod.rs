@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ impl SplitEnumerator for DatagenSplitEnumerator {
         properties: DatagenProperties,
         _context: SourceEnumeratorContextRef,
     ) -> crate::error::ConnectorResult<DatagenSplitEnumerator> {
-        let split_num = properties.split_num.unwrap_or_else(|| "1".to_string());
+        let split_num = properties.split_num.unwrap_or_else(|| "1".to_owned());
         let split_num = split_num
             .parse::<i32>()
             .context("failed to parse datagen split num")?;

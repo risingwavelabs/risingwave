@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,7 +40,7 @@ pub enum ExchangeSourceImpl {
 }
 
 impl ExchangeSourceImpl {
-    pub(crate) async fn take_data(&mut self) -> Result<Option<DataChunk>> {
+    pub async fn take_data(&mut self) -> Result<Option<DataChunk>> {
         match self {
             ExchangeSourceImpl::Grpc(grpc) => grpc.take_data().await,
             ExchangeSourceImpl::Local(local) => local.take_data().await,
@@ -48,8 +48,7 @@ impl ExchangeSourceImpl {
         }
     }
 
-    #[expect(dead_code)]
-    pub(crate) fn get_task_id(&self) -> TaskId {
+    pub fn get_task_id(&self) -> TaskId {
         match self {
             ExchangeSourceImpl::Grpc(grpc) => grpc.get_task_id(),
             ExchangeSourceImpl::Local(local) => local.get_task_id(),
@@ -58,7 +57,7 @@ impl ExchangeSourceImpl {
     }
 
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
-    pub(crate) async fn take_data_stream(self) {
+    pub async fn take_data_stream(self) {
         let mut source = self;
         loop {
             match source.take_data().await {

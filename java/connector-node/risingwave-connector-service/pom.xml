@@ -28,10 +28,6 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
-            <artifactId>tracing</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
             <artifactId>java-binding</artifactId>
         </dependency>
         <dependency>
@@ -42,11 +38,17 @@
             <groupId>com.google.guava</groupId>
             <artifactId>guava</artifactId>
         </dependency>
-
-
+        <dependency>
+            <groupId>org.slf4j</groupId>
+            <artifactId>slf4j-api</artifactId>
+        </dependency>
         <dependency>
             <groupId>com.google.code.gson</groupId>
             <artifactId>gson</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.commons</groupId>
@@ -64,9 +66,26 @@
             <groupId>io.prometheus</groupId>
             <artifactId>simpleclient_httpserver</artifactId>
         </dependency>
+
+        <!-- test dependencies -->
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-api</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-core</artifactId>
+            <scope>test</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.logging.log4j</groupId>
+            <artifactId>log4j-slf4j2-impl</artifactId>
             <scope>test</scope>
         </dependency>
 
@@ -94,11 +113,8 @@
         </dependency>
         <dependency>
             <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-mock-flink-runtime</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.risingwave</groupId>
-            <artifactId>risingwave-sink-mock-flink-http-sink</artifactId>
+            <artifactId>risingwave-jdbc-runner</artifactId>
+            <scope>provided</scope>
         </dependency>
     </dependencies>
 </project>

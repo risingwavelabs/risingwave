@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -226,9 +226,11 @@ pub mod tests {
             levels: vec![],
             ..Default::default()
         };
-        assert!(picker
-            .pick_compaction(&empty_level, &levels_handler, &mut local_stats)
-            .is_none());
+        assert!(
+            picker
+                .pick_compaction(&empty_level, &levels_handler, &mut local_stats)
+                .is_none()
+        );
     }
 
     #[test]

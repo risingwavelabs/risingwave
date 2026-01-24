@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,17 +13,20 @@
 // limitations under the License.
 
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::TableFunctionNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeLeaf, ToBatchPb, ToDistributedBatch};
+use super::utils::{Distill, childless_record};
+use super::{
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeLeaf, ToBatchPb,
+    ToDistributedBatch,
+};
 use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
+use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::logical_table_function::LogicalTableFunction;
-use crate::optimizer::plan_node::ToLocalBatch;
 use crate::optimizer::property::{Distribution, Order};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -33,7 +36,7 @@ pub struct BatchTableFunction {
 }
 
 impl PlanTreeNodeLeaf for BatchTableFunction {}
-impl_plan_tree_node_for_leaf!(BatchTableFunction);
+impl_plan_tree_node_for_leaf! { Batch, BatchTableFunction }
 
 impl BatchTableFunction {
     pub fn new(logical: LogicalTableFunction) -> Self {
@@ -41,7 +44,7 @@ impl BatchTableFunction {
     }
 
     pub fn with_dist(logical: LogicalTableFunction, dist: Distribution) -> Self {
-        let ctx = logical.base.ctx().clone();
+        let ctx = logical.base.ctx();
         let base = PlanBase::new_batch(ctx, logical.schema().clone(), dist, Order::any());
         BatchTableFunction { base, logical }
     }
@@ -79,7 +82,7 @@ impl ToLocalBatch for BatchTableFunction {
     }
 }
 
-impl ExprRewritable for BatchTableFunction {
+impl ExprRewritable<Batch> for BatchTableFunction {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,8 +17,8 @@ use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::row_id_gen::RowIdGenExecutor;
 use crate::executor::Executor;
+use crate::executor::row_id_gen::RowIdGenExecutor;
 use crate::task::ExecutorParams;
 
 pub struct RowIdGenExecutorBuilder;

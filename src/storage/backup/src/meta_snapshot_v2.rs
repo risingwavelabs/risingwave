@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,9 @@
 
 use std::fmt::{Display, Formatter};
 
+use anyhow::anyhow;
 use bytes::{Buf, BufMut};
+use itertools::Itertools;
 use risingwave_hummock_sdk::version::HummockVersion;
 use serde::{Deserialize, Serialize};
 
@@ -33,35 +35,42 @@ impl From<serde_json::Error> for BackupError {
 macro_rules! for_all_metadata_models_v2 {
     ($macro:ident) => {
         $macro! {
-            {seaql_migrations, risingwave_meta_model_v2::serde_seaql_migration},
-            {version_stats, risingwave_meta_model_v2::hummock_version_stats},
-            {compaction_configs, risingwave_meta_model_v2::compaction_config},
-            {actors, risingwave_meta_model_v2::actor},
-            {clusters, risingwave_meta_model_v2::cluster},
-            {actor_dispatchers, risingwave_meta_model_v2::actor_dispatcher},
-            {catalog_versions, risingwave_meta_model_v2::catalog_version},
-            {connections, risingwave_meta_model_v2::connection},
-            {databases, risingwave_meta_model_v2::database},
-            {fragments, risingwave_meta_model_v2::fragment},
-            {functions, risingwave_meta_model_v2::function},
-            {indexes, risingwave_meta_model_v2::index},
-            {objects, risingwave_meta_model_v2::object},
-            {object_dependencies, risingwave_meta_model_v2::object_dependency},
-            {schemas, risingwave_meta_model_v2::schema},
-            {sinks, risingwave_meta_model_v2::sink},
-            {sources, risingwave_meta_model_v2::source},
-            {streaming_jobs, risingwave_meta_model_v2::streaming_job},
-            {subscriptions, risingwave_meta_model_v2::subscription},
-            {system_parameters, risingwave_meta_model_v2::system_parameter},
-            {tables, risingwave_meta_model_v2::table},
-            {users, risingwave_meta_model_v2::user},
-            {user_privileges, risingwave_meta_model_v2::user_privilege},
-            {views, risingwave_meta_model_v2::view},
-            {workers, risingwave_meta_model_v2::worker},
-            {worker_properties, risingwave_meta_model_v2::worker_property},
-            {hummock_sequences, risingwave_meta_model_v2::hummock_sequence},
-            {session_parameters, risingwave_meta_model_v2::session_parameter},
-            {secrets, risingwave_meta_model_v2::secret}
+            {seaql_migrations, risingwave_meta_model::serde_seaql_migration},
+            {version_stats, risingwave_meta_model::hummock_version_stats},
+            {compaction_configs, risingwave_meta_model::compaction_config},
+            {clusters, risingwave_meta_model::cluster},
+            {fragment_relation, risingwave_meta_model::fragment_relation},
+            {catalog_versions, risingwave_meta_model::catalog_version},
+            {connections, risingwave_meta_model::connection},
+            {databases, risingwave_meta_model::database},
+            {fragments, risingwave_meta_model::fragment},
+            {functions, risingwave_meta_model::function},
+            {indexes, risingwave_meta_model::index},
+            {objects, risingwave_meta_model::object},
+            {object_dependencies, risingwave_meta_model::object_dependency},
+            {schemas, risingwave_meta_model::schema},
+            {sinks, risingwave_meta_model::sink},
+            {sources, risingwave_meta_model::source},
+            {streaming_jobs, risingwave_meta_model::streaming_job},
+            {subscriptions, risingwave_meta_model::subscription},
+            {system_parameters, risingwave_meta_model::system_parameter},
+            {tables, risingwave_meta_model::table},
+            {users, risingwave_meta_model::user},
+            {user_privileges, risingwave_meta_model::user_privilege},
+            {views, risingwave_meta_model::view},
+            {workers, risingwave_meta_model::worker},
+            {worker_properties, risingwave_meta_model::worker_property},
+            {hummock_sequences, risingwave_meta_model::hummock_sequence},
+            {session_parameters, risingwave_meta_model::session_parameter},
+            {secrets, risingwave_meta_model::secret},
+            {exactly_once_iceberg_sinks, risingwave_meta_model::exactly_once_iceberg_sink},
+            {iceberg_tables, risingwave_meta_model::iceberg_tables},
+            {iceberg_namespace_properties, risingwave_meta_model::iceberg_namespace_properties},
+            {user_default_privilege, risingwave_meta_model::user_default_privilege},
+            {fragment_splits, risingwave_meta_model::fragment_splits},
+            {pending_sink_state, risingwave_meta_model::pending_sink_state},
+            {refresh_jobs, risingwave_meta_model::refresh_job},
+            {cdc_table_snapshot_splits, risingwave_meta_model::cdc_table_snapshot_split}
         }
     };
 }
@@ -156,6 +165,42 @@ impl Metadata for MetadataV2 {
 
     fn hummock_version(self) -> HummockVersion {
         self.hummock_version
+    }
+
+    fn storage_url(&self) -> BackupResult<String> {
+        let storage_url_from_snapshot = self
+            .system_parameters
+            .iter()
+            .filter_map(|m| {
+                if m.name == "state_store" {
+                    return Some(m.value.clone());
+                }
+                None
+            })
+            .exactly_one()
+            .map_err(|_| BackupError::Other(anyhow!("expect state_store")))?;
+        storage_url_from_snapshot
+            .strip_prefix("hummock+")
+            .map(|s| s.to_owned())
+            .ok_or_else(|| {
+                BackupError::Other(anyhow!(
+                    "invalid state_store from metadata snapshot: {}",
+                    storage_url_from_snapshot
+                ))
+            })
+    }
+
+    fn storage_directory(&self) -> BackupResult<String> {
+        self.system_parameters
+            .iter()
+            .filter_map(|m| {
+                if m.name == "data_directory" {
+                    return Some(m.value.clone());
+                }
+                None
+            })
+            .exactly_one()
+            .map_err(|_| BackupError::Other(anyhow!("expect data_directory")))
     }
 }
 

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -48,6 +48,18 @@ impl OrderedRowSerde {
             Cow::Owned(Self {
                 schema: self.schema[..len].to_vec(),
                 order_types: self.order_types[..len].to_vec(),
+            })
+        }
+    }
+
+    #[must_use]
+    pub fn index(&self, idx: usize) -> Cow<'_, Self> {
+        if 1 == self.order_types.len() {
+            Cow::Borrowed(self)
+        } else {
+            Cow::Owned(Self {
+                schema: vec![self.schema[idx].clone()],
+                order_types: vec![self.order_types[idx]],
             })
         }
     }
@@ -235,7 +247,7 @@ mod tests {
     fn test_encoding_data_size() {
         use std::mem::size_of;
 
-        use crate::types::{Interval, F64};
+        use crate::types::{F64, Interval};
 
         let order_types = vec![OrderType::ascending()];
         let schema = vec![DataType::Int16];

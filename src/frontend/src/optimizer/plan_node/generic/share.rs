@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ use std::hash::Hash;
 use risingwave_common::catalog::Schema;
 
 use super::{GenericPlanNode, GenericPlanRef};
-use crate::optimizer::property::FunctionalDependencySet;
 use crate::OptimizerContextRef;
+use crate::optimizer::property::FunctionalDependencySet;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Share<PlanRef> {
@@ -33,6 +33,12 @@ impl<P: Hash> Hash for Share<P> {
 }
 
 impl<PlanRef: GenericPlanRef> Share<PlanRef> {
+    pub fn new(input: PlanRef) -> Self {
+        Self {
+            input: RefCell::new(input),
+        }
+    }
+
     pub fn replace_input(&self, plan: PlanRef) {
         *self.input.borrow_mut() = plan;
     }

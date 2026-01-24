@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,11 +14,6 @@
 
 use std::future::Future;
 
-use itertools::Itertools;
-use risingwave_common::array::Op;
-use risingwave_common::bitmap::Bitmap;
-use risingwave_common::row::{CompactedRow, RowDeserializer};
-use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::ColumnOrder;
@@ -27,24 +22,25 @@ use super::top_n_cache::CacheKey;
 use crate::executor::prelude::*;
 
 pub trait TopNExecutorBase: Send + 'static {
+    type State: StateStore;
     /// Apply the chunk to the dirty state and get the diffs.
+    /// TODO(rc): There can be a 2 times amplification in terms of the chunk size, so we may need to
+    /// allow `apply_chunk` return a stream of chunks. Motivation is not quite strong though.
     fn apply_chunk(
         &mut self,
         chunk: StreamChunk,
-    ) -> impl Future<Output = StreamExecutorResult<StreamChunk>> + Send;
+    ) -> impl Future<Output = StreamExecutorResult<Option<StreamChunk>>> + Send;
 
     /// Flush the buffered chunk to the storage backend.
     fn flush_data(
         &mut self,
         epoch: EpochPair,
-    ) -> impl Future<Output = StreamExecutorResult<()>> + Send;
+    ) -> impl Future<Output = StreamExecutorResult<StateTablePostCommit<'_, Self::State>>> + Send;
 
     /// Flush the buffered chunk to the storage backend.
     fn try_flush_data(&mut self) -> impl Future<Output = StreamExecutorResult<()>> + Send;
 
-    /// Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
-    /// by Group Top-N since it's distributed.
-    fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) {
+    fn clear_cache(&mut self) {
         unreachable!()
     }
 
@@ -87,9 +83,9 @@ where
         let mut input = self.input.execute();
 
         let barrier = expect_first_barrier(&mut input).await?;
-        self.inner.init(barrier.epoch).await?;
-
+        let barrier_epoch = barrier.epoch;
         yield Message::Barrier(barrier);
+        self.inner.init(barrier_epoch).await?;
 
         #[for_await]
         for msg in input {
@@ -102,48 +98,29 @@ where
                     }
                 }
                 Message::Chunk(chunk) => {
-                    yield Message::Chunk(self.inner.apply_chunk(chunk).await?);
+                    if let Some(output_chunk) = self.inner.apply_chunk(chunk).await? {
+                        yield Message::Chunk(output_chunk);
+                    }
                     self.inner.try_flush_data().await?;
                 }
                 Message::Barrier(barrier) => {
-                    self.inner.flush_data(barrier.epoch).await?;
+                    let post_commit = self.inner.flush_data(barrier.epoch).await?;
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
+                    yield Message::Barrier(barrier);
 
                     // Update the vnode bitmap, only used by Group Top-N.
-                    if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-                        self.inner.update_vnode_bitmap(vnode_bitmap);
+                    if let Some((_, cache_may_stale)) =
+                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
+                    {
+                        // Update the vnode bitmap for the state table and manipulate the cache if necessary, only used
+                        // by Group Top-N since it's distributed.
+                        if cache_may_stale {
+                            self.inner.clear_cache();
+                        }
                     }
-
-                    yield Message::Barrier(barrier)
                 }
             };
         }
-    }
-}
-
-pub fn generate_output(
-    new_rows: Vec<CompactedRow>,
-    new_ops: Vec<Op>,
-    schema: &Schema,
-) -> StreamExecutorResult<StreamChunk> {
-    if !new_rows.is_empty() {
-        let mut data_chunk_builder = DataChunkBuilder::new(schema.data_types(), new_rows.len() + 1);
-        let row_deserializer = RowDeserializer::new(schema.data_types());
-        for compacted_row in new_rows {
-            let res = data_chunk_builder
-                .append_one_row(row_deserializer.deserialize(compacted_row.row.as_ref())?);
-            debug_assert!(res.is_none());
-        }
-        // since `new_rows` is not empty, we unwrap directly
-        let new_data_chunk = data_chunk_builder.consume_all().unwrap();
-        let new_stream_chunk = StreamChunk::new(new_ops, new_data_chunk.columns().to_vec());
-        Ok(new_stream_chunk)
-    } else {
-        let columns = schema
-            .create_array_builders(0)
-            .into_iter()
-            .map(|x| x.finish().into())
-            .collect_vec();
-        Ok(StreamChunk::new(vec![], columns))
     }
 }
 
@@ -202,5 +179,7 @@ pub fn create_cache_key_serde(
 }
 
 use risingwave_common::row;
-pub trait GroupKey = row::Row + Send + Sync;
+pub use row::Row as GroupKey;
+
+use crate::common::table::state_table::StateTablePostCommit;
 pub const NO_GROUP_KEY: Option<row::Empty> = None;

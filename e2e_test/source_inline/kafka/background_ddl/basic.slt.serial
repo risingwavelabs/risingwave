@@ -1,0 +1,129 @@
+control substitution on
+
+statement ok
+SET streaming_use_shared_source TO false;
+
+############## Create kafka seed data
+
+statement ok
+create table kafka_seed_data (v1 int);
+
+statement ok
+insert into kafka_seed_data select * from generate_series(1, 1000);
+
+statement ok
+create sink kafka_sink
+from
+  kafka_seed_data with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'test_rate_limit',
+    type = 'append-only',
+    force_append_only='true'
+);
+
+# Wait for the topic to create
+sleep 5s
+
+############## Create kafka source
+
+statement ok
+create source kafka_source (v1 int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test_rate_limit',
+  scan.startup.mode = 'earliest',
+  source_rate_limit = 1,
+) FORMAT PLAIN ENCODE JSON
+
+statement ok
+flush;
+
+############## Create background mv with only source upstream
+
+statement ok
+set background_ddl = true;
+
+statement ok
+create materialized view rl_mv1 as select count(*) from kafka_source;
+
+statement ok
+wait
+
+statement ok
+select * from rl_mv1;
+
+statement ok
+drop materialized view rl_mv1;
+
+############## Create background mv joined with another mv
+
+statement ok
+set streaming_parallelism=1;
+
+statement ok
+create table t1(v1 int);
+
+statement ok
+insert into t1 select * from generate_series(1, 10);
+
+statement ok
+flush;
+
+statement ok
+set backfill_rate_limit = 1;
+
+statement ok
+set background_ddl=true;
+
+statement ok
+create materialized view rl_mv2 as select kafka_source.v1 from kafka_source join t1 on kafka_source.v1 = t1.v1;
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+1
+
+sleep 1s
+
+statement ok
+recover
+
+sleep 5s
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+1
+
+statement ok
+wait
+
+query I
+select count(*) from rw_catalog.rw_ddl_progress;
+----
+0
+
+statement ok
+drop materialized view rl_mv2;
+
+statement ok
+drop table t1;
+
+############## Cleanup
+
+statement ok
+drop source kafka_source;
+
+statement ok
+drop sink kafka_sink;
+
+statement ok
+drop table kafka_seed_data;
+
+statement ok
+set background_ddl=false;
+
+statement ok
+SET streaming_use_shared_source TO true;
+
+statement ok
+set streaming_parallelism=default;

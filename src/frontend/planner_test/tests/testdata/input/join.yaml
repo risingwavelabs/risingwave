@@ -6,6 +6,16 @@
   expected_outputs:
   - logical_plan
   - stream_plan
+- name: unaligned join
+  sql: |
+    set streaming_enable_unaligned_join=true;
+    create table t1 (v1 int, v2 int);
+    create table t2 (v3 int, v4 int);
+    create table t3 (v5 int, v6 int);
+    select * from t1, t2, t3 where t1.v1 = t2.v3 and t1.v1 = t3.v5;
+  expected_outputs:
+  - logical_plan
+  - stream_plan
 - name: self join
   sql: |
     create table t (v1 int, v2 int);
@@ -334,6 +344,47 @@
   sql: |
     create table t (src int, dst int);
     select t1.src p1, t1.dst p2, t2.dst p3 from t t1, t t2, t t3 where t1.dst = t2.src and t2.src = t3.dst and t3.dst = t1.src;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+- name: Force filter pushed down into join
+  sql: |
+    set streaming_force_filter_inside_join = true;
+    create table t(v1 int, v2 int);
+    create table t2(v3 int, v4 int);
+    select * from t, t2 where t.v1 = t2.v3 and t.v2 > t2.v4 + 1000;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: Pull up filter from join by default
+  sql: |
+    create table t(v1 int, v2 int);
+    create table t2(v3 int, v4 int);
+    select * from t, t2 where t.v1 = t2.v3 and t.v2 > t2.v4 + 1000;
+  expected_outputs:
+  - batch_plan
+  - stream_plan
+- name: Separate consecutive StreamHashJoin by no-shuffle Exchange
+  sql: |
+    set streaming_separate_consecutive_join = true;
+    create table t1(v1 int primary key);
+    create table t2(v2 int primary key);
+    create table t3(v3 int primary key);
+    create table t4(v4 int primary key);
+    create table t5(v5 int primary key);
+    create table t6(v6 int primary key);
+    select v1, v2, v3, v4, v5, v6 from t1 left join t2 on t1.v1 = t2.v2 left join t3 on t1.v1 = t3.v3 left join t4 on t1.v1 = t4.v4 left join t5 on t1.v1 = t5.v5 left join t6 on t1.v1 = t6.v6;
+  expected_outputs:
+    - stream_plan
+    - stream_dist_plan
+- name: Repro stream join dist_key / stream_key mismatch (other_cond=false), issue 24434
+  sql: |
+    create table t1 (k int, v int);
+    create table t2 (k int);
+    select t1.v, count(*) as cnt
+    from t1
+    left join t2 on t1.k = t2.k and (true <> true)
+    group by t1.v;
   expected_outputs:
   - stream_plan
   - stream_dist_plan

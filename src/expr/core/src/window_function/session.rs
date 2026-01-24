@@ -29,11 +29,11 @@ use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt
 use risingwave_pb::expr::window_frame::PbSessionFrameBounds;
 
 use super::FrameBoundsImpl;
-use crate::expr::{
-    build_func, BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression,
-    LiteralExpression,
-};
 use crate::Result;
+use crate::expr::{
+    BoxedExpression, Expression, ExpressionBoxExt, InputRefExpression, LiteralExpression,
+    build_func,
+};
 
 /// To implement Session Window in a similar way to Range Frame, we define a similar frame bounds
 /// structure here. It's very like [`RangeFrameBounds`](super::RangeFrameBounds), but with a gap
@@ -168,7 +168,7 @@ impl SessionFrameGap {
         self.add_expr = Some(Arc::new(build_func(
             PbExprType::Add,
             order_data_type.clone(),
-            vec![input_expr.clone().boxed(), gap_expr.clone().boxed()],
+            vec![input_expr.boxed(), gap_expr.boxed()],
         )?));
         Ok(())
     }
@@ -196,7 +196,7 @@ struct SessionFrameGapRef<'a> {
     add_expr: &'a dyn Expression,
 }
 
-impl<'a> SessionFrameGapRef<'a> {
+impl SessionFrameGapRef<'_> {
     fn minimal_next_start_of(&self, end_order_value: impl ToOwnedDatum) -> Datum {
         let row = OwnedRow::new(vec![end_order_value.to_owned_datum()]);
         self.add_expr

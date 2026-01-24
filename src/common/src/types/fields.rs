@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use super::DataType;
 use crate::row::OwnedRow;
 use crate::util::chunk_coalesce::DataChunkBuilder;
@@ -84,7 +85,7 @@ mod tests {
     use bytes::Bytes;
 
     use super::*;
-    use crate::types::{Fields, StructType, Timestamp, Timestamptz, F32};
+    use crate::types::{F32, Fields, StructType, Timestamp, Timestamptz};
 
     #[test]
     #[allow(dead_code)]
@@ -121,9 +122,9 @@ mod tests {
                 ("v5", DataType::Float32),
                 ("v6", DataType::Float64),
                 ("v7", DataType::Bytea),
-                ("v8", DataType::List(Box::new(DataType::Int16))),
-                ("v9", DataType::List(Box::new(DataType::Int64))),
-                ("v10", DataType::List(Box::new(DataType::Float32))),
+                ("v8", DataType::Int16.list()),
+                ("v9", DataType::Int64.list()),
+                ("v10", DataType::Float32.list()),
                 ("v11", DataType::Timestamp),
                 (
                     "v14",

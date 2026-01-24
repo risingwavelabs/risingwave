@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,9 +13,9 @@
 // limitations under the License.
 
 #![feature(trait_alias)]
-#![feature(let_chains)]
 #![feature(try_blocks)]
 #![feature(register_tool)]
+#![feature(if_let_guard)]
 #![register_tool(rw)]
 #![allow(rw::format_error)] // test code
 
@@ -27,4 +27,7 @@ pub mod nexmark;
 pub mod slt;
 pub mod utils;
 
+mod parse;
+
+risingwave_batch_executors::enable!();
 risingwave_expr_impl::enable!();

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,16 +14,19 @@
 
 use std::hash::Hash;
 
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, StructType};
 
 use super::{Expr, ExprImpl, ExprType};
-use crate::binder::BoundQuery;
+use crate::binder::{BoundQuery, UNNAMED_COLUMN};
 use crate::expr::{CorrelatedId, Depth};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum SubqueryKind {
     /// Returns a scalar value (single column single row).
     Scalar,
+    /// Returns a scalar struct value composed of multiple columns.
+    /// Used in `UPDATE SET (col1, col2) = (SELECT ...)`.
+    UpdateSet,
     /// `EXISTS` | `NOT EXISTS` subquery (semi/anti-semi join). Returns a boolean.
     Existential,
     /// `IN` subquery.
@@ -48,8 +51,32 @@ impl Subquery {
         Self { query, kind }
     }
 
-    pub fn is_correlated(&self, depth: Depth) -> bool {
-        self.query.is_correlated(depth)
+    pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
+        let is_correlated = match &self.kind {
+            SubqueryKind::In(expr) => expr.has_correlated_input_ref_by_depth(depth),
+            SubqueryKind::Some(expr, _) | SubqueryKind::All(expr, _) => {
+                expr.has_correlated_input_ref_by_depth(depth)
+            }
+            SubqueryKind::Array
+            | SubqueryKind::Scalar
+            | SubqueryKind::UpdateSet
+            | SubqueryKind::Existential => false,
+        };
+        is_correlated || self.query.is_correlated_by_depth(depth)
+    }
+
+    pub fn is_correlated_by_correlated_id(&self, correlated_id: CorrelatedId) -> bool {
+        let is_correlated = match &self.kind {
+            SubqueryKind::In(expr) => expr.has_correlated_input_ref_by_correlated_id(correlated_id),
+            SubqueryKind::Some(expr, _) | SubqueryKind::All(expr, _) => {
+                expr.has_correlated_input_ref_by_correlated_id(correlated_id)
+            }
+            SubqueryKind::Array
+            | SubqueryKind::Scalar
+            | SubqueryKind::UpdateSet
+            | SubqueryKind::Existential => false,
+        };
+        is_correlated || self.query.is_correlated_by_correlated_id(correlated_id)
     }
 
     pub fn collect_correlated_indices_by_depth_and_assign_id(
@@ -60,6 +87,25 @@ impl Subquery {
         let mut correlated_indices = self
             .query
             .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id);
+
+        match &mut self.kind {
+            SubqueryKind::In(expr) => {
+                correlated_indices.extend(
+                    expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                );
+            }
+            SubqueryKind::Some(expr, _) | SubqueryKind::All(expr, _) => {
+                correlated_indices.extend(
+                    expr.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                );
+            }
+            SubqueryKind::Array
+            | SubqueryKind::Scalar
+            | SubqueryKind::UpdateSet
+            | SubqueryKind::Existential => {
+                // No additional correlated indices to collect for these kinds.
+            }
+        }
         correlated_indices.sort();
         correlated_indices.dedup();
         correlated_indices
@@ -88,17 +134,28 @@ impl Expr for Subquery {
                 assert_eq!(types.len(), 1, "Subquery with more than one column");
                 types[0].clone()
             }
+            SubqueryKind::UpdateSet => {
+                let schema = self.query.schema();
+                let struct_type = if schema.fields().iter().any(|f| f.name == UNNAMED_COLUMN) {
+                    StructType::unnamed(self.query.data_types())
+                } else {
+                    StructType::new(
+                        (schema.fields().iter().cloned()).map(|f| (f.name, f.data_type)),
+                    )
+                };
+                DataType::Struct(struct_type)
+            }
             SubqueryKind::Array => {
                 let types = self.query.data_types();
                 assert_eq!(types.len(), 1, "Subquery with more than one column");
-                DataType::List(types[0].clone().into())
+                DataType::list(types[0].clone())
             }
             _ => DataType::Boolean,
         }
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
-        unreachable!("Subquery {:?} has not been unnested", self)
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
+        Err(format!("Subquery {:?} has not been unnested", self))
     }
 }
 

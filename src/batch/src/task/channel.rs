@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,18 +15,18 @@
 use std::sync::Arc;
 
 use risingwave_common::array::DataChunk;
-use risingwave_pb::batch_plan::exchange_info::DistributionMode as ShuffleDistributionMode;
 use risingwave_pb::batch_plan::ExchangeInfo;
+use risingwave_pb::batch_plan::exchange_info::DistributionMode as ShuffleDistributionMode;
 
 use crate::error::{BatchError, Result, SharedResult};
-use crate::task::broadcast_channel::{new_broadcast_channel, BroadcastReceiver, BroadcastSender};
+use crate::task::broadcast_channel::{BroadcastReceiver, BroadcastSender, new_broadcast_channel};
 use crate::task::consistent_hash_shuffle_channel::{
-    new_consistent_shuffle_channel, ConsistentHashShuffleReceiver, ConsistentHashShuffleSender,
+    ConsistentHashShuffleReceiver, ConsistentHashShuffleSender, new_consistent_shuffle_channel,
 };
 use crate::task::data_chunk_in_channel::DataChunkInChannel;
-use crate::task::fifo_channel::{new_fifo_channel, FifoReceiver, FifoSender};
+use crate::task::fifo_channel::{FifoReceiver, FifoSender, new_fifo_channel};
 use crate::task::hash_shuffle_channel::{
-    new_hash_shuffle_channel, HashShuffleReceiver, HashShuffleSender,
+    HashShuffleReceiver, HashShuffleSender, new_hash_shuffle_channel,
 };
 
 pub(super) trait ChanSender: Send {
@@ -96,7 +96,7 @@ impl ChanReceiverImpl {
 
 /// Output-channel is a synchronous, bounded single-producer-multiple-consumer queue.
 /// The producer is the local task executor, the consumer is
-/// [`ExchangeService`](risingwave_pb::task_service::exchange_service_server::ExchangeService).
+/// [`BatchExchangeService`](risingwave_pb::task_service::batch_exchange_service_server::BatchExchangeService).
 /// The implementation depends on the shuffling strategy.
 pub fn create_output_channel(
     shuffle: &ExchangeInfo,

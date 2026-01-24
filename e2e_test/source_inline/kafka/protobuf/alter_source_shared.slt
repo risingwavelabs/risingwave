@@ -1,0 +1,113 @@
+control substitution on
+
+system ok
+rpk topic delete pb_alter_source_shared_test || true; \
+(rpk sr subject delete 'pb_alter_source_shared_test-value' && rpk sr subject delete 'pb_alter_source_shared_test-value' --permanent) || true;
+
+system ok
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_shared_test" 20 user
+
+statement ok
+CREATE SOURCE src_user
+INCLUDE timestamp -- include explicitly here to test a bug found in https://github.com/risingwavelabs/risingwave/pull/17293
+WITH (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'pb_alter_source_shared_test',
+    scan.startup.mode = 'earliest'
+)
+FORMAT PLAIN ENCODE PROTOBUF(
+    schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+    message = 'test.User'
+);
+
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user';
+----
+CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>) INCLUDE timestamp
+
+statement ok
+CREATE MATERIALIZED VIEW mv_user AS SELECT * FROM src_user;
+
+statement ok
+CREATE MATERIALIZED VIEW mv_user_2 AS SELECT * FROM src_user;
+
+# age is new field
+statement error
+SELECT age FROM mv_user;
+
+# Push more events with extended fields
+system ok
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_shared_test" 5 user_with_more_fields
+
+sleep 5s
+
+
+# set session variable shouldn't affect existing source.
+statement ok
+set streaming_use_shared_source to false;
+
+# Refresh source schema
+statement ok
+ALTER SOURCE src_user REFRESH SCHEMA;
+
+query T
+SELECT SUBSTRING(definition, 1, POSITION(' WITH' IN definition) - 1) FROM rw_sources WHERE name = 'src_user';
+----
+CREATE SOURCE src_user (id INT, name CHARACTER VARYING, address CHARACTER VARYING, city CHARACTER VARYING, gender CHARACTER VARYING, sc STRUCT<file_name CHARACTER VARYING>, age INT) INCLUDE timestamp
+
+# Check it should still be shared source <https://github.com/risingwavelabs/risingwave/issues/19799>
+query
+EXPLAIN CREATE MATERIALIZED VIEW mv_user_more AS SELECT * FROM src_user;
+----
+StreamMaterialize { columns: [id, name, address, city, gender, sc, _rw_kafka_timestamp, age, _row_id(hidden)], stream_key: [_row_id], pk_columns: [_row_id], pk_conflict: NoCheck }
+└─StreamProject { exprs: [id, name, address, city, gender, sc, _rw_kafka_timestamp, age, _row_id] }
+  └─StreamRowIdGen { row_id_index: 9 }
+    └─StreamSourceScan { columns: [id, name, address, city, gender, sc, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id, age] }
+
+
+statement ok
+CREATE MATERIALIZED VIEW mv_user_more AS SELECT * FROM src_user;
+
+statement ok
+flush;
+
+
+query ????
+SELECT COUNT(*) FROM mv_user;
+----
+25
+
+query ????
+SELECT COUNT(*) FROM mv_user_2;
+----
+25
+
+query ????
+SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
+----
+25	104	0	510
+
+# Push more events with extended fields
+system ok
+python3 e2e_test/source_inline/kafka/protobuf/pb.py "${RISEDEV_KAFKA_BOOTSTRAP_SERVERS}" "${RISEDEV_SCHEMA_REGISTRY_URL}" "pb_alter_source_shared_test" 5 user_with_more_fields
+
+
+
+query ???? retry 6 backoff 1s
+SELECT COUNT(*) FROM mv_user;
+----
+30
+
+query ????
+SELECT COUNT(*) FROM mv_user_2;
+----
+30
+
+query ????
+SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
+----
+30	104	0	1020
+
+
+statement ok
+DROP SOURCE src_user CASCADE;

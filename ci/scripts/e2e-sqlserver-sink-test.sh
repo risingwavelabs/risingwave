@@ -4,7 +4,7 @@
 set -euo pipefail
 
 source ci/scripts/common.sh
-
+export CONNECTOR_LIBS_PATH="./connector-node/libs"
 while getopts 'p:' opt; do
     case ${opt} in
         p )
@@ -23,6 +23,11 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
+echo "--- download connector node package"
+buildkite-agent artifact download risingwave-connector.tar.gz ./
+mkdir ./connector-node
+tar xf ./risingwave-connector.tar.gz -C ./connector-node
+
 echo "--- starting risingwave cluster"
 risedev ci-start ci-sink-test
 sleep 1
@@ -39,7 +44,10 @@ sqlcmd -S sqlserver-server -U SA -P SomeTestOnly@SA -Q "
 CREATE DATABASE SinkTest;
 GO
 USE SinkTest;
-CREATE TABLE t_many_data_type (
+GO
+CREATE SCHEMA test_schema;
+GO
+CREATE TABLE test_schema.t_many_data_type (
   k1 int, k2 int,
   c_boolean bit,
   c_int16 smallint,
@@ -62,7 +70,7 @@ echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/sqlserver_sink.slt'
 sleep 1
 sqlcmd -S sqlserver-server -U SA -P SomeTestOnly@SA -h -1 -Q "
-SELECT * FROM SinkTest.dbo.t_many_data_type;
+SELECT * FROM SinkTest.test_schema.t_many_data_type;
 GO" > ./query_result.txt
 
 mapfile -t actual < <(tr -s '[:space:]' '\n' < query_result.txt)

@@ -14,24 +14,25 @@
 
 use std::cmp::Ordering;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use futures::stream::BoxStream;
-use futures::{pin_mut, StreamExt, TryStreamExt};
+use futures::{StreamExt, TryStreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Schema};
+use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
-use serde_derive::{Deserialize, Serialize};
+use serde::{Deserialize, Serialize};
 use tiberius::{Config, Query, QueryItem};
 
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::parser::{sql_server_row_to_owned_row, ScalarImplTiberiusWrapper};
+use crate::parser::{ScalarImplTiberiusWrapper, sql_server_row_to_owned_row};
 use crate::sink::sqlserver::SqlServerClient;
+use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcOffsetParseFunc, DebeziumOffset, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
 // The maximum commit_lsn value in Sql Server
@@ -124,7 +125,7 @@ impl SqlServerExternalTable {
                         column_descs.push(ColumnDesc::named(
                             col_name,
                             ColumnId::placeholder(),
-                            type_to_rw_type(col_type, col_name)?,
+                            mssql_type_to_rw_type(col_type, col_name)?,
                         ));
                     }
                 }
@@ -152,10 +153,20 @@ impl SqlServerExternalTable {
                     QueryItem::Metadata(_) => {}
                     QueryItem::Row(row) => {
                         let pk_name: &str = row.try_get(0)?.unwrap();
-                        pk_names.push(pk_name.to_string());
+                        pk_names.push(pk_name.to_owned());
                     }
                 }
             }
+        }
+
+        // The table does not exist
+        if column_descs.is_empty() {
+            bail!(
+                "Sql Server table '{}'.'{}' not found in '{}'",
+                config.schema,
+                config.table,
+                config.database
+            );
         }
 
         Ok(Self {
@@ -173,7 +184,7 @@ impl SqlServerExternalTable {
     }
 }
 
-fn type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
+fn mssql_type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
     let dtype = match col_type.to_lowercase().as_str() {
         "bit" => DataType::Boolean,
         "binary" | "varbinary" => DataType::Bytea,
@@ -189,6 +200,7 @@ fn type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> 
         "datetimeoffset" => DataType::Timestamptz,
         "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml"
         | "uniqueidentifier" => DataType::Varchar,
+        "money" => DataType::Decimal,
         mssql_type => {
             return Err(anyhow!(
                 "Unsupported Sql Server data type: {:?}, column name: {}",
@@ -242,7 +254,9 @@ impl ExternalTableReader for SqlServerExternalTableReader {
                 }
                 hex_string
             }
-            None => bail!("None is returned by `SELECT sys.fn_cdc_get_max_lsn()`, please ensure Sql Server Agent is running."),
+            None => bail!(
+                "None is returned by `SELECT sys.fn_cdc_get_max_lsn()`, please ensure Sql Server Agent is running."
+            ),
         };
 
         tracing::debug!("current max_lsn: {}", max_lsn);
@@ -261,6 +275,24 @@ impl ExternalTableReader for SqlServerExternalTableReader {
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
+    }
+
+    fn get_parallel_cdc_splits(
+        &self,
+        _options: CdcTableSnapshotSplitOption,
+    ) -> BoxStream<'_, ConnectorResult<CdcTableSnapshotSplit>> {
+        // TODO(zw): feat: impl
+        stream::empty::<ConnectorResult<CdcTableSnapshotSplit>>().boxed()
+    }
+
+    fn split_snapshot_read(
+        &self,
+        _table_name: SchemaTableName,
+        _left: OwnedRow,
+        _right: OwnedRow,
+        _split_columns: Vec<Field>,
+    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
+        todo!("implement SqlServer CDC parallelized backfill")
     }
 }
 
@@ -425,11 +457,11 @@ mod tests {
 
     #[test]
     fn test_sql_server_filter_expr() {
-        let cols = vec!["id".to_string()];
+        let cols = vec!["id".to_owned()];
         let expr = SqlServerExternalTableReader::filter_expression(&cols);
         assert_eq!(expr, "(\"id\" > @P1)");
 
-        let cols = vec!["aa".to_string(), "bb".to_string(), "cc".to_string()];
+        let cols = vec!["aa".to_owned(), "bb".to_owned(), "cc".to_owned()];
         let expr = SqlServerExternalTableReader::filter_expression(&cols);
         assert_eq!(
             expr,

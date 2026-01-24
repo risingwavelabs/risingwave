@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,10 +16,10 @@ use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_vec_with_registry,
-    register_histogram_with_registry, register_int_counter_vec_with_registry,
-    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, HistogramVec,
-    IntGauge, Registry,
+    Histogram, HistogramVec, IntGauge, Registry, exponential_buckets, histogram_opts,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_counter_with_registry,
+    register_int_gauge_with_registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
@@ -58,8 +58,8 @@ pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
 
 impl CompactorMetrics {
     fn new(registry: &Registry) -> Self {
-        // 256B - 4GB
-        let size_buckets = exponential_buckets(256.0, 16.0, 7).unwrap();
+        // 256B - 4GB, finer resolution near 256MB (adds two extra buckets)
+        let size_buckets = exponential_buckets(256.0, 8.0, 9).unwrap();
         // 10ms - 2.7h
         let time_buckets = exponential_buckets(0.01, 10.0, 7).unwrap();
         let opts = histogram_opts!(

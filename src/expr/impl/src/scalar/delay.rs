@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,7 @@
 
 use std::time::Duration;
 
-use risingwave_common::types::{Interval, F64};
+use risingwave_common::types::{F64, Interval};
 use risingwave_expr::function;
 
 /// Makes the current session's process sleep until the given number of seconds have elapsed.

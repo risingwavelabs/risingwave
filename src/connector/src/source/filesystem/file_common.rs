@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::fmt::Debug;
 use std::hash::Hash;
 use std::marker::PhantomData;
@@ -23,55 +24,6 @@ use strum::Display;
 use super::opendal_source::OpendalSource;
 use crate::error::ConnectorResult;
 use crate::source::{SplitId, SplitMetaData};
-
-///  [`FsSplit`] Describes a file or a split of a file. A file is a generic concept,
-/// and can be a local file, a distributed file system, or am object in S3 bucket.
-#[derive(Debug, Clone, Eq, PartialEq, Hash, Serialize, Deserialize)]
-pub struct FsSplit {
-    pub name: String,
-    pub offset: usize,
-    pub size: usize,
-}
-
-impl From<&Object> for FsSplit {
-    fn from(value: &Object) -> Self {
-        Self {
-            name: value.key().unwrap().to_owned(),
-            offset: 0,
-            size: value.size().unwrap_or_default() as usize,
-        }
-    }
-}
-
-impl SplitMetaData for FsSplit {
-    fn id(&self) -> SplitId {
-        self.name.as_str().into()
-    }
-
-    fn restore_from_json(value: JsonbVal) -> ConnectorResult<Self> {
-        serde_json::from_value(value.take()).map_err(Into::into)
-    }
-
-    fn encode_to_json(&self) -> JsonbVal {
-        serde_json::to_value(self.clone()).unwrap().into()
-    }
-
-    fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        let offset = last_seen_offset.parse().unwrap();
-        self.offset = offset;
-        Ok(())
-    }
-}
-
-impl FsSplit {
-    pub fn new(name: String, start: usize, size: usize) -> Self {
-        Self {
-            name,
-            offset: start,
-            size,
-        }
-    }
-}
 
 ///  [`OpendalFsSplit`] Describes a file or a split of a file. A file is a generic concept,
 /// and can be a local file, a distributed file system, or am object in S3 bucket.
@@ -127,7 +79,7 @@ impl<Src: OpendalSource> OpendalFsSplit<Src> {
 
     pub fn empty_split() -> Self {
         Self {
-            name: "empty_split".to_string(),
+            name: "empty_split".to_owned(),
             offset: 0,
             size: 0,
             _marker: PhantomData,

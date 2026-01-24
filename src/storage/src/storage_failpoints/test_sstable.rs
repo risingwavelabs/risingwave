@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,12 +19,12 @@ use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::FullKey;
 
 use crate::assert_bytes_eq;
-use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::iterator::HummockIterator;
+use crate::hummock::iterator::test_utils::mock_sstable_store;
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::test_utils::{
-    default_builder_opt_for_test, default_writer_opt_for_test, gen_test_sstable,
-    gen_test_sstable_data, put_sst, test_key_of, test_value_of, TEST_KEYS_COUNT,
+    TEST_KEYS_COUNT, default_builder_opt_for_test, default_writer_opt_for_test, gen_test_sstable,
+    gen_test_sstable_data, put_sst, test_key_of, test_value_of,
 };
 use crate::hummock::value::HummockValue;
 use crate::hummock::{SstableIterator, SstableIteratorType};
@@ -40,7 +40,7 @@ async fn test_failpoints_table_read() {
     // We should close buffer, so that table iterator must read in object_stores
     let kv_iter =
         (0..TEST_KEYS_COUNT).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i))));
-    let table = gen_test_sstable(
+    let (table, sstable_info) = gen_test_sstable(
         default_builder_opt_for_test(),
         0,
         kv_iter,
@@ -52,6 +52,7 @@ async fn test_failpoints_table_read() {
         table,
         sstable_store,
         Arc::new(SstableIteratorReadOptions::default()),
+        &sstable_info,
     );
     sstable_iter.rewind().await.unwrap();
 
@@ -130,6 +131,7 @@ async fn test_failpoints_vacuum_and_metadata() {
         sstable_store.sstable(&info, &mut stats).await.unwrap(),
         sstable_store,
         Arc::new(SstableIteratorReadOptions::default()),
+        &info,
     );
     let mut cnt = 0;
     sstable_iter.rewind().await.unwrap();

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 
+use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::level::{InputLevel, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
@@ -27,7 +28,7 @@ pub struct SpaceReclaimCompactionPicker {
     pub _max_space_reclaim_bytes: u64,
 
     // for filter
-    pub all_table_ids: HashSet<u32>,
+    pub all_table_ids: HashSet<TableId>,
 }
 
 // According to the execution model of SpaceReclaimCompactionPicker, SpaceReclaimPickerState is
@@ -38,7 +39,7 @@ pub struct SpaceReclaimPickerState {
 }
 
 impl SpaceReclaimCompactionPicker {
-    pub fn new(max_space_reclaim_bytes: u64, all_table_ids: HashSet<u32>) -> Self {
+    pub fn new(max_space_reclaim_bytes: u64, all_table_ids: HashSet<TableId>) -> Self {
         Self {
             _max_space_reclaim_bytes: max_space_reclaim_bytes,
             all_table_ids,
@@ -173,12 +174,15 @@ mod test {
 
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
+    use risingwave_hummock_sdk::key_range::KeyRange;
     use risingwave_hummock_sdk::level::Level;
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
-    use risingwave_pb::hummock::compact_task;
     pub use risingwave_pb::hummock::LevelType;
+    use risingwave_pb::hummock::compact_task;
 
     use super::*;
+    use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::{
         assert_compaction_task, generate_l0_nonoverlapping_sublevels, generate_level,
@@ -187,7 +191,6 @@ mod test {
     use crate::hummock::compaction::selector::{
         CompactionSelector, LocalSelectorStatistic, SpaceReclaimCompactionSelector,
     };
-    use crate::hummock::compaction::CompactionDeveloperConfig;
     use crate::hummock::model::CompactionGroup;
     use crate::hummock::test_utils::compaction_selector_context;
 
@@ -234,7 +237,14 @@ mod test {
         {
             let sst_10 = levels[3].table_infos.get_mut(8).unwrap();
             assert_eq!(10, sst_10.sst_id);
-            sst_10.key_range.right_exclusive = true;
+            *sst_10 = SstableInfoInner {
+                key_range: KeyRange {
+                    right_exclusive: true,
+                    ..sst_10.get_inner().key_range
+                },
+                ..sst_10.get_inner()
+            }
+            .into();
         }
 
         assert_eq!(levels.len(), 4);
@@ -349,22 +359,24 @@ mod test {
                 start_id += 1;
             }
 
-            assert!(selector
-                .pick_compaction(
-                    1,
-                    compaction_selector_context(
-                        &group_config,
-                        &levels,
-                        &member_table_ids,
-                        &mut levels_handler,
-                        &mut local_stats,
-                        &HashMap::default(),
-                        Arc::new(CompactionDeveloperConfig::default()),
-                        &Default::default(),
-                        &HummockVersionStateTableInfo::empty(),
-                    ),
-                )
-                .is_none())
+            assert!(
+                selector
+                    .pick_compaction(
+                        1,
+                        compaction_selector_context(
+                            &group_config,
+                            &levels,
+                            &member_table_ids,
+                            &mut levels_handler,
+                            &mut local_stats,
+                            &HashMap::default(),
+                            Arc::new(CompactionDeveloperConfig::default()),
+                            &Default::default(),
+                            &HummockVersionStateTableInfo::empty(),
+                        ),
+                    )
+                    .is_none()
+            )
         }
 
         {

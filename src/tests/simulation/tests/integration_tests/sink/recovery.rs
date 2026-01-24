@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::Ordering::Relaxed;
 use std::sync::Arc;
+use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
 use anyhow::Result;
 use risingwave_simulation::cluster::{Cluster, KillOpts};
 use tokio::time::sleep;
 
-use crate::sink::utils::{
-    start_sink_test_cluster, SimulationTestSink, SimulationTestSource, CREATE_SINK, CREATE_SOURCE,
-    DROP_SINK, DROP_SOURCE,
-};
+use crate::sink::utils::*;
 use crate::{assert_eq_with_err_returned as assert_eq, assert_with_err_returned as assert};
 
 async fn kill_and_check(
@@ -53,12 +50,12 @@ async fn kill_and_check(
     Ok(())
 }
 
-async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
+async fn recovery_test_inner(is_decouple: bool, test_type: TestSinkType) -> Result<()> {
     let mut cluster = start_sink_test_cluster().await?;
 
     let source_parallelism = 6;
 
-    let test_sink = SimulationTestSink::register_new();
+    let test_sink = SimulationTestSink::register_new(test_type);
     let test_source = SimulationTestSource::register_new(source_parallelism, 0..100000, 0.2, 20);
 
     let mut session = cluster.start_session();
@@ -71,7 +68,7 @@ async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
     }
     session.run(CREATE_SOURCE).await?;
     session.run(CREATE_SINK).await?;
-    assert_eq!(6, test_sink.parallelism_counter.load(Relaxed));
+    test_sink.wait_initial_parallelism(6).await?;
 
     let count = test_source.id_list.len();
 
@@ -85,20 +82,35 @@ async fn recovery_test_inner(is_decouple: bool) -> Result<()> {
 
     assert!(source_parallelism <= test_source.create_stream_count.load(Relaxed));
     assert_eq!(0, test_sink.parallelism_counter.load(Relaxed));
-    assert!(test_sink.store.inner().checkpoint_count > 0);
+    assert!(test_sink.store.checkpoint_count() > 0);
 
     test_sink.store.check_simple_result(&test_source.id_list)?;
-    assert!(test_sink.store.inner().checkpoint_count > 0);
+    assert!(test_sink.store.checkpoint_count() > 0);
 
     Ok(())
 }
 
-#[tokio::test]
-async fn test_sink_recovery() -> Result<()> {
-    recovery_test_inner(false).await
+macro_rules! define_tests {
+    ($($test_type:ident,)+) => {
+        $(
+            paste::paste! {
+                #[tokio::test]
+                async fn [<test_ $test_type:snake _recovery>]() -> Result<()> {
+                    recovery_test_inner(false, TestSinkType::$test_type).await
+                }
+
+                #[tokio::test]
+                async fn [<test_ $test_type:snake _decouple_recovery>]() -> Result<()> {
+                    recovery_test_inner(true, TestSinkType::$test_type).await
+                }
+            }
+        )+
+    };
+    () => {
+        $crate::for_all_sink_types! {
+            define_tests
+        }
+    }
 }
 
-#[tokio::test]
-async fn test_sink_decouple_recovery() -> Result<()> {
-    recovery_test_inner(true).await
-}
+define_tests!();

@@ -1,0 +1,10 @@
+control substitution on
+
+statement ok
+drop materialized view ${TEST_NAME}_extended_mv;
+
+statement ok
+drop materialized view ${TEST_NAME}_mv;
+
+statement ok
+drop view ${TEST_NAME}_v;

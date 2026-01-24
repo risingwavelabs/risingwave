@@ -12,18 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub use expect_test::{expect, Expect};
+pub use expect_test::{Expect, expect};
 pub use itertools::Itertools;
-pub use risingwave_common::catalog::ColumnDesc;
+pub use risingwave_common::catalog::Field;
 use risingwave_common::types::{
     DataType, Datum, DatumCow, DatumRef, ScalarImpl, ScalarRefImpl, ToDatumRef,
 };
-use risingwave_pb::plan_common::AdditionalColumn;
 
 /// More concise display for `DataType`, to use in tests.
 pub struct DataTypeTestDisplay<'a>(pub &'a DataType);
 
-impl<'a> std::fmt::Debug for DataTypeTestDisplay<'a> {
+impl std::fmt::Debug for DataTypeTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             DataType::Struct(s) => {
@@ -40,7 +39,8 @@ impl<'a> std::fmt::Debug for DataTypeTestDisplay<'a> {
                 f.finish()?;
                 Ok(())
             }
-            DataType::List(t) => {
+            DataType::List(l) => {
+                let t = l.elem();
                 if t.is_struct() {
                     f.debug_tuple("List")
                         .field(&DataTypeTestDisplay(t))
@@ -68,7 +68,7 @@ impl<'a> std::fmt::Debug for DataTypeTestDisplay<'a> {
 /// More concise display for `ScalarRefImpl`, to use in tests.
 pub struct ScalarRefImplTestDisplay<'a>(pub ScalarRefImpl<'a>);
 
-impl<'a> std::fmt::Debug for ScalarRefImplTestDisplay<'a> {
+impl std::fmt::Debug for ScalarRefImplTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             ScalarRefImpl::Struct(s) => {
@@ -112,7 +112,7 @@ impl<'a> std::fmt::Debug for ScalarRefImplTestDisplay<'a> {
 /// More concise display for `ScalarImpl`, to use in tests.
 pub struct ScalarImplTestDisplay<'a>(pub &'a ScalarImpl);
 
-impl<'a> std::fmt::Debug for ScalarImplTestDisplay<'a> {
+impl std::fmt::Debug for ScalarImplTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         ScalarRefImplTestDisplay(self.0.as_scalar_ref_impl()).fmt(f)
     }
@@ -121,7 +121,7 @@ impl<'a> std::fmt::Debug for ScalarImplTestDisplay<'a> {
 /// More concise display for `DatumRef`, to use in tests.
 pub struct DatumRefTestDisplay<'a>(pub DatumRef<'a>);
 
-impl<'a> std::fmt::Debug for DatumRefTestDisplay<'a> {
+impl std::fmt::Debug for DatumRefTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             Some(scalar) => ScalarRefImplTestDisplay(scalar).fmt(f),
@@ -133,7 +133,7 @@ impl<'a> std::fmt::Debug for DatumRefTestDisplay<'a> {
 /// More concise display for `Datum`, to use in tests.
 pub struct DatumTestDisplay<'a>(pub &'a Datum);
 
-impl<'a> std::fmt::Debug for DatumTestDisplay<'a> {
+impl std::fmt::Debug for DatumTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         DatumRefTestDisplay(self.0.to_datum_ref()).fmt(f)
     }
@@ -142,7 +142,7 @@ impl<'a> std::fmt::Debug for DatumTestDisplay<'a> {
 /// More concise display for `DatumCow`, to use in tests.
 pub struct DatumCowTestDisplay<'a>(pub &'a DatumCow<'a>);
 
-impl<'a> std::fmt::Debug for DatumCowTestDisplay<'a> {
+impl std::fmt::Debug for DatumCowTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self.0 {
             DatumCow::Borrowed(datum_ref) => {
@@ -161,53 +161,15 @@ impl<'a> std::fmt::Debug for DatumCowTestDisplay<'a> {
     }
 }
 
-/// More concise display for `ColumnDesc`, to use in tests.
-pub struct ColumnDescTestDisplay<'a>(pub &'a ColumnDesc);
+/// More concise display for `Field`, to use in tests.
+pub struct FieldTestDisplay<'a>(pub &'a Field);
 
-impl<'a> std::fmt::Debug for ColumnDescTestDisplay<'a> {
+impl std::fmt::Debug for FieldTestDisplay<'_> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let ColumnDesc {
-            data_type,
-            column_id,
-            name,
-            field_descs,
-            type_name,
-            generated_or_default_column,
-            description,
-            additional_column: AdditionalColumn { column_type },
-            version: _,
-        } = &self.0;
+        let Field { data_type, name } = &self.0;
 
-        write!(
-            f,
-            "{name}(#{column_id}): {:#?}",
-            DataTypeTestDisplay(data_type)
-        )?;
-        if !type_name.is_empty() {
-            write!(f, ", type_name: {}", type_name)?;
-        }
-        if !field_descs.is_empty() {
-            write!(
-                f,
-                ", field_descs: [{}]",
-                field_descs.iter().format_with(", ", |field_desc, f| {
-                    f(&format_args!("{:?}", ColumnDescTestDisplay(field_desc)))
-                })
-            )?;
-        }
-        if let Some(generated_or_default_column) = generated_or_default_column {
-            write!(
-                f,
-                ", generated_or_default_column: {:?}",
-                generated_or_default_column
-            )?;
-        }
-        if let Some(description) = description {
-            write!(f, ", description: {:?}", description)?;
-        }
-        if let Some(column_type) = column_type {
-            write!(f, ", additional_column: {:?}", column_type)?;
-        }
+        write!(f, "{name}: {:#?}", DataTypeTestDisplay(data_type))?;
+
         Ok(())
     }
 }

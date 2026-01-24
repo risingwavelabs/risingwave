@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,6 +49,14 @@ impl Row {
     pub fn take(self) -> Vec<Option<Bytes>> {
         self.0
     }
+
+    pub fn project(&mut self, indices: &[usize]) -> Row {
+        let mut new_row = Vec::with_capacity(indices.len());
+        for i in indices {
+            new_row.push(self.0[*i].take());
+        }
+        Row(new_row)
+    }
 }
 
 impl Index<usize> for Row {
@@ -76,6 +84,13 @@ impl Format {
             )),
         }
     }
+
+    pub fn to_i8(self) -> i8 {
+        match self {
+            Format::Binary => 1,
+            Format::Text => 0,
+        }
+    }
 }
 
 /// FormatIterator used to generate formats of actual length given the provided format.
@@ -94,7 +109,7 @@ where
     default_format: Format,
 }
 
-impl<'a, 'b> FormatIterator<'a, 'b> {
+impl<'a> FormatIterator<'a, '_> {
     pub fn new(provided_formats: &'a [Format], actual_len: usize) -> Result<Self, String> {
         if !provided_formats.is_empty()
             && provided_formats.len() != 1

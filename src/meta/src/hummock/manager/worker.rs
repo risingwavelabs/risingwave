@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,8 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::HummockVersionId;
-use risingwave_pb::common::WorkerType;
+use risingwave_meta_model::ObjectId;
+use risingwave_object_store::object::{ObjectResult, ObjectStoreRef};
 use sync_point::sync_point;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
@@ -31,7 +33,7 @@ pub enum HummockManagerEvent {
 }
 
 impl HummockManager {
-    pub async fn start_worker(
+    pub fn start_worker(
         self: &HummockManagerRef,
         mut receiver: HummockManagerEventReceiver,
     ) -> JoinHandle<()> {
@@ -39,8 +41,7 @@ impl HummockManager {
             tokio::sync::mpsc::unbounded_channel();
         self.env
             .notification_manager()
-            .insert_local_sender(local_notification_tx)
-            .await;
+            .insert_local_sender(local_notification_tx);
         let hummock_manager = self.clone();
         tokio::spawn(async move {
             loop {
@@ -92,21 +93,62 @@ impl HummockManager {
     }
 
     async fn handle_local_notification(&self, notification: LocalNotification) {
-        if let LocalNotification::WorkerNodeDeleted(worker_node) = notification {
-            if worker_node.get_type().unwrap() == WorkerType::Compactor {
-                self.compactor_manager.remove_compactor(worker_node.id);
+        match notification {
+            LocalNotification::WorkerNodeDeleted(worker_node) => {
+                self.release_contexts(vec![worker_node.id])
+                    .await
+                    .unwrap_or_else(|err| {
+                        panic!(
+                            "Failed to release hummock context {}, error={}",
+                            worker_node.id,
+                            err.as_report()
+                        )
+                    });
+                tracing::info!("Released hummock context {}", worker_node.id);
+                sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
             }
-            self.release_contexts(vec![worker_node.id])
-                .await
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to release hummock context {}, error={}",
-                        worker_node.id,
-                        err.as_report()
+            LocalNotification::SourceDropped(source_id) => {
+                let object_store = self.object_store.clone();
+                let sys_params = self.env.system_params_reader().await;
+                let data_directory = sys_params.data_directory().to_owned();
+                // Best effort.
+                // The source_id may not belong to a CDC source, in which case this is a no-op.
+                tokio::spawn(async move {
+                    if let Err(e) = try_clean_up_cdc_source_schema_history(
+                        source_id,
+                        object_store,
+                        data_directory,
                     )
+                    .await
+                    {
+                        use thiserror_ext::AsReport;
+                        tracing::error!(
+                            "Failed to clean up cdc source {source_id} schema history: {}.",
+                            e.as_report()
+                        )
+                    }
                 });
-            tracing::info!("Released hummock context {}", worker_node.id);
-            sync_point!("AFTER_RELEASE_HUMMOCK_CONTEXTS_ASYNC");
+            }
+            _ => {}
         }
     }
+}
+
+async fn try_clean_up_cdc_source_schema_history(
+    source_id: ObjectId,
+    object_store: ObjectStoreRef,
+    data_directory: String,
+) -> ObjectResult<()> {
+    // The path should follow that defined in OpenDalSchemaHIstory.java prefixed by data_directory.
+    let object_dir: String = format!("{data_directory}/rw-cdc-schema-history/source-{source_id}");
+    let mut keys: Vec<String> = Vec::new();
+    let mut stream = object_store.list(&object_dir, None, None).await?;
+    use futures::StreamExt;
+    while let Some(obj) = stream.next().await {
+        let obj = obj?;
+        keys.push(obj.key);
+    }
+    tracing::debug!(?keys, "Deleting schema history files");
+    object_store.delete_objects(&keys).await?;
+    Ok(())
 }

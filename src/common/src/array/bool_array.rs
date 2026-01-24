@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -87,7 +87,7 @@ impl Array for BoolArray {
     type RefItem<'a> = bool;
 
     unsafe fn raw_value_at_unchecked(&self, idx: usize) -> bool {
-        self.data.is_set_unchecked(idx)
+        unsafe { self.data.is_set_unchecked(idx) }
     }
 
     fn len(&self) -> usize {
@@ -257,8 +257,6 @@ mod tests {
     fn test_bool_array_hash() {
         use std::hash::BuildHasher;
 
-        use twox_hash::RandomXxHashBuilder64;
-
         use super::super::test_util::{hash_finish, test_hash};
 
         const ARR_NUM: usize = 2;
@@ -286,7 +284,7 @@ mod tests {
             .map(|v| helper_test_builder(v.clone()))
             .collect_vec();
 
-        let hasher_builder = RandomXxHashBuilder64::default();
+        let hasher_builder = twox_hash::xxhash64::RandomState::default();
         let mut states = vec![hasher_builder.build_hasher(); ARR_LEN];
         vecs.iter().for_each(|v| {
             v.iter()

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -47,8 +47,8 @@ impl<'a, A: Array> Iterator for ArrayIterator<'a, A> {
     }
 }
 
-impl<'a, A: Array> ExactSizeIterator for ArrayIterator<'a, A> {}
-unsafe impl<'a, A: Array> TrustedLen for ArrayIterator<'a, A> {}
+impl<A: Array> ExactSizeIterator for ArrayIterator<'_, A> {}
+unsafe impl<A: Array> TrustedLen for ArrayIterator<'_, A> {}
 
 #[cfg(test)]
 mod tests {

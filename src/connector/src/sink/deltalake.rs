@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,107 +16,104 @@ use core::num::NonZeroU64;
 use std::collections::{BTreeMap, HashMap};
 use std::sync::Arc;
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use deltalake::DeltaTable;
 use deltalake::aws::storage::s3_constants::{
     AWS_ACCESS_KEY_ID, AWS_ALLOW_HTTP, AWS_ENDPOINT_URL, AWS_REGION, AWS_S3_ALLOW_UNSAFE_RENAME,
     AWS_SECRET_ACCESS_KEY,
 };
-use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType, StructType};
-use deltalake::operations::transaction::CommitBuilder;
+use deltalake::datafusion::datasource::TableProvider;
+use deltalake::kernel::transaction::CommitBuilder;
+use deltalake::kernel::{Action, Add, DataType as DeltaLakeDataType, PrimitiveType};
 use deltalake::protocol::{DeltaOperation, SaveMode};
 use deltalake::writer::{DeltaWriter, RecordBatchWriter};
-use deltalake::DeltaTable;
-use risingwave_common::array::arrow::DeltaLakeConvert;
+use url::Url;
+use phf::{Set, phf_set};
 use risingwave_common::array::StreamChunk;
+use risingwave_common::array::arrow::DeltaLakeConvert;
 use risingwave_common::bail;
-use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{Schema};
 use risingwave_common::types::DataType;
-use risingwave_common::util::iter_util::{ZipEqDebug, ZipEqFast};
+use risingwave_common::util::iter_util::ZipEqDebug;
+use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
-use risingwave_pb::connector_service::SinkMetadata;
-use serde_derive::{Deserialize, Serialize};
-use serde_with::{serde_as, DisplayFromStr};
+use serde::{Deserialize, Serialize};
+use serde_with::{DisplayFromStr, serde_as};
+use tokio::sync::mpsc::UnboundedSender;
 use with_options::WithOptions;
 
-use super::coordinate::CoordinatedSinkWriter;
-use super::decouple_checkpoint_log_sink::{
-    default_commit_checkpoint_interval, DecoupleCheckpointLogSinkerOf,
-};
-use super::writer::SinkWriter;
-use super::{
-    Result, Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam,
-    SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+use crate::connector_common::{AwsAuthProps, IcebergSinkCompactionUpdate};
+use crate::enforce_secret::{EnforceSecret, EnforceSecretError};
+use crate::sink::coordinate::CoordinatedLogSinker;
+use crate::sink::decouple_checkpoint_log_sink::default_commit_checkpoint_interval;
+use crate::sink::writer::SinkWriter;
+use crate::sink::{
+    Result, SINK_TYPE_APPEND_ONLY, SINK_USER_FORCE_APPEND_ONLY_OPTION,
+    SinglePhaseCommitCoordinator, Sink, SinkCommitCoordinator, SinkError, SinkParam,
+    SinkWriterParam,
 };
 
-pub const DELTALAKE_SINK: &str = "deltalake";
 pub const DEFAULT_REGION: &str = "us-east-1";
 pub const GCS_SERVICE_ACCOUNT: &str = "service_account_key";
 
+pub const DELTALAKE_SINK: &str = "deltalake";
+
 #[serde_as]
-#[derive(Deserialize, Serialize, Debug, Clone, WithOptions)]
+#[derive(Deserialize, Debug, Clone, WithOptions)]
 pub struct DeltaLakeCommon {
-    #[serde(rename = "s3.access.key")]
-    pub s3_access_key: Option<String>,
-    #[serde(rename = "s3.secret.key")]
-    pub s3_secret_key: Option<String>,
     #[serde(rename = "location")]
     pub location: String,
-    #[serde(rename = "s3.region")]
-    pub s3_region: Option<String>,
-    #[serde(rename = "s3.endpoint")]
-    pub s3_endpoint: Option<String>,
+    #[serde(flatten)]
+    pub aws_auth_props: AwsAuthProps,
+
     #[serde(rename = "gcs.service.account")]
     pub gcs_service_account: Option<String>,
     /// Commit every n(>0) checkpoints, default is 10.
     #[serde(default = "default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub commit_checkpoint_interval: u64,
+}
+
+impl EnforceSecret for DeltaLakeCommon {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = phf_set! {
+        "gcs.service.account",
+    };
+
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        AwsAuthProps::enforce_one(prop)?;
+        if Self::ENFORCE_SECRET_PROPERTIES.contains(prop) {
+            return Err(EnforceSecretError {
+                key: prop.to_owned(),
+            }
+            .into());
+        }
+
+        Ok(())
+    }
 }
 
 impl DeltaLakeCommon {
     pub async fn create_deltalake_client(&self) -> Result<DeltaTable> {
         let table = match Self::get_table_url(&self.location)? {
             DeltaTableUrl::S3(s3_path) => {
-                let mut storage_options = HashMap::new();
-                storage_options.insert(
-                    AWS_ACCESS_KEY_ID.to_string(),
-                    self.s3_access_key.clone().ok_or_else(|| {
-                        SinkError::Config(anyhow!("s3.access.key is required with aws s3"))
-                    })?,
-                );
-                storage_options.insert(
-                    AWS_SECRET_ACCESS_KEY.to_string(),
-                    self.s3_secret_key.clone().ok_or_else(|| {
-                        SinkError::Config(anyhow!("s3.secret.key is required with aws s3"))
-                    })?,
-                );
-                if self.s3_endpoint.is_none() && self.s3_region.is_none() {
-                    return Err(SinkError::Config(anyhow!(
-                        "s3.endpoint and s3.region need to be filled with at least one"
-                    )));
-                }
-                storage_options.insert(
-                    AWS_REGION.to_string(),
-                    self.s3_region
-                        .clone()
-                        .unwrap_or_else(|| DEFAULT_REGION.to_string()),
-                );
-                if let Some(s3_endpoint) = &self.s3_endpoint {
-                    storage_options.insert(AWS_ENDPOINT_URL.to_string(), s3_endpoint.clone());
-                }
-                storage_options.insert(AWS_ALLOW_HTTP.to_string(), "true".to_string());
-                storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_string(), "true".to_string());
+                let storage_options = self.build_delta_lake_config_for_aws().await?;
                 deltalake::aws::register_handlers(None);
-                deltalake::open_table_with_storage_options(s3_path.clone(), storage_options).await?
+                let url = Url::parse(&s3_path)
+                    .map_err(|e| SinkError::DeltaLake(anyhow!(e)))?;
+                deltalake::open_table_with_storage_options(url, storage_options).await?
             }
-            DeltaTableUrl::Local(local_path) => deltalake::open_table(local_path).await?,
+            DeltaTableUrl::Local(local_path) => {
+                let url = Url::parse(&format!("file://{}", local_path))
+                    .map_err(|e| SinkError::DeltaLake(anyhow!(e)))?;
+                deltalake::open_table(url).await?
+            }
             DeltaTableUrl::Gcs(gcs_path) => {
                 let mut storage_options = HashMap::new();
                 storage_options.insert(
-                    GCS_SERVICE_ACCOUNT.to_string(),
+                    GCS_SERVICE_ACCOUNT.to_owned(),
                     self.gcs_service_account.clone().ok_or_else(|| {
                         SinkError::Config(anyhow!(
                             "gcs.service.account is required with Google Cloud Storage (GCS)"
@@ -124,7 +121,9 @@ impl DeltaLakeCommon {
                     })?,
                 );
                 deltalake::gcp::register_handlers(None);
-                deltalake::open_table_with_storage_options(gcs_path.clone(), storage_options)
+                let url = Url::parse(&gcs_path)
+                    .map_err(|e| SinkError::DeltaLake(anyhow!(e)))?;
+                deltalake::open_table_with_storage_options(url, storage_options)
                     .await?
             }
         };
@@ -133,16 +132,59 @@ impl DeltaLakeCommon {
 
     fn get_table_url(path: &str) -> Result<DeltaTableUrl> {
         if path.starts_with("s3://") || path.starts_with("s3a://") {
-            Ok(DeltaTableUrl::S3(path.to_string()))
+            Ok(DeltaTableUrl::S3(path.to_owned()))
         } else if path.starts_with("gs://") {
-            Ok(DeltaTableUrl::Gcs(path.to_string()))
+            Ok(DeltaTableUrl::Gcs(path.to_owned()))
         } else if let Some(path) = path.strip_prefix("file://") {
-            Ok(DeltaTableUrl::Local(path.to_string()))
+            Ok(DeltaTableUrl::Local(path.to_owned()))
         } else {
             Err(SinkError::DeltaLake(anyhow!(
                 "path should start with 's3://','s3a://'(s3) ,gs://(gcs) or file://(local)"
             )))
         }
+    }
+
+    async fn build_delta_lake_config_for_aws(&self) -> Result<HashMap<String, String>> {
+        let mut storage_options = HashMap::new();
+        storage_options.insert(AWS_ALLOW_HTTP.to_owned(), "true".to_owned());
+        storage_options.insert(AWS_S3_ALLOW_UNSAFE_RENAME.to_owned(), "true".to_owned());
+        let sdk_config = self.aws_auth_props.build_config().await?;
+        let credentials = sdk_config
+            .credentials_provider()
+            .ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "s3.access.key and s3.secret.key is required with aws s3"
+                ))
+            })?
+            .as_ref()
+            .provide_credentials()
+            .await
+            .map_err(|e| SinkError::Config(e.into()))?;
+        let region = sdk_config.region();
+        let endpoint = sdk_config.endpoint_url();
+        storage_options.insert(
+            AWS_ACCESS_KEY_ID.to_owned(),
+            credentials.access_key_id().to_owned(),
+        );
+        storage_options.insert(
+            AWS_SECRET_ACCESS_KEY.to_owned(),
+            credentials.secret_access_key().to_owned(),
+        );
+        if endpoint.is_none() && region.is_none() {
+            return Err(SinkError::Config(anyhow!(
+                "s3.endpoint and s3.region need to be filled with at least one"
+            )));
+        }
+        storage_options.insert(
+            AWS_REGION.to_owned(),
+            region
+                .map(|r| r.as_ref().to_owned())
+                .unwrap_or_else(|| DEFAULT_REGION.to_owned()),
+        );
+        if let Some(s3_endpoint) = endpoint {
+            storage_options.insert(AWS_ENDPOINT_URL.to_owned(), s3_endpoint.to_owned());
+        }
+        Ok(storage_options)
     }
 }
 
@@ -161,6 +203,12 @@ pub struct DeltaLakeConfig {
     pub r#type: String,
 }
 
+impl EnforceSecret for DeltaLakeConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        DeltaLakeCommon::enforce_one(prop)
+    }
+}
+
 impl DeltaLakeConfig {
     pub fn from_btreemap(properties: BTreeMap<String, String>) -> Result<Self> {
         let config = serde_json::from_value::<DeltaLakeConfig>(
@@ -175,6 +223,17 @@ impl DeltaLakeConfig {
 pub struct DeltaLakeSink {
     pub config: DeltaLakeConfig,
     param: SinkParam,
+}
+
+impl EnforceSecret for DeltaLakeSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            DeltaLakeCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl DeltaLakeSink {
@@ -224,7 +283,7 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         DataType::Decimal => {
             matches!(
                 dl_data_type,
-                DeltaLakeDataType::Primitive(PrimitiveType::Decimal(_, _))
+                DeltaLakeDataType::Primitive(PrimitiveType::Decimal(_))
             )
         }
         DataType::Date => {
@@ -248,10 +307,8 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         DataType::Struct(rw_struct) => {
             if let DeltaLakeDataType::Struct(dl_struct) = dl_data_type {
                 let mut result = true;
-                for ((rw_name, rw_type), dl_field) in rw_struct
-                    .names()
-                    .zip_eq_fast(rw_struct.types())
-                    .zip_eq_debug(dl_struct.fields())
+                for ((rw_name, rw_type), dl_field) in
+                    rw_struct.iter().zip_eq_debug(dl_struct.fields())
                 {
                     result = check_field_type(rw_type, dl_field.data_type())?
                         && result
@@ -264,24 +321,23 @@ fn check_field_type(rw_data_type: &DataType, dl_data_type: &DeltaLakeDataType) -
         }
         DataType::List(rw_list) => {
             if let DeltaLakeDataType::Array(dl_list) = dl_data_type {
-                check_field_type(rw_list, dl_list.element_type())?
+                check_field_type(rw_list.elem(), dl_list.element_type())?
             } else {
                 false
             }
         }
         _ => {
             return Err(SinkError::DeltaLake(anyhow!(
-                "deltalake cannot support type {:?}",
-                rw_data_type.to_string()
-            )))
+                "Type {:?} is not supported for DeltaLake sink.",
+                rw_data_type.to_owned()
+            )));
         }
     };
     Ok(result)
 }
 
 impl Sink for DeltaLakeSink {
-    type Coordinator = DeltaLakeSinkCommitter;
-    type LogSinker = DecoupleCheckpointLogSinkerOf<CoordinatedSinkWriter<DeltaLakeSinkWriter>>;
+    type LogSinker = CoordinatedLogSinker<DeltaLakeSinkWriter>;
 
     const SINK_NAME: &'static str = DELTALAKE_SINK;
 
@@ -289,24 +345,7 @@ impl Sink for DeltaLakeSink {
         let inner = DeltaLakeSinkWriter::new(
             self.config.clone(),
             self.param.schema().clone(),
-            self.param.downstream_pk.clone(),
-        )
-        .await?;
-
-        let metrics = SinkWriterMetrics::new(&writer_param);
-        let writer = CoordinatedSinkWriter::new(
-            writer_param
-                .meta_client
-                .expect("should have meta client")
-                .sink_coordinate_client()
-                .await,
-            self.param.clone(),
-            writer_param.vnode_bitmap.ok_or_else(|| {
-                SinkError::Remote(anyhow!(
-                    "sink needs coordination should not have singleton input"
-                ))
-            })?,
-            inner,
+            self.param.downstream_pk_or_empty(),
         )
         .await?;
 
@@ -315,11 +354,20 @@ impl Sink for DeltaLakeSink {
                 "commit_checkpoint_interval should be greater than 0, and it should be checked in config validation",
             );
 
-        Ok(DecoupleCheckpointLogSinkerOf::new(
-            writer,
-            metrics,
+        let writer = CoordinatedLogSinker::new(
+            &writer_param,
+            self.param.clone(),
+            inner,
             commit_checkpoint_interval,
-        ))
+        )
+        .await?;
+
+        Ok(writer)
+    }
+
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        DeltaLakeConfig::from_btreemap(config.clone())?;
+        Ok(())
     }
 
     async fn validate(&self) -> Result<()> {
@@ -331,14 +379,15 @@ impl Sink for DeltaLakeSink {
             )));
         }
         let table = self.config.common.create_deltalake_client().await?;
-        let deltalake_fields: HashMap<&String, &DeltaLakeDataType> = table
-            .get_schema()?
+        let snapshot = table.snapshot()?;
+        let delta_schema = snapshot.schema();
+        let deltalake_fields: HashMap<&String, &DeltaLakeDataType> = delta_schema
             .fields()
             .map(|f| (f.name(), f.data_type()))
             .collect();
         if deltalake_fields.len() != self.param.schema().fields().len() {
             return Err(SinkError::DeltaLake(anyhow!(
-                "Columns mismatch. RisingWave is {}, DeltaLake is {}",
+                "Columns mismatch. RisingWave schema has {} fields, DeltaLake schema has {} fields",
                 self.param.schema().fields().len(),
                 deltalake_fields.len()
             )));
@@ -350,12 +399,12 @@ impl Sink for DeltaLakeSink {
                     field.name
                 )));
             }
-            let deltalake_field_type: &&DeltaLakeDataType = deltalake_fields
-                .get(&field.name)
-                .ok_or_else(|| SinkError::DeltaLake(anyhow!("cannot find field type")))?;
+            let deltalake_field_type = deltalake_fields.get(&field.name).ok_or_else(|| {
+                SinkError::DeltaLake(anyhow!("cannot find field type for {}", field.name))
+            })?;
             if !check_field_type(&field.data_type, deltalake_field_type)? {
                 return Err(SinkError::DeltaLake(anyhow!(
-                    "column {} type is not match, deltalake is {:?}, rw is{:?}",
+                    "column '{}' type mismatch: deltalake type is {:?}, RisingWave type is {:?}",
                     field.name,
                     deltalake_field_type,
                     field.data_type
@@ -370,10 +419,18 @@ impl Sink for DeltaLakeSink {
         Ok(())
     }
 
-    async fn new_coordinator(&self) -> Result<Self::Coordinator> {
-        Ok(DeltaLakeSinkCommitter {
+    fn is_coordinated_sink(&self) -> bool {
+        true
+    }
+
+    async fn new_coordinator(
+        &self,
+        _iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
+    ) -> Result<SinkCommitCoordinator> {
+        let coordinator = DeltaLakeSinkCommitter {
             table: self.config.common.create_deltalake_client().await?,
-        })
+        };
+        Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))
     }
 }
 
@@ -406,8 +463,8 @@ impl DeltaLakeSinkWriter {
     ) -> Result<Self> {
         let dl_table = config.common.create_deltalake_client().await?;
         let writer = RecordBatchWriter::for_table(&dl_table)?;
-        let dl_schema: Arc<deltalake::arrow::datatypes::Schema> =
-            Arc::new(convert_schema(dl_table.get_schema()?)?);
+        // Use TableProvider::schema() to get the arrow schema directly
+        let dl_schema: Arc<deltalake::arrow::datatypes::Schema> = dl_table.schema();
 
         Ok(Self {
             config,
@@ -429,20 +486,6 @@ impl DeltaLakeSinkWriter {
     }
 }
 
-fn convert_schema(schema: &StructType) -> Result<deltalake::arrow::datatypes::Schema> {
-    let mut builder = deltalake::arrow::datatypes::SchemaBuilder::new();
-    for field in schema.fields() {
-        let dl_field = deltalake::arrow::datatypes::Field::new(
-            field.name(),
-            deltalake::arrow::datatypes::DataType::try_from(field.data_type())
-                .context("convert schema error")
-                .map_err(SinkError::DeltaLake)?,
-            field.is_nullable(),
-        );
-        builder.push(dl_field);
-    }
-    Ok(builder.finish())
-}
 
 #[async_trait]
 impl SinkWriter for DeltaLakeSinkWriter {
@@ -470,10 +513,6 @@ impl SinkWriter for DeltaLakeSinkWriter {
             adds,
         })?))
     }
-
-    async fn update_vnode_bitmap(&mut self, _vnode_bitmap: Arc<Bitmap>) -> Result<()> {
-        Ok(())
-    }
 }
 
 pub struct DeltaLakeSinkCommitter {
@@ -481,14 +520,18 @@ pub struct DeltaLakeSinkCommitter {
 }
 
 #[async_trait::async_trait]
-impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
+impl SinglePhaseCommitCoordinator for DeltaLakeSinkCommitter {
     async fn init(&mut self) -> Result<()> {
         tracing::info!("DeltaLake commit coordinator inited.");
         Ok(())
     }
 
-    async fn commit(&mut self, epoch: u64, metadata: Vec<SinkMetadata>) -> Result<()> {
-        tracing::info!("Starting DeltaLake commit in epoch {epoch}.");
+    async fn commit_data(
+        &mut self,
+        epoch: u64,
+        metadata: Vec<SinkMetadata>,
+    ) -> Result<()> {
+        tracing::debug!("Starting DeltaLake commit in epoch {epoch}.");
 
         let deltalake_write_result = metadata
             .iter()
@@ -503,7 +546,7 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
         if write_adds.is_empty() {
             return Ok(());
         }
-        let partition_cols = self.table.metadata()?.partition_columns.clone();
+        let partition_cols = self.table.snapshot()?.metadata().partition_columns().clone();
         let partition_by = if !partition_cols.is_empty() {
             Some(partition_cols)
         } else {
@@ -524,8 +567,8 @@ impl SinkCommitCoordinator for DeltaLakeSinkCommitter {
             .await?
             .version();
         self.table.update().await?;
-        tracing::info!(
-            "Succeeded to commit ti DeltaLake table in epoch {epoch} version {version}."
+        tracing::debug!(
+            "Succeeded to commit to DeltaLake table in epoch {epoch}, version {version}."
         );
         Ok(())
     }
@@ -539,7 +582,7 @@ struct DeltaLakeWriteResult {
 impl<'a> TryFrom<&'a DeltaLakeWriteResult> for SinkMetadata {
     type Error = SinkError;
 
-    fn try_from(value: &'a DeltaLakeWriteResult) -> std::prelude::v1::Result<Self, Self::Error> {
+    fn try_from(value: &'a DeltaLakeWriteResult) -> std::result::Result<Self, Self::Error> {
         let metadata =
             serde_json::to_vec(&value.adds).context("cannot serialize deltalake sink metadata")?;
         Ok(SinkMetadata {
@@ -560,19 +603,25 @@ impl DeltaLakeWriteResult {
     }
 }
 
+impl From<::deltalake::DeltaTableError> for SinkError {
+    fn from(value: ::deltalake::DeltaTableError) -> Self {
+        SinkError::DeltaLake(anyhow!(value))
+    }
+}
+
 #[cfg(all(test, not(madsim)))]
-mod test {
+mod tests {
     use deltalake::kernel::DataType as SchemaDataType;
     use deltalake::operations::create::CreateBuilder;
     use maplit::btreemap;
+    use url::Url;
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
     use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
 
-    use super::{DeltaLakeConfig, DeltaLakeSinkWriter};
-    use crate::sink::deltalake::DeltaLakeSinkCommitter;
+    use super::{DeltaLakeConfig, DeltaLakeSinkCommitter, DeltaLakeSinkWriter};
+    use crate::sink::SinglePhaseCommitCoordinator;
     use crate::sink::writer::SinkWriter;
-    use crate::sink::SinkCommitCoordinator;
-    use crate::source::DataType;
 
     #[tokio::test]
     async fn test_deltalake() {
@@ -596,24 +645,20 @@ mod test {
             .unwrap();
 
         let properties = btreemap! {
-            "connector".to_string() => "deltalake".to_string(),
-            "force_append_only".to_string() => "true".to_string(),
-            "type".to_string() => "append-only".to_string(),
-            "location".to_string() => format!("file://{}", path),
+            "connector".to_owned() => "deltalake".to_owned(),
+            "force_append_only".to_owned() => "true".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
+            "location".to_owned() => format!("file://{}", path),
         };
 
         let schema = Schema::new(vec![
             Field {
                 data_type: DataType::Int32,
                 name: "id".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
             },
             Field {
                 data_type: DataType::Varchar,
                 name: "name".into(),
-                sub_fields: vec![],
-                type_name: "".into(),
             },
         ]);
 
@@ -639,7 +684,7 @@ mod test {
             table: deltalake_table,
         };
         let metadata = deltalake_writer.barrier(true).await.unwrap().unwrap();
-        committer.commit(1, vec![metadata]).await.unwrap();
+        committer.commit_data(1, vec![metadata]).await.unwrap();
 
         // The following code is to test reading the deltalake data table written with test data.
         // To enable the following code, add `deltalake = { workspace = true, features = ["datafusion"] }`
@@ -650,7 +695,7 @@ mod test {
         // dev dependency.
 
         let ctx = deltalake::datafusion::prelude::SessionContext::new();
-        let table = deltalake::open_table(path).await.unwrap();
+        let table = deltalake::open_table(Url::parse(&format!("file://{}", path)).unwrap()).await.unwrap();
         ctx.register_table("demo", std::sync::Arc::new(table))
             .unwrap();
 

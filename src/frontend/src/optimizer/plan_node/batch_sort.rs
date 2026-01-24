@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,15 +13,18 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
-use risingwave_pb::batch_plan::plan_node::NodeBody;
 use risingwave_pb::batch_plan::SortNode;
+use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use super::batch::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, ToBatchPb, ToDistributedBatch};
+use super::utils::{Distill, childless_record};
+use super::{
+    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    ToDistributedBatch,
+};
 use crate::error::Result;
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::ToLocalBatch;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Order, OrderDisplay};
 
 /// `BatchSort` buffers all data from input and sort these rows by specified order, providing the
@@ -52,7 +55,7 @@ impl Distill for BatchSort {
     }
 }
 
-impl PlanTreeNodeUnary for BatchSort {
+impl PlanTreeNodeUnary<Batch> for BatchSort {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -61,7 +64,7 @@ impl PlanTreeNodeUnary for BatchSort {
         Self::new(input, self.base.order().clone())
     }
 }
-impl_plan_tree_node_for_unary! {BatchSort}
+impl_plan_tree_node_for_unary! { Batch, BatchSort}
 
 impl ToDistributedBatch for BatchSort {
     fn to_distributed(&self) -> Result<PlanRef> {
@@ -84,6 +87,6 @@ impl ToLocalBatch for BatchSort {
     }
 }
 
-impl ExprRewritable for BatchSort {}
+impl ExprRewritable<Batch> for BatchSort {}
 
 impl ExprVisitable for BatchSort {}

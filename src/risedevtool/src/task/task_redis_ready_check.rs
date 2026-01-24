@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -32,7 +32,7 @@ impl Task for RedisReadyCheckTask {
     fn execute(&mut self, ctx: &mut ExecuteContext<impl Write>) -> Result<()> {
         ctx.pb.set_message("waiting for online...");
         let client = redis::Client::open(
-            "redis://".to_string() + &format!("{}:{}", self.config.address, self.config.port),
+            "redis://".to_owned() + &format!("{}:{}", self.config.address, self.config.port),
         )?;
 
         ctx.wait(|| {

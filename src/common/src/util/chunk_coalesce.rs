@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -232,8 +232,8 @@ impl DataChunkBuilder {
         self.buffered_count
     }
 
-    pub fn can_append(&self, count: usize) -> bool {
-        self.buffered_count + count <= self.batch_size
+    pub fn can_append_update(&self) -> bool {
+        self.buffered_count + 2 <= self.batch_size
     }
 
     pub fn num_columns(&self) -> usize {
@@ -351,14 +351,14 @@ mod tests {
         assert_eq!(Some(1), returned_input.as_ref().map(|c| c.offset));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
-        assert!(output.unwrap().is_compacted());
+        assert!(output.unwrap().is_vis_compacted());
 
         // Append last input
         let (returned_input, output) = builder.append_chunk_inner(returned_input.unwrap());
         assert!(returned_input.is_none());
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
-        assert!(output.unwrap().is_compacted());
+        assert!(output.unwrap().is_vis_compacted());
     }
 
     #[test]
@@ -389,7 +389,7 @@ mod tests {
         assert_eq!(Some(3), returned_input.as_ref().map(|c| c.offset));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::cardinality));
         assert_eq!(Some(3), output.as_ref().map(DataChunk::capacity));
-        assert!(output.unwrap().is_compacted());
+        assert!(output.unwrap().is_vis_compacted());
         assert_eq!(0, builder.buffered_count());
 
         // Append last input
@@ -431,7 +431,7 @@ mod tests {
         for output in &[output_1, output_2] {
             assert_eq!(3, output.cardinality());
             assert_eq!(3, output.capacity());
-            assert!(output.is_compacted());
+            assert!(output.is_vis_compacted());
         }
     }
 
@@ -456,7 +456,7 @@ mod tests {
         let output = builder.consume_all().expect("Failed to consume all!");
         assert_eq!(2, output.cardinality());
         assert_eq!(2, output.capacity());
-        assert!(output.is_compacted());
+        assert!(output.is_vis_compacted());
     }
 
     #[test]

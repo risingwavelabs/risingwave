@@ -1,0 +1,30 @@
+[meta]
+disable_recovery = true
+max_heartbeat_interval_secs = 60
+
+[meta.compaction_config]
+level0_tier_compact_file_number = 6
+level0_overlapping_sub_level_compact_level_count = 3
+level0_max_compact_file_number = 96
+
+[streaming]
+in_flight_barrier_nums = 10
+
+[streaming.developer]
+stream_exchange_concurrent_barriers = 10
+stream_switch_jdbc_pg_to_native = true
+
+[storage]
+imm_merge_threshold = 2
+max_cached_recent_versions_number = 200
+
+[storage.object_store.retry]
+streaming_upload_attempt_timeout_ms = 10000
+upload_retry_attempts = 5
+read_attempt_timeout_ms = 16000
+read_retry_attempts = 6
+
+[system]
+barrier_interval_ms = 250
+checkpoint_frequency = 5
+max_concurrent_creating_streaming_jobs = 0

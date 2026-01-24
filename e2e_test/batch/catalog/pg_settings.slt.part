@@ -8,14 +8,17 @@ internal parallel_compact_size_mb
 internal sstable_size_mb
 internal state_store
 internal use_new_object_prefix_strategy
+postmaster adaptive_parallelism_strategy
 postmaster backup_storage_directory
 postmaster backup_storage_url
 postmaster barrier_interval_ms
 postmaster checkpoint_frequency
 postmaster enable_tracing
+postmaster enforce_secret
 postmaster license_key
 postmaster max_concurrent_creating_streaming_jobs
 postmaster pause_on_next_bootstrap
+postmaster per_database_isolation
 postmaster time_travel_retention_ms
 user application_name
 user backfill_rate_limit
@@ -23,6 +26,8 @@ user background_ddl
 user batch_enable_distributed_dml
 user batch_enable_lookup_join
 user batch_enable_sort_agg
+user batch_expr_strict_mode
+user batch_hnsw_ef_search
 user batch_parallelism
 user bypass_cluster_limits
 user bytea_output
@@ -31,13 +36,18 @@ user client_encoding
 user client_min_messages
 user create_compaction_group_for_mv
 user datestyle
+user disable_purify_definition
+user dml_rate_limit
+user enable_datafusion_engine
+user enable_index_selection
 user enable_join_ordering
+user enable_locality_backfill
 user enable_share_plan
-user enable_shared_source
 user enable_two_phase_agg
 user extra_float_digits
 user force_split_distinct_agg
 user force_two_phase_agg
+user iceberg_engine_connection
 user idle_in_transaction_session_timeout
 user implicit_flush
 user intervalstyle
@@ -51,20 +61,39 @@ user server_encoding
 user server_version
 user server_version_num
 user sink_decouple
+user sink_rate_limit
+user slow_ddl_notification_secs
 user source_rate_limit
 user standard_conforming_strings
 user statement_timeout
 user streaming_allow_jsonb_in_stream_key
 user streaming_enable_bushy_join
 user streaming_enable_delta_join
+user streaming_enable_unaligned_join
+user streaming_force_filter_inside_join
+user streaming_join_encoding
 user streaming_max_parallelism
 user streaming_over_window_cache_policy
 user streaming_parallelism
+user streaming_parallelism_for_backfill
+user streaming_parallelism_for_index
+user streaming_parallelism_for_materialized_view
+user streaming_parallelism_for_sink
+user streaming_parallelism_for_source
+user streaming_parallelism_for_table
+user streaming_separate_consecutive_join
+user streaming_separate_sink
+user streaming_sync_log_store_buffer_size
+user streaming_sync_log_store_pause_duration_ms
+user streaming_unsafe_allow_unmaterialized_impure_expr
 user streaming_use_arrangement_backfill
+user streaming_use_shared_source
 user streaming_use_snapshot_backfill
 user synchronize_seqscans
 user timezone
 user transaction_isolation
+user unsafe_enable_storage_retention_for_non_append_only_tables
+user upsert_dml
 user visibility_mode
 
 query TT
@@ -75,9 +104,9 @@ SELECT * FROM pg_catalog.pg_settings where name='dummy';
 query TT
 SELECT min(name) name, context FROM pg_catalog.pg_settings GROUP BY context;
 ----
-application_name            user
-backup_storage_directory    postmaster
-block_size_kb               internal
+application_name	user
+adaptive_parallelism_strategy	postmaster
+block_size_kb	internal
 
 # Tab-completion of `SET` command
 query T

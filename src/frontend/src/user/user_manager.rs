@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,12 +17,11 @@ use std::collections::HashMap;
 use itertools::Itertools;
 use risingwave_pb::user::{GrantPrivilege, UserInfo};
 
+use crate::user::UserId;
 use crate::user::user_catalog::UserCatalog;
-use crate::user::{UserId, UserInfoVersion};
 
 /// `UserInfoManager` is responsible for managing users.
 pub struct UserInfoManager {
-    version: UserInfoVersion,
     user_by_name: HashMap<String, UserCatalog>,
     user_name_by_id: HashMap<UserId, String>,
 }
@@ -31,7 +30,6 @@ pub struct UserInfoManager {
 impl Default for UserInfoManager {
     fn default() -> Self {
         UserInfoManager {
-            version: 0,
             user_by_name: HashMap::new(),
             user_name_by_id: HashMap::new(),
         }
@@ -50,6 +48,11 @@ impl UserInfoManager {
 
     pub fn get_user_by_name(&self, user_name: &str) -> Option<&UserCatalog> {
         self.user_by_name.get(user_name)
+    }
+
+    pub fn get_user_by_id(&self, id: &UserId) -> Option<&UserCatalog> {
+        let name = self.user_name_by_id.get(id)?;
+        self.user_by_name.get(name)
     }
 
     pub fn get_user_name_by_id(&self, id: UserId) -> Option<String> {
@@ -99,15 +102,5 @@ impl UserInfoManager {
     pub fn clear(&mut self) {
         self.user_by_name.clear();
         self.user_name_by_id.clear();
-    }
-
-    /// Get the user info cache's version.
-    pub fn version(&self) -> u64 {
-        self.version
-    }
-
-    /// Set the user info cache's version.
-    pub fn set_version(&mut self, version: UserInfoVersion) {
-        self.version = version;
     }
 }

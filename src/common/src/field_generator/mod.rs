@@ -1,10 +1,10 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -19,7 +19,7 @@ mod varchar;
 use std::time::Duration;
 
 // TODO(error-handling): use a new error type
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 use chrono::{DateTime, FixedOffset};
 pub use numeric::*;
 use serde_json::Value;
@@ -255,7 +255,7 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::Struct(fields) => {
                 let map = fields
                     .iter_mut()
-                    .map(|(name, gen)| (name.clone(), gen.generate_json(offset)))
+                    .map(|(name, r#gen)| (name.clone(), r#gen.generate_json(offset)))
                     .collect();
                 Value::Object(map)
             }
@@ -288,7 +288,7 @@ impl FieldGeneratorImpl {
             FieldGeneratorImpl::Struct(fields) => {
                 let data = fields
                     .iter_mut()
-                    .map(|(_, gen)| gen.generate_datum(offset))
+                    .map(|(_, r#gen)| r#gen.generate_datum(offset))
                     .collect();
                 Some(ScalarImpl::Struct(StructValue::new(data)))
             }
@@ -319,7 +319,7 @@ impl FieldGeneratorImpl {
             Self::Timestamp(_) => DataType::Timestamp,
             Self::Timestamptz(_) => DataType::Timestamptz,
             Self::Struct(_) => todo!("data_type for struct"),
-            Self::List(inner, _) => DataType::List(Box::new(inner.data_type())),
+            Self::List(inner, _) => DataType::list(inner.data_type()),
         }
     }
 }
@@ -336,8 +336,8 @@ mod tests {
             i32_fields.push(
                 FieldGeneratorImpl::with_number_sequence(
                     DataType::Int32,
-                    Some("1".to_string()),
-                    Some("20".to_string()),
+                    Some("1".to_owned()),
+                    Some("20".to_owned()),
                     split_index,
                     split_num,
                     0,

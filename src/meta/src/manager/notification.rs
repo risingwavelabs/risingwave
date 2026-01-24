@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,25 +12,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::hash_map::Entry;
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
+use risingwave_common::id::JobId;
 use risingwave_common::system_param::reader::SystemParamsReader;
+use risingwave_meta_model::ObjectId;
 use risingwave_pb::common::{WorkerNode, WorkerType};
-use risingwave_pb::meta::relation::RelationInfo;
+use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::meta::{
-    MetaSnapshot, Relation, RelationGroup, SubscribeResponse, SubscribeType,
+    MetaSnapshot, PbObject, PbObjectGroup, SubscribeResponse, SubscribeType,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::{self, UnboundedSender};
 use tonic::Status;
 
 use crate::controller::SqlMetaStore;
-use crate::manager::notification_version::NotificationVersionGenerator;
 use crate::manager::WorkerKey;
+use crate::manager::notification_version::NotificationVersionGenerator;
 use crate::model::FragmentId;
 
 pub type MessageStatus = Status;
@@ -45,9 +47,11 @@ pub enum LocalNotification {
     WorkerNodeDeleted(WorkerNode),
     WorkerNodeActivated(WorkerNode),
     SystemParamsChange(SystemParamsReader),
+    BatchParallelismChange,
     FragmentMappingsUpsert(Vec<FragmentId>),
     FragmentMappingsDelete(Vec<FragmentId>),
-    AdhocRecovery,
+    SourceDropped(ObjectId),
+    StreamingJobBackfillFinished(JobId),
 }
 
 #[derive(Debug)]
@@ -76,7 +80,7 @@ struct Task {
 
 /// [`NotificationManager`] is used to send notification to frontends and compute nodes.
 pub struct NotificationManager {
-    core: Arc<Mutex<NotificationManagerCore>>,
+    core: Arc<parking_lot::Mutex<NotificationManagerCore>>,
     /// Sender used to add a notification into the waiting queue.
     task_tx: UnboundedSender<Task>,
     /// The current notification version generator.
@@ -87,7 +91,7 @@ impl NotificationManager {
     pub async fn new(meta_store_impl: SqlMetaStore) -> Self {
         // notification waiting queue.
         let (task_tx, mut task_rx) = mpsc::unbounded_channel::<Task>();
-        let core = Arc::new(Mutex::new(NotificationManagerCore::new()));
+        let core = Arc::new(parking_lot::Mutex::new(NotificationManagerCore::new()));
         let core_clone = core.clone();
         let version_generator = NotificationVersionGenerator::new(meta_store_impl)
             .await
@@ -101,7 +105,7 @@ impl NotificationManager {
                     info: Some(task.info),
                     version: task.version.unwrap_or_default(),
                 };
-                core.lock().await.notify(task.target, response);
+                core.lock().notify(task.target, response);
             }
         });
 
@@ -112,8 +116,8 @@ impl NotificationManager {
         }
     }
 
-    pub async fn abort_all(&self) {
-        let mut guard = self.core.lock().await;
+    pub fn abort_all(&self) {
+        let mut guard = self.core.lock();
         *guard = NotificationManagerCore::new();
         guard.exiting = true;
     }
@@ -171,22 +175,33 @@ impl NotificationManager {
         )
     }
 
+    pub fn notify_all_without_version(&self, operation: Operation, info: Info) {
+        for subscribe_type in [
+            SubscribeType::Frontend,
+            SubscribeType::Hummock,
+            SubscribeType::Compactor,
+            SubscribeType::Compute,
+        ] {
+            self.notify_without_version(subscribe_type.into(), operation, info.clone());
+        }
+    }
+
     pub async fn notify_frontend(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Frontend.into(), operation, info)
             .await
     }
 
-    pub async fn notify_frontend_relation_info(
+    pub async fn notify_frontend_object_info(
         &self,
         operation: Operation,
-        relation_info: RelationInfo,
+        object_info: PbObjectInfo,
     ) -> NotificationVersion {
         self.notify_with_version(
             SubscribeType::Frontend.into(),
             operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
+            Info::ObjectGroup(PbObjectGroup {
+                objects: vec![PbObject {
+                    object_info: object_info.into(),
                 }],
             }),
         )
@@ -198,47 +213,8 @@ impl NotificationManager {
             .await
     }
 
-    pub async fn notify_hummock_relation_info(
-        &self,
-        operation: Operation,
-        relation_info: RelationInfo,
-    ) -> NotificationVersion {
-        self.notify_with_version(
-            SubscribeType::Hummock.into(),
-            operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
-                }],
-            }),
-        )
-        .await
-    }
-
     pub async fn notify_compactor(&self, operation: Operation, info: Info) -> NotificationVersion {
         self.notify_with_version(SubscribeType::Compactor.into(), operation, info)
-            .await
-    }
-
-    pub async fn notify_compactor_relation_info(
-        &self,
-        operation: Operation,
-        relation_info: RelationInfo,
-    ) -> NotificationVersion {
-        self.notify_with_version(
-            SubscribeType::Compactor.into(),
-            operation,
-            Info::RelationGroup(RelationGroup {
-                relations: vec![Relation {
-                    relation_info: relation_info.into(),
-                }],
-            }),
-        )
-        .await
-    }
-
-    pub async fn notify_compute(&self, operation: Operation, info: Info) -> NotificationVersion {
-        self.notify_with_version(SubscribeType::Compute.into(), operation, info)
             .await
     }
 
@@ -268,8 +244,8 @@ impl NotificationManager {
         self.notify(SubscribeType::Hummock.into(), operation, info, version)
     }
 
-    pub async fn notify_local_subscribers(&self, notification: LocalNotification) {
-        let mut core_guard = self.core.lock().await;
+    pub fn notify_local_subscribers(&self, notification: LocalNotification) {
+        let mut core_guard = self.core.lock();
         core_guard.local_senders.retain(|sender| {
             if let Err(err) = sender.send(notification.clone()) {
                 tracing::warn!(error = %err.as_report(), "Failed to notify local subscriber");
@@ -280,8 +256,8 @@ impl NotificationManager {
     }
 
     /// Tell `NotificationManagerCore` to delete sender.
-    pub async fn delete_sender(&self, worker_type: WorkerType, worker_key: WorkerKey) {
-        let mut core_guard = self.core.lock().await;
+    pub fn delete_sender(&self, worker_type: WorkerType, worker_key: WorkerKey) {
+        let mut core_guard = self.core.lock();
         // TODO: we may avoid passing the worker_type and remove the `worker_key` in all sender
         // holders anyway
         match worker_type {
@@ -295,13 +271,13 @@ impl NotificationManager {
     }
 
     /// Tell `NotificationManagerCore` to insert sender by `worker_type`.
-    pub async fn insert_sender(
+    pub fn insert_sender(
         &self,
         subscribe_type: SubscribeType,
         worker_key: WorkerKey,
         sender: UnboundedSender<Notification>,
     ) {
-        let mut core_guard = self.core.lock().await;
+        let mut core_guard = self.core.lock();
         if core_guard.exiting {
             tracing::warn!("notification manager exiting.");
             return;
@@ -311,8 +287,8 @@ impl NotificationManager {
         senders.insert(worker_key, sender);
     }
 
-    pub async fn insert_local_sender(&self, sender: UnboundedSender<LocalNotification>) {
-        let mut core_guard = self.core.lock().await;
+    pub fn insert_local_sender(&self, sender: UnboundedSender<LocalNotification>) {
+        let mut core_guard = self.core.lock();
         if core_guard.exiting {
             tracing::warn!("notification manager exiting.");
             return;
@@ -321,8 +297,8 @@ impl NotificationManager {
     }
 
     #[cfg(test)]
-    pub async fn clear_local_sender(&self) {
-        self.core.lock().await.local_senders.clear();
+    pub fn clear_local_sender(&self) {
+        self.core.lock().local_senders.clear();
     }
 
     pub async fn current_version(&self) -> NotificationVersion {
@@ -377,7 +353,7 @@ impl NotificationManagerCore {
             match senders.entry(worker_key.clone()) {
                 Entry::Occupied(entry) => {
                     let _ = entry.get().send(Ok(response)).inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err);
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                         entry.remove_entry();
                     });
                 }
@@ -390,7 +366,7 @@ impl NotificationManagerCore {
                 sender
                     .send(Ok(response.clone()))
                     .inspect_err(|err| {
-                        warn_send_failure!(target.subscribe_type, &worker_key, err);
+                        warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                     })
                     .is_ok()
             });
@@ -410,6 +386,7 @@ impl NotificationManagerCore {
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::id::JobId;
     use risingwave_pb::common::HostAddress;
 
     use super::*;
@@ -419,22 +396,19 @@ mod tests {
     async fn test_multiple_subscribers_one_worker() {
         let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
         let worker_key1 = WorkerKey(HostAddress {
-            host: "a".to_string(),
+            host: "a".to_owned(),
             port: 1,
         });
         let worker_key2 = WorkerKey(HostAddress {
-            host: "a".to_string(),
+            host: "a".to_owned(),
             port: 2,
         });
         let (tx1, mut rx1) = mpsc::unbounded_channel();
         let (tx2, mut rx2) = mpsc::unbounded_channel();
         let (tx3, mut rx3) = mpsc::unbounded_channel();
-        mgr.insert_sender(SubscribeType::Hummock, worker_key1.clone(), tx1)
-            .await;
-        mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), tx2)
-            .await;
-        mgr.insert_sender(SubscribeType::Frontend, worker_key2, tx3)
-            .await;
+        mgr.insert_sender(SubscribeType::Hummock, worker_key1.clone(), tx1);
+        mgr.insert_sender(SubscribeType::Frontend, worker_key1.clone(), tx2);
+        mgr.insert_sender(SubscribeType::Frontend, worker_key2, tx3);
         mgr.notify_snapshot(
             worker_key1.clone(),
             SubscribeType::Hummock,
@@ -449,5 +423,22 @@ mod tests {
         assert!(rx1.try_recv().is_err());
         assert!(rx2.recv().await.is_some());
         assert!(rx3.recv().await.is_some());
+    }
+
+    #[tokio::test]
+    async fn test_local_notification_backfill_finished() {
+        let mgr = NotificationManager::new(SqlMetaStore::for_test().await).await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        mgr.insert_local_sender(tx);
+
+        let job_id = JobId::new(42);
+        mgr.notify_local_subscribers(LocalNotification::StreamingJobBackfillFinished(job_id));
+
+        match rx.recv().await.expect("should receive notification") {
+            LocalNotification::StreamingJobBackfillFinished(received) => {
+                assert_eq!(received, job_id);
+            }
+            other => panic!("unexpected notification: {other:?}"),
+        }
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,8 +21,8 @@ use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, LevelCompactionPicker,
     LocalPickerStatistic, TierCompactionPicker,
 };
-use crate::hummock::compaction::picker::intra_compaction_picker::WholeLevelCompactionPicker;
 use crate::hummock::compaction::CompactionDeveloperConfig;
+use crate::hummock::compaction::picker::intra_compaction_picker::WholeLevelCompactionPicker;
 use crate::hummock::level_handler::LevelHandler;
 
 pub struct EmergencyCompactionPicker {

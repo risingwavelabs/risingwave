@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,6 +19,7 @@
 
 mod metrics_manager;
 mod observer_manager;
+mod profile_service;
 mod tracing;
 
 pub use metrics_manager::MetricsManager;
@@ -26,4 +27,5 @@ pub use observer_manager::{
     Channel, NotificationClient, ObserverError, ObserverManager, ObserverState,
     RpcNotificationClient,
 };
+pub use profile_service::ProfileServiceImpl;
 pub use tracing::TracingExtractLayer;

@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -16,15 +16,25 @@
  */
 
 import {
-  primaryKeyColumn,
+  Column,
   Relations,
   streamingJobColumns,
+  tableColumns,
 } from "../components/Relations"
 import { getIndexes } from "../lib/api/streaming"
+import { Index } from "../proto/gen/catalog"
 
 export default function Indexes() {
-  return Relations("Indexes", getIndexes, [
-    ...streamingJobColumns,
-    primaryKeyColumn,
-  ])
+  const indexItemsCountColumn: Column<Index> = {
+    name: "Index Len",
+    width: 3,
+    content: (s) => s.indexColumnsLen,
+  }
+
+  return Relations(
+    "Indexes",
+    getIndexes,
+    [indexItemsCountColumn, ...streamingJobColumns, ...tableColumns],
+    { withStreamingJobs: true }
+  )
 }

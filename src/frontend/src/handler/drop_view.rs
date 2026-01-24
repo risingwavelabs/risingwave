@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -28,17 +28,17 @@ pub async fn handle_drop_view(
     cascade: bool,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
-    let db_name = session.database();
-    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, table_name)?;
+    let db_name = &session.database();
+    let (schema_name, table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
     let search_path = session.config().search_path();
-    let user_name = &session.auth_context().user_name;
+    let user_name = &session.user_name();
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
     let view_id = {
         let reader = session.env().catalog_reader().read_guard();
         let (view, schema_name) =
-            match reader.get_view_by_name(session.database(), schema_path, &table_name) {
+            match reader.get_view_by_name(&session.database(), schema_path, &table_name) {
                 Ok((t, s)) => (t, s),
                 Err(e) => {
                     return if if_exists {
@@ -47,7 +47,7 @@ pub async fn handle_drop_view(
                             .into())
                     } else {
                         Err(e.into())
-                    }
+                    };
                 }
             };
 

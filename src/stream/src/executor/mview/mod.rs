@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,9 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod materialize;
+pub mod cache;
+pub mod materialize;
+pub mod refresh_progress_table;
 
 #[cfg(test)]
 pub(crate) mod test_utils;
 
 pub use materialize::*;
+pub use refresh_progress_table::RefreshProgressTable;

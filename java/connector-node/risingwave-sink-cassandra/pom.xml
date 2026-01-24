@@ -44,9 +44,9 @@
 
         <!-- cassandra drivers -->
         <dependency>
-            <groupId>com.datastax.oss</groupId>
+            <groupId>org.apache.cassandra</groupId>
             <artifactId>java-driver-core</artifactId>
-            <version>${datastax.version}</version>
+            <version>4.19.0</version>
         </dependency>
     </dependencies>
 

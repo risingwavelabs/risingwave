@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(let_chains)]
-#![feature(hash_extract_if)]
+#![warn(clippy::large_futures, clippy::large_stack_frames)]
 
 use anyhow::Result;
 use clap::{Args, Parser, Subcommand};
 use cmd_impl::bench::BenchCommands;
 use cmd_impl::hummock::SstDumpArgs;
+use itertools::Itertools;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_hummock_sdk::{HummockEpoch, HummockVersionId};
 use risingwave_meta::backup_restore::RestoreOpts;
@@ -26,7 +26,11 @@ use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::Compressi
 use risingwave_pb::meta::update_worker_node_schedulability_request::Schedulability;
 use thiserror_ext::AsReport;
 
-use crate::cmd_impl::hummock::{build_compaction_config_vec, list_pinned_versions};
+use crate::cmd_impl::hummock::{
+    build_compaction_config_vec, list_pinned_versions, migrate_legacy_object,
+};
+use crate::cmd_impl::profile::ProfileWorkerType;
+use crate::cmd_impl::scale::set_cdc_table_backfill_parallelism;
 use crate::cmd_impl::throttle::apply_throttle;
 use crate::common::CtlContext;
 
@@ -68,15 +72,18 @@ enum Commands {
     /// Commands for Benchmarks
     #[clap(subcommand)]
     Bench(BenchCommands),
-    /// Dump the await-tree of compute nodes and compactors
+    /// Commands for await-tree, such as dumping, analyzing and transcribing
+    #[clap(subcommand)]
     #[clap(visible_alias("trace"))]
-    AwaitTree,
-    // TODO(yuhao): profile other nodes
-    /// Commands for profilng the compute nodes
+    AwaitTree(AwaitTreeCommands),
+    /// Commands for profiling nodes
     #[clap(subcommand)]
     Profile(ProfileCommands),
     #[clap(subcommand)]
     Throttle(ThrottleCommands),
+    /// Commands for Self-testing
+    #[clap(subcommand, hide = true)]
+    Test(TestCommands),
 }
 
 #[derive(Subcommand)]
@@ -85,6 +92,7 @@ enum ComputeCommands {
     ShowConfig { host: String },
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum HummockCommands {
     /// list latest Hummock version on meta node
@@ -191,6 +199,24 @@ enum HummockCommands {
         sst_allowed_trivial_move_min_size: Option<u64>,
         #[clap(long)]
         disable_auto_group_scheduling: Option<bool>,
+        #[clap(long)]
+        max_overlapping_level_size: Option<u64>,
+        #[clap(long)]
+        sst_allowed_trivial_move_max_count: Option<u32>,
+        #[clap(long)]
+        emergency_level0_sst_file_count: Option<u32>,
+        #[clap(long)]
+        emergency_level0_sub_level_partition: Option<u32>,
+        #[clap(long)]
+        level0_stop_write_threshold_max_sst_count: Option<u32>,
+        #[clap(long)]
+        level0_stop_write_threshold_max_size: Option<u64>,
+        #[clap(long)]
+        enable_optimize_l0_interval_selection: Option<bool>,
+        #[clap(long)]
+        vnode_aligned_level_size_threshold: Option<u64>,
+        #[clap(long)]
+        max_kv_count_for_xor16: Option<u64>,
     },
     /// Split given compaction group into two. Moves the given tables to the new group.
     SplitCompactionGroup {
@@ -269,6 +295,19 @@ enum HummockCommands {
         left_group_id: u64,
         #[clap(long)]
         right_group_id: u64,
+    },
+    MigrateLegacyObject {
+        url: String,
+        source_dir: String,
+        target_dir: String,
+        #[clap(long, default_value = "100")]
+        concurrency: u32,
+    },
+    ResizeCache {
+        #[clap(long)]
+        meta_cache_capacity_mb: Option<u64>,
+        #[clap(long)]
+        data_cache_capacity_mb: Option<u64>,
     },
 }
 
@@ -426,18 +465,71 @@ enum MetaCommands {
         #[clap(long)]
         props: String,
     },
+
+    SetCdcTableBackfillParallelism {
+        #[clap(long, required = true)]
+        table_id: u32,
+        #[clap(long, required = true)]
+        parallelism: u32,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+pub enum AwaitTreeCommands {
+    /// Dump Await Tree
+    Dump {
+        /// The format of actor traces in the diagnose file. Allowed values: `json`, `text`. `json` by default.
+        #[clap(short, long = "actor-traces-format")]
+        actor_traces_format: Option<String>,
+    },
+    /// Analyze Await Tree
+    Analyze {
+        /// The path to the diagnose file, if None, ctl will first pull one from the cluster
+        /// The actor traces format can be either `json` or `text`. The analyze command will
+        /// automatically detect the format.
+        #[clap(long = "path")]
+        path: Option<String>,
+    },
+    /// Transcribe Await Tree From JSON to Text format
+    Transcribe {
+        /// The path to the await tree file to be transcribed
+        #[clap(long = "path")]
+        path: String,
+    },
+}
+
+#[derive(Subcommand, Clone, Debug)]
+enum TestCommands {
+    /// Test if JVM and Java libraries are working
+    Jvm,
 }
 
 #[derive(Subcommand, Clone, Debug)]
 enum ThrottleCommands {
     Source(ThrottleCommandArgs),
     Mv(ThrottleCommandArgs),
+    Sink(ThrottleCommandArgs),
+}
+
+#[derive(Clone, Debug, clap::ValueEnum)]
+pub enum ThrottleTypeArg {
+    Dml,
+    Backfill,
+    Source,
+    Sink,
 }
 
 #[derive(Clone, Debug, Args)]
 pub struct ThrottleCommandArgs {
+    /// The ID of the object to throttle
+    #[clap(long, required = true)]
     id: u32,
+    /// The rate limit to apply
+    #[clap(long)]
     rate: Option<u32>,
+    /// The type of throttle to apply
+    #[clap(long, value_enum, required = true)]
+    throttle_type: ThrottleTypeArg,
 }
 
 #[derive(Subcommand, Clone, Debug)]
@@ -447,12 +539,18 @@ pub enum ProfileCommands {
         /// The time to active profiling for (in seconds)
         #[clap(short, long = "sleep")]
         sleep: u64,
+        /// Target worker types. Repeatable. Defaults to frontend, compute-node, and compactor.
+        #[clap(long = "worker-type", value_name = "TYPE")]
+        worker_types: Vec<ProfileWorkerType>,
     },
     /// Heap profile
     Heap {
         /// The output directory of the dumped file
         #[clap(long = "dir")]
         dir: Option<String>,
+        /// Target worker types. Repeatable. Defaults to frontend, compute-node, and compactor.
+        #[clap(long = "worker-type", value_name = "TYPE")]
+        worker_types: Vec<ProfileWorkerType>,
     },
 }
 
@@ -488,6 +586,11 @@ pub async fn start_fallible(opts: CliOpts, context: &CtlContext) -> Result<()> {
     result
 }
 
+#[expect(
+    clippy::large_stack_frames,
+    reason = "Pre-opt MIR sums locals across match arms in async dispatch; \
+              post-layout generator stores only one arm at a time (~13–16 KiB)."
+)]
 async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
     match opts.command {
         Commands::Compute(ComputeCommands::ShowConfig { host }) => {
@@ -540,7 +643,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::trigger_manual_compaction(
                 context,
                 compaction_group_id,
-                table_id,
+                table_id.into(),
                 level,
                 sst_ids,
             )
@@ -578,6 +681,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             max_l0_compact_level,
             sst_allowed_trivial_move_min_size,
             disable_auto_group_scheduling,
+            max_overlapping_level_size,
+            sst_allowed_trivial_move_max_count,
+            emergency_level0_sst_file_count,
+            emergency_level0_sub_level_partition,
+            level0_stop_write_threshold_max_sst_count,
+            level0_stop_write_threshold_max_size,
+            enable_optimize_l0_interval_selection,
+            vnode_aligned_level_size_threshold,
+            max_kv_count_for_xor16,
         }) => {
             cmd_impl::hummock::update_compaction_config(
                 context,
@@ -610,6 +722,15 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                     max_l0_compact_level,
                     sst_allowed_trivial_move_min_size,
                     disable_auto_group_scheduling,
+                    max_overlapping_level_size,
+                    sst_allowed_trivial_move_max_count,
+                    emergency_level0_sst_file_count,
+                    emergency_level0_sub_level_partition,
+                    level0_stop_write_threshold_max_sst_count,
+                    level0_stop_write_threshold_max_size,
+                    enable_optimize_l0_interval_selection,
+                    vnode_aligned_level_size_threshold,
+                    max_kv_count_for_xor16,
                 ),
             )
             .await?
@@ -622,7 +743,7 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::split_compaction_group(
                 context,
                 compaction_group_id,
-                &table_ids,
+                &table_ids.into_iter().map_into().collect_vec(),
                 partition_vnode_count,
             )
             .await?;
@@ -709,6 +830,27 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
             cmd_impl::hummock::merge_compaction_group(context, left_group_id, right_group_id)
                 .await?
         }
+
+        Commands::Hummock(HummockCommands::MigrateLegacyObject {
+            url,
+            source_dir,
+            target_dir,
+            concurrency,
+        }) => {
+            migrate_legacy_object(url, source_dir, target_dir, concurrency).await?;
+        }
+        Commands::Hummock(HummockCommands::ResizeCache {
+            meta_cache_capacity_mb,
+            data_cache_capacity_mb,
+        }) => {
+            const MIB: u64 = 1024 * 1024;
+            cmd_impl::hummock::resize_cache(
+                context,
+                meta_cache_capacity_mb.map(|v| v * MIB),
+                data_cache_capacity_mb.map(|v| v * MIB),
+            )
+            .await?
+        }
         Commands::Table(TableCommands::Scan {
             mv_name,
             data_dir,
@@ -776,12 +918,21 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Meta(MetaCommands::ValidateSource { props }) => {
             cmd_impl::meta::validate_source(context, props).await?
         }
-        Commands::AwaitTree => cmd_impl::await_tree::dump(context).await?,
-        Commands::Profile(ProfileCommands::Cpu { sleep }) => {
-            cmd_impl::profile::cpu_profile(context, sleep).await?
+        Commands::AwaitTree(AwaitTreeCommands::Dump {
+            actor_traces_format,
+        }) => cmd_impl::await_tree::dump(context, actor_traces_format).await?,
+        Commands::AwaitTree(AwaitTreeCommands::Analyze { path }) => {
+            cmd_impl::await_tree::bottleneck_detect(context, path).await?
         }
-        Commands::Profile(ProfileCommands::Heap { dir }) => {
-            cmd_impl::profile::heap_profile(context, dir).await?
+        Commands::AwaitTree(AwaitTreeCommands::Transcribe { path }) => {
+            rw_diagnose_tools::await_tree::transcribe(path)?
+        }
+        Commands::Profile(ProfileCommands::Cpu {
+            sleep,
+            worker_types,
+        }) => cmd_impl::profile::cpu_profile(context, sleep, worker_types).await?,
+        Commands::Profile(ProfileCommands::Heap { dir, worker_types }) => {
+            cmd_impl::profile::heap_profile(context, dir, worker_types).await?
         }
         Commands::Scale(ScaleCommands::Cordon { workers }) => {
             cmd_impl::scale::update_schedulability(context, workers, Schedulability::Unschedulable)
@@ -797,6 +948,16 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Throttle(ThrottleCommands::Mv(args)) => {
             apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Mv, args).await?;
         }
+        Commands::Throttle(ThrottleCommands::Sink(args)) => {
+            apply_throttle(context, risingwave_pb::meta::PbThrottleTarget::Sink, args).await?;
+        }
+        Commands::Meta(MetaCommands::SetCdcTableBackfillParallelism {
+            table_id,
+            parallelism,
+        }) => {
+            set_cdc_table_backfill_parallelism(context, table_id, parallelism).await?;
+        }
+        Commands::Test(TestCommands::Jvm) => cmd_impl::test::test_jvm()?,
     }
     Ok(())
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::secret::PbSecretRef;
 
 use super::{ColumnDesc, ColumnId, TableId};
+use crate::id::SourceId;
 use crate::util::sort_util::ColumnOrder;
 
 /// Necessary information for compute node to access data in the external database.
@@ -28,7 +29,7 @@ pub struct CdcTableDesc {
     pub table_id: TableId,
 
     /// Id of the upstream source in sharing cdc mode
-    pub source_id: TableId,
+    pub source_id: SourceId,
 
     /// The full name of the table in external database, e.g. `database_name.table_name` in MySQL
     /// and `schema_name.table_name` in the Postgres.
@@ -48,21 +49,10 @@ pub struct CdcTableDesc {
 }
 
 impl CdcTableDesc {
-    pub fn order_column_indices(&self) -> Vec<usize> {
-        self.pk.iter().map(|col| (col.column_index)).collect()
-    }
-
-    pub fn order_column_ids(&self) -> Vec<ColumnId> {
-        self.pk
-            .iter()
-            .map(|col| self.columns[col.column_index].column_id)
-            .collect()
-    }
-
     pub fn to_protobuf(&self) -> ExternalTableDesc {
         ExternalTableDesc {
-            table_id: self.table_id.into(),
-            source_id: self.source_id.into(),
+            table_id: self.table_id,
+            source_id: self.source_id,
             columns: self.columns.iter().map(Into::into).collect(),
             pk: self.pk.iter().map(|v| v.to_protobuf()).collect(),
             table_name: self.external_table_name.clone(),
@@ -74,10 +64,6 @@ impl CdcTableDesc {
 
     /// Helper function to create a mapping from `column id` to `column index`
     pub fn get_id_to_op_idx_mapping(&self) -> HashMap<ColumnId, usize> {
-        let mut id_to_idx = HashMap::new();
-        self.columns.iter().enumerate().for_each(|(idx, c)| {
-            id_to_idx.insert(c.column_id, idx);
-        });
-        id_to_idx
+        ColumnDesc::get_id_to_op_idx_mapping(self.columns.as_slice(), None)
     }
 }

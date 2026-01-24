@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -27,9 +27,10 @@ use super::{Array, ArrayBuilder, ArrayBuilderImpl, ArrayImpl, ArrayResult, DataC
 use crate::array::ArrayRef;
 use crate::bitmap::{Bitmap, BitmapBuilder};
 use crate::error::BoxedError;
+use crate::row::Row;
 use crate::types::{
-    hash_datum, DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef,
-    ToText,
+    DataType, Datum, DatumRef, DefaultOrd, Scalar, ScalarImpl, StructType, ToDatumRef, ToText,
+    hash_datum,
 };
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::memcmp_encoding;
@@ -243,13 +244,7 @@ impl StructArray {
             .iter()
             .map(|child| Ok(Arc::new(ArrayImpl::from_protobuf(child, cardinality)?)))
             .collect::<ArrayResult<Vec<ArrayRef>>>()?;
-        let type_ = StructType::unnamed(
-            array_data
-                .children_type
-                .iter()
-                .map(DataType::from)
-                .collect(),
-        );
+        let type_ = StructType::unnamed(array_data.children_type.iter().map(DataType::from));
         Ok(Self::new(type_, children, bitmap).into())
     }
 
@@ -258,8 +253,19 @@ impl StructArray {
         self.children.iter()
     }
 
+    /// Get the field array at the given index.
+    ///
+    /// Panics if the index is out of bounds.
     pub fn field_at(&self, index: usize) -> &ArrayRef {
         &self.children[index]
+    }
+
+    /// Get the field array at the given index.
+    ///
+    /// # Safety
+    /// The caller must ensure that the index is within bounds.
+    pub unsafe fn field_at_unchecked(&self, index: usize) -> &ArrayRef {
+        unsafe { self.children.get_unchecked(index) }
     }
 
     #[cfg(test)]
@@ -281,7 +287,7 @@ impl EstimateSize for StructArray {
 impl From<DataChunk> for StructArray {
     fn from(chunk: DataChunk) -> Self {
         Self::new(
-            StructType::unnamed(chunk.columns().iter().map(|c| c.data_type()).collect()),
+            StructType::unnamed(chunk.columns().iter().map(|c| c.data_type())),
             chunk.columns().to_vec(),
             chunk.visibility().clone(),
         )
@@ -320,6 +326,11 @@ impl StructValue {
         Self {
             fields: fields.into_boxed_slice(),
         }
+    }
+
+    /// Returns an empty struct.
+    pub fn empty() -> Self {
+        Self::new(vec![])
     }
 
     pub fn fields(&self) -> &[Datum] {
@@ -387,12 +398,28 @@ impl<'a> StructRef<'a> {
         iter_fields_ref!(self, it, { Either::Left(it) }, { Either::Right(it) })
     }
 
-    /// # Panics
+    /// Get the field at the given index.
+    ///
     /// Panics if the index is out of bounds.
     pub fn field_at(&self, i: usize) -> DatumRef<'a> {
         match self {
             StructRef::Indexed { arr, idx } => arr.field_at(i).value_at(*idx),
             StructRef::ValueRef { val } => val.fields[i].to_datum_ref(),
+        }
+    }
+
+    /// Get the field at the given index.
+    ///
+    /// # Safety
+    /// The caller must ensure that the index is within bounds.
+    pub unsafe fn field_at_unchecked(&self, i: usize) -> DatumRef<'a> {
+        unsafe {
+            match self {
+                StructRef::Indexed { arr, idx } => {
+                    arr.field_at_unchecked(i).value_at_unchecked(*idx)
+                }
+                StructRef::ValueRef { val } => val.fields.get_unchecked(i).to_datum_ref(),
+            }
         }
     }
 
@@ -497,6 +524,25 @@ impl ToText for StructRef<'_> {
             DataType::Struct(_) => self.write(f),
             _ => unreachable!(),
         }
+    }
+}
+
+/// A struct value can be treated as a row.
+impl Row for StructRef<'_> {
+    fn datum_at(&self, index: usize) -> DatumRef<'_> {
+        self.field_at(index)
+    }
+
+    unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
+        unsafe { self.field_at_unchecked(index) }
+    }
+
+    fn len(&self) -> usize {
+        self.iter_fields_ref().len()
+    }
+
+    fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
+        self.iter_fields_ref()
     }
 }
 
@@ -663,19 +709,17 @@ mod tests {
         let fields = [
             DataType::Float32,
             DataType::Varchar,
-            DataType::new_struct(
-                vec![
-                    DataType::Float64,
-                    DataType::Varchar,
-                    DataType::Varchar,
-                    DataType::new_struct(vec![], vec![]),
-                ],
-                vec![],
-            ),
+            StructType::unnamed(vec![
+                DataType::Float64,
+                DataType::Varchar,
+                DataType::Varchar,
+                StructType::unnamed(vec![]).into(),
+            ])
+            .into(),
             DataType::Int64,
             DataType::Varchar,
             DataType::Int16,
-            DataType::new_struct(vec![], vec![]),
+            StructType::unnamed(vec![]).into(),
             DataType::Int32,
         ];
         let struct_ref = StructRef::ValueRef { val: &value };
@@ -747,7 +791,7 @@ mod tests {
                 ]),
                 vec![
                     DataType::Varchar,
-                    DataType::new_struct(vec![DataType::Varchar], vec![]),
+                    StructType::unnamed(vec![DataType::Varchar]).into(),
                 ],
                 Ordering::Greater,
             ),
@@ -762,7 +806,7 @@ mod tests {
                 ]),
                 vec![
                     DataType::Varchar,
-                    DataType::new_struct(vec![DataType::Varchar], vec![]),
+                    StructType::unnamed(vec![DataType::Varchar]).into(),
                 ],
                 Ordering::Equal,
             ),
@@ -787,7 +831,7 @@ mod tests {
 
             let mut builder = StructArrayBuilder::with_type(
                 0,
-                DataType::Struct(StructType::unnamed(fields.to_vec())),
+                DataType::Struct(StructType::unnamed(fields.clone())),
             );
             builder.append(Some(StructRef::ValueRef { val: &lhs }));
             builder.append(Some(StructRef::ValueRef { val: &rhs }));

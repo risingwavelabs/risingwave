@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,7 +20,7 @@ use byteorder::{BigEndian, ReadBytesExt};
 use mockall::automock;
 
 use crate::error::{Result, TraceError};
-use crate::{Record, MAGIC_BYTES};
+use crate::{MAGIC_BYTES, Record};
 #[cfg_attr(test, automock)]
 pub trait TraceReader {
     fn read(&mut self) -> Result<Record>;
@@ -45,7 +45,7 @@ pub struct BincodeDeserializer;
 
 impl<R: Read> Deserializer<R> for BincodeDeserializer {
     fn deserialize(&self, reader: &mut R) -> Result<Record> {
-        let record = decode_from_std_read(reader, config::standard())?;
+        let record: Record = decode_from_std_read(reader, config::standard())?;
         Ok(record)
     }
 }
@@ -103,8 +103,8 @@ mod test {
 
     use super::{TraceReader, TraceReaderImpl};
     use crate::{
-        BincodeDeserializer, Deserializer, MockDeserializer, Operation, Record, TracedReadOptions,
-        TracedSubResp, MAGIC_BYTES,
+        BincodeDeserializer, Deserializer, MAGIC_BYTES, MockDeserializer, Operation, Record,
+        TracedReadOptions, TracedSubResp,
     };
 
     mock! {
@@ -141,7 +141,7 @@ mod test {
         let resp = TracedSubResp(SubscribeResponse {
             status: Some(Status {
                 code: 0,
-                message: "abc".to_string(),
+                message: "abc".to_owned(),
             }),
             info: None,
             operation: 1,
@@ -185,7 +185,8 @@ mod test {
         }
 
         assert!(deserializer.deserialize(&mut buf).is_err());
-        assert!(buf.is_empty());
+        // https://github.com/rust-lang/rust/pull/109174
+        assert!(buf.split().1.is_empty());
     }
 
     #[test]

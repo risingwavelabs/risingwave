@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,7 +16,7 @@ use std::fs::File;
 use std::io::Write;
 use std::path::Path;
 
-use anyhow::{anyhow, Result};
+use anyhow::{Result, anyhow};
 
 pub(crate) fn read_file_contents<P: AsRef<Path>>(filepath: P) -> Result<String> {
     std::fs::read_to_string(filepath.as_ref()).map_err(|e| {

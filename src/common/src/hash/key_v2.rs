@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,7 +18,7 @@ use std::marker::PhantomData;
 
 use bytes::BufMut;
 use educe::Educe;
-use either::{for_both, Either};
+use either::{Either, for_both};
 use itertools::Itertools;
 use risingwave_common_estimate_size::EstimateSize;
 use tinyvec::ArrayVec;

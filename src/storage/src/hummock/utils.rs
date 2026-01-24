@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,34 +12,40 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::backtrace::Backtrace;
 use std::cmp::Ordering;
 use std::collections::VecDeque;
 use std::fmt::{Debug, Formatter};
 use std::ops::Bound::{Excluded, Included, Unbounded};
 use std::ops::{Bound, RangeBounds};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering as AtomicOrdering};
 use std::time::{Duration, Instant};
 
 use bytes::Bytes;
-use foyer::CacheContext;
+use foyer::Hint;
+use futures::{Stream, StreamExt, pin_mut};
 use parking_lot::Mutex;
-use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::catalog::TableId;
 use risingwave_common::config::StorageMemoryConfig;
+use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
+use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
-    bound_table_key_range, EmptySliceRef, FullKey, TableKey, UserKey,
+    EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range,
 };
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use tokio::sync::oneshot::{channel, Receiver, Sender};
+use tokio::sync::oneshot::{Receiver, Sender, channel};
 
 use super::{HummockError, HummockResult, SstableStoreRef};
-use crate::error::StorageResult;
-use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::error::{StorageError, StorageResult};
 use crate::hummock::CachePolicy;
+use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::mem_table::{KeyOp, MemTableError};
 use crate::monitor::MemoryCollector;
-use crate::store::{OpConsistencyLevel, ReadOptions, StateStoreRead};
+use crate::store::{
+    OpConsistencyLevel, ReadOptions, StateStoreGet, StateStoreKeyedRow, StateStoreRead,
+};
 
 pub fn range_overlap<R, B>(
     search_key_range: &R,
@@ -77,21 +83,24 @@ where
     R: RangeBounds<TableKey<B>>,
     B: AsRef<[u8]> + EmptySliceRef,
 {
+    debug_assert!(info.table_ids.is_sorted());
     let table_range = &info.key_range;
     let table_start = FullKey::decode(table_range.left.as_ref()).user_key;
     let table_end = FullKey::decode(table_range.right.as_ref()).user_key;
     let (left, right) = bound_table_key_range(table_id, table_key_range);
     let left: Bound<UserKey<&[u8]>> = left.as_ref().map(|key| key.as_ref());
     let right: Bound<UserKey<&[u8]>> = right.as_ref().map(|key| key.as_ref());
-    range_overlap(
-        &(left, right),
-        &table_start,
-        if table_range.right_exclusive {
-            Bound::Excluded(&table_end)
-        } else {
-            Bound::Included(&table_end)
-        },
-    ) && info.table_ids.binary_search(&table_id.table_id()).is_ok()
+
+    info.table_ids.binary_search(&table_id).is_ok()
+        && range_overlap(
+            &(left, right),
+            &table_start,
+            if table_range.right_exclusive {
+                Bound::Excluded(&table_end)
+            } else {
+                Bound::Included(&table_end)
+            },
+        )
 }
 
 /// Search the SST containing the specified key within a level, using binary search.
@@ -123,6 +132,7 @@ where
 pub fn prune_nonoverlapping_ssts<'a>(
     ssts: &'a [SstableInfo],
     user_key_range: (Bound<UserKey<&'a [u8]>>, Bound<UserKey<&'a [u8]>>),
+    table_id: StateTableId,
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
     debug_assert!(can_concat(ssts));
     let start_table_idx = match user_key_range.0 {
@@ -133,7 +143,9 @@ pub fn prune_nonoverlapping_ssts<'a>(
         Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
         _ => ssts.len().saturating_sub(1),
     };
-    ssts[start_table_idx..=end_table_idx].iter()
+    ssts[start_table_idx..=end_table_idx]
+        .iter()
+        .filter(move |sst| sst.table_ids.binary_search(&table_id).is_ok())
 }
 
 type RequestQueue = VecDeque<(Sender<MemoryTracker>, u64)>;
@@ -371,29 +383,38 @@ pub(crate) fn sanity_check_enabled() -> bool {
     SANITY_CHECK_ENABLED.load(AtomicOrdering::Acquire)
 }
 
+async fn get_from_state_store(
+    state_store: &impl StateStoreGet,
+    key: TableKey<Bytes>,
+    read_options: ReadOptions,
+) -> StorageResult<Option<Bytes>> {
+    state_store
+        .on_key_value(key, read_options, |_, value| {
+            Ok(Bytes::copy_from_slice(value))
+        })
+        .await
+}
+
 /// Make sure the key to insert should not exist in storage.
 pub(crate) async fn do_insert_sanity_check(
+    table_id: TableId,
     key: &TableKey<Bytes>,
     value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
-    table_id: TableId,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     if let OpConsistencyLevel::Inconsistent = op_consistency_level {
         return Ok(());
     }
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
-        table_id,
-        cache_policy: CachePolicy::Fill(CacheContext::Default),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
-    let stored_value = inner.get(key.clone(), epoch, read_options).await?;
+    let stored_value = get_from_state_store(inner, key.clone(), read_options).await?;
 
     if let Some(stored_value) = stored_value {
         return Err(Box::new(MemTableError::InconsistentOperation {
+            table_id,
             key: key.clone(),
             prev: KeyOp::Insert(stored_value),
             new: KeyOp::Insert(value.clone()),
@@ -405,12 +426,10 @@ pub(crate) async fn do_insert_sanity_check(
 
 /// Make sure that the key to delete should exist in storage and the value should be matched.
 pub(crate) async fn do_delete_sanity_check(
+    table_id: TableId,
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
-    table_id: TableId,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     let OpConsistencyLevel::ConsistentOldValue {
@@ -421,13 +440,12 @@ pub(crate) async fn do_delete_sanity_check(
         return Ok(());
     };
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
-        table_id,
-        cache_policy: CachePolicy::Fill(CacheContext::Default),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
-    match inner.get(key.clone(), epoch, read_options).await? {
+    match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
+            table_id,
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
             new: KeyOp::Delete(old_value.clone()),
@@ -436,6 +454,7 @@ pub(crate) async fn do_delete_sanity_check(
         Some(stored_value) => {
             if !old_value_checker(&stored_value, old_value) {
                 Err(Box::new(MemTableError::InconsistentOperation {
+                    table_id,
                     key: key.clone(),
                     prev: KeyOp::Insert(stored_value),
                     new: KeyOp::Delete(old_value.clone()),
@@ -450,13 +469,11 @@ pub(crate) async fn do_delete_sanity_check(
 
 /// Make sure that the key to update should exist in storage and the value should be matched
 pub(crate) async fn do_update_sanity_check(
+    table_id: TableId,
     key: &TableKey<Bytes>,
     old_value: &Bytes,
     new_value: &Bytes,
     inner: &impl StateStoreRead,
-    epoch: u64,
-    table_id: TableId,
-    table_option: TableOption,
     op_consistency_level: &OpConsistencyLevel,
 ) -> StorageResult<()> {
     let OpConsistencyLevel::ConsistentOldValue {
@@ -467,14 +484,13 @@ pub(crate) async fn do_update_sanity_check(
         return Ok(());
     };
     let read_options = ReadOptions {
-        retention_seconds: table_option.retention_seconds,
-        table_id,
-        cache_policy: CachePolicy::Fill(CacheContext::Default),
+        cache_policy: CachePolicy::Fill(Hint::Normal),
         ..Default::default()
     };
 
-    match inner.get(key.clone(), epoch, read_options).await? {
+    match get_from_state_store(inner, key.clone(), read_options).await? {
         None => Err(Box::new(MemTableError::InconsistentOperation {
+            table_id,
             key: key.clone(),
             prev: KeyOp::Delete(Bytes::default()),
             new: KeyOp::Update((old_value.clone(), new_value.clone())),
@@ -483,6 +499,7 @@ pub(crate) async fn do_update_sanity_check(
         Some(stored_value) => {
             if !old_value_checker(&stored_value, old_value) {
                 Err(Box::new(MemTableError::InconsistentOperation {
+                    table_id,
                     key: key.clone(),
                     prev: KeyOp::Insert(stored_value),
                     new: KeyOp::Update((old_value.clone(), new_value.clone())),
@@ -531,7 +548,7 @@ pub(crate) fn filter_with_delete_range<'a>(
             range_end
         );
     }
-    kv_iter.filter(move |(ref key, _)| {
+    kv_iter.filter(move |(key, _)| {
         if let Some(range_bound) = range {
             if cmp_delete_range_left_bounds(Included(&key.0), range_bound.0.as_ref())
                 == Ordering::Less
@@ -583,10 +600,10 @@ pub(crate) async fn wait_for_epoch(
     notifier: &tokio::sync::watch::Sender<PinnedVersion>,
     wait_epoch: u64,
     table_id: TableId,
-) -> StorageResult<()> {
+) -> StorageResult<PinnedVersion> {
     let mut prev_committed_epoch = None;
     let prev_committed_epoch = &mut prev_committed_epoch;
-    wait_for_update(
+    let version = wait_for_update(
         notifier,
         |version| {
             let committed_epoch = version.table_committed_epoch(table_id);
@@ -615,22 +632,30 @@ pub(crate) async fn wait_for_epoch(
         },
     )
     .await?;
-    Ok(())
+    Ok(version)
 }
 
 pub(crate) async fn wait_for_update(
     notifier: &tokio::sync::watch::Sender<PinnedVersion>,
     mut inspect_fn: impl FnMut(&PinnedVersion) -> HummockResult<bool>,
     mut periodic_debug_info: impl FnMut() -> String,
-) -> HummockResult<()> {
+) -> HummockResult<PinnedVersion> {
     let mut receiver = notifier.subscribe();
-    if inspect_fn(&receiver.borrow_and_update())? {
-        return Ok(());
+    {
+        let version = receiver.borrow_and_update();
+        if inspect_fn(&version)? {
+            return Ok(version.clone());
+        }
     }
     let start_time = Instant::now();
     loop {
         match tokio::time::timeout(Duration::from_secs(30), receiver.changed()).await {
             Err(_) => {
+                // Provide backtrace iff in debug mode for observability.
+                let backtrace = cfg!(debug_assertions)
+                    .then(Backtrace::capture)
+                    .map(tracing::field::display);
+
                 // The reason that we need to retry here is batch scan in
                 // chain/rearrange_chain is waiting for an
                 // uncommitted epoch carried by the CreateMV barrier, which
@@ -643,6 +668,7 @@ pub(crate) async fn wait_for_update(
                 tracing::warn!(
                     info = periodic_debug_info(),
                     elapsed = ?start_time.elapsed(),
+                    backtrace,
                     "timeout when waiting for version update",
                 );
                 continue;
@@ -651,8 +677,9 @@ pub(crate) async fn wait_for_update(
                 return Err(HummockError::wait_epoch("tx dropped"));
             }
             Ok(Ok(_)) => {
-                if inspect_fn(&receiver.borrow_and_update())? {
-                    return Ok(());
+                let version = receiver.borrow_and_update();
+                if inspect_fn(&version)? {
+                    return Ok(version.clone());
                 }
             }
         }
@@ -681,11 +708,19 @@ impl HummockMemoryCollector {
 
 impl MemoryCollector for HummockMemoryCollector {
     fn get_meta_memory_usage(&self) -> u64 {
-        self.sstable_store.get_meta_memory_usage()
+        self.sstable_store.meta_cache().memory().usage() as _
     }
 
     fn get_data_memory_usage(&self) -> u64 {
         self.sstable_store.block_cache().memory().usage() as _
+    }
+
+    fn get_vector_meta_memory_usage(&self) -> u64 {
+        self.sstable_store.vector_meta_cache.usage() as _
+    }
+
+    fn get_vector_data_memory_usage(&self) -> u64 {
+        self.sstable_store.vector_block_cache.usage() as _
     }
 
     fn get_uploading_memory_usage(&self) -> u64 {
@@ -697,13 +732,23 @@ impl MemoryCollector for HummockMemoryCollector {
     }
 
     fn get_meta_cache_memory_usage_ratio(&self) -> f64 {
-        self.sstable_store.get_meta_memory_usage() as f64
-            / (self.storage_memory_config.meta_cache_capacity_mb * 1024 * 1024) as f64
+        self.sstable_store.meta_cache().memory().usage() as f64
+            / self.sstable_store.meta_cache().memory().capacity() as f64
     }
 
     fn get_block_cache_memory_usage_ratio(&self) -> f64 {
-        self.get_data_memory_usage() as f64
-            / (self.storage_memory_config.block_cache_capacity_mb * 1024 * 1024) as f64
+        self.sstable_store.block_cache().memory().usage() as f64
+            / self.sstable_store.block_cache().memory().capacity() as f64
+    }
+
+    fn get_vector_meta_cache_memory_usage_ratio(&self) -> f64 {
+        self.sstable_store.vector_meta_cache.usage() as f64
+            / self.sstable_store.vector_meta_cache.capacity() as f64
+    }
+
+    fn get_vector_data_cache_memory_usage_ratio(&self) -> f64 {
+        self.sstable_store.vector_block_cache.usage() as f64
+            / self.sstable_store.vector_block_cache.capacity() as f64
     }
 
     fn get_shared_buffer_usage_ratio(&self) -> f64 {
@@ -712,23 +757,110 @@ impl MemoryCollector for HummockMemoryCollector {
     }
 }
 
+#[try_stream(ok = StateStoreKeyedRow, error = StorageError)]
+pub(crate) async fn merge_stream<'a>(
+    mem_table_iter: impl Iterator<Item = (&'a TableKey<Bytes>, &'a KeyOp)> + 'a,
+    inner_stream: impl Stream<Item = StorageResult<StateStoreKeyedRow>> + 'static,
+    table_id: TableId,
+    epoch: u64,
+    rev: bool,
+) {
+    let inner_stream = inner_stream.peekable();
+    pin_mut!(inner_stream);
+
+    let mut mem_table_iter = mem_table_iter.fuse().peekable();
+
+    loop {
+        match (inner_stream.as_mut().peek().await, mem_table_iter.peek()) {
+            (None, None) => break,
+            // The mem table side has come to an end, return data from the shared storage.
+            (Some(_), None) => {
+                let (key, value) = inner_stream.next().await.unwrap()?;
+                yield (key, value)
+            }
+            // The stream side has come to an end, return data from the mem table.
+            (None, Some(_)) => {
+                let (key, key_op) = mem_table_iter.next().unwrap();
+                match key_op {
+                    KeyOp::Insert(value) | KeyOp::Update((_, value)) => {
+                        yield (FullKey::new(table_id, key.clone(), epoch), value.clone())
+                    }
+                    _ => {}
+                }
+            }
+            (Some(Ok((inner_key, _))), Some((mem_table_key, _))) => {
+                debug_assert_eq!(inner_key.user_key.table_id, table_id);
+                let mut ret = inner_key.user_key.table_key.cmp(mem_table_key);
+                if rev {
+                    ret = ret.reverse();
+                }
+                match ret {
+                    Ordering::Less => {
+                        // yield data from storage
+                        let (key, value) = inner_stream.next().await.unwrap()?;
+                        yield (key, value);
+                    }
+                    Ordering::Equal => {
+                        // both memtable and storage contain the key, so we advance both
+                        // iterators and return the data in memory.
+
+                        let (_, key_op) = mem_table_iter.next().unwrap();
+                        let (key, old_value_in_inner) = inner_stream.next().await.unwrap()?;
+                        match key_op {
+                            KeyOp::Insert(value) => {
+                                yield (key.clone(), value.clone());
+                            }
+                            KeyOp::Delete(_) => {}
+                            KeyOp::Update((old_value, new_value)) => {
+                                debug_assert!(old_value == &old_value_in_inner);
+
+                                yield (key, new_value.clone());
+                            }
+                        }
+                    }
+                    Ordering::Greater => {
+                        // yield data from mem table
+                        let (key, key_op) = mem_table_iter.next().unwrap();
+
+                        match key_op {
+                            KeyOp::Insert(value) => {
+                                yield (FullKey::new(table_id, key.clone(), epoch), value.clone());
+                            }
+                            KeyOp::Delete(_) => {}
+                            KeyOp::Update(_) => unreachable!(
+                                "memtable update should always be paired with a storage key"
+                            ),
+                        }
+                    }
+                }
+            }
+            (Some(Err(_)), Some(_)) => {
+                // Throw the error.
+                return Err(inner_stream.next().await.unwrap().unwrap_err());
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
-    use std::future::{poll_fn, Future};
+    use std::future::{Future, poll_fn};
     use std::sync::Arc;
     use std::task::Poll;
 
-    use futures::future::join_all;
     use futures::FutureExt;
-    use rand::random;
+    use futures::future::join_all;
+    use rand::random_range;
 
     use crate::hummock::utils::MemoryLimiter;
 
     async fn assert_pending(future: &mut (impl Future + Unpin)) {
         for _ in 0..10 {
-            assert!(poll_fn(|cx| Poll::Ready(future.poll_unpin(cx)))
-                .await
-                .is_pending());
+            assert!(
+                poll_fn(|cx| Poll::Ready(future.poll_unpin(cx)))
+                    .await
+                    .is_pending()
+            );
         }
     }
 
@@ -762,7 +894,7 @@ mod tests {
             let limiter = memory_limiter.clone();
             let h = tokio::spawn(async move {
                 let mut buffers = vec![];
-                let mut current_buffer_usage = (random::<usize>() % 8) + 2;
+                let mut current_buffer_usage = random_range(2..=9);
                 for _ in 0..1000 {
                     if buffers.len() < current_buffer_usage
                         && let Some(tracker) = limiter.try_require_memory(QUOTA)
@@ -770,7 +902,7 @@ mod tests {
                         buffers.push(tracker);
                     } else {
                         buffers.clear();
-                        current_buffer_usage = (random::<usize>() % 8) + 2;
+                        current_buffer_usage = random_range(2..=9);
                         let req = limiter.require_memory(QUOTA);
                         match tokio::time::timeout(std::time::Duration::from_millis(1), req).await {
                             Ok(tracker) => {
@@ -781,7 +913,7 @@ mod tests {
                             }
                         }
                     }
-                    let sleep_time = random::<u64>() % 3 + 1;
+                    let sleep_time = random_range(1..=3);
                     tokio::time::sleep(std::time::Duration::from_millis(sleep_time)).await;
                 }
             });

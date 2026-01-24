@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,18 +14,19 @@
 
 use std::collections::HashSet;
 
-use fixedbitset::FixedBitSet;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{GenericPlanNode, PlanWindowFunction};
 use super::stream::prelude::*;
-use super::utils::{impl_distill_by_unit, TableCatalogBuilder};
-use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
-use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::MonotonicityMap;
-use crate::stream_fragmenter::BuildFragmentGraphState;
+use super::utils::{TableCatalogBuilder, impl_distill_by_unit};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
+};
 use crate::TableCatalog;
+use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
+use crate::optimizer::property::{MonotonicityMap, WatermarkColumns};
+use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamOverWindow {
@@ -34,21 +35,23 @@ pub struct StreamOverWindow {
 }
 
 impl StreamOverWindow {
-    pub fn new(core: generic::OverWindow<PlanRef>) -> Self {
+    pub fn new(core: generic::OverWindow<PlanRef>) -> Result<Self> {
         assert!(core.funcs_have_same_partition_and_order());
+        reject_upsert_input!(core.input);
 
         let input = &core.input;
-        let watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        let watermark_columns = WatermarkColumns::new();
 
         let base = PlanBase::new_stream_with_core(
             &core,
             input.distribution().clone(),
-            false, // general over window cannot be append-only
+            StreamKind::Retract, // general over window cannot be append-only
             false,
             watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
         );
-        StreamOverWindow { base, core }
+
+        Ok(StreamOverWindow { base, core })
     }
 
     fn infer_state_table(&self) -> TableCatalog {
@@ -84,7 +87,7 @@ impl StreamOverWindow {
 
 impl_distill_by_unit!(StreamOverWindow, core, "StreamOverWindow");
 
-impl PlanTreeNodeUnary for StreamOverWindow {
+impl PlanTreeNodeUnary<Stream> for StreamOverWindow {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -92,10 +95,10 @@ impl PlanTreeNodeUnary for StreamOverWindow {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core)
+        Self::new(core).unwrap()
     }
 }
-impl_plan_tree_node_for_unary! { StreamOverWindow }
+impl_plan_tree_node_for_unary! { Stream, StreamOverWindow }
 
 impl StreamNode for StreamOverWindow {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -117,29 +120,27 @@ impl StreamNode for StreamOverWindow {
             .core
             .order_key()
             .iter()
+            .copied()
             .map(ColumnOrder::to_protobuf)
             .collect();
         let state_table = self
             .infer_state_table()
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
-        let cache_policy = self
-            .base
-            .ctx()
-            .session_ctx()
-            .config()
-            .streaming_over_window_cache_policy();
 
-        PbNodeBody::OverWindow(OverWindowNode {
+        PbNodeBody::OverWindow(Box::new(OverWindowNode {
             calls,
             partition_by,
             order_by,
             state_table: Some(state_table),
-            cache_policy: cache_policy.to_protobuf() as _,
-        })
+
+            // Cache policy should now be read from per-job config override.
+            #[allow(deprecated)]
+            cache_policy: PbOverWindowCachePolicy::Unspecified as _,
+        }))
     }
 }
 
-impl ExprRewritable for StreamOverWindow {}
+impl ExprRewritable<Stream> for StreamOverWindow {}
 
 impl ExprVisitable for StreamOverWindow {}

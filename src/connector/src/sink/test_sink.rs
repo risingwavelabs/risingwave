@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,21 +15,32 @@
 use std::sync::{Arc, OnceLock};
 
 use anyhow::anyhow;
+use futures::future::BoxFuture;
 use parking_lot::Mutex;
+use tokio::sync::mpsc::UnboundedSender;
 
-use crate::sink::boxed::{BoxCoordinator, BoxWriter};
-use crate::sink::writer::{LogSinkerOf, SinkWriterExt};
-use crate::sink::{Sink, SinkError, SinkParam, SinkWriterMetrics, SinkWriterParam};
+use crate::connector_common::IcebergSinkCompactionUpdate;
+use crate::enforce_secret::EnforceSecret;
+use crate::sink::boxed::BoxLogSinker;
+use crate::sink::{Sink, SinkCommitCoordinator, SinkError, SinkParam, SinkWriterParam};
 
-pub trait BuildBoxWriterTrait = FnMut(SinkParam, SinkWriterParam) -> BoxWriter<()> + Send + 'static;
+pub trait BuildBoxLogSinkerTrait = FnMut(SinkParam, SinkWriterParam) -> BoxFuture<'static, crate::sink::Result<BoxLogSinker>>
+    + Send
+    + 'static;
+pub trait BuildSinkCoordinatorTrait = FnMut(SinkParam, Option<UnboundedSender<IcebergSinkCompactionUpdate>>) -> SinkCommitCoordinator
+    + Send
+    + 'static;
 
-pub type BuildBoxWriter = Box<dyn BuildBoxWriterTrait>;
+type BuildBoxLogSinker = Box<dyn BuildBoxLogSinkerTrait>;
+type BuildSinkCoordinator = Box<dyn BuildSinkCoordinatorTrait>;
 pub const TEST_SINK_NAME: &str = "test";
 
 #[derive(Debug)]
 pub struct TestSink {
     param: SinkParam,
 }
+
+impl EnforceSecret for TestSink {}
 
 impl TryFrom<SinkParam> for TestSink {
     type Error = SinkError;
@@ -44,8 +55,7 @@ impl TryFrom<SinkParam> for TestSink {
 }
 
 impl Sink for TestSink {
-    type Coordinator = BoxCoordinator;
-    type LogSinker = LogSinkerOf<BoxWriter<()>>;
+    type LogSinker = BoxLogSinker;
 
     const SINK_NAME: &'static str = "test";
 
@@ -57,19 +67,28 @@ impl Sink for TestSink {
         &self,
         writer_param: SinkWriterParam,
     ) -> crate::sink::Result<Self::LogSinker> {
-        let metrics = SinkWriterMetrics::new(&writer_param);
-        Ok(build_box_writer(self.param.clone(), writer_param).into_log_sinker(metrics))
+        build_box_log_sinker(self.param.clone(), writer_param).await
+    }
+
+    async fn new_coordinator(
+        &self,
+        iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
+    ) -> crate::sink::Result<SinkCommitCoordinator> {
+        Ok(build_sink_coordinator(
+            self.param.clone(),
+            iceberg_compact_stat_sender,
+        ))
     }
 }
 
 struct TestSinkRegistry {
-    build_box_writer: Arc<Mutex<Option<BuildBoxWriter>>>,
+    build_box_sink: Arc<Mutex<Option<(BuildBoxLogSinker, BuildSinkCoordinator)>>>,
 }
 
 impl TestSinkRegistry {
     fn new() -> Self {
         TestSinkRegistry {
-            build_box_writer: Arc::new(Mutex::new(None)),
+            build_box_sink: Arc::new(Mutex::new(None)),
         }
     }
 }
@@ -83,23 +102,63 @@ pub struct TestSinkRegistryGuard;
 
 impl Drop for TestSinkRegistryGuard {
     fn drop(&mut self) {
-        assert!(get_registry().build_box_writer.lock().take().is_some());
+        assert!(get_registry().build_box_sink.lock().take().is_some());
     }
 }
 
-pub fn registry_build_sink(build_box_writer: impl BuildBoxWriterTrait) -> TestSinkRegistryGuard {
-    assert!(get_registry()
-        .build_box_writer
-        .lock()
-        .replace(Box::new(build_box_writer))
-        .is_none());
+fn register_build_sink_inner(
+    build_box_log_sinker: impl BuildBoxLogSinkerTrait,
+    build_box_coordinator: impl BuildSinkCoordinatorTrait,
+) -> TestSinkRegistryGuard {
+    assert!(
+        get_registry()
+            .build_box_sink
+            .lock()
+            .replace((
+                Box::new(build_box_log_sinker),
+                Box::new(build_box_coordinator)
+            ))
+            .is_none()
+    );
     TestSinkRegistryGuard
 }
 
-pub fn build_box_writer(param: SinkParam, writer_param: SinkWriterParam) -> BoxWriter<()> {
+pub fn register_build_coordinated_sink(
+    build_box_log_sinker: impl BuildBoxLogSinkerTrait,
+    build_box_coordinator: impl BuildSinkCoordinatorTrait,
+) -> TestSinkRegistryGuard {
+    register_build_sink_inner(build_box_log_sinker, build_box_coordinator)
+}
+
+pub fn register_build_sink(
+    build_box_log_sinker: impl BuildBoxLogSinkerTrait,
+) -> TestSinkRegistryGuard {
+    register_build_sink_inner(build_box_log_sinker, |_, _| {
+        unreachable!("no coordinator registered")
+    })
+}
+
+fn build_sink_coordinator(
+    sink_param: SinkParam,
+    iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
+) -> SinkCommitCoordinator {
     (get_registry()
-        .build_box_writer
+        .build_box_sink
         .lock()
         .as_mut()
-        .expect("should not be empty"))(param, writer_param)
+        .expect("should not be empty")
+        .1)(sink_param, iceberg_compact_stat_sender)
+}
+
+async fn build_box_log_sinker(
+    param: SinkParam,
+    writer_param: SinkWriterParam,
+) -> crate::sink::Result<BoxLogSinker> {
+    let future = (get_registry()
+        .build_box_sink
+        .lock()
+        .as_mut()
+        .expect("should not be empty")
+        .0)(param, writer_param);
+    future.await
 }

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::rc::Rc;
 
 use educe::Educe;
-use risingwave_common::catalog::{ColumnCatalog, Field, Schema};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::WithPropertiesExt;
@@ -23,10 +23,10 @@ use risingwave_sqlparser::ast::AsOf;
 
 use super::super::utils::TableCatalogBuilder;
 use super::GenericPlanNode;
+use crate::TableCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::optimizer_context::OptimizerContextRef;
-use crate::optimizer::property::FunctionalDependencySet;
-use crate::TableCatalog;
+use crate::optimizer::property::{FunctionalDependencySet, StreamKind};
 
 /// In which scnario the source node is created
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -77,7 +77,23 @@ impl GenericPlanNode for Source {
     }
 
     fn stream_key(&self) -> Option<Vec<usize>> {
-        self.row_id_index.map(|idx| vec![idx])
+        // FIXME: output col idx is not set. But iceberg source can prune cols.
+        // XXX: there's a RISINGWAVE_ICEBERG_ROW_ID. Should we use it?
+        if let Some(idx) = self.row_id_index {
+            Some(vec![idx])
+        } else if let Some(catalog) = &self.catalog {
+            catalog
+                .pk_col_ids
+                .iter()
+                .map(|id| {
+                    self.column_catalog
+                        .iter()
+                        .position(|c| c.column_id() == *id)
+                })
+                .collect::<Option<Vec<_>>>()
+        } else {
+            None
+        }
     }
 
     fn ctx(&self) -> OptimizerContextRef {
@@ -88,6 +104,11 @@ impl GenericPlanNode for Source {
         let pk_indices = self.stream_key();
         match pk_indices {
             Some(pk_indices) => {
+                debug_assert!(
+                    pk_indices
+                        .iter()
+                        .all(|idx| *idx < self.column_catalog.len())
+                );
                 FunctionalDependencySet::with_key(self.column_catalog.len(), &pk_indices)
             }
             None => FunctionalDependencySet::new(self.column_catalog.len()),
@@ -96,6 +117,113 @@ impl GenericPlanNode for Source {
 }
 
 impl Source {
+    pub fn stream_kind(&self) -> StreamKind {
+        if let Some(catalog) = &self.catalog {
+            if catalog.append_only {
+                StreamKind::AppendOnly
+            } else {
+                // Always treat source as upsert, as we either don't parse the old record for `Update`, or we don't
+                // trust the old record from external source.
+                StreamKind::Upsert
+            }
+        } else {
+            // `Source` acts only as a barrier receiver. There's no data at all.
+            StreamKind::AppendOnly
+        }
+    }
+
+    /// The output is [`risingwave_connector::source::filesystem::FsPageItem`] / [`iceberg::scan::FileScanTask`]
+    pub fn file_list_node(core: Self) -> Self {
+        let column_catalog = if core.is_iceberg_connector() {
+            vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "file_path".to_owned(),
+                            data_type: DataType::Varchar,
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "file_scan_task".to_owned(),
+                            data_type: DataType::Jsonb,
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+            ]
+        } else if core.is_batch_connector() {
+            vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_id".to_owned(),
+                            data_type: DataType::Varchar,
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "batch_task_info".to_owned(),
+                            data_type: DataType::Jsonb,
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+            ]
+        } else if core.is_new_fs_connector() {
+            vec![
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "filename".to_owned(),
+                            data_type: DataType::Varchar,
+                        },
+                        0,
+                    ),
+                    is_hidden: false,
+                },
+                // This columns seems unused.
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "last_edit_time".to_owned(),
+                            data_type: DataType::Timestamptz,
+                        },
+                        1,
+                    ),
+                    is_hidden: false,
+                },
+                ColumnCatalog {
+                    column_desc: ColumnDesc::from_field_with_column_id(
+                        &Field {
+                            name: "file_size".to_owned(),
+                            data_type: DataType::Int64,
+                        },
+                        2,
+                    ),
+                    is_hidden: false,
+                },
+            ]
+        } else {
+            unreachable!()
+        };
+        Self {
+            column_catalog,
+            row_id_index: None,
+            ..core
+        }
+    }
+
     pub fn is_new_fs_connector(&self) -> bool {
         self.catalog
             .as_ref()
@@ -114,9 +242,47 @@ impl Source {
             .is_some_and(|catalog| catalog.with_properties.is_kafka_connector())
     }
 
+    pub fn is_batch_connector(&self) -> bool {
+        self.catalog
+            .as_ref()
+            .is_some_and(|catalog| catalog.with_properties.is_batch_connector())
+    }
+
+    pub fn requires_singleton(&self) -> bool {
+        self.is_iceberg_connector() || self.is_batch_connector()
+    }
+
     /// Currently, only iceberg source supports time travel.
     pub fn support_time_travel(&self) -> bool {
         self.is_iceberg_connector()
+    }
+
+    pub fn exclude_iceberg_hidden_columns(mut self) -> Self {
+        let Some(catalog) = &mut self.catalog else {
+            return self;
+        };
+        if catalog.info.is_shared() {
+            // for shared source, we should produce all columns
+            return self;
+        }
+        if self.kind != SourceNodeKind::CreateMViewOrBatch {
+            return self;
+        }
+
+        let prune = |col: &ColumnCatalog| col.is_hidden() && !col.is_row_id_column();
+
+        // minus the number of hidden columns before row_id_index.
+        self.row_id_index = self.row_id_index.map(|idx| {
+            let mut cnt = 0;
+            for col in self.column_catalog.iter().take(idx + 1) {
+                if prune(col) {
+                    cnt += 1;
+                }
+            }
+            idx - cnt
+        });
+        self.column_catalog.retain(|c| !prune(c));
+        self
     }
 
     /// The columns in stream/batch source node indicate the actual columns it will produce,
@@ -162,15 +328,11 @@ impl Source {
 
         let key = Field {
             data_type: DataType::Varchar,
-            name: "partition_id".to_string(),
-            sub_fields: vec![],
-            type_name: "".to_string(),
+            name: "partition_id".to_owned(),
         };
         let value = Field {
             data_type: DataType::Jsonb,
-            name: "offset_info".to_string(),
-            sub_fields: vec![],
-            type_name: "".to_string(),
+            name: "offset_info".to_owned(),
         };
 
         let ordered_col_idx = builder.add_column(&key);
@@ -185,5 +347,17 @@ impl Source {
             },
             1,
         )
+    }
+
+    pub fn clone_with_column_catalog(&self, column_catalog: Vec<ColumnCatalog>) -> Self {
+        let row_id_index = column_catalog.iter().position(|c| c.is_row_id_column());
+        Self {
+            catalog: self.catalog.clone(),
+            column_catalog,
+            row_id_index,
+            kind: self.kind.clone(),
+            ctx: self.ctx.clone(),
+            as_of: self.as_of.clone(),
+        }
     }
 }

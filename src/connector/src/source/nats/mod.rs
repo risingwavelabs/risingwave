@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,7 @@
 // limitations under the License.
 
 pub mod enumerator;
+pub use enumerator::NatsSplitEnumerator;
 pub mod source;
 pub mod split;
 
@@ -23,15 +24,15 @@ use std::time::Duration;
 use async_nats::jetstream::consumer::pull::Config;
 use async_nats::jetstream::consumer::{AckPolicy, ReplayPolicy};
 use serde::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde_with::{DisplayFromStr, serde_as};
 use thiserror::Error;
 use with_options::WithOptions;
 
 use crate::connector_common::NatsCommon;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::source::nats::enumerator::NatsSplitEnumerator;
-use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::source::SourceProperties;
+use crate::source::nats::source::{NatsSplit, NatsSplitReader};
 use crate::{
     deserialize_optional_string_seq_from_string, deserialize_optional_u64_seq_from_string,
 };
@@ -100,11 +101,20 @@ pub struct NatsProperties {
     #[serde(rename = "stream")]
     pub stream: String,
 
-    #[serde(rename = "durable_consumer_name")]
+    #[serde(rename = "consumer.durable_name")]
     pub durable_consumer_name: String,
 
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+impl EnforceSecret for NatsProperties {
+    fn enforce_secret<'a>(prop_iter: impl Iterator<Item = &'a str>) -> ConnectorResult<()> {
+        for prop in prop_iter {
+            NatsCommon::enforce_one(prop)?;
+        }
+        Ok(())
+    }
 }
 
 impl NatsProperties {
@@ -120,9 +130,6 @@ impl NatsProperties {
 pub struct NatsPropertiesConsumer {
     #[serde(rename = "consumer.deliver_subject")]
     pub deliver_subject: Option<String>,
-
-    #[serde(rename = "consumer.durable_name")]
-    pub durable_name: Option<String>,
 
     #[serde(rename = "consumer.name")]
     pub name: Option<String>,
@@ -217,9 +224,6 @@ impl NatsPropertiesConsumer {
         if let Some(v) = &self.name {
             c.name = Some(v.clone())
         }
-        if let Some(v) = &self.durable_name {
-            c.durable_name = Some(v.clone())
-        }
         if let Some(v) = &self.description {
             c.description = Some(v.clone())
         }
@@ -312,37 +316,37 @@ mod test {
     #[test]
     fn test_parse_config_consumer() {
         let config: BTreeMap<String, String> = btreemap! {
-            "stream".to_string() => "risingwave".to_string(),
+            "stream".to_owned() => "risingwave".to_owned(),
 
             // NATS common
-            "subject".to_string() => "subject1".to_string(),
-            "server_url".to_string() => "nats-server:4222".to_string(),
-            "connect_mode".to_string() => "plain".to_string(),
-            "type".to_string() => "append-only".to_string(),
+            "subject".to_owned() => "subject1".to_owned(),
+            "server_url".to_owned() => "nats-server:4222".to_owned(),
+            "connect_mode".to_owned() => "plain".to_owned(),
+            "type".to_owned() => "append-only".to_owned(),
 
             // NATS properties consumer
-            "consumer.name".to_string() => "foobar".to_string(),
-            "consumer.durable_name".to_string() => "durable_foobar".to_string(),
-            "consumer.description".to_string() => "A description".to_string(),
-            "consumer.ack_policy".to_string() => "all".to_string(),
-            "consumer.ack_wait.sec".to_string() => "10".to_string(),
-            "consumer.max_deliver".to_string() => "10".to_string(),
-            "consumer.filter_subject".to_string() => "subject".to_string(),
-            "consumer.filter_subjects".to_string() => "subject1,subject2".to_string(),
-            "consumer.replay_policy".to_string() => "instant".to_string(),
-            "consumer.rate_limit".to_string() => "100".to_string(),
-            "consumer.sample_frequency".to_string() => "1".to_string(),
-            "consumer.max_waiting".to_string() => "5".to_string(),
-            "consumer.max_ack_pending".to_string() => "100".to_string(),
-            "consumer.headers_only".to_string() => "true".to_string(),
-            "consumer.max_batch".to_string() => "10".to_string(),
-            "consumer.max_bytes".to_string() => "1024".to_string(),
-            "consumer.max_expires.sec".to_string() => "24".to_string(),
-            "consumer.inactive_threshold.sec".to_string() => "10".to_string(),
-            "consumer.num_replicas".to_string() => "3".to_string(),
-            "consumer.memory_storage".to_string() => "true".to_string(),
-            "consumer.backoff.sec".to_string() => "2,10,15".to_string(),
-            "durable_consumer_name".to_string() => "test_durable_consumer".to_string(),
+            "consumer.name".to_owned() => "foobar".to_owned(),
+            "consumer.durable_name".to_owned() => "durable_foobar".to_owned(),
+            "consumer.description".to_owned() => "A description".to_owned(),
+            "consumer.ack_policy".to_owned() => "all".to_owned(),
+            "consumer.ack_wait.sec".to_owned() => "10".to_owned(),
+            "consumer.max_deliver".to_owned() => "10".to_owned(),
+            "consumer.filter_subject".to_owned() => "subject".to_owned(),
+            "consumer.filter_subjects".to_owned() => "subject1,subject2".to_owned(),
+            "consumer.replay_policy".to_owned() => "instant".to_owned(),
+            "consumer.rate_limit".to_owned() => "100".to_owned(),
+            "consumer.sample_frequency".to_owned() => "1".to_owned(),
+            "consumer.max_waiting".to_owned() => "5".to_owned(),
+            "consumer.max_ack_pending".to_owned() => "100".to_owned(),
+            "consumer.headers_only".to_owned() => "true".to_owned(),
+            "consumer.max_batch".to_owned() => "10".to_owned(),
+            "consumer.max_bytes".to_owned() => "1024".to_owned(),
+            "consumer.max_expires.sec".to_owned() => "24".to_owned(),
+            "consumer.inactive_threshold.sec".to_owned() => "10".to_owned(),
+            "consumer.num_replicas".to_owned() => "3".to_owned(),
+            "consumer.memory_storage".to_owned() => "true".to_owned(),
+            "consumer.backoff.sec".to_owned() => "2,10,15".to_owned(),
+            "durable_consumer_name".to_owned() => "test_durable_consumer".to_owned(),
 
         };
 
@@ -351,28 +355,25 @@ mod test {
 
         assert_eq!(
             props.nats_properties_consumer.name,
-            Some("foobar".to_string())
+            Some("foobar".to_owned())
         );
-        assert_eq!(
-            props.nats_properties_consumer.durable_name,
-            Some("durable_foobar".to_string())
-        );
+        assert_eq!(props.durable_consumer_name, "durable_foobar".to_owned());
         assert_eq!(
             props.nats_properties_consumer.description,
-            Some("A description".to_string())
+            Some("A description".to_owned())
         );
         assert_eq!(
             props.nats_properties_consumer.ack_policy,
-            Some("all".to_string())
+            Some("all".to_owned())
         );
         assert_eq!(props.nats_properties_consumer.ack_wait, Some(10));
         assert_eq!(
             props.nats_properties_consumer.filter_subjects,
-            Some(vec!["subject1".to_string(), "subject2".to_string()])
+            Some(vec!["subject1".to_owned(), "subject2".to_owned()])
         );
         assert_eq!(
             props.nats_properties_consumer.replay_policy,
-            Some("instant".to_string())
+            Some("instant".to_owned())
         );
         assert_eq!(props.nats_properties_consumer.rate_limit, Some(100));
         assert_eq!(props.nats_properties_consumer.sample_frequency, Some(1));

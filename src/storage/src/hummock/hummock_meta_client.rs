@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,10 +17,15 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use futures::stream::BoxStream;
 use risingwave_hummock_sdk::version::HummockVersion;
-use risingwave_hummock_sdk::{HummockSstableObjectId, SstObjectIdRange, SyncResult};
-use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest, VacuumTask};
+use risingwave_hummock_sdk::{ObjectIdRange, SyncResult};
+use risingwave_pb::hummock::{PbHummockVersion, SubscribeCompactionEventRequest};
+use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
+use risingwave_pb::id::{JobId, TableId};
 use risingwave_rpc_client::error::Result;
-use risingwave_rpc_client::{CompactionEventItem, HummockMetaClient, MetaClient};
+use risingwave_rpc_client::{
+    CompactionEventItem, HummockMetaClient, HummockMetaClientChangeLogInfo,
+    IcebergCompactionEventItem, MetaClient,
+};
 use tokio::sync::mpsc::UnboundedSender;
 
 use crate::hummock::{HummockEpoch, HummockVersionId};
@@ -54,55 +59,32 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
         self.meta_client.get_current_version().await
     }
 
-    async fn get_new_sst_ids(&self, number: u32) -> Result<SstObjectIdRange> {
+    async fn get_new_object_ids(&self, number: u32) -> Result<ObjectIdRange> {
         self.stats.get_new_sst_ids_counts.inc();
         let timer = self.stats.get_new_sst_ids_latency.start_timer();
-        let res = self.meta_client.get_new_sst_ids(number).await;
+        let res = self.meta_client.get_new_object_ids(number).await;
         timer.observe_duration();
         res
     }
 
-    async fn commit_epoch(
+    async fn commit_epoch_with_change_log(
         &self,
         _epoch: HummockEpoch,
         _sync_result: SyncResult,
-        _is_log_store: bool,
+        _change_log_info: Option<HummockMetaClientChangeLogInfo>,
     ) -> Result<()> {
         panic!("Only meta service can commit_epoch in production.")
-    }
-
-    async fn report_vacuum_task(&self, vacuum_task: VacuumTask) -> Result<()> {
-        self.meta_client.report_vacuum_task(vacuum_task).await
     }
 
     async fn trigger_manual_compaction(
         &self,
         compaction_group_id: u64,
-        table_id: u32,
+        table_id: JobId,
         level: u32,
         sst_ids: Vec<u64>,
     ) -> Result<()> {
         self.meta_client
             .trigger_manual_compaction(compaction_group_id, table_id, level, sst_ids)
-            .await
-    }
-
-    async fn report_full_scan_task(
-        &self,
-        filtered_object_ids: Vec<HummockSstableObjectId>,
-        total_object_count: u64,
-        total_object_size: u64,
-        start_after: Option<String>,
-        next_start_after: Option<String>,
-    ) -> Result<()> {
-        self.meta_client
-            .report_full_scan_task(
-                filtered_object_ids,
-                total_object_count,
-                total_object_size,
-                start_after,
-                next_start_after,
-            )
             .await
     }
 
@@ -128,8 +110,17 @@ impl HummockMetaClient for MonitoredHummockMetaClient {
     async fn get_version_by_epoch(
         &self,
         epoch: HummockEpoch,
-        table_id: u32,
+        table_id: TableId,
     ) -> Result<PbHummockVersion> {
         self.meta_client.get_version_by_epoch(epoch, table_id).await
+    }
+
+    async fn subscribe_iceberg_compaction_event(
+        &self,
+    ) -> Result<(
+        UnboundedSender<SubscribeIcebergCompactionEventRequest>,
+        BoxStream<'static, IcebergCompactionEventItem>,
+    )> {
+        self.meta_client.subscribe_iceberg_compaction_event().await
     }
 }

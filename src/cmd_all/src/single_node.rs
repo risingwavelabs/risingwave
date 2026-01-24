@@ -15,8 +15,10 @@
 use clap::Parser;
 use home::home_dir;
 use risingwave_common::config::MetaBackend;
+use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_compactor::CompactorOpts;
 use risingwave_compute::ComputeNodeOpts;
+use risingwave_compute::memory::config::gradient_reserve_memory_bytes;
 use risingwave_frontend::FrontendOpts;
 use risingwave_meta_node::MetaNodeOpts;
 
@@ -85,7 +87,7 @@ impl SingleNodeOpts {
 #[derive(Eq, PartialOrd, PartialEq, Debug, Clone, Parser)]
 pub struct NodeSpecificOpts {
     // ------- Compute Node Options -------
-    /// Total available memory for the compute node in bytes. Used by both computing and storage.
+    /// Total available memory for all the nodes
     #[clap(long)]
     pub total_memory_bytes: Option<usize>,
 
@@ -116,6 +118,8 @@ pub struct NodeSpecificOpts {
     #[clap(long)]
     pub compaction_worker_threads_number: Option<usize>,
 }
+
+const HUMMOCK_IN_MEMORY: &str = "hummock+memory";
 
 pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedStandaloneOpts {
     // Parse from empty strings to get the default values.
@@ -152,13 +156,13 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     let store_directory = opts.store_directory.unwrap_or_else(|| {
         let mut home_path = home_dir().unwrap();
         home_path.push(".risingwave");
-        home_path.to_str().unwrap().to_string()
+        home_path.to_str().unwrap().to_owned()
     });
 
     // Set state store for meta (if not set). It could be set by environment variables before this.
     if meta_opts.state_store.is_none() {
         if opts.in_memory {
-            meta_opts.state_store = Some("hummock+memory".to_string());
+            meta_opts.state_store = Some(HUMMOCK_IN_MEMORY.to_owned());
         } else {
             let state_store_dir = format!("{}/state_store", &store_directory);
             std::fs::create_dir_all(&state_store_dir).unwrap();
@@ -167,7 +171,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         }
 
         // FIXME: otherwise it reports: missing system param "data_directory", but I think it should be set by this way...
-        meta_opts.data_directory = Some("hummock_001".to_string());
+        meta_opts.data_directory = Some("hummock_001".to_owned());
     }
 
     // Set meta store for meta (if not set). It could be set by environment variables before this.
@@ -192,25 +196,33 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     }
 
     // Set listen addresses (force to override)
-    meta_opts.listen_addr = "0.0.0.0:5690".to_string();
-    meta_opts.advertise_addr = "127.0.0.1:5690".to_string();
-    meta_opts.dashboard_host = Some("0.0.0.0:5691".to_string());
-    compute_opts.listen_addr = "0.0.0.0:5688".to_string();
-    compactor_opts.listen_addr = "0.0.0.0:6660".to_string();
-    if let Some(frontend_addr) = &opts.node_opts.listen_addr {
-        frontend_opts.listen_addr.clone_from(frontend_addr);
-    }
+    meta_opts.listen_addr = "127.0.0.1:5690".to_owned();
+    meta_opts.advertise_addr = "127.0.0.1:5690".to_owned();
+    meta_opts.dashboard_host = Some("0.0.0.0:5691".to_owned());
+    compute_opts.listen_addr = "127.0.0.1:5688".to_owned();
+    compactor_opts.listen_addr = "127.0.0.1:6660".to_owned();
 
     // Set Meta addresses for all nodes (force to override)
-    let meta_addr = "http://127.0.0.1:5690".to_string();
+    let meta_addr = "http://127.0.0.1:5690".to_owned();
     compute_opts.meta_address = meta_addr.parse().unwrap();
     frontend_opts.meta_addr = meta_addr.parse().unwrap();
     compactor_opts.meta_address = meta_addr.parse().unwrap();
 
+    // Allocate memory for each node
+    let total_memory_bytes = if let Some(total_memory_bytes) = opts.node_opts.total_memory_bytes {
+        total_memory_bytes
+    } else {
+        system_memory_available_bytes()
+    };
+    frontend_opts.frontend_total_memory_bytes = memory_for_frontend(total_memory_bytes);
+    compactor_opts.compactor_total_memory_bytes = memory_for_compactor(total_memory_bytes);
+    compute_opts.total_memory_bytes = total_memory_bytes
+        - memory_for_frontend(total_memory_bytes)
+        - memory_for_compactor(total_memory_bytes);
+    compute_opts.memory_manager_target_bytes =
+        Some(gradient_reserve_memory_bytes(total_memory_bytes));
+
     // Apply node-specific options
-    if let Some(total_memory_bytes) = opts.node_opts.total_memory_bytes {
-        compute_opts.total_memory_bytes = total_memory_bytes;
-    }
     if let Some(parallelism) = opts.node_opts.parallelism {
         compute_opts.parallelism = parallelism;
     }
@@ -227,10 +239,59 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         compactor_opts.compaction_worker_threads_number = Some(n);
     }
 
+    let in_memory_state_store = meta_opts
+        .state_store
+        .as_ref()
+        .unwrap()
+        .starts_with(HUMMOCK_IN_MEMORY);
+
     ParsedStandaloneOpts {
         meta_opts: Some(meta_opts),
         compute_opts: Some(compute_opts),
         frontend_opts: Some(frontend_opts),
-        compactor_opts: Some(compactor_opts),
+        // If the state store is in-memory, the compute node will start an embedded compactor.
+        compactor_opts: if in_memory_state_store {
+            None
+        } else {
+            Some(compactor_opts)
+        },
+    }
+}
+
+fn memory_for_frontend(total_memory_bytes: usize) -> usize {
+    if total_memory_bytes <= (16 << 30) {
+        total_memory_bytes / 8
+    } else {
+        (total_memory_bytes - (16 << 30)) / 16 + (16 << 30) / 8
+    }
+}
+
+fn memory_for_compactor(total_memory_bytes: usize) -> usize {
+    if total_memory_bytes <= (16 << 30) {
+        total_memory_bytes / 8
+    } else {
+        (total_memory_bytes - (16 << 30)) / 16 + (16 << 30) / 8
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_playground_in_memory_state_store() {
+        let opts = SingleNodeOpts::new_for_playground();
+        let standalone_opts = map_single_node_opts_to_standalone_opts(opts);
+
+        // Should not start a compactor.
+        assert!(standalone_opts.compactor_opts.is_none());
+
+        assert_eq!(
+            (standalone_opts.meta_opts.as_ref().unwrap())
+                .state_store
+                .as_ref()
+                .unwrap(),
+            HUMMOCK_IN_MEMORY,
+        );
     }
 }

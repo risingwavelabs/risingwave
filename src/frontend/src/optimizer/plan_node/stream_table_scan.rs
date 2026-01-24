@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,12 +21,13 @@ use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
-use super::utils::{childless_record, Distill};
-use super::{generic, ExprRewritable, PlanBase, PlanNodeId, PlanRef, StreamNode};
+use super::utils::{Distill, childless_record};
+use super::{ExprRewritable, PlanBase, PlanNodeId, StreamNode, StreamPlanRef as PlanRef, generic};
+use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
@@ -34,7 +35,6 @@ use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay, MonotonicityMap};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::TableCatalog;
 
 /// `StreamTableScan` is a virtual plan node to represent a stream table scan. It will be converted
 /// to stream scan + merge node (for upstream materialize) + batch table scan when converting to `MView`
@@ -48,11 +48,24 @@ pub struct StreamTableScan {
 }
 
 impl StreamTableScan {
+    pub const BACKFILL_FINISHED_COLUMN_NAME: &str = "backfill_finished";
+    pub const EPOCH_COLUMN_NAME: &str = "epoch";
+    pub const IS_EPOCH_FINISHED_COLUMN_NAME: &str = "is_epoch_finished";
+    pub const ROW_COUNT_COLUMN_NAME: &str = "row_count";
+    pub const VNODE_COLUMN_NAME: &str = "vnode";
+
     pub fn new_with_stream_scan_type(
         core: generic::TableScan,
         stream_scan_type: StreamScanType,
     ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
+
+        let mut stream_scan_type = stream_scan_type;
+        if core.cross_database() {
+            assert_ne!(stream_scan_type, StreamScanType::UpstreamOnly);
+            // Force rewrite scan type to cross-db scan
+            stream_scan_type = StreamScanType::CrossDbSnapshotBackfill;
+        }
 
         let distribution = {
             match core.distribution_key() {
@@ -61,7 +74,7 @@ impl StreamTableScan {
                         Distribution::Single
                     } else {
                         // See also `BatchSeqScan::clone_with_dist`.
-                        Distribution::UpstreamHashShard(distribution_key, core.table_desc.table_id)
+                        Distribution::UpstreamHashShard(distribution_key, core.table_catalog.id)
                     }
                 }
                 None => Distribution::SomeShard,
@@ -71,7 +84,11 @@ impl StreamTableScan {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            core.append_only(),
+            if core.append_only() {
+                StreamKind::AppendOnly
+            } else {
+                StreamKind::Retract
+            },
             false,
             core.watermark_columns(),
             MonotonicityMap::new(),
@@ -85,7 +102,7 @@ impl StreamTableScan {
     }
 
     pub fn table_name(&self) -> &str {
-        &self.core.table_name
+        self.core.table_name()
     }
 
     pub fn core(&self) -> &generic::TableScan {
@@ -94,14 +111,12 @@ impl StreamTableScan {
 
     pub fn to_index_scan(
         &self,
-        index_name: &str,
         index_table_catalog: Arc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
         stream_scan_type: StreamScanType,
     ) -> StreamTableScan {
         let logical_index_scan = self.core.to_index_scan(
-            index_name,
             index_table_catalog,
             primary_to_secondary_mapping,
             function_mapping,
@@ -122,6 +137,8 @@ impl StreamTableScan {
     }
 
     /// Build catalog for backfill state
+    ///
+    /// When `stream_scan_type` is not `StreamScanType::SnapshotBackfill`:
     ///
     /// Schema: | vnode | pk ... | `backfill_finished` | `row_count` |
     ///
@@ -144,38 +161,91 @@ impl StreamTableScan {
     ///
     /// FIXME(kwannoel):
     /// - Across all vnodes, the values are the same.
-    /// - e.g. | vnode | pk ...  | `backfill_finished` | `row_count` |
-    ///        | 1002 | Int64(1) | t                   | 10          |
-    ///        | 1003 | Int64(1) | t                   | 10          |
-    ///        | 1003 | Int64(1) | t                   | 10          |
+    /// - e.g.
+    ///   | vnode | pk ...  | `backfill_finished` | `row_count` |
+    ///   | 1002 | Int64(1) | t                   | 10          |
+    ///   | 1003 | Int64(1) | t                   | 10          |
+    ///   | 1003 | Int64(1) | t                   | 10          |
     ///
     /// Eventually we should track progress per vnode, to support scaling with both mview and
     /// the corresponding `no_shuffle_backfill`.
     /// However this is not high priority, since we are working on supporting arrangement backfill,
     /// which already has this capability.
+    ///
+    ///
+    /// When `stream_scan_type` is `StreamScanType::SnapshotBackfill`:
+    ///
+    /// Schema: | vnode | `epoch` | `row_count` | `is_epoch_finished` | pk ...
+    ///
+    /// key:    | vnode |
+    /// value:  | `epoch` | `row_count` | `is_epoch_finished` | pk ...
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
+        stream_scan_type: StreamScanType,
     ) -> TableCatalog {
         let mut catalog_builder = TableCatalogBuilder::default();
         let upstream_schema = &self.core.get_table_columns();
 
         // We use vnode as primary key in state table.
         // If `Distribution::Single`, vnode will just be `VirtualNode::default()`.
-        catalog_builder.add_column(&Field::with_name(VirtualNode::RW_TYPE, "vnode"));
+        catalog_builder.add_column(&Field::with_name(
+            VirtualNode::RW_TYPE,
+            Self::VNODE_COLUMN_NAME,
+        ));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
-        // pk columns
-        for col_order in self.core.primary_key() {
-            let col = &upstream_schema[col_order.column_index];
-            catalog_builder.add_column(&Field::from(col));
+        match stream_scan_type {
+            StreamScanType::Chain
+            | StreamScanType::Rearrange
+            | StreamScanType::Backfill
+            | StreamScanType::UpstreamOnly
+            | StreamScanType::ArrangementBackfill => {
+                // pk columns
+                for col_order in self.core.primary_key() {
+                    let col = &upstream_schema[col_order.column_index];
+                    catalog_builder.add_column(&Field::from(&**col));
+                }
+
+                // `backfill_finished` column
+                catalog_builder.add_column(&Field::with_name(
+                    DataType::Boolean,
+                    Self::BACKFILL_FINISHED_COLUMN_NAME,
+                ));
+
+                // `row_count` column
+                catalog_builder.add_column(&Field::with_name(
+                    DataType::Int64,
+                    Self::ROW_COUNT_COLUMN_NAME,
+                ));
+            }
+            StreamScanType::SnapshotBackfill | StreamScanType::CrossDbSnapshotBackfill => {
+                // `epoch` column
+                catalog_builder
+                    .add_column(&Field::with_name(DataType::Int64, Self::EPOCH_COLUMN_NAME));
+
+                // `row_count` column
+                catalog_builder.add_column(&Field::with_name(
+                    DataType::Int64,
+                    Self::ROW_COUNT_COLUMN_NAME,
+                ));
+
+                // `is_finished` column
+                catalog_builder.add_column(&Field::with_name(
+                    DataType::Boolean,
+                    Self::IS_EPOCH_FINISHED_COLUMN_NAME,
+                ));
+
+                // pk columns
+                for col_order in self.core.primary_key() {
+                    let col = &upstream_schema[col_order.column_index];
+                    catalog_builder.add_column(&Field::from(&col.column_desc));
+                }
+            }
+            StreamScanType::Unspecified => {
+                unreachable!()
+            }
         }
-
-        // `backfill_finished` column
-        catalog_builder.add_column(&Field::with_name(DataType::Boolean, "backfill_finished"));
-
-        // `row_count` column
-        catalog_builder.add_column(&Field::with_name(DataType::Int64, "row_count"));
 
         // Reuse the state store pk (vnode) as the vnode as well.
         catalog_builder.set_vnode_col_idx(0);
@@ -190,13 +260,13 @@ impl StreamTableScan {
     }
 }
 
-impl_plan_tree_node_for_leaf! { StreamTableScan }
+impl_plan_tree_node_for_leaf! { Stream, StreamTableScan }
 
 impl Distill for StreamTableScan {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let verbose = self.base.ctx().is_explain_verbose();
         let mut vec = Vec::with_capacity(4);
-        vec.push(("table", Pretty::from(self.core.table_name.clone())));
+        vec.push(("table", Pretty::from(self.core.table_name().to_owned())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
 
         if verbose {
@@ -229,7 +299,9 @@ impl Distill for StreamTableScan {
 
 impl StreamNode for StreamTableScan {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        unreachable!("stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead.")
+        unreachable!(
+            "stream scan cannot be converted into a prost body -- call `adhoc_to_stream_prost` instead."
+        )
     }
 }
 
@@ -252,7 +324,8 @@ impl StreamTableScan {
             // For backfill, we additionally need the primary key columns.
             StreamScanType::Backfill
             | StreamScanType::ArrangementBackfill
-            | StreamScanType::SnapshotBackfill => self.core.output_and_pk_column_ids(),
+            | StreamScanType::SnapshotBackfill
+            | StreamScanType::CrossDbSnapshotBackfill => self.core.output_and_pk_column_ids(),
             StreamScanType::Chain | StreamScanType::Rearrange | StreamScanType::UpstreamOnly => {
                 self.core.output_column_ids()
             }
@@ -272,7 +345,7 @@ impl StreamTableScan {
                     .iter()
                     .find(|c| c.column_id.get_id() == id)
                     .unwrap();
-                Field::from(col).to_prost()
+                Field::from(&col.column_desc).to_prost()
             })
             .collect_vec();
 
@@ -280,12 +353,12 @@ impl StreamTableScan {
 
         // TODO: snapshot read of upstream mview
         let batch_plan_node = BatchPlanNode {
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
+            table_desc: Some(self.core.table_catalog.table_desc().try_to_protobuf()?),
             column_ids: upstream_column_ids.clone(),
         };
 
         let catalog = self
-            .build_backfill_state_catalog(state)
+            .build_backfill_state_catalog(state, self.stream_scan_type)
             .to_internal_table_prost();
 
         // For backfill, we first read pk + output_indices from upstream.
@@ -310,53 +383,59 @@ impl StreamTableScan {
             None
         };
 
-        let node_body = PbNodeBody::StreamScan(StreamScanNode {
-            table_id: self.core.table_desc.table_id.table_id,
-            stream_scan_type: self.stream_scan_type as i32,
-            // The column indices need to be forwarded to the downstream
-            output_indices,
-            upstream_column_ids,
-            // The table desc used by backfill executor
-            table_desc: Some(self.core.table_desc.try_to_protobuf()?),
-            state_table: Some(catalog),
-            arrangement_table,
-            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
-            ..Default::default()
-        });
-
-        Ok(PbStreamNode {
-            fields: self.schema().to_prost(),
-            input: vec![
+        let input = if self.stream_scan_type == StreamScanType::CrossDbSnapshotBackfill {
+            vec![]
+        } else {
+            vec![
                 // Upstream updates
                 // The merge node body will be filled by the `ActorBuilder` on the meta service.
                 PbStreamNode {
                     node_body: Some(PbNodeBody::Merge(Default::default())),
                     identity: "Upstream".into(),
-                    fields: upstream_schema.clone(),
+                    fields: upstream_schema,
                     stream_key: vec![], // not used
                     ..Default::default()
                 },
                 // Snapshot read
                 PbStreamNode {
-                    node_body: Some(PbNodeBody::BatchPlan(batch_plan_node)),
-                    operator_id: self.batch_plan_id.0 as u64,
+                    node_body: Some(PbNodeBody::BatchPlan(Box::new(batch_plan_node))),
+                    operator_id: self.batch_plan_id.to_stream_node_operator_id(),
                     identity: "BatchPlanNode".into(),
                     fields: snapshot_schema,
                     stream_key: vec![], // not used
                     input: vec![],
-                    append_only: true,
+                    stream_kind: PbStreamKind::AppendOnly as i32,
                 },
-            ],
+            ]
+        };
+
+        let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
+            table_id: self.core.table_catalog.id,
+            stream_scan_type: self.stream_scan_type as i32,
+            // The column indices need to be forwarded to the downstream
+            output_indices,
+            upstream_column_ids,
+            // The table desc used by backfill executor
+            table_desc: Some(self.core.table_catalog.table_desc().try_to_protobuf()?),
+            state_table: Some(catalog),
+            arrangement_table,
+            rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
+            ..Default::default()
+        }));
+
+        Ok(PbStreamNode {
+            fields: self.schema().to_prost(),
+            input,
             node_body: Some(node_body),
             stream_key,
-            operator_id: self.base.id().0 as u64,
+            operator_id: self.base.id().to_stream_node_operator_id(),
             identity: self.distill_to_string(),
-            append_only: self.append_only(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
         })
     }
 }
 
-impl ExprRewritable for StreamTableScan {
+impl ExprRewritable<Stream> for StreamTableScan {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

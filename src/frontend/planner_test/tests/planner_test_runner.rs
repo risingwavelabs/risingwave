@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,7 +42,7 @@ fn main() {
             || path.extension() == Some(OsStr::new("yaml"))
         {
             let file_name = path.file_name().unwrap().to_string_lossy().to_string();
-            let test_case_name = file_name.split('.').next().unwrap().to_string();
+            let test_case_name = file_name.split('.').next().unwrap().to_owned();
 
             tests.push(Trial::test(test_case_name, move || {
                 let path = test_data_dir().join("input").join(file_name);

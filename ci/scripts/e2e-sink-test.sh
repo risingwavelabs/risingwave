@@ -25,15 +25,27 @@ shift $((OPTIND -1))
 
 download_and_prepare_rw "$profile" source
 
+prepare_pg() {
+  # set up PG sink destination
+  export PGPASSWORD='post\tgres'
+  psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';" || true
+  dropdb -h db -U postgres test || true
+  createdb -h db -U postgres test
+  psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int PRIMARY KEY, v2 int);"
+  psql -h db -U postgres -d test -c "create table t5 (v1 smallint primary key, v2 int, v3 bigint, v4 float4, v5 float8, v6 decimal, v7 varchar, v8 timestamp, v9 boolean);"
+  psql -h db -U postgres -d test < ./e2e_test/sink/remote/pg_create_table.sql
+}
+
 # Change process number limit
 echo "--- os limits"
 ulimit -a
 
-echo "--- Download connector node package"
+echo "--- download connector node package"
 buildkite-agent artifact download risingwave-connector.tar.gz ./
 mkdir ./connector-node
 tar xf ./risingwave-connector.tar.gz -C ./connector-node
 
+echo "--- prepare mysql"
 # prepare environment mysql sink
 mysql --host=mysql --port=3306 -u root -p123456 -e "CREATE DATABASE IF NOT EXISTS test;"
 # grant access to `test` for ci test user
@@ -42,34 +54,61 @@ mysql --host=mysql --port=3306 -u root -p123456 -e "GRANT ALL PRIVILEGES ON test
 mysql --host=mysql --port=3306 -u root -p123456 test < ./e2e_test/sink/remote/mysql_create_table.sql
 
 echo "--- preparing postgresql"
+prepare_pg
 
-# set up PG sink destination
-apt-get -y install postgresql-client jq
-export PGPASSWORD=postgres
-psql -h db -U postgres -c "CREATE ROLE test LOGIN SUPERUSER PASSWORD 'connector';"
-createdb -h db -U postgres test
-psql -h db -U postgres -d test -c "CREATE TABLE t4 (v1 int PRIMARY KEY, v2 int);"
-psql -h db -U postgres -d test -c "create table t5 (v1 smallint primary key, v2 int, v3 bigint, v4 float4, v5 float8, v6 decimal, v7 varchar, v8 timestamp, v9 boolean);"
-psql -h db -U postgres -d test < ./e2e_test/sink/remote/pg_create_table.sql
+echo "--- starting risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
+risedev ci-start ci-1cn-1fe-jdbc-to-native
+
+echo "--- test sink: jdbc:postgres switch to postgres native"
+# check sink destination postgres
+risedev slt './e2e_test/sink/remote/jdbc.load.slt'
+sleep 1
+SLT_PASSWORD=$PGPASSWORD sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'pg-native'
+sleep 1
+
+echo "--- killing risingwave cluster: ci-1cn-1fe-switch-to-pg-native"
+risedev ci-kill
 
 echo "--- starting risingwave cluster"
-risedev ci-start ci-1cn-1fe
+# Use ci-inline-source-test since it will configure ports, db, host etc... env vars via risedev-env.
+# These are required for cli tools like psql have env vars correctly configured.
+risedev ci-start ci-inline-source-test
+
+echo "--- check connectivity for postgres"
+PGPASSWORD='post\tgres' psql -h db -U postgres -d postgres -p 5432 -c "SELECT 1;"
+
+echo "--- dumping risedev-env"
+echo "risedev-env:"
+risedev show-risedev-env
+
+# MUST use risedev slt, not sqllogictest, else env var not loaded and test fails.
+echo "--- testing postgres_sink"
+risedev slt './e2e_test/sink/postgres_sink.slt'
 
 echo "--- testing common sinks"
-sqllogictest -p 4566 -d dev './e2e_test/sink/append_only_sink.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/create_sink_as.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/blackhole_sink.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/remote/types.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/sink_into_table/*.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/file_sink.slt'
+risedev slt './e2e_test/sink/append_only_sink.slt'
+risedev slt './e2e_test/sink/create_sink_as.slt'
+risedev slt './e2e_test/sink/blackhole_sink.slt'
+risedev slt './e2e_test/sink/remote/types.slt'
+risedev slt './e2e_test/sink/sink_into_table/*.slt'
+risedev slt './e2e_test/sink/file_sink.slt'
+risedev slt './e2e_test/sink/license.slt'
+risedev slt './e2e_test/sink/rate_limit.slt'
+risedev slt './e2e_test/sink/auto_schema_change.slt'
+risedev slt './e2e_test/sink/sink_vector_columns.slt'
+risedev slt './e2e_test/sink/force_compaction_sink.slt'
+risedev slt './e2e_test/sink/bug_fixes/**/*.slt'
 sleep 1
+
+echo "--- preparing postgresql"
+prepare_pg
 
 echo "--- testing remote sinks"
 
 # check sink destination postgres
-sqllogictest -p 4566 -d dev './e2e_test/sink/remote/jdbc.load.slt'
+risedev slt './e2e_test/sink/remote/jdbc.load.slt'
 sleep 1
-sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt'
+SLT_PASSWORD=$PGPASSWORD sqllogictest -h db -p 5432 -d test './e2e_test/sink/remote/jdbc.check.pg.slt' --label 'jdbc'
 sleep 1
 
 # check sink destination mysql using shell
@@ -124,8 +163,8 @@ risedev ci-kill
 echo "--- e2e, ci-1cn-1fe, nexmark endless"
 RUST_LOG="info,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info" \
 risedev ci-start ci-1cn-1fe
-sqllogictest -p 4566 -d dev './e2e_test/sink/nexmark_endless_mvs/*.slt'
-sqllogictest -p 4566 -d dev './e2e_test/sink/nexmark_endless_sinks/*.slt'
+risedev slt './e2e_test/sink/nexmark_endless_mvs/*.slt'
+risedev slt './e2e_test/sink/nexmark_endless_sinks/*.slt'
 
 echo "--- Kill cluster"
 risedev ci-kill

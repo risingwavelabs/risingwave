@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,20 +18,20 @@ use super::Row;
 use crate::types::DatumRef;
 
 /// Row for the [`project`](super::RowExt::project) method.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, Default)]
 pub struct Project<'i, R> {
     row: R,
     indices: &'i [usize],
 }
 
-impl<'i, R: Row> PartialEq for Project<'i, R> {
+impl<R: Row> PartialEq for Project<'_, R> {
     fn eq(&self, other: &Self) -> bool {
         self.iter().eq(other.iter())
     }
 }
-impl<'i, R: Row> Eq for Project<'i, R> {}
+impl<R: Row> Eq for Project<'_, R> {}
 
-impl<'i, R: Row> Row for Project<'i, R> {
+impl<R: Row> Row for Project<'_, R> {
     #[inline]
     fn datum_at(&self, index: usize) -> DatumRef<'_> {
         // SAFETY: we have checked that `self.indices` are all valid in `new`.
@@ -40,8 +40,10 @@ impl<'i, R: Row> Row for Project<'i, R> {
 
     #[inline]
     unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-        self.row
-            .datum_at_unchecked(*self.indices.get_unchecked(index))
+        unsafe {
+            self.row
+                .datum_at_unchecked(*self.indices.get_unchecked(index))
+        }
     }
 
     #[inline]

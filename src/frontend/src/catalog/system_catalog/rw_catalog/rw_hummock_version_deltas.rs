@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -40,11 +40,12 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwHummockVersionDelta
             id: d.id.to_u64() as _,
             prev_id: d.prev_id.to_u64() as _,
             trivial_move: d.trivial_move,
-            group_deltas: json!(d
-                .group_deltas
-                .into_iter()
-                .map(|(group_id, deltas)| (group_id, PbGroupDeltas::from(deltas)))
-                .collect::<HashMap<u64, PbGroupDeltas>>())
+            group_deltas: json!(
+                d.group_deltas
+                    .into_iter()
+                    .map(|(group_id, deltas)| (group_id, PbGroupDeltas::from(deltas)))
+                    .collect::<HashMap<u64, PbGroupDeltas>>()
+            )
             .into(),
         })
         .collect();

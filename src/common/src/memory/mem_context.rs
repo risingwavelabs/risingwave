@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -46,7 +46,7 @@ impl MemCounter for TrAdderAtomic {
     }
 }
 
-impl<const N: usize> MemCounter for LabelGuardedIntGauge<N> {
+impl MemCounter for LabelGuardedIntGauge {
     fn add(&self, bytes: i64) {
         self.deref().add(bytes)
     }

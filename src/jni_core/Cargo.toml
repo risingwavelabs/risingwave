@@ -1,32 +1,23 @@
 [package]
 name = "risingwave_jni_core"
 version = "0.1.0"
-edition = "2021"
-
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
+edition = "2024"
 
 [dependencies]
 anyhow = "1"
 bytes = "1"
 cfg-or-panic = "0.2"
-chrono = { version = "0.4", default-features = false }
-foyer ={ workspace = true }
-fs-err = "2"
+chrono = { workspace = true }
+fs-err = "3"
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
-itertools = { workspace = true }
-jni = { version = "0.21.1", features = ["invocation"] }
+jni = { workspace = true }
+linkme = { workspace = true }
 paste = "1"
 prost = { workspace = true }
 risingwave_common = { workspace = true }
+risingwave_object_store = { workspace = true }
 risingwave_pb = { workspace = true }
-rw_futures_util = { workspace = true }
-serde = { version = "1.0", features = ["derive"] }
-serde_json = "1.0"
-thiserror = "1"
+thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "fs",
@@ -41,8 +32,6 @@ tracing = "0.1"
 
 [dev-dependencies]
 expect-test = "1"
-risingwave_expr = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
 
 [lints]
 workspace = true

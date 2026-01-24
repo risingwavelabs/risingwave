@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,25 +12,29 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::env;
 use std::ops::Range;
+use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
-use std::sync::Arc;
 use std::time::Duration;
 
-use criterion::{criterion_group, criterion_main, Criterion};
-use foyer::{Engine, HybridCacheBuilder};
+use criterion::{Criterion, criterion_group, criterion_main};
+use foyer::{CacheBuilder, HybridCacheBuilder};
 use rand::random;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
+use risingwave_common::hash::VirtualNode;
 use risingwave_hummock_sdk::key::{FullKey, UserKey};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_object_store::object::{
     InMemObjectStore, ObjectStore, ObjectStoreImpl, S3ObjectStore,
 };
+use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::iterator::{ConcatIterator, ConcatIteratorInner, HummockIterator};
 use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFactory};
+use risingwave_storage::hummock::none::NoneRecentFilter;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
     BackwardSstableIterator, BatchSstableWriterFactory, CachePolicy, HummockResult, MemoryLimiter,
@@ -38,7 +42,7 @@ use risingwave_storage::hummock::{
     SstableStoreConfig, SstableWriterFactory, SstableWriterOptions, StreamingSstableWriterFactory,
     Xor16FilterBuilder,
 };
-use risingwave_storage::monitor::{global_hummock_state_store_metrics, ObjectStoreMetrics};
+use risingwave_storage::monitor::{ObjectStoreMetrics, global_hummock_state_store_metrics};
 
 const RANGE: Range<u64> = 0..1500000;
 const VALUE: &[u8] = &[0; 400];
@@ -83,7 +87,18 @@ impl<F: SstableWriterFactory> TableBuilderFactory for LocalTableBuilderFactory<F
             .create_sst_writer(id, writer_options)
             .await
             .unwrap();
-        let builder = SstableBuilder::for_test(id, writer, self.options.clone());
+        let table_id_to_vnode =
+            HashMap::from_iter(vec![(TableId::default(), VirtualNode::COUNT_FOR_TEST)]);
+
+        let table_id_to_watermark_serde = HashMap::from_iter(vec![(0, None)]);
+
+        let builder = SstableBuilder::for_test(
+            id,
+            writer,
+            self.options.clone(),
+            table_id_to_vnode,
+            table_id_to_watermark_serde,
+        );
 
         Ok(builder)
     }
@@ -130,27 +145,30 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
     let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
-        .storage(Engine::Large)
+        .storage()
         .build()
         .await
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
         .with_shards(2)
-        .storage(Engine::Large)
+        .storage()
         .build()
         .await
         .unwrap();
     Arc::new(SstableStore::new(SstableStoreConfig {
         store: object_store,
-        path: "test".to_string(),
+        path: "test".to_owned(),
         prefetch_buffer_capacity: 64 << 20,
         max_prefetch_block_number: 16,
-        recent_filter: None,
+        recent_filter: Arc::new(NoneRecentFilter::default().into()),
         state_store_metrics: Arc::new(global_hummock_state_store_metrics(MetricLevel::Disabled)),
         use_new_object_prefix_strategy: true,
+        skip_bloom_filter_in_serde: false,
         meta_cache,
         block_cache,
+        vector_meta_cache: CacheBuilder::new(1 << 10).build(),
+        vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }))
 }
 
@@ -192,6 +210,8 @@ fn bench_builder(
 
     let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
 
+    let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
+
     let mut group = c.benchmark_group("bench_multi_builder");
     group
         .sample_size(SAMPLE_COUNT)
@@ -205,6 +225,7 @@ fn bench_builder(
                         StreamingSstableWriterFactory::new(sstable_store.clone()),
                         get_builder_options(capacity_mb),
                     ),
+                    compaction_catalog_agent_ref.clone(),
                 ))
             })
         });
@@ -217,6 +238,7 @@ fn bench_builder(
                         BatchSstableWriterFactory::new(sstable_store.clone()),
                         get_builder_options(capacity_mb),
                     ),
+                    compaction_catalog_agent_ref.clone(),
                 ))
             })
         });
@@ -242,12 +264,14 @@ fn bench_table_scan(c: &mut Criterion) {
         .build()
         .unwrap();
 
-    let store = InMemObjectStore::new().monitored(
+    let store = InMemObjectStore::for_test().monitored(
         Arc::new(ObjectStoreMetrics::unused()),
         Arc::new(ObjectStoreConfig::default()),
     );
     let object_store = Arc::new(ObjectStoreImpl::InMem(store));
     let sstable_store = runtime.block_on(async { generate_sstable_store(object_store).await });
+
+    let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![0]);
 
     let ssts = runtime.block_on(async {
         build_tables(CapacitySplitTableBuilder::for_test(
@@ -256,6 +280,7 @@ fn bench_table_scan(c: &mut Criterion) {
                 BatchSstableWriterFactory::new(sstable_store.clone()),
                 get_builder_options(capacity_mb),
             ),
+            compaction_catalog_agent_ref.clone(),
         ))
         .await
     });

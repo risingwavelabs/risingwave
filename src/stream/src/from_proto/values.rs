@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -35,12 +35,11 @@ impl ExecutorBuilder for ValuesExecutorBuilder {
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
         let barrier_receiver = params
-            .shared_context
             .local_barrier_manager
             .subscribe_barrier(params.actor_context.id);
         let progress = params
             .local_barrier_manager
-            .register_create_mview_progress(params.actor_context.id);
+            .register_create_mview_progress(&params.actor_context);
         let rows = node
             .get_tuples()
             .iter()

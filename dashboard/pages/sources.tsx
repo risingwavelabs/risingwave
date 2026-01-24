@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2025 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@
 import {
   Column,
   connectorColumnSource,
-  dependentsColumn,
   Relations,
+  streamingJobColumns,
 } from "../components/Relations"
 import { getSources } from "../lib/api/streaming"
 import { Source } from "../proto/gen/catalog"
@@ -31,9 +31,10 @@ export default function DataSources() {
     content: (s) => s.info?.rowFormat ?? "unknown",
   }
 
-  return Relations("Sources", getSources, [
-    connectorColumnSource,
-    rowFormatColumn,
-    dependentsColumn,
-  ])
+  return Relations(
+    "Sources",
+    getSources,
+    [connectorColumnSource, rowFormatColumn, ...streamingJobColumns],
+    { withStreamingJobs: true }
+  )
 }

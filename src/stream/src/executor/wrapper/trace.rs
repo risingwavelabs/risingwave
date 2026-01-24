@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use await_tree::InstrumentAwait;
-use futures::{pin_mut, StreamExt};
+use futures::{StreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use tracing::{Instrument, Span};
 
@@ -24,12 +24,8 @@ use crate::executor::{ActorContextRef, ExecutorInfo, Message, MessageStream};
 
 /// Streams wrapped by `trace` will be traced with `tracing` spans and reported to `opentelemetry`.
 #[try_stream(ok = Message, error = StreamExecutorError)]
-pub async fn trace(
-    enable_executor_row_count: bool,
-    info: Arc<ExecutorInfo>,
-    actor_ctx: ActorContextRef,
-    input: impl MessageStream,
-) {
+pub async fn trace(info: Arc<ExecutorInfo>, actor_ctx: ActorContextRef, input: impl MessageStream) {
+    let enable_executor_row_count = (actor_ctx.config.developer).enable_executor_row_count;
     let actor_id_str = actor_ctx.id.to_string();
     let fragment_id_str = actor_ctx.fragment_id.to_string();
 
@@ -88,6 +84,7 @@ pub async fn trace(
                     prev_epoch = barrier.epoch.prev,
                     curr_epoch = barrier.epoch.curr,
                     kind = ?barrier.kind,
+                    mutation = ?barrier.mutation,
                 );
                 span.record("message", "barrier");
             }

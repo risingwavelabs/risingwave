@@ -20,7 +20,7 @@ use risingwave_pb::plan_common::StorageTableDesc;
 
 use crate::array::{Array, DataChunk, PrimitiveArray};
 use crate::bitmap::Bitmap;
-use crate::hash::VirtualNode;
+use crate::hash::{VirtualNode, VnodeCountCompat};
 use crate::row::Row;
 use crate::util::iter_util::ZipEqFast;
 
@@ -64,7 +64,15 @@ impl TableDistribution {
             .map(|&k| k as usize)
             .collect_vec();
         let vnode_col_idx_in_pk = table_desc.vnode_col_idx_in_pk.map(|k| k as usize);
-        Self::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk)
+
+        let this = Self::new(vnodes, dist_key_in_pk_indices, vnode_col_idx_in_pk);
+        assert_eq!(
+            this.vnode_count(),
+            table_desc.vnode_count(),
+            "vnode count mismatch, scanning table {} under wrong distribution?",
+            table_desc.table_id
+        );
+        this
     }
 
     pub fn new(
@@ -139,6 +147,11 @@ impl TableDistribution {
         }
     }
 
+    /// Get vnode count (1 if singleton). Equivalent to `self.vnodes().len()`.
+    pub fn vnode_count(&self) -> usize {
+        self.vnodes().len()
+    }
+
     /// Get vnode value with given primary key.
     pub fn compute_vnode_by_pk(&self, pk: impl Row) -> VirtualNode {
         match &self.compute_vnode {
@@ -190,7 +203,7 @@ pub fn compute_vnode(row: impl Row, indices: &[usize], vnodes: &Bitmap) -> Virtu
 }
 
 pub fn get_vnode_from_row(row: impl Row, index: usize, vnodes: &Bitmap) -> VirtualNode {
-    let vnode = VirtualNode::from_datum(row.datum_at(index));
+    let vnode = VirtualNode::from_datum_ref(row.datum_at(index));
     check_vnode_is_set(vnode, vnodes);
 
     tracing::debug!(target: "events::storage::storage_table", "get vnode from row: {:?} vnode column index {:?} => {}", row, index, vnode);
@@ -253,11 +266,16 @@ impl TableDistribution {
 }
 
 /// Check whether the given `vnode` is set in the `vnodes` of this table.
-fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
+pub fn check_vnode_is_set(vnode: VirtualNode, vnodes: &Bitmap) {
     let is_set = vnodes.is_set(vnode.to_index());
-    assert!(
-        is_set,
-        "vnode {} should not be accessed by this table",
-        vnode
-    );
+
+    if !is_set {
+        let high_ranges = vnodes.high_ranges().map(|r| format!("{r:?}")).join(", ");
+        panic!(
+            "vnode {} should not be accessed by this table\nvnode count: {}\nallowed vnodes: {}",
+            vnode,
+            vnodes.len(),
+            high_ranges
+        );
+    }
 }

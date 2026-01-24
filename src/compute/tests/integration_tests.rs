@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,47 +15,45 @@
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 
-use std::sync::atomic::AtomicU64;
 use std::sync::Arc;
+use std::sync::atomic::AtomicU64;
 
 use futures::stream::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use maplit::{btreemap, convert_args};
 use risingwave_batch::error::BatchError;
-use risingwave_batch::executor::{
+use risingwave_batch_executors::{
     BoxedDataChunkStream, BoxedExecutor, DeleteExecutor, Executor as BatchExecutor, InsertExecutor,
     RowSeqScanExecutor, ScanRange,
 };
 use risingwave_common::array::{Array, DataChunk, F64Array, SerialArray};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{
-    ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId, INITIAL_TABLE_VERSION_ID,
+    ColumnDesc, ColumnId, ConflictBehavior, Field, INITIAL_TABLE_VERSION_ID, Schema, TableId,
 };
 use risingwave_common::row::OwnedRow;
-use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
 use risingwave_common::test_prelude::DataChunkTestExt;
 use risingwave_common::types::{DataType, IntoOrdered};
-use risingwave_common::util::epoch::{test_epoch, EpochExt, EpochPair};
+use risingwave_common::util::epoch::{EpochExt, EpochPair, test_epoch};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_common_rate_limit::RateLimit;
 use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
 use risingwave_dml::dml_manager::DmlManager;
 use risingwave_hummock_sdk::test_batch_query_epoch;
 use risingwave_pb::catalog::StreamSourceInfo;
 use risingwave_pb::plan_common::PbRowFormatType;
 use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::panic_store::PanicStateStore;
-use risingwave_storage::table::batch_table::storage_table::StorageTable;
+use risingwave_storage::table::batch_table::BatchTable;
 use risingwave_stream::common::table::state_table::StateTable;
 use risingwave_stream::common::table::test_utils::gen_pbtable;
 use risingwave_stream::error::StreamResult;
 use risingwave_stream::executor::dml::DmlExecutor;
-use risingwave_stream::executor::monitor::StreamingMetrics;
 use risingwave_stream::executor::row_id_gen::RowIdGenExecutor;
-use risingwave_stream::executor::source::SourceExecutor;
+use risingwave_stream::executor::source::DummySourceExecutor;
 use risingwave_stream::executor::{
-    ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, PkIndices,
+    ActorContext, Barrier, Execute, Executor, ExecutorInfo, MaterializeExecutor, Message, StreamKey,
 };
 use tokio::sync::mpsc::unbounded_channel;
 
@@ -70,7 +68,7 @@ impl SingleChunkExecutor {
         Self {
             chunk: Some(chunk),
             schema,
-            identity: "SingleChunkExecutor".to_string(),
+            identity: "SingleChunkExecutor".to_owned(),
         }
     }
 }
@@ -147,7 +145,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let all_column_ids = vec![ColumnId::from(0), ColumnId::from(1)];
     let all_schema = get_schema(&all_column_ids);
-    let pk_indices = PkIndices::from([0]);
+    let stream_key = StreamKey::from([0]);
     let column_descs = all_column_ids
         .iter()
         .zip_eq_fast(all_schema.fields.iter().cloned())
@@ -158,51 +156,46 @@ async fn test_table_materialize() -> StreamResult<()> {
     let vnodes = Bitmap::from_bytes(&[0b11111111]);
 
     let actor_ctx = ActorContext::for_test(0x3f3f3f);
-    let system_params_manager = LocalSystemParamsManager::for_test();
 
     // Create a `SourceExecutor` to read the changes.
     let source_executor = Executor::new(
-        ExecutorInfo {
-            schema: all_schema.clone(),
-            pk_indices: pk_indices.clone(),
-            identity: format!("SourceExecutor {:X}", 1),
-        },
-        SourceExecutor::<PanicStateStore>::new(
-            actor_ctx.clone(),
-            None, // There is no external stream source.
-            Arc::new(StreamingMetrics::unused()),
-            barrier_rx,
-            system_params_manager.get_params(),
-            None,
-            false,
-        )
-        .boxed(),
+        ExecutorInfo::for_test(
+            all_schema.clone(),
+            stream_key.clone(),
+            "SourceExecutor".to_owned(),
+            1,
+        ),
+        DummySourceExecutor::new(actor_ctx.clone(), barrier_rx).boxed(),
     );
 
     // Create a `DmlExecutor` to accept data change from users.
     let dml_executor = Executor::new(
-        ExecutorInfo {
-            schema: all_schema.clone(),
-            pk_indices: pk_indices.clone(),
-            identity: format!("DmlExecutor {:X}", 2),
-        },
+        ExecutorInfo::for_test(
+            all_schema.clone(),
+            stream_key.clone(),
+            "DmlExecutor".to_owned(),
+            2,
+        ),
         DmlExecutor::new(
+            ActorContext::for_test(0),
             source_executor,
             dml_manager.clone(),
             table_id,
             INITIAL_TABLE_VERSION_ID,
             column_descs.clone(),
             1024,
+            RateLimit::Disabled,
         )
         .boxed(),
     );
 
     let row_id_gen_executor = Executor::new(
-        ExecutorInfo {
-            schema: all_schema.clone(),
-            pk_indices: pk_indices.clone(),
-            identity: format!("RowIdGenExecutor {:X}", 3),
-        },
+        ExecutorInfo::for_test(
+            all_schema.clone(),
+            stream_key.clone(),
+            "RowIdGenExecutor".to_owned(),
+            3,
+        ),
         RowIdGenExecutor::new(actor_ctx, dml_executor, row_id_index, vnodes).boxed(),
     );
 
@@ -240,7 +233,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         dml_manager.clone(),
         insert_inner,
         1024,
-        "InsertExecutor".to_string(),
+        "InsertExecutor".to_owned(),
         vec![0], // ignore insertion order
         vec![],
         Some(row_id_index),
@@ -250,7 +243,7 @@ async fn test_table_materialize() -> StreamResult<()> {
 
     let value_indices = (0..column_descs.len()).collect_vec();
     // Since we have not polled `Materialize`, we cannot scan anything from this table
-    let table = StorageTable::for_test(
+    let table = BatchTable::for_test(
         memory_state_store.clone(),
         table_id,
         column_descs.clone(),
@@ -265,8 +258,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1024,
-        "RowSeqExecutor2".to_string(),
-        None,
+        "RowSeqExecutor2".to_owned(),
         None,
         None,
     ));
@@ -336,8 +328,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1024,
-        "RowSeqScanExecutor2".to_string(),
-        None,
+        "RowSeqScanExecutor2".to_owned(),
         None,
         None,
     ));
@@ -364,12 +355,14 @@ async fn test_table_materialize() -> StreamResult<()> {
     let delete = Box::new(DeleteExecutor::new(
         table_id,
         INITIAL_TABLE_VERSION_ID,
+        vec![0],
         dml_manager.clone(),
         delete_inner,
         1024,
-        "DeleteExecutor".to_string(),
+        "DeleteExecutor".to_owned(),
         false,
         0,
+        false,
     ));
 
     curr_epoch.inc_epoch();
@@ -416,8 +409,7 @@ async fn test_table_materialize() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1024,
-        "RowSeqScanExecutor2".to_string(),
-        None,
+        "RowSeqScanExecutor2".to_owned(),
         None,
         None,
     ));
@@ -461,7 +453,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         None,
     )
     .await;
-    let table = StorageTable::for_test(
+    let table = BatchTable::for_test(
         memory_state_store.clone(),
         TableId::from(0x42),
         column_descs.clone(),
@@ -471,7 +463,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
     );
 
     let mut epoch = EpochPair::new_test_epoch(test_epoch(1));
-    state.init_epoch(epoch);
+    state.init_epoch(epoch).await?;
     state.insert(OwnedRow::new(vec![
         Some(1_i32.into()),
         Some(4_i32.into()),
@@ -484,7 +476,10 @@ async fn test_row_seq_scan() -> StreamResult<()> {
     ]));
 
     epoch.inc_for_test();
-    state.commit(epoch).await.unwrap();
+    state
+        .commit_assert_no_update_vnode_bitmap(epoch)
+        .await
+        .unwrap();
 
     let executor = Box::new(RowSeqScanExecutor::new(
         table,
@@ -492,8 +487,7 @@ async fn test_row_seq_scan() -> StreamResult<()> {
         true,
         test_batch_query_epoch(),
         1,
-        "RowSeqScanExecutor2".to_string(),
-        None,
+        "RowSeqScanExecutor2".to_owned(),
         None,
         None,
     ));

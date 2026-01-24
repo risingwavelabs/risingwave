@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
-use itertools::Itertools;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamPlanRef as PlanRef, StreamPlanRef,
+    TryToStreamPb,
+};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{MonotonicityMap, RequiredDist};
+use crate::optimizer::property::{MonotonicityMap, RequiredDist, WatermarkColumns};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Streaming stateless simple agg.
@@ -38,28 +40,31 @@ pub struct StreamStatelessSimpleAgg {
 }
 
 impl StreamStatelessSimpleAgg {
-    pub fn new(core: generic::Agg<PlanRef>) -> Self {
+    pub fn new(core: generic::Agg<StreamPlanRef>) -> Result<Self> {
         let input = core.input.clone();
+        reject_upsert_input!(input);
         let input_dist = input.distribution();
         debug_assert!(input_dist.satisfies(&RequiredDist::AnyShard));
 
-        let mut watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        let mut watermark_columns = WatermarkColumns::new();
         // Watermark column(s) must be in group key.
         for (idx, input_idx) in core.group_key.indices().enumerate() {
-            if input.watermark_columns().contains(input_idx) {
-                watermark_columns.insert(idx);
+            if let Some(wtmk_group) = input.watermark_columns().get_group(input_idx) {
+                watermark_columns.insert(idx, wtmk_group);
             }
         }
 
         let base = PlanBase::new_stream_with_core(
             &core,
             input_dist.clone(),
-            input.append_only(),
+            // Stateless simple agg outputs one `Insert` row per epoch to the global phase.
+            StreamKind::AppendOnly,
             input.emit_on_window_close(),
             watermark_columns,
             MonotonicityMap::new(),
         );
-        StreamStatelessSimpleAgg { base, core }
+
+        Ok(StreamStatelessSimpleAgg { base, core })
     }
 
     pub fn agg_calls(&self) -> &[PlanAggCall] {
@@ -68,7 +73,7 @@ impl StreamStatelessSimpleAgg {
 }
 impl_distill_by_unit!(StreamStatelessSimpleAgg, core, "StreamStatelessSimpleAgg");
 
-impl PlanTreeNodeUnary for StreamStatelessSimpleAgg {
+impl PlanTreeNodeUnary<Stream> for StreamStatelessSimpleAgg {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -76,38 +81,37 @@ impl PlanTreeNodeUnary for StreamStatelessSimpleAgg {
     fn clone_with_input(&self, input: PlanRef) -> Self {
         let mut core = self.core.clone();
         core.input = input;
-        Self::new(core)
+        Self::new(core).unwrap()
     }
 }
-impl_plan_tree_node_for_unary! { StreamStatelessSimpleAgg }
+impl_plan_tree_node_for_unary! { Stream, StreamStatelessSimpleAgg }
 
-impl StreamNode for StreamStatelessSimpleAgg {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+impl TryToStreamPb for StreamStatelessSimpleAgg {
+    fn try_to_stream_prost_body(
+        &self,
+        _state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbNodeBody> {
         use risingwave_pb::stream_plan::*;
-        PbNodeBody::StatelessSimpleAgg(SimpleAggNode {
-            agg_calls: self
-                .agg_calls()
-                .iter()
-                .map(PlanAggCall::to_protobuf)
-                .collect(),
+        let append_only = self.input().append_only();
+        let agg_calls = self
+            .agg_calls()
+            .iter()
+            .map(|call| call.to_protobuf_checked_pure(self.input().stream_kind().is_retract()))
+            .collect::<crate::error::Result<Vec<_>>>()?;
+        Ok(PbNodeBody::StatelessSimpleAgg(Box::new(SimpleAggNode {
+            agg_calls,
             row_count_index: u32::MAX, // this is not used
-            distribution_key: self
-                .distribution()
-                .dist_column_indices()
-                .iter()
-                .map(|idx| *idx as u32)
-                .collect_vec(),
             agg_call_states: vec![],
             intermediate_state_table: None,
-            is_append_only: self.input().append_only(),
+            is_append_only: append_only,
             distinct_dedup_tables: Default::default(),
             version: AggNodeVersion::Issue13465 as _,
             must_output_per_barrier: false, // this is not used
-        })
+        })))
     }
 }
 
-impl ExprRewritable for StreamStatelessSimpleAgg {
+impl ExprRewritable<Stream> for StreamStatelessSimpleAgg {
     fn has_rewritable_expr(&self) -> bool {
         true
     }
@@ -115,7 +119,7 @@ impl ExprRewritable for StreamStatelessSimpleAgg {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new(core).into()
+        Self::new(core).unwrap().into()
     }
 }
 

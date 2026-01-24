@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use anyhow::Result;
-use rand::distributions::{Alphanumeric, DistString};
+use rand::distr::{Alphanumeric, SampleString};
 use rand::rngs::SmallRng;
-use rand::{thread_rng, RngCore, SeedableRng};
+use rand::{RngCore, SeedableRng, rng as thread_rng};
 use risingwave_simulation::cluster::{Cluster, Configuration};
 use risingwave_simulation::utils::AssertResult;
 

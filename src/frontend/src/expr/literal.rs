@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::types::{literal_type_match, DataType, Datum, ToText};
+use risingwave_common::types::{DataType, Datum, ToText, literal_type_match};
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
 use risingwave_pb::expr::expr_node::RexNode;
 
@@ -55,7 +55,8 @@ impl std::fmt::Debug for Literal {
                     | DataType::Jsonb
                     | DataType::Int256
                     | DataType::Struct(_)
-                    | DataType::Map(_) => write!(
+                    | DataType::Map(_)
+                    | DataType::Vector(_) => write!(
                         f,
                         "'{}'",
                         v.as_scalar_ref_impl().to_text_with_type(&data_type)
@@ -93,6 +94,10 @@ impl Literal {
         &self.data
     }
 
+    pub fn get_data_type(&self) -> &Option<DataType> {
+        &self.data_type
+    }
+
     pub fn is_untyped(&self) -> bool {
         self.data_type.is_none()
     }
@@ -113,13 +118,14 @@ impl Expr for Literal {
         self.data_type.clone().unwrap_or(DataType::Varchar)
     }
 
-    fn to_expr_proto(&self) -> risingwave_pb::expr::ExprNode {
+    fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
         use risingwave_pb::expr::*;
-        ExprNode {
+
+        Ok(ExprNode {
             function_type: ExprType::Unspecified as i32,
             return_type: Some(self.return_type().to_protobuf()),
             rex_node: Some(literal_to_value_encoding(self.get_data())),
-        }
+        })
     }
 }
 
@@ -148,7 +154,7 @@ fn value_encoding_to_literal(
 #[cfg(test)]
 mod tests {
     use risingwave_common::array::{ListValue, StructValue};
-    use risingwave_common::types::{DataType, Datum, ScalarImpl};
+    use risingwave_common::types::{DataType, Datum, ScalarImpl, StructType};
     use risingwave_common::util::value_encoding::DatumFromProtoExt;
     use risingwave_pb::expr::expr_node::RexNode;
 
@@ -166,10 +172,8 @@ mod tests {
         if let RexNode::Constant(prost) = node {
             let data2 = Datum::from_protobuf(
                 &prost,
-                &DataType::new_struct(
-                    vec![DataType::Varchar, DataType::Int32, DataType::Int32],
-                    vec![],
-                ),
+                &StructType::unnamed(vec![DataType::Varchar, DataType::Int32, DataType::Int32])
+                    .into(),
             )
             .unwrap()
             .unwrap();
@@ -183,7 +187,7 @@ mod tests {
         let data = Some(ScalarImpl::List(value.clone()));
         let node = literal_to_value_encoding(&data);
         if let RexNode::Constant(prost) = node {
-            let data2 = Datum::from_protobuf(&prost, &DataType::List(Box::new(DataType::Varchar)))
+            let data2 = Datum::from_protobuf(&prost, &DataType::Varchar.list())
                 .unwrap()
                 .unwrap();
             assert_eq!(ScalarImpl::List(value), data2);

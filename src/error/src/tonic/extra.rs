@@ -14,6 +14,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::code::PostgresErrorCode;
+use crate::error_request_copy;
+
 /// The score of the error.
 ///
 /// Currently, it's used to identify the root cause of streaming pipeline failures, i.e., which actor
@@ -21,13 +24,39 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 pub struct Score(pub i32);
 
+/// A error with a score, used to find the root cause of multiple failures.
+#[derive(Debug, Clone)]
+pub struct ScoredError<E> {
+    pub error: E,
+    pub score: Score,
+}
+
+impl<E: std::fmt::Display> std::fmt::Display for ScoredError<E> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.error.fmt(f)
+    }
+}
+
+impl<E: std::error::Error> std::error::Error for ScoredError<E> {
+    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
+        self.error.source()
+    }
+
+    fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
+        self.error.provide(request);
+        // HIGHLIGHT: Provide the score to make it retrievable from meta service.
+        request.provide_value(self.score);
+    }
+}
+
 /// Extra fields in errors that can be passed through the gRPC boundary.
 ///
 /// - Field being set to `None` means it is not available.
 /// - To add a new field, also update the `provide` method.
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
 pub(super) struct Extra {
-    pub score: Option<Score>,
+    score: Option<Score>,
+    code: Option<PostgresErrorCode>,
 }
 
 impl Extra {
@@ -37,7 +66,8 @@ impl Extra {
         T: ?Sized + std::error::Error,
     {
         Self {
-            score: std::error::request_value(error),
+            score: error_request_copy(error),
+            code: error_request_copy(error),
         }
     }
 
@@ -45,6 +75,9 @@ impl Extra {
     pub fn provide<'a>(&'a self, request: &mut std::error::Request<'a>) {
         if let Some(score) = self.score {
             request.provide_value(score);
+        }
+        if let Some(code) = self.code {
+            request.provide_value(code);
         }
     }
 }

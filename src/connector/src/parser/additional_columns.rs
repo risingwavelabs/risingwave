@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,21 +16,22 @@ use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use risingwave_common::bail;
-use risingwave_common::catalog::{max_column_id, ColumnCatalog, ColumnDesc, ColumnId};
+use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId, max_column_id};
 use risingwave_common::types::{DataType, StructType};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 use risingwave_pb::plan_common::{
     AdditionalCollectionName, AdditionalColumn, AdditionalColumnFilename, AdditionalColumnHeader,
     AdditionalColumnHeaders, AdditionalColumnKey, AdditionalColumnOffset,
-    AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnTimestamp,
-    AdditionalDatabaseName, AdditionalSchemaName, AdditionalTableName,
+    AdditionalColumnPartition, AdditionalColumnPayload, AdditionalColumnPulsarMessageIdData,
+    AdditionalColumnTimestamp, AdditionalDatabaseName, AdditionalSchemaName, AdditionalSubject,
+    AdditionalTableName,
 };
 
 use crate::error::ConnectorResult;
 use crate::source::cdc::MONGODB_CDC_CONNECTOR;
 use crate::source::{
-    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, NATS_CONNECTOR,
-    OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
+    AZBLOB_CONNECTOR, GCS_CONNECTOR, KAFKA_CONNECTOR, KINESIS_CONNECTOR, MQTT_CONNECTOR,
+    NATS_CONNECTOR, OPENDAL_S3_CONNECTOR, POSIX_FS_CONNECTOR, PULSAR_CONNECTOR,
 };
 
 // Hidden additional columns connectors which do not support `include` syntax.
@@ -53,7 +54,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             ),
             (
                 PULSAR_CONNECTOR,
-                HashSet::from(["key", "partition", "offset", "payload"]),
+                HashSet::from(["key", "partition", "offset", "payload", "message_id_data"]),
             ),
             (
                 KINESIS_CONNECTOR,
@@ -61,7 +62,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
             ),
             (
                 NATS_CONNECTOR,
-                HashSet::from(["partition", "offset", "payload"]),
+                HashSet::from(["partition", "offset", "payload", "subject"]),
             ),
             (
                 OPENDAL_S3_CONNECTOR,
@@ -87,6 +88,7 @@ pub static COMPATIBLE_ADDITIONAL_COLUMNS: LazyLock<HashMap<&'static str, HashSet
                     "collection_name",
                 ]),
             ),
+            (MQTT_CONNECTOR, HashSet::from(["offset", "partition"])),
         ])
     });
 
@@ -125,7 +127,7 @@ pub fn gen_default_addition_col_name(
         inner_field_name,
         legacy_dt_name.as_deref(),
     ];
-    col_name.iter().fold("_rw".to_string(), |name, ele| {
+    col_name.iter().fold("_rw".to_owned(), |name, ele| {
         if let Some(ele) = ele {
             format!("{}_{}", name, ele)
         } else {
@@ -161,7 +163,9 @@ pub fn build_additional_column_desc(
     if !compatible_columns.contains(additional_col_type) {
         bail!(
             "additional column type {} is not supported for connector {}, acceptable column types: {:?}",
-            additional_col_type, connector_name, compatible_columns
+            additional_col_type,
+            connector_name,
+            compatible_columns
         );
     }
 
@@ -266,10 +270,56 @@ pub fn build_additional_column_desc(
                 )),
             },
         ),
+        "subject" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Varchar, // Assuming subject is a string
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::Subject(AdditionalSubject {})),
+            },
+        ),
+        "message_id_data" => ColumnDesc::named_with_additional_column(
+            column_name,
+            column_id,
+            DataType::Bytea,
+            AdditionalColumn {
+                column_type: Some(AdditionalColumnType::PulsarMessageIdData(
+                    AdditionalColumnPulsarMessageIdData {},
+                )),
+            },
+        ),
         _ => unreachable!(),
     };
 
     Ok(col_desc)
+}
+
+pub fn derive_pulsar_message_id_data_column(
+    connector_name: &str,
+    column_exist: &mut Vec<bool>,
+    additional_columns: &mut Vec<ColumnDesc>,
+) {
+    // additional columns already check the max_column_id
+    // so we can take the max column id of additional columns as the max column id of all columns
+    let max_column_id = additional_columns
+        .iter()
+        .fold(ColumnId::first_user_column(), |a, b| a.max(b.column_id));
+
+    // assume user does not include `message_id_data` column
+    column_exist.push(false);
+    additional_columns.push(
+        build_additional_column_desc(
+            max_column_id.next(),
+            connector_name,
+            "message_id_data",
+            None,
+            None,
+            None,
+            false,
+            false,
+        )
+        .unwrap(),
+    );
 }
 
 /// Utility function for adding partition and offset columns to the columns, if not specified by the user.
@@ -280,9 +330,20 @@ pub fn build_additional_column_desc(
 pub fn source_add_partition_offset_cols(
     columns: &[ColumnCatalog],
     connector_name: &str,
-) -> ([bool; 2], [ColumnDesc; 2]) {
-    let mut columns_exist = [false; 2];
+    skip_col_id: bool,
+) -> (Vec<bool>, Vec<ColumnDesc>) {
+    let mut columns_exist = vec![false; 2];
+
     let mut last_column_id = max_column_id(columns);
+    let mut assign_col_id = || {
+        if skip_col_id {
+            // col id will be filled outside later. Here just use a placeholder.
+            ColumnId::placeholder()
+        } else {
+            last_column_id = last_column_id.next();
+            last_column_id
+        }
+    };
 
     let additional_columns: Vec<_> = {
         let compat_col_types = COMPATIBLE_ADDITIONAL_COLUMNS
@@ -291,11 +352,10 @@ pub fn source_add_partition_offset_cols(
         ["partition", "file", "offset"]
             .iter()
             .filter_map(|col_type| {
-                last_column_id = last_column_id.next();
                 if compat_col_types.contains(col_type) {
                     Some(
                         build_additional_column_desc(
-                            last_column_id,
+                            assign_col_id(),
                             connector_name,
                             col_type,
                             None,
@@ -344,7 +404,7 @@ pub fn source_add_partition_offset_cols(
         }
     }
 
-    (columns_exist, additional_columns.try_into().unwrap())
+    (columns_exist, additional_columns)
 }
 
 fn build_header_catalog(
@@ -362,7 +422,7 @@ fn build_header_catalog(
             data_type.clone(),
             AdditionalColumn {
                 column_type: Some(AdditionalColumnType::HeaderInner(AdditionalColumnHeader {
-                    inner_field: inner.to_string(),
+                    inner_field: inner.to_owned(),
                     data_type: Some(pb_data_type),
                 })),
             },
@@ -371,7 +431,7 @@ fn build_header_catalog(
         ColumnDesc::named_with_additional_column(
             col_name,
             column_id,
-            DataType::List(get_kafka_header_item_datatype().into()),
+            DataType::list(get_kafka_header_item_datatype()),
             AdditionalColumn {
                 column_type: Some(AdditionalColumnType::Headers(AdditionalColumnHeaders {})),
             },

@@ -1,0 +1,324 @@
+control substitution on
+
+statement ok
+SET streaming_use_shared_source TO true;
+
+system ok
+rpk topic create shared_source -p 4
+
+# Test create source before produing data.
+statement ok
+create source s_before_produce (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'shared_source',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+query T
+select connector, is_shared from rw_sources where name = 's_before_produce';
+----
+KAFKA t
+
+statement ok
+create materialized view mv_before_produce as select * from s_before_produce;
+
+sleep 2s
+
+# All partitions starts with backfill_info: NoDataToBackfill, so it finishes immediately.
+system ok
+internal_table.mjs --name mv_before_produce --type sourcebackfill
+----
+0,"{""num_consumed_rows"": 0, ""state"": ""Finished"", ""target_offset"": null}"
+1,"{""num_consumed_rows"": 0, ""state"": ""Finished"", ""target_offset"": null}"
+2,"{""num_consumed_rows"": 0, ""state"": ""Finished"", ""target_offset"": null}"
+3,"{""num_consumed_rows"": 0, ""state"": ""Finished"", ""target_offset"": null}"
+
+
+system ok
+cat << EOF | rpk topic produce shared_source -f "%p %v\n" -p 0
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+3 {"v1": 4, "v2": "d"}
+3 {"v1": 4, "v2": "d"}
+EOF
+
+statement ok
+create source s0 (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'shared_source',
+  scan.startup.mode = 'earliest'
+) FORMAT PLAIN ENCODE JSON;
+
+query ?
+select count(*) from rw_internal_tables where name like '%s0%';
+----
+1
+
+sleep 1s
+
+statement ok
+flush;
+
+# SourceExecutor's starts from latest.
+system ok
+internal_table.mjs --name s0 --type source
+----
+0,"{""split_info"": {""partition"": 0, ""start_offset"": 0, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+1,"{""split_info"": {""partition"": 1, ""start_offset"": 0, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+2,"{""split_info"": {""partition"": 2, ""start_offset"": 1, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+3,"{""split_info"": {""partition"": 3, ""start_offset"": 2, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+
+
+statement ok
+create materialized view mv_1 as select * from s0;
+
+# Wait enough time to ensure SourceExecutor consumes all Kafka data.
+sleep 2s
+
+
+# SourceBackfill starts from offset 0, with backfill_info: HasDataToBackfill { latest_offset: "0" } (decided by kafka high watermark).
+# (meaning upstream already consumed offset 0, so we only need to backfill to offset 0)
+# After backfilling offset 0, it enters SourceCachingUp state. Now the backfill is finished.
+# We wait for SourceExecutor to produce offset > 0.
+system ok
+internal_table.mjs --name mv_1 --type sourcebackfill
+----
+0,"{""num_consumed_rows"": 1, ""state"": {""SourceCachingUp"": ""0""}, ""target_offset"": ""0""}"
+1,"{""num_consumed_rows"": 1, ""state"": {""SourceCachingUp"": ""0""}, ""target_offset"": ""0""}"
+2,"{""num_consumed_rows"": 2, ""state"": {""SourceCachingUp"": ""1""}, ""target_offset"": ""1""}"
+3,"{""num_consumed_rows"": 3, ""state"": {""SourceCachingUp"": ""2""}, ""target_offset"": ""2""}"
+
+
+# This does not affect the behavior for CREATE MATERIALIZED VIEW below. It also uses the shared source, and creates SourceBackfillExecutor.
+statement ok
+SET streaming_use_shared_source TO false;
+
+statement ok
+create materialized view mv_2 as select * from s0;
+
+statement ok
+SET streaming_use_shared_source TO true;
+
+
+sleep 2s
+
+query ?? rowsort
+select v1, v2 from s0;
+----
+1	a
+2	b
+3	c
+3	c
+4	d
+4	d
+4	d
+
+query ?? rowsort
+select v1, v2 from mv_1;
+----
+1	a
+2	b
+3	c
+3	c
+4	d
+4	d
+4	d
+
+query ?? rowsort
+select v1, v2 from mv_2;
+----
+1	a
+2	b
+3	c
+3	c
+4	d
+4	d
+4	d
+
+system ok
+cat << EOF | rpk topic produce shared_source -f "%p %v\n" -p 0
+0 {"v1": 1, "v2": "aa"}
+1 {"v1": 2, "v2": "bb"}
+2 {"v1": 3, "v2": "cc"}
+3 {"v1": 4, "v2": "dd"}
+EOF
+
+sleep 2s
+
+# SourceExecutor's got new data.
+system ok
+internal_table.mjs --name s0 --type source
+----
+0,"{""split_info"": {""partition"": 0, ""start_offset"": 1, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+1,"{""split_info"": {""partition"": 1, ""start_offset"": 1, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+2,"{""split_info"": {""partition"": 2, ""start_offset"": 2, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+3,"{""split_info"": {""partition"": 3, ""start_offset"": 3, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+
+
+query ?? rowsort
+select v1, v2 from s0;
+----
+1	a
+1	aa
+2	b
+2	bb
+3	c
+3	c
+3	cc
+4	d
+4	d
+4	d
+4	dd
+
+query ?? rowsort
+select v1, v2 from mv_1;
+----
+1	a
+1	aa
+2	b
+2	bb
+3	c
+3	c
+3	cc
+4	d
+4	d
+4	d
+4	dd
+
+
+# Transition from SourceCachingUp to Finished after consuming one upstream message.
+system ok
+internal_table.mjs --name mv_1 --type sourcebackfill
+----
+0,"{""num_consumed_rows"": 1, ""state"": ""Finished"", ""target_offset"": ""0""}"
+1,"{""num_consumed_rows"": 1, ""state"": ""Finished"", ""target_offset"": ""0""}"
+2,"{""num_consumed_rows"": 2, ""state"": ""Finished"", ""target_offset"": ""1""}"
+3,"{""num_consumed_rows"": 3, ""state"": ""Finished"", ""target_offset"": ""2""}"
+
+
+system ok
+for i in {0..9}; do
+sleep 0.1
+cat <<EOF | rpk topic produce shared_source -f "%p %v\n" -p 0
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+EOF
+done
+
+sleep 3s
+
+query ?? rowsort
+select v1, count(*) from s0 group by v1;
+----
+1	12
+2	12
+3	13
+4	14
+
+query ?? rowsort
+select v1, count(*) from mv_1 group by v1;
+----
+1	12
+2	12
+3	13
+4	14
+
+query ?? rowsort
+select v1, count(*) from mv_before_produce group by v1;
+----
+1	12
+2	12
+3	13
+4	14
+
+
+# start_offset changed to 11
+system ok
+internal_table.mjs --name s0 --type source
+----
+0,"{""split_info"": {""partition"": 0, ""start_offset"": 11, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+1,"{""split_info"": {""partition"": 1, ""start_offset"": 11, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+2,"{""split_info"": {""partition"": 2, ""start_offset"": 12, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+3,"{""split_info"": {""partition"": 3, ""start_offset"": 13, ""stop_offset"": null, ""topic"": ""shared_source""}, ""split_type"": ""kafka""}"
+
+
+# Test: rate limit and resume won't lose data
+
+statement ok
+alter source s0 set source_rate_limit to 0;
+
+
+system ok
+cat <<EOF | rpk topic produce shared_source -f "%p %v\n" -p 0
+0 {"v1": 1, "v2": "a"}
+1 {"v1": 2, "v2": "b"}
+2 {"v1": 3, "v2": "c"}
+3 {"v1": 4, "v2": "d"}
+EOF
+
+sleep 2s
+
+# no data goes in
+
+query ?? rowsort
+select v1, count(*) from mv_1 group by v1;
+----
+1	12
+2	12
+3	13
+4	14
+
+statement ok
+alter source s0 set source_rate_limit to default;
+
+sleep 3s
+
+# data comes in
+query ?? rowsort
+select v1, count(*) from mv_1 group by v1;
+----
+1	13
+2	13
+3	14
+4	15
+
+
+statement ok
+drop source s0 cascade;
+
+statement ok
+drop source s_before_produce cascade;
+
+# test: scan.startup.mode=latest should not be blocked when there's no data to backfill
+# https://github.com/risingwavelabs/risingwave/issues/20083#issuecomment-2609422824
+statement ok
+create source s_latest (v1 int, v2 varchar) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'shared_source',
+  scan.startup.mode = 'latest'
+) FORMAT PLAIN ENCODE JSON;
+
+# Note: batch kafka scan ignores scan.startup.mode
+query ? rowsort
+select count(*) from s_latest;
+----
+55
+
+statement ok
+create materialized view mv_latest as select * from s_latest;
+
+query ? rowsort
+select count(*) from mv_latest;
+----
+0
+
+statement ok
+drop source s_latest cascade;
+
+system ok
+rpk topic delete shared_source;

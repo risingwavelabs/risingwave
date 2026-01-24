@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,14 +14,14 @@
 
 use std::sync::Arc;
 
+use opendal::Operator;
 use opendal::layers::LoggingLayer;
 use opendal::services::Gcs;
-use opendal::Operator;
 use risingwave_common::config::ObjectStoreConfig;
 
 use super::{MediaType, OpendalObjectStore};
-use crate::object::object_metrics::ObjectStoreMetrics;
 use crate::object::ObjectResult;
+use crate::object::object_metrics::ObjectStoreMetrics;
 
 impl OpendalObjectStore {
     /// create opendal gcs engine.
@@ -43,6 +43,7 @@ impl OpendalObjectStore {
         let op: Operator = Operator::new(builder)?
             .layer(LoggingLayer::default())
             .finish();
+
         Ok(Self {
             op,
             media_type: MediaType::Gcs,

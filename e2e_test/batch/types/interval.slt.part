@@ -212,3 +212,8 @@ select interval '2147483647 mons 2147483647 days' * 0.999999991;
 
 statement error out of range
 select interval '2147483647 mons 2147483647 days' * 0.999999992;
+
+query T
+select interval '- 1 year -1 months -       1 days 4 hours 5 minutes 6 seconds';
+----
+-1 years -1 mons -1 days +04:05:06

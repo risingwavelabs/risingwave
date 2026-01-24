@@ -16,9 +16,7 @@ RisingWave requires all code to pass fmt, clippy, sort and hakari checks. Run th
 ./risedev c             # Run all checks. Shortcut for ./risedev check
 ```
 
-There are also some miscellaneous checks. See `ci/scripts/misc-check.sh`.
-
-### Unit and integration tests
+## Unit and integration tests
 
 RiseDev runs unit tests with cargo-nextest. To run unit tests:
 
@@ -119,7 +117,9 @@ See also the blog posts for a detailed writeup:
 - [Deterministic Simulation: A New Era of Distributed System Testing (Part 1 of 2)](https://www.risingwave.com/blog/deterministic-simulation-a-new-era-of-distributed-system-testing/)
 - [Applying Deterministic Simulation: The RisingWave Story (Part 2 of 2)](https://www.risingwave.com/blog/applying-deterministic-simulation-the-risingwave-story-part-2-of-2/)
 
-In RisingWave, deterministic simulation is supported in both unit test and end-to-end test. You can run them using the following commands:
+### Unit and e2e tests
+
+You can run normal unit tests and end-to-end tests in deterministic simulation mode.
 
 ```sh
 # run deterministic unit test
@@ -159,13 +159,15 @@ MADSIM_TEST_NUM=100 ./risedev sslt --release -- './e2e_test/path/to/directory/**
 ./risedev sslt -- --help
 ```
 
-Deterministic test is included in CI as well. See [CI script](https://github.com/risingwavelabs/risingwave/blob/fb60113c2e8a7f0676af545c99f073a335c255f3/ci/scripts/deterministic-e2e-test.sh) for details.
+Deterministic test is included in CI as well. See [CI script](https://github.com/risingwavelabs/risingwave/blob/ee97c1d52a0a27cf6684fd082ebc4065407d71e0/ci/scripts/deterministic-e2e-test.sh) for details.
 
-## Deterministic Simulation Integration tests
+### Integration tests
+
+`src/tests/simulation` contains some special integration tests that are designed to be run in deterministic simulation mode. In these tests, we have more fine-grained control over the cluster and the execution environment to test some complex cases that are hard to test in normal environments.
 
 To run these tests:
 ```shell
-./risedev sit-test
+./risedev sit-test <test_name>
 ```
 
 Sometimes in CI you may see a backtrace, followed by an error message with a `MADSIM_TEST_SEED`:
@@ -186,7 +188,7 @@ You may use that to reproduce it in your local environment. For example:
 MADSIM_TEST_SEED=4 ./risedev sit-test test_backfill_with_upstream_and_snapshot_read
 ```
 
-## Backwards Compatibility tests
+## Backwards compatibility tests
 
 This tests backwards compatibility between the earliest minor version
 and latest minor version of Risingwave (e.g. 1.0.0 vs 1.1.0).

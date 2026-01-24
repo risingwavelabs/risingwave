@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,20 +20,18 @@ use std::ops::Deref;
 use futures::{Stream, StreamExt};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
-pub use risingwave_common::hash::table_distribution::*;
 use risingwave_common::hash::VirtualNode;
+pub use risingwave_common::hash::table_distribution::*;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_hummock_sdk::key::TableKey;
 
+use crate::StateStoreIter;
 use crate::error::StorageResult;
 use crate::row_serde::value_serde::ValueRowSerde;
 use crate::store::{ChangeLogValue, StateStoreIterExt, StateStoreReadLogItem};
-use crate::StateStoreIter;
 
-// TODO: GAT-ify this trait or remove this trait
-#[async_trait::async_trait]
 pub trait TableIter: Send {
     async fn next_row(&mut self) -> StorageResult<Option<OwnedRow>>;
 }
@@ -104,25 +102,21 @@ pub fn get_second<T, U, E>(arg: Result<(T, U), E>) -> Result<U, E> {
 }
 
 #[derive(Debug)]
-pub struct KeyedRow<T: AsRef<[u8]>> {
+pub struct KeyedRow<T: AsRef<[u8]>, R = OwnedRow> {
     vnode_prefixed_key: TableKey<T>,
-    row: OwnedRow,
+    row: R,
 }
 
-impl<T: AsRef<[u8]>> KeyedRow<T> {
-    pub fn new(table_key: TableKey<T>, row: OwnedRow) -> Self {
+impl<T: AsRef<[u8]>, R> KeyedRow<T, R> {
+    pub fn new(table_key: TableKey<T>, row: R) -> Self {
         Self {
             vnode_prefixed_key: table_key,
             row,
         }
     }
 
-    pub fn into_owned_row(self) -> OwnedRow {
+    pub fn into_owned_row(self) -> R {
         self.row
-    }
-
-    pub fn into_owned_row_key(self) -> (TableKey<T>, OwnedRow) {
-        (self.vnode_prefixed_key, self.row)
     }
 
     pub fn vnode(&self) -> VirtualNode {
@@ -133,11 +127,11 @@ impl<T: AsRef<[u8]>> KeyedRow<T> {
         self.vnode_prefixed_key.key_part()
     }
 
-    pub fn row(&self) -> &OwnedRow {
+    pub fn row(&self) -> &R {
         &self.row
     }
 
-    pub fn into_parts(self) -> (TableKey<T>, OwnedRow) {
+    pub fn into_parts(self) -> (TableKey<T>, R) {
         (self.vnode_prefixed_key, self.row)
     }
 }
@@ -149,6 +143,8 @@ impl<T: AsRef<[u8]>> Deref for KeyedRow<T> {
         &self.row
     }
 }
+
+pub type KeyedChangeLogRow<T> = KeyedRow<T, ChangeLogRow>;
 
 pub type ChangeLogRow = ChangeLogValue<OwnedRow>;
 

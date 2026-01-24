@@ -12,14 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_meta_model_v2::catalog_version;
-use risingwave_meta_model_v2::catalog_version::VersionCategory;
-use risingwave_meta_model_v2::prelude::CatalogVersion;
+use risingwave_meta_model::catalog_version;
+use risingwave_meta_model::catalog_version::VersionCategory;
+use risingwave_meta_model::prelude::CatalogVersion;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{ActiveModelTrait, DatabaseConnection, EntityTrait, TransactionTrait};
 
-use crate::controller::SqlMetaStore;
 use crate::MetaResult;
+use crate::controller::SqlMetaStore;
 
 pub struct NotificationVersionGenerator {
     current_version: u64,

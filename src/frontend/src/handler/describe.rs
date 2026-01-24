@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,31 +12,42 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::max;
 use std::fmt::Display;
 
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
+use pretty_xmlish::{Pretty, PrettyConfig};
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
-use risingwave_common::types::Fields;
-use risingwave_sqlparser::ast::{display_comma_separated, ObjectName};
+use risingwave_common::types::{DataType, Fields};
+use risingwave_expr::bail;
+use risingwave_pb::meta::FragmentDistribution;
+use risingwave_pb::meta::list_table_fragments_response::TableFragmentInfo;
+use risingwave_pb::meta::table_fragments::fragment;
+use risingwave_pb::stream_plan::StreamNode;
+use risingwave_sqlparser::ast::{DescribeKind, ObjectName, display_comma_separated};
 
+use super::explain::ExplainRow;
 use super::show::ShowColumnRow;
-use super::{fields_to_descriptors, RwPgResponse};
+use super::{RwPgResponse, fields_to_descriptors};
 use crate::binder::{Binder, Relation};
-use crate::catalog::CatalogError;
-use crate::error::Result;
+use crate::catalog::{CatalogError, FragmentId};
+use crate::error::{ErrorCode, Result};
+use crate::handler::show::ShowColumnName;
 use crate::handler::{HandlerArgs, RwPgResponseBuilderExt};
 
 pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let mut binder = Binder::new_for_system(&session);
+
+    Binder::validate_cross_db_reference(&session.database(), &object_name)?;
     let not_found_err =
-        CatalogError::NotFound("table, source, sink or view", object_name.to_string());
+        CatalogError::not_found("table, source, sink or view", object_name.to_string());
 
     // Vec<ColumnCatalog>, Vec<ColumnDesc>, Vec<ColumnDesc>, Vec<Arc<IndexCatalog>>, String, Option<String>
     let (columns, pk_columns, dist_columns, indices, relname, description) =
-        if let Ok(relation) = binder.bind_relation_by_name(object_name.clone(), None, None) {
+        if let Ok(relation) = binder.bind_relation_by_name(&object_name, None, None, false) {
             match relation {
                 Relation::Source(s) => {
                     let pk_column_catalogs = s
@@ -130,9 +141,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
             }
         } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
             let columns = sink.sink_catalog.full_columns().to_vec();
-            let pk_columns = sink
-                .sink_catalog
-                .downstream_pk_indices()
+            let pk_columns = (sink.sink_catalog.downstream_pk.clone().unwrap_or_default())
                 .into_iter()
                 .map(|idx| columns[idx].column_desc.clone())
                 .collect_vec();
@@ -173,7 +182,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
     // Convert primary key to rows
     if !pk_columns.is_empty() {
         rows.push(ShowColumnRow {
-            name: "primary key".into(),
+            name: ShowColumnName::special("primary key"),
             r#type: concat(pk_columns.iter().map(|x| &x.name)),
             is_hidden: None,
             description: None,
@@ -183,7 +192,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
     // Convert distribution keys to rows
     if !dist_columns.is_empty() {
         rows.push(ShowColumnRow {
-            name: "distribution key".into(),
+            name: ShowColumnName::special("distribution key"),
             r#type: concat(dist_columns.iter().map(|x| &x.name)),
             is_hidden: None,
             description: None,
@@ -195,7 +204,7 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
         let index_display = index.display();
 
         ShowColumnRow {
-            name: index.name.clone(),
+            name: ShowColumnName::special(&index.name),
             r#type: if index_display.include_columns.is_empty() {
                 format!(
                     "index({}) distributed by({})",
@@ -217,10 +226,10 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
     }));
 
     rows.push(ShowColumnRow {
-        name: "table description".into(),
+        name: ShowColumnName::special("table description"),
         r#type: relname,
         is_hidden: None,
-        description: description.map(Into::into),
+        description,
     });
 
     // TODO: table name and description as title of response
@@ -230,8 +239,205 @@ pub fn handle_describe(handler_args: HandlerArgs, object_name: ObjectName) -> Re
         .into())
 }
 
-pub fn infer_describe() -> Vec<PgFieldDescriptor> {
-    fields_to_descriptors(ShowColumnRow::fields())
+pub fn infer_describe(kind: &DescribeKind) -> Vec<PgFieldDescriptor> {
+    match kind {
+        DescribeKind::Fragments => vec![PgFieldDescriptor::new(
+            "Fragments".to_owned(),
+            DataType::Varchar.to_oid(),
+            DataType::Varchar.type_len(),
+        )],
+        DescribeKind::Plain => fields_to_descriptors(ShowColumnRow::fields()),
+    }
+}
+
+pub async fn handle_describe_fragments(
+    handler_args: HandlerArgs,
+    object_name: ObjectName,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+    let job_id = {
+        let mut binder = Binder::new_for_system(&session);
+
+        Binder::validate_cross_db_reference(&session.database(), &object_name)?;
+        let not_found_err = CatalogError::not_found("stream job", object_name.to_string());
+
+        if let Ok(relation) = binder.bind_catalog_relation_by_object_name(&object_name, true) {
+            match relation {
+                Relation::Source(s) => {
+                    if s.is_shared() {
+                        s.catalog.id.as_share_source_job_id()
+                    } else {
+                        bail!(ErrorCode::NotSupported(
+                            "non shared source has no fragments to describe".to_owned(),
+                            "Use `DESCRIBE` instead of `DESCRIBE FRAGMENTS`".to_owned(),
+                        ));
+                    }
+                }
+                Relation::BaseTable(t) => t.table_catalog.id.as_job_id(),
+                Relation::SystemTable(_t) => {
+                    bail!(ErrorCode::NotSupported(
+                        "system table has no fragments to describe".to_owned(),
+                        "Use `DESCRIBE` instead of `DESCRIBE FRAGMENTS`".to_owned(),
+                    ));
+                }
+                Relation::Share(_s) => {
+                    bail!(ErrorCode::NotSupported(
+                        "view has no fragments to describe".to_owned(),
+                        "Use `DESCRIBE` instead of `DESCRIBE FRAGMENTS`".to_owned(),
+                    ));
+                }
+                _ => {
+                    // Other relation types (Subquery, Join, etc.) are not directly describable.
+                    return Err(not_found_err.into());
+                }
+            }
+        } else if let Ok(sink) = binder.bind_sink_by_name(object_name.clone()) {
+            sink.sink_catalog.id.as_job_id()
+        } else {
+            return Err(not_found_err.into());
+        }
+    };
+
+    let meta_client = session.env().meta_client();
+    let fragments = &meta_client.list_table_fragments(&[job_id]).await?[&job_id];
+    let res = generate_fragments_string(fragments)?;
+    Ok(res)
+}
+
+/// The implementation largely copied from `crate::utils::stream_graph_formatter::StreamGraphFormatter`.
+/// The input is different, so we need separate implementation.
+fn generate_fragments_string(fragments: &TableFragmentInfo) -> Result<RwPgResponse> {
+    let mut config = PrettyConfig {
+        need_boundaries: false,
+        width: 80,
+        ..Default::default()
+    };
+
+    let mut max_width = 80;
+
+    let mut blocks = vec![];
+    for fragment in fragments.fragments.iter().sorted_by_key(|f| f.id) {
+        let mut res = String::new();
+        let actor_ids = fragment.actors.iter().map(|a| a.id).format(",");
+        res.push_str(&format!("Fragment {} (Actor {})\n", fragment.id, actor_ids));
+        let node = &fragment.actors[0].node;
+        let node = explain_node(node.as_ref().unwrap(), true);
+        let width = config.unicode(&mut res, &node);
+        max_width = max(width, max_width);
+        config.width = max_width;
+        blocks.push(res);
+        blocks.push("".to_owned());
+    }
+
+    let rows = blocks.iter().map(|b| ExplainRow {
+        query_plan: b.into(),
+    });
+    Ok(PgResponse::builder(StatementType::DESCRIBE)
+        .rows(rows)
+        .into())
+}
+
+fn explain_node<'a>(node: &StreamNode, verbose: bool) -> Pretty<'a> {
+    // TODO: we need extra edge information to get which fragment MergeExecutor connects to.
+    let one_line_explain = node.identity.clone();
+
+    let mut fields = Vec::with_capacity(3);
+    if verbose {
+        fields.push((
+            "output",
+            Pretty::Array(
+                node.fields
+                    .iter()
+                    .map(|f| Pretty::display(f.get_name()))
+                    .collect(),
+            ),
+        ));
+        fields.push((
+            "stream key",
+            Pretty::Array(
+                node.stream_key
+                    .iter()
+                    .map(|i| Pretty::display(node.fields[*i as usize].get_name()))
+                    .collect(),
+            ),
+        ));
+    }
+    let children = node
+        .input
+        .iter()
+        .map(|input| explain_node(input, verbose))
+        .collect();
+    Pretty::simple_record(one_line_explain, fields, children)
+}
+
+pub async fn handle_describe_fragment(
+    handler_args: HandlerArgs,
+    fragment_id: FragmentId,
+) -> Result<RwPgResponse> {
+    let session = handler_args.session.clone();
+    let meta_client = session.env().meta_client();
+    let distribution = &meta_client
+        .get_fragment_by_id(fragment_id)
+        .await?
+        .ok_or_else(|| CatalogError::not_found("fragment", fragment_id.to_string()))?;
+    let res: PgResponse<super::PgResponseStream> = generate_enhanced_fragment_string(distribution)?;
+    Ok(res)
+}
+
+fn generate_enhanced_fragment_string(fragment_dist: &FragmentDistribution) -> Result<RwPgResponse> {
+    let mut config = PrettyConfig {
+        need_boundaries: false,
+        width: 80,
+        ..Default::default()
+    };
+
+    let mut res = String::new();
+
+    res.push_str(&format!(
+        "Fragment {} (Table {})\n",
+        fragment_dist.fragment_id, fragment_dist.table_id
+    ));
+    let dist_type = fragment::FragmentDistributionType::try_from(fragment_dist.distribution_type)
+        .unwrap_or(fragment::FragmentDistributionType::Unspecified);
+    res.push_str(&format!("Distribution Type: {}\n", dist_type.as_str_name()));
+    res.push_str(&format!("Parallelism: {}\n", fragment_dist.parallelism));
+    res.push_str(&format!("VNode Count: {}\n", fragment_dist.vnode_count));
+
+    if !fragment_dist.state_table_ids.is_empty() {
+        res.push_str(&format!(
+            "State Tables: [{}]\n",
+            fragment_dist
+                .state_table_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    if !fragment_dist.upstream_fragment_ids.is_empty() {
+        res.push_str(&format!(
+            "Upstream Fragments: [{}]\n",
+            fragment_dist
+                .upstream_fragment_ids
+                .iter()
+                .map(|id| id.to_string())
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+
+    if let Some(node) = &fragment_dist.node {
+        res.push_str("Stream Plan:\n");
+        let node_pretty = explain_node(node, true);
+        config.unicode(&mut res, &node_pretty);
+    }
+
+    let rows = vec![ExplainRow { query_plan: res }];
+
+    Ok(PgResponse::builder(StatementType::DESCRIBE)
+        .rows(rows)
+        .into())
 }
 
 #[cfg(test)]
@@ -267,10 +473,10 @@ mod tests {
                 columns.insert(
                     std::str::from_utf8(row.index(0).as_ref().unwrap())
                         .unwrap()
-                        .to_string(),
+                        .to_owned(),
                     std::str::from_utf8(row.index(1).as_ref().unwrap())
                         .unwrap()
-                        .to_string(),
+                        .to_owned(),
                 );
             }
         }
@@ -282,6 +488,7 @@ mod tests {
             "v4".into() => "integer".into(),
             "primary key".into() => "v3".into(),
             "distribution key".into() => "v3".into(),
+            "_rw_timestamp".into() => "timestamp with time zone".into(),
             "idx1".into() => "index(v1 DESC, v2 ASC, v3 ASC) include(v4) distributed by(v1)".into(),
             "table description".into() => "t".into(),
         };

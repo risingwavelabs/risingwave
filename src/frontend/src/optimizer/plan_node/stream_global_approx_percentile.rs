@@ -11,25 +11,27 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-use fixedbitset::FixedBitSet;
+
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::GlobalApproxPercentileNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
+use super::StreamPlanRef as PlanRef;
 use crate::expr::{ExprRewriter, ExprVisitor, Literal};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, Distill, TableCatalogBuilder};
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
+use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless_record};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanAggCall, PlanBase, PlanTreeNodeUnary, Stream, StreamNode,
 };
-use crate::optimizer::property::{Distribution, FunctionalDependencySet};
+use crate::optimizer::property::{
+    Distribution, FunctionalDependencySet, MonotonicityMap, StreamKind, WatermarkColumns,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamGlobalApproxPercentile {
@@ -43,22 +45,25 @@ pub struct StreamGlobalApproxPercentile {
 
 impl StreamGlobalApproxPercentile {
     pub fn new(input: PlanRef, approx_percentile_agg_call: &PlanAggCall) -> Self {
+        assert!(
+            input.stream_kind().is_append_only(),
+            "the input of GlobalApproxPercentile must be the local phase, which is append-only"
+        );
         let schema = Schema::new(vec![Field::with_name(
             DataType::Float64,
             "approx_percentile",
         )]);
-        let functional_dependency = FunctionalDependencySet::with_key(1, &[]);
-        let watermark_columns = FixedBitSet::with_capacity(1);
+
         let base = PlanBase::new_stream(
             input.ctx(),
             schema,
             Some(vec![]),
-            functional_dependency,
+            FunctionalDependencySet::new(1),
             Distribution::Single,
-            input.append_only(),
+            StreamKind::Retract,
             input.emit_on_window_close(),
-            watermark_columns,
-            input.columns_monotonicity().clone(),
+            WatermarkColumns::new(),
+            MonotonicityMap::new(),
         );
         Self {
             base,
@@ -79,7 +84,7 @@ impl Distill for StreamGlobalApproxPercentile {
     }
 }
 
-impl PlanTreeNodeUnary for StreamGlobalApproxPercentile {
+impl PlanTreeNodeUnary<Stream> for StreamGlobalApproxPercentile {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -94,7 +99,7 @@ impl PlanTreeNodeUnary for StreamGlobalApproxPercentile {
     }
 }
 
-impl_plan_tree_node_for_unary! {StreamGlobalApproxPercentile}
+impl_plan_tree_node_for_unary! { Stream, StreamGlobalApproxPercentile}
 
 impl StreamNode for StreamGlobalApproxPercentile {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
@@ -132,11 +137,11 @@ impl StreamNode for StreamGlobalApproxPercentile {
                     .to_internal_table_prost(),
             ),
         };
-        PbNodeBody::GlobalApproxPercentile(body)
+        PbNodeBody::GlobalApproxPercentile(Box::new(body))
     }
 }
 
-impl ExprRewritable for StreamGlobalApproxPercentile {
+impl ExprRewritable<Stream> for StreamGlobalApproxPercentile {
     fn has_rewritable_expr(&self) -> bool {
         false
     }

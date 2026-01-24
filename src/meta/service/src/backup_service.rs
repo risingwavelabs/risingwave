@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -72,7 +72,7 @@ impl BackupService for BackupServiceImpl {
         _request: Request<GetMetaSnapshotManifestRequest>,
     ) -> Result<Response<GetMetaSnapshotManifestResponse>, Status> {
         Ok(Response::new(GetMetaSnapshotManifestResponse {
-            manifest: Some(self.backup_manager.manifest().deref().into()),
+            manifest: Some(self.backup_manager.manifest().await.deref().into()),
         }))
     }
 }

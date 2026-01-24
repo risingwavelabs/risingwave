@@ -84,7 +84,8 @@ impl Strong {
             | ExprType::QuoteNullable
             | ExprType::IsNotTrue
             | ExprType::IsFalse
-            | ExprType::IsNotFalse => false,
+            | ExprType::IsNotFalse
+            | ExprType::CheckNotNull => false,
             // ANY: This kind of expression is null if and only if at least one of its arguments is null.
             ExprType::Not
             | ExprType::Equal
@@ -107,6 +108,14 @@ impl Strong {
             | ExprType::Ceil
             | ExprType::Floor
             | ExprType::Extract
+            | ExprType::L2Distance
+            | ExprType::CosineDistance
+            | ExprType::L1Distance
+            | ExprType::InnerProduct
+            | ExprType::VecConcat
+            | ExprType::L2Norm
+            | ExprType::L2Normalize
+            | ExprType::Subvector
             | ExprType::Greatest
             | ExprType::Least => self.any_null(func_call),
             // ALL: This kind of expression is null if and only if all of its arguments are null.
@@ -130,6 +139,7 @@ impl Strong {
             | ExprType::SecToTimestamptz
             | ExprType::AtTimeZone
             | ExprType::DateTrunc
+            | ExprType::DateBin
             | ExprType::CharToTimestamptz
             | ExprType::CharToDate
             | ExprType::CastWithTimeZone
@@ -160,6 +170,7 @@ impl Strong {
             | ExprType::CharLength
             | ExprType::Repeat
             | ExprType::ConcatOp
+            | ExprType::ByteaConcatOp
             | ExprType::BoolOut
             | ExprType::OctetLength
             | ExprType::BitLength
@@ -191,6 +202,8 @@ impl Strong {
             | ExprType::Acosd
             | ExprType::Atan
             | ExprType::Atan2
+            | ExprType::Atand
+            | ExprType::Atan2d
             | ExprType::Sind
             | ExprType::Cosd
             | ExprType::Cotd
@@ -221,6 +234,13 @@ impl Strong {
             | ExprType::Sha256
             | ExprType::Sha384
             | ExprType::Sha512
+            | ExprType::GetBit
+            | ExprType::GetByte
+            | ExprType::SetBit
+            | ExprType::SetByte
+            | ExprType::BitCount
+            | ExprType::Hmac
+            | ExprType::SecureCompare
             | ExprType::Left
             | ExprType::Right
             | ExprType::Format
@@ -257,8 +277,10 @@ impl Strong {
             | ExprType::ArrayMax
             | ExprType::ArraySum
             | ExprType::ArraySort
+            | ExprType::ArrayReverse
             | ExprType::ArrayContains
             | ExprType::ArrayContained
+            | ExprType::ArrayFlatten
             | ExprType::HexToInt256
             | ExprType::JsonbAccess
             | ExprType::JsonbAccessStr
@@ -289,6 +311,7 @@ impl Strong {
             | ExprType::JsonbPathQueryArray
             | ExprType::JsonbPathQueryFirst
             | ExprType::JsonbPopulateRecord
+            | ExprType::JsonbToArray
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
             | ExprType::JsonbPopulateMap
@@ -301,11 +324,13 @@ impl Strong {
             | ExprType::MapCat
             | ExprType::MapContains
             | ExprType::MapDelete
+            | ExprType::MapFilter
             | ExprType::MapInsert
             | ExprType::MapLength
             | ExprType::Vnode
             | ExprType::VnodeUser
-            | ExprType::TestPaidTier
+            | ExprType::TestFeature
+            | ExprType::License
             | ExprType::Proctime
             | ExprType::PgSleep
             | ExprType::PgSleepFor
@@ -320,13 +345,23 @@ impl Strong {
             | ExprType::PgGetSerialSequence
             | ExprType::PgIndexColumnHasProperty
             | ExprType::PgIsInRecovery
+            | ExprType::PgTableIsVisible
             | ExprType::RwRecoveryStatus
+            | ExprType::RwClusterId
+            | ExprType::RwFragmentVnodes
+            | ExprType::RwActorVnodes
             | ExprType::IcebergTransform
             | ExprType::HasTablePrivilege
+            | ExprType::HasFunctionPrivilege
             | ExprType::HasAnyColumnPrivilege
             | ExprType::HasSchemaPrivilege
             | ExprType::InetAton
-            | ExprType::InetNtoa => false,
+            | ExprType::InetNtoa
+            | ExprType::CompositeCast
+            | ExprType::RwEpochToTs
+            | ExprType::OpenaiEmbedding
+            | ExprType::HasDatabasePrivilege
+            | ExprType::Random => false,
             ExprType::Unspecified => unreachable!(),
         }
     }
@@ -360,7 +395,7 @@ mod tests {
         assert!(Strong::is_null(&expr, null_columns.clone()));
 
         let expr = Literal(
-            crate::expr::Literal::new(Some("test".to_string().into()), DataType::Varchar).into(),
+            crate::expr::Literal::new(Some("test".to_owned().into()), DataType::Varchar).into(),
         );
         assert!(!Strong::is_null(&expr, null_columns));
     }

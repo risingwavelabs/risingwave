@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use fixedbitset::FixedBitSet;
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail;
 use risingwave_common::catalog::Schema;
@@ -24,14 +23,15 @@ use crate::error::Result;
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::generic::{GenericPlanRef, PhysicalPlanRef};
-use crate::optimizer::plan_node::stream::StreamPlanRef;
-use crate::optimizer::plan_node::utils::{childless_record, Distill};
+use crate::optimizer::plan_node::stream::StreamPlanNodeMetadata;
+use crate::optimizer::plan_node::utils::{Distill, childless_record};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode,
+    ExprRewritable, PlanBase, PlanTreeNodeBinary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
-use crate::optimizer::property::FunctionalDependencySet;
+use crate::optimizer::property::{
+    Distribution, FunctionalDependencySet, MonotonicityMap, StreamKind, WatermarkColumns,
+};
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::PlanRef;
 
 /// `StreamRowMerge` is used for merging two streams with the same stream key and distribution.
 /// It will buffer the outputs from its input streams until we receive a barrier.
@@ -58,8 +58,14 @@ impl StreamRowMerge {
         assert_eq!(lhs_mapping.target_size(), rhs_mapping.target_size());
         assert_eq!(lhs_input.distribution(), rhs_input.distribution());
         assert_eq!(lhs_input.stream_key(), rhs_input.stream_key());
-        let functional_dependency =
-            FunctionalDependencySet::with_key(lhs_mapping.target_size(), &[]);
+        assert_eq!(lhs_input.stream_kind(), rhs_input.stream_kind());
+
+        // Currently, `RowMerge` only supports and is only used for merging singleton inputs, typically
+        // simple agg and approx percentile agg. We check the input's properties here for sanity.
+        assert_eq!(lhs_input.distribution(), &Distribution::Single);
+        assert_eq!(lhs_input.stream_key(), Some(&[][..]));
+        assert_eq!(lhs_input.stream_kind(), StreamKind::Retract);
+
         let mut schema_fields = Vec::with_capacity(lhs_mapping.target_size());
         let o2i_lhs = lhs_mapping
             .inverse()
@@ -81,18 +87,16 @@ impl StreamRowMerge {
         }
         let schema = Schema::new(schema_fields);
         assert!(!schema.is_empty());
-        let watermark_columns = FixedBitSet::with_capacity(schema.fields.len());
-
         let base = PlanBase::new_stream(
             lhs_input.ctx(),
             schema,
-            lhs_input.stream_key().map(|k| k.to_vec()),
-            functional_dependency,
-            lhs_input.distribution().clone(),
-            lhs_input.append_only(),
+            Some(vec![]),
+            FunctionalDependencySet::new(lhs_mapping.target_size()),
+            Distribution::Single,
+            StreamKind::Retract,
             lhs_input.emit_on_window_close(),
-            watermark_columns,
-            lhs_input.columns_monotonicity().clone(),
+            WatermarkColumns::new(),
+            MonotonicityMap::new(),
         );
         Ok(Self {
             base,
@@ -117,7 +121,7 @@ impl Distill for StreamRowMerge {
     }
 }
 
-impl PlanTreeNodeBinary for StreamRowMerge {
+impl PlanTreeNodeBinary<Stream> for StreamRowMerge {
     fn left(&self) -> PlanRef {
         self.lhs_input.clone()
     }
@@ -137,18 +141,18 @@ impl PlanTreeNodeBinary for StreamRowMerge {
     }
 }
 
-impl_plan_tree_node_for_binary! { StreamRowMerge }
+impl_plan_tree_node_for_binary! { Stream, StreamRowMerge }
 
 impl StreamNode for StreamRowMerge {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        PbNodeBody::RowMerge(risingwave_pb::stream_plan::RowMergeNode {
+        PbNodeBody::RowMerge(Box::new(risingwave_pb::stream_plan::RowMergeNode {
             lhs_mapping: Some(self.lhs_mapping.to_protobuf()),
             rhs_mapping: Some(self.rhs_mapping.to_protobuf()),
-        })
+        }))
     }
 }
 
-impl ExprRewritable for StreamRowMerge {
+impl ExprRewritable<Stream> for StreamRowMerge {
     fn has_rewritable_expr(&self) -> bool {
         false
     }

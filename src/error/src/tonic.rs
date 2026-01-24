@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -24,6 +24,9 @@ use tonic::metadata::{MetadataMap, MetadataValue};
 
 /// The key of the metadata field that contains the serialized error.
 const ERROR_KEY: &str = "risingwave-error-bin";
+
+/// The key of the metadata field that contains the call name.
+pub const CALL_KEY: &str = "risingwave-grpc-call";
 
 /// The service name that the error is from. Used to provide better error message.
 // TODO: also make it a field of `Extra`?
@@ -128,6 +131,9 @@ where
 pub struct TonicStatusWrapper {
     inner: tonic::Status,
 
+    /// The call name (path) of the gRPC request.
+    call: Option<String>,
+
     /// Optional service name from the client side.
     ///
     /// # Explanation
@@ -148,20 +154,27 @@ impl TonicStatusWrapper {
     /// Create a new [`TonicStatusWrapper`] from the given [`tonic::Status`] and extract
     /// the source chain from its `details` field.
     pub fn new(mut status: tonic::Status) -> Self {
-        if status.source().is_none() {
-            if let Some(value) = status.metadata().get_bin(ERROR_KEY) {
-                if let Some(e) = value.to_bytes().ok().and_then(|serialized| {
-                    bincode::deserialize::<ServerError>(serialized.as_ref()).ok()
-                }) {
-                    status.set_source(Arc::new(e));
-                } else {
-                    tracing::warn!("failed to deserialize error from gRPC metadata");
-                }
+        if status.source().is_none()
+            && let Some(value) = status.metadata().get_bin(ERROR_KEY)
+        {
+            if let Some(e) = value.to_bytes().ok().and_then(|serialized| {
+                bincode::deserialize::<ServerError>(serialized.as_ref()).ok()
+            }) {
+                status.set_source(Arc::new(e));
+            } else {
+                tracing::warn!("failed to deserialize error from gRPC metadata");
             }
         }
 
+        let call = status
+            .metadata()
+            .get(CALL_KEY)
+            .and_then(|value| value.to_str().ok())
+            .map(str::to_owned);
+
         Self {
             inner: status,
+            call,
             client_side_service_name: None,
         }
     }
@@ -195,6 +208,9 @@ impl std::fmt::Display for TonicStatusWrapper {
             .or(self.client_side_service_name.as_ref())
         {
             write!(f, " to {} service", service_name)?;
+        }
+        if let Some(call) = &self.call {
+            write!(f, " (call `{}`)", call)?;
         }
         write!(f, " failed: {}: ", self.inner.code())?;
 

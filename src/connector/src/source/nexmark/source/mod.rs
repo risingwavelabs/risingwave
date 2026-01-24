@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,6 +13,6 @@
 // limitations under the License.
 
 mod combined_event;
-pub use combined_event::{get_event_data_types_with_names, EventType};
+pub use combined_event::{EventType, get_event_data_types_with_names};
 pub mod message;
 pub mod reader;

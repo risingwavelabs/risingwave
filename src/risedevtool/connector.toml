@@ -10,14 +10,18 @@ MAVEN_DOWNLOAD_PATH = "${PREFIX_TMP}/maven.tar.gz"
 private = true
 category = "RiseDev - Components"
 dependencies = ["prepare"]
-condition = { env_set = [ "ENABLE_BUILD_RW_CONNECTOR" ] }
+condition = { env_set = [
+  "ENABLE_BUILD_RW_CONNECTOR",
+], files_not_exist = [
+  "${PREFIX_BIN}/maven",
+] }
 description = "Download Maven"
 script = '''
 #!/usr/bin/env bash
 
 set -euo pipefail
 
-if !(command -v javac &> /dev/null && [[ "$(javac -version 2>&1 | awk '{print $2}')" =~ ^(11|17|19|20|21|22) ]]); then
+if !(command -v javac &> /dev/null && [[ "$(javac -version 2>&1 | awk '{print $2}' | cut -d. -f1)" -ge 11 ]]); then
   echo "JDK 11+ is not installed. Please install JDK 11+ first."
   exit 1
 fi

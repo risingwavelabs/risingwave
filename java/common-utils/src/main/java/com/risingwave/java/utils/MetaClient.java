@@ -1,16 +1,18 @@
-// Copyright 2024 RisingWave Labs
-//
-// Licensed under the Apache License, Version 2.0 (the "License");
-// you may not use this file except in compliance with the License.
-// You may obtain a copy of the License at
-//
-//     http://www.apache.org/licenses/LICENSE-2.0
-//
-// Unless required by applicable law or agreed to in writing, software
-// distributed under the License is distributed on an "AS IS" BASIS,
-// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-// See the License for the specific language governing permissions and
-// limitations under the License.
+/*
+ * Copyright 2023 RisingWave Labs
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
 
 package com.risingwave.java.utils;
 
@@ -18,6 +20,7 @@ import com.risingwave.proto.*;
 import com.risingwave.proto.Catalog.Table;
 import com.risingwave.proto.ClusterServiceGrpc.ClusterServiceBlockingStub;
 import com.risingwave.proto.Common.HostAddress;
+import com.risingwave.proto.Common.WorkerNode.Property;
 import com.risingwave.proto.Common.WorkerType;
 import com.risingwave.proto.DdlServiceGrpc.DdlServiceBlockingStub;
 import com.risingwave.proto.DdlServiceOuterClass.GetTableRequest;
@@ -29,7 +32,6 @@ import com.risingwave.proto.Hummock.PinVersionResponse;
 import com.risingwave.proto.Hummock.UnpinVersionBeforeRequest;
 import com.risingwave.proto.HummockManagerServiceGrpc.HummockManagerServiceBlockingStub;
 import com.risingwave.proto.Meta.AddWorkerNodeRequest;
-import com.risingwave.proto.Meta.AddWorkerNodeRequest.Property;
 import com.risingwave.proto.Meta.AddWorkerNodeResponse;
 import com.risingwave.proto.Meta.HeartbeatRequest;
 import io.grpc.Grpc;
@@ -100,7 +102,6 @@ public class MetaClient implements AutoCloseable {
                                 Property.newBuilder()
                                         .setIsStreaming(false)
                                         .setIsServing(false)
-                                        .setWorkerNodeParallelism(0)
                                         .build())
                         .build();
         AddWorkerNodeResponse resp = clusterStub.addWorkerNode(req);

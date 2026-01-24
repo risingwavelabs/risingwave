@@ -1,0 +1,59 @@
+statement ok
+create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language javascript as $$
+export function to_string(a, b, c, d, e, f, g, h, i, j) {
+    return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString() + h.toString() + i.toString() + JSON.stringify(j);
+}
+$$;
+
+query T
+select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
+----
+false1234.56.78.9abc1,2,3{"key":1}
+
+statement ok
+drop function to_string;
+
+# show data types in javascript
+statement ok
+create function js_typeof(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns jsonb language javascript as $$
+export function js_typeof(a, b, c, d, e, f, g, h, i, j) {
+    return {
+        boolean: typeof a,
+        smallint: typeof b,
+        int: typeof c,
+        bigint: typeof d,
+        real: typeof e,
+        float: typeof f,
+        decimal: typeof g,
+        varchar: typeof h,
+        bytea: typeof i,
+        jsonb: typeof j,
+    };
+}
+$$;
+
+query T
+select js_typeof(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
+----
+{"bigint": "number", "boolean": "boolean", "bytea": "object", "decimal": "bigdecimal", "float": "number", "int": "number", "jsonb": "object", "real": "number", "smallint": "number", "varchar": "string"}
+
+statement ok
+drop function js_typeof;
+
+
+statement ok
+create function echo_batch(s varchar) returns varchar language javascript as $$
+export function echo_batch(vals) {
+    return vals.map(v => v + "!");
+}
+$$ WITH (batch = true);
+
+query T
+select echo_batch(x) from (values ('hello'), (null), ('world')) as t(x);
+----
+hello!
+null!
+world!
+
+statement ok
+drop function echo_batch;

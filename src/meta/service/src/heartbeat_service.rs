@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,6 @@ impl HeartbeatServiceImpl {
 
 #[async_trait::async_trait]
 impl HeartbeatService for HeartbeatServiceImpl {
-    #[cfg_attr(coverage, coverage(off))]
     async fn heartbeat(
         &self,
         request: Request<HeartbeatRequest>,
@@ -40,7 +39,7 @@ impl HeartbeatService for HeartbeatServiceImpl {
         let result = self
             .metadata_manager
             .cluster_controller
-            .heartbeat(req.node_id as _)
+            .heartbeat(req.node_id)
             .await;
 
         match result {

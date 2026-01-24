@@ -12,13 +12,15 @@
  * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
  * See the License for the specific language governing permissions and
  * limitations under the License.
- *
  */
 
+import { Expose, plainToInstance } from "class-transformer"
 import _ from "lodash"
 import sortBy from "lodash/sortBy"
 import {
   Database,
+  Function,
+  Index,
   Schema,
   Sink,
   Source,
@@ -27,7 +29,7 @@ import {
   View,
 } from "../../proto/gen/catalog"
 import {
-  FragmentVertexToRelationMap,
+  FragmentToRelationMap,
   ListObjectDependenciesResponse_ObjectDependencies as ObjectDependencies,
   RelationIdInfos,
   TableFragments,
@@ -53,30 +55,57 @@ export async function getRelationIdInfos(): Promise<RelationIdInfos> {
   return fragmentIds
 }
 
-export async function getFragments(): Promise<TableFragments[]> {
-  let fragmentList: TableFragments[] = (await api.get("/fragments2")).map(
-    TableFragments.fromJSON
-  )
-  fragmentList = sortBy(fragmentList, (x) => x.tableId)
-  return fragmentList
-}
-
 export interface Relation {
   id: number
   name: string
   owner: number
   schemaId: number
   databaseId: number
+  streamingJob?: StreamingJob
 
   // For display
   columns?: (ColumnCatalog | Field)[]
   ownerName?: string
   schemaName?: string
   databaseName?: string
+  totalSizeBytes?: number
 }
 
-export interface StreamingJob extends Relation {
-  dependentRelations: number[]
+export class StreamingJob {
+  @Expose({ name: "jobId" })
+  id!: number
+  @Expose({ name: "objType" })
+  _objType!: string
+  name!: string
+  jobStatus!: string
+  @Expose({ name: "parallelism" })
+  _parallelism!: any
+  maxParallelism!: number
+  configOverride!: string
+
+  get parallelism() {
+    const parallelism = this._parallelism
+    if (typeof parallelism === "string") {
+      // `Adaptive`
+      return parallelism
+    } else if (typeof parallelism === "object") {
+      // `Fixed (64)`
+      let key = Object.keys(parallelism)[0]
+      let value = parallelism[key]
+      return `${key} (${value})`
+    } else {
+      // fallback
+      return JSON.stringify(parallelism)
+    }
+  }
+
+  get type() {
+    if (this._objType == "Table") {
+      return "Table / MV"
+    } else {
+      return this._objType
+    }
+  }
 }
 
 export function relationType(x: Relation) {
@@ -88,6 +117,8 @@ export function relationType(x: Relation) {
     return "SOURCE"
   } else if ((x as Subscription).dependentTableId !== undefined) {
     return "SUBSCRIPTION"
+  } else if ((x as Function).language !== undefined) {
+    return "FUNCTION"
   } else {
     return "UNKNOWN"
   }
@@ -98,17 +129,15 @@ export function relationTypeTitleCase(x: Relation) {
   return _.startCase(_.toLower(relationType(x)))
 }
 
-export function relationIsStreamingJob(x: Relation): x is StreamingJob {
+export function relationIsStreamingJob(x: Relation) {
   const type = relationType(x)
   return type !== "UNKNOWN" && type !== "SOURCE" && type !== "INTERNAL"
 }
 
 export async function getStreamingJobs() {
-  let jobs = _.concat<StreamingJob>(
-    await getMaterializedViews(),
-    await getTables(),
-    await getIndexes(),
-    await getSinks()
+  let jobs = plainToInstance(
+    StreamingJob,
+    (await api.get("/streaming_jobs")) as any[]
   )
   jobs = sortBy(jobs, (x) => x.id)
   return jobs
@@ -131,17 +160,30 @@ export async function getRelationDependencies() {
   return await getObjectDependencies()
 }
 
-export async function getFragmentVertexToRelationMap() {
-  let res = await api.get("/fragment_vertex_to_relation_id_map")
-  let fragmentVertexToRelationMap: FragmentVertexToRelationMap =
-    FragmentVertexToRelationMap.fromJSON(res)
+export async function getFragmentToRelationMap() {
+  let res = await api.get("/fragment_to_relation_map")
+  let fragmentVertexToRelationMap: FragmentToRelationMap =
+    FragmentToRelationMap.fromJSON(res)
   return fragmentVertexToRelationMap
+}
+
+interface ExtendedTable extends Table {
+  totalSizeBytes?: number
+}
+
+// Extended conversion function for Table with extra fields
+function extendedTableFromJSON(json: any): ExtendedTable {
+  const table = Table.fromJSON(json)
+  return {
+    ...table,
+    totalSizeBytes: json.total_size_bytes,
+  }
 }
 
 async function getTableCatalogsInner(
   path: "tables" | "materialized_views" | "indexes" | "internal_tables"
-) {
-  let list: Table[] = (await api.get(`/${path}`)).map(Table.fromJSON)
+): Promise<ExtendedTable[]> {
+  let list = (await api.get(`/${path}`)).map(extendedTableFromJSON)
   list = sortBy(list, (x) => x.id)
   return list
 }
@@ -154,8 +196,19 @@ export async function getTables() {
   return await getTableCatalogsInner("tables")
 }
 
-export async function getIndexes() {
-  return await getTableCatalogsInner("indexes")
+export async function getIndexes(): Promise<(Table & Index)[]> {
+  let index_tables = await getTableCatalogsInner("indexes")
+  let index_items: Index[] = (await api.get("/index_items")).map(Index.fromJSON)
+
+  // Join them by id.
+  return index_tables.flatMap((x) => {
+    let index = index_items.find((y) => y.id === x.id)
+    if (index === undefined) {
+      return []
+    } else {
+      return [{ ...x, ...index }]
+    }
+  })
 }
 
 export async function getInternalTables() {
@@ -178,6 +231,14 @@ export async function getViews() {
   let views: View[] = (await api.get("/views")).map(View.fromJSON)
   views = sortBy(views, (x) => x.id)
   return views
+}
+
+export async function getFunctions() {
+  let functions: Function[] = (await api.get("/functions")).map(
+    Function.fromJSON
+  )
+  functions = sortBy(functions, (x) => x.id)
+  return functions
 }
 
 export async function getSubscriptions() {

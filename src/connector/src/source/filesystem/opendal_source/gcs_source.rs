@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,9 +15,9 @@
 use std::marker::PhantomData;
 
 use anyhow::Context;
+use opendal::Operator;
 use opendal::layers::{LoggingLayer, RetryLayer};
 use opendal::services::Gcs;
-use opendal::Operator;
 
 use super::opendal_enumerator::OpendalEnumerator;
 use super::{GcsProperties, OpendalSource};

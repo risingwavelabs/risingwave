@@ -4,24 +4,31 @@ set -euo pipefail
 
 # Register a schema to schema registry
 #
-# Usage: sr_register <subject> <schema>
+# Usage: sr_register <subject> <encoding>
+# Schema content is read from stdin. Use redirection or heredoc.
 #
 # https://docs.confluent.io/platform/current/schema-registry/develop/api.html#post--subjects-(string-%20subject)-versions
 
 # Validate arguments
 if [[ $# -ne 2 ]]; then
-    echo "Usage: sr_register <subject> <schema>"
+    echo "Usage: sr_register <subject> <encoding>"
+    echo "Schema content is read from stdin. Use redirection or heredoc."
+    echo "<encoding> is one of AVRO, PROTOBUF or JSON."
     exit 1
 fi
 
 subject="$1"
-schema="$2"
+encoding="$2"
 
 
-if [[ -z $subject || -z $schema ]]; then
+if [[ -z $subject || -z $encoding ]]; then
     echo "Error: Arguments cannot be empty"
     exit 1
 fi
 
-echo "$schema" | jq '{"schema": tojson}' \
-| curl -X POST -H 'content-type:application/vnd.schemaregistry.v1+json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL}/subjects/${subject}/versions"
+jq -Rs "{\"schema\": ., \"schemaType\": \"$encoding\"}" \
+| curl -X POST -H 'content-type:application/vnd.schemaregistry.v1+json' -d @- "${RISEDEV_SCHEMA_REGISTRY_URL:-http://schemaregistry:8082}/subjects/${subject}/versions"
+
+# Wait for the subject to be registered.
+# Otherwise we may encounter "Subject ... not found".
+sleep 1

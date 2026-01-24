@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,14 +15,14 @@
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_pb::plan_common::JoinType;
 
-use super::{BoxedRule, Rule};
+use super::prelude::{PlanRef, *};
 use crate::optimizer::plan_node::{LogicalHopWindow, LogicalJoin};
 use crate::utils::IndexRewriter;
 
 pub struct PullUpHopRule {}
 
-impl Rule for PullUpHopRule {
-    fn apply(&self, plan: crate::PlanRef) -> Option<crate::PlanRef> {
+impl Rule<Logical> for PullUpHopRule {
+    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let join = plan.as_logical_join()?;
 
         let (left, right, on, join_type, mut output_index) = join.clone().decompose();
@@ -54,9 +54,8 @@ impl Rule for PullUpHopRule {
         let (new_left, left_time_col, left_window_slide, left_window_size, left_window_offset) =
             if let Some(hop) = left.as_logical_hop_window()
                 && left_input_index_on_condition.iter().all(|&index| {
-                    hop.output_window_start_col_idx()
-                        .map_or(true, |v| index != v)
-                        && hop.output_window_end_col_idx().map_or(true, |v| index != v)
+                    (hop.output_window_start_col_idx() != Some(index))
+                        && (hop.output_window_end_col_idx() != Some(index))
                 })
                 && join_type != JoinType::RightAnti
                 && join_type != JoinType::RightSemi
@@ -91,9 +90,8 @@ impl Rule for PullUpHopRule {
         let (new_right, right_time_col, right_window_slide, right_window_size, right_window_offset) =
             if let Some(hop) = right.as_logical_hop_window()
                 && right_input_index_on_condition.iter().all(|&index| {
-                    hop.output_window_start_col_idx()
-                        .map_or(true, |v| index != v)
-                        && hop.output_window_end_col_idx().map_or(true, |v| index != v)
+                    hop.output_window_start_col_idx() != Some(index)
+                        && hop.output_window_end_col_idx() != Some(index)
                 })
                 && join_type != JoinType::LeftAnti
                 && join_type != JoinType::LeftSemi

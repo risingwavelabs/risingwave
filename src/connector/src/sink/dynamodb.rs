@@ -14,20 +14,20 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use aws_sdk_dynamodb as dynamodb;
 use aws_sdk_dynamodb::client::Client;
 use aws_smithy_types::Blob;
 use dynamodb::types::{AttributeValue, TableStatus, WriteRequest};
-use futures::prelude::future::TryFutureExt;
 use futures::prelude::TryFuture;
+use futures::prelude::future::TryFutureExt;
 use risingwave_common::array::{Op, RowRef, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row as _;
 use risingwave_common::types::{DataType, ScalarRefImpl, ToText};
 use risingwave_common::util::iter_util::ZipEqDebug;
-use serde_derive::Deserialize;
-use serde_with::{serde_as, DisplayFromStr};
+use serde::Deserialize;
+use serde_with::{DisplayFromStr, serde_as};
 use with_options::WithOptions;
 use write_chunk_future::{DynamoDbPayloadWriter, WriteChunkFuture};
 
@@ -35,8 +35,9 @@ use super::log_store::DeliveryFutureManagerAddFuture;
 use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt,
 };
-use super::{DummySinkCommitCoordinator, Result, Sink, SinkError, SinkParam, SinkWriterParam};
+use super::{Result, Sink, SinkError, SinkParam, SinkWriterParam};
 use crate::connector_common::AwsAuthProps;
+use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 
 pub const DYNAMO_DB_SINK: &str = "dynamodb";
@@ -68,6 +69,12 @@ pub struct DynamoDbConfig {
     )]
     #[serde_as(as = "DisplayFromStr")]
     pub max_future_send_nums: usize,
+}
+
+impl EnforceSecret for DynamoDbConfig {
+    fn enforce_one(prop: &str) -> crate::error::ConnectorResult<()> {
+        AwsAuthProps::enforce_one(prop)
+    }
 }
 
 fn default_max_batch_item_nums() -> usize {
@@ -103,8 +110,18 @@ pub struct DynamoDbSink {
     pk_indices: Vec<usize>,
 }
 
+impl EnforceSecret for DynamoDbSink {
+    fn enforce_secret<'a>(
+        prop_iter: impl Iterator<Item = &'a str>,
+    ) -> crate::error::ConnectorResult<()> {
+        for prop in prop_iter {
+            DynamoDbConfig::enforce_one(prop)?;
+        }
+        Ok(())
+    }
+}
+
 impl Sink for DynamoDbSink {
-    type Coordinator = DummySinkCommitCoordinator;
     type LogSinker = AsyncTruncateLogSinkerOf<DynamoDbSinkWriter>;
 
     const SINK_NAME: &'static str = DYNAMO_DB_SINK;
@@ -173,12 +190,13 @@ impl TryFrom<SinkParam> for DynamoDbSink {
 
     fn try_from(param: SinkParam) -> std::result::Result<Self, Self::Error> {
         let schema = param.schema();
+        let pk_indices = param.downstream_pk_or_empty();
         let config = DynamoDbConfig::from_btreemap(param.properties)?;
 
         Ok(Self {
             config,
             schema,
-            pk_indices: param.downstream_pk,
+            pk_indices,
         })
     }
 }
@@ -271,6 +289,7 @@ pub type DynamoDbSinkDeliveryFuture = impl TryFuture<Ok = (), Error = SinkError>
 impl AsyncTruncateSinkWriter for DynamoDbSinkWriter {
     type DeliveryFuture = DynamoDbSinkDeliveryFuture;
 
+    #[define_opaque(DynamoDbSinkDeliveryFuture)]
     async fn write_chunk<'a>(
         &'a mut self,
         chunk: StreamChunk,
@@ -322,11 +341,11 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
         | DataType::Jsonb => AttributeValue::S(scalar_ref.to_text_with_type(data_type)),
         DataType::Boolean => AttributeValue::Bool(scalar_ref.into_bool()),
         DataType::Bytea => AttributeValue::B(Blob::new(scalar_ref.into_bytea())),
-        DataType::List(datatype) => {
+        DataType::List(lt) => {
             let list_attr = scalar_ref
                 .into_list()
                 .iter()
-                .map(|x| map_data(x, datatype))
+                .map(|x| map_data(x, lt.elem()))
                 .collect::<Result<Vec<_>>>()?;
             AttributeValue::L(list_attr)
         }
@@ -338,12 +357,15 @@ fn map_data(scalar_ref: Option<ScalarRefImpl<'_>>, data_type: &DataType) -> Resu
                 .zip_eq_debug(st.iter())
             {
                 let attr = map_data(sub_datum_ref, data_type)?;
-                map.insert(name.to_string(), attr);
+                map.insert(name.to_owned(), attr);
             }
             AttributeValue::M(map)
         }
         DataType::Map(_m) => {
             return Err(SinkError::DynamoDb(anyhow!("map is not supported yet")));
+        }
+        DataType::Vector(_) => {
+            return Err(SinkError::DynamoDb(anyhow!("vector is not supported yet")));
         }
     };
     Ok(attr)
@@ -364,8 +386,8 @@ mod write_chunk_future {
         ReturnItemCollectionMetrics, WriteRequest,
     };
     use futures::future::{Map, TryJoinAll};
-    use futures::prelude::future::{try_join_all, FutureExt};
     use futures::prelude::Future;
+    use futures::prelude::future::{FutureExt, try_join_all};
     use itertools::Itertools;
     use maplit::hashmap;
 
@@ -437,6 +459,7 @@ mod write_chunk_future {
             request_items.push(r_req);
         }
 
+        #[define_opaque(WriteChunkFuture)]
         pub fn write_chunk(&mut self, request_items: Vec<DynamoDbRequest>) -> WriteChunkFuture {
             let table = self.table.clone();
             let chunks = request_items

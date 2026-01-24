@@ -93,7 +93,7 @@
       │   └─LogicalProject { exprs: [window_start, auction] }
       │     └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
       │       └─LogicalFilter { predicate: IsNotNull(date_time) }
-      │         └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+      │         └─LogicalSource { source: bid, is_shared: false, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
       └─LogicalProject { exprs: [max(count), window_start] }
         └─LogicalAgg { group_key: [window_start], aggs: [max(count)] }
           └─LogicalProject { exprs: [window_start, count] }
@@ -102,7 +102,7 @@
                 └─LogicalProject { exprs: [auction, window_start] }
                   └─LogicalHopWindow { time_col: date_time, slide: 00:00:02, size: 00:00:10, output: all }
                     └─LogicalFilter { predicate: IsNotNull(date_time) }
-                      └─LogicalSource { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
+                      └─LogicalSource { source: bid, is_shared: false, columns: [auction, bidder, price, channel, url, date_time, extra, _row_id] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchHashJoin { type: Inner, predicate: window_start = window_start AND (count >= max(count)), output: [auction, count] }
@@ -157,7 +157,7 @@
       │ └─StreamProject { exprs: [sum0(count), 0:Int32] }
       │   └─StreamShare { id: 5 }
       │     └─StreamProject { exprs: [sum0(count)] }
-      │       └─StreamSimpleAgg { aggs: [sum0(count), count] }
+      │       └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
       │         └─StreamExchange { dist: Single }
       │           └─StreamStatelessSimpleAgg { aggs: [count] }
       │             └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -165,7 +165,7 @@
         └─StreamProject { exprs: [sum0(count), 1:Int32] }
           └─StreamShare { id: 5 }
             └─StreamProject { exprs: [sum0(count)] }
-              └─StreamSimpleAgg { aggs: [sum0(count), count] }
+              └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
                 └─StreamExchange { dist: Single }
                   └─StreamStatelessSimpleAgg { aggs: [count] }
                     └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -178,13 +178,13 @@
     └─StreamUnion { all: true }
       ├─StreamExchange { dist: HashShard(0:Int32) }
       │ └─StreamProject { exprs: [sum0(count), 0:Int32] }
-      │   └─StreamSimpleAgg { aggs: [sum0(count), count] }
+      │   └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
       │     └─StreamExchange { dist: Single }
       │       └─StreamStatelessSimpleAgg { aggs: [count] }
       │         └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
       └─StreamExchange { dist: HashShard(1:Int32) }
         └─StreamProject { exprs: [sum0(count), 1:Int32] }
-          └─StreamSimpleAgg { aggs: [sum0(count), count] }
+          └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
             └─StreamExchange { dist: Single }
               └─StreamStatelessSimpleAgg { aggs: [count] }
                 └─StreamTableScan { table: t, columns: [t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -218,7 +218,7 @@
   stream_plan: |-
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
     └─StreamProject { exprs: [sum0(count)] }
-      └─StreamSimpleAgg { aggs: [sum0(count), count] }
+      └─StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
         └─StreamExchange { dist: Single }
           └─StreamStatelessSimpleAgg { aggs: [count] }
             └─StreamHashJoin { type: Inner, predicate: t.a = t.a, output: all }
@@ -235,9 +235,9 @@
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [count], stream_key: [], pk_columns: [], pk_conflict: NoCheck }
-    ├── tables: [ Materialize: 4294967294 ]
     └── StreamProject { exprs: [sum0(count)] }
-        └── StreamSimpleAgg { aggs: [sum0(count), count] } { tables: [ SimpleAggState: 0 ] }
+        └── StreamSimpleAgg [append_only] { aggs: [sum0(count), count] }
+            ├── tables: [ SimpleAggState: 0 ]
             └── StreamExchange Single from 1
 
     Fragment 1
@@ -266,27 +266,27 @@
     StreamNoOp
     └── StreamExchange NoShuffle from 2
 
-    Table 0 { columns: [ sum0(count), count ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 0 { columns: [ sum0(count), count, _rw_timestamp ], primary key: [], value indices: [ 0, 1 ], distribution key: [], read pk prefix len hint: 0 }
 
-    Table 1 { columns: [ t_a ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 1 { columns: [ t_a, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 2 { columns: [ t_a, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 2 { columns: [ t_a, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 3 { columns: [ t_a ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 3 { columns: [ t_a, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 0 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 4 { columns: [ t_a, _degree ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 4 { columns: [ t_a, _degree, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
-    Table 5 { columns: [ t_a, count ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
+    Table 5 { columns: [ t_a, count, _rw_timestamp ], primary key: [ $0 ASC ], value indices: [ 1 ], distribution key: [ 0 ], read pk prefix len hint: 1 }
 
     Table 6
-    ├── columns: [ vnode, _row_id, backfill_finished, row_count ]
+    ├── columns: [ vnode, _row_id, backfill_finished, row_count, _rw_timestamp ]
     ├── primary key: [ $0 ASC ]
     ├── value indices: [ 1, 2, 3 ]
     ├── distribution key: [ 0 ]
     ├── read pk prefix len hint: 1
     └── vnode column idx: 0
 
-    Table 4294967294 { columns: [ count ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
+    Table 4294967294 { columns: [ count, _rw_timestamp ], primary key: [], value indices: [ 0 ], distribution key: [], read pk prefix len hint: 0 }
 
 - id: self_join_with_temporal_filter_one_side
   before:
@@ -310,7 +310,7 @@
       └─StreamHashJoin { type: Inner, predicate: id = id, output: [id, id, date_time, date_time, _row_id, _row_id] }
         ├─StreamExchange { dist: HashShard(id) }
         │ └─StreamProject { exprs: [id, date_time, _row_id] }
-        │   └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [$expr1], output: [id, date_time, $expr1, _row_id], cleaned_by_watermark: true }
+        │   └─StreamDynamicFilter { predicate: ($expr1 > $expr2), output_watermarks: [[$expr1]], output: [id, date_time, $expr1, _row_id], cleaned_by_watermark: true }
         │     ├─StreamProject { exprs: [id, date_time, AtTimeZone(date_time, 'UTC':Varchar) as $expr1, _row_id] }
         │     │ └─StreamFilter { predicate: (initial_bid = 1:Int32) }
         │     │   └─StreamShare { id: 4 }
@@ -319,7 +319,7 @@
         │     │         └─StreamRowIdGen { row_id_index: 10 }
         │     │           └─StreamSource { source: auction, columns: [id, item_name, description, initial_bid, reserve, date_time, expires, seller, category, extra, _row_id] }
         │     └─StreamExchange { dist: Broadcast }
-        │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:01':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [$expr2] }
+        │       └─StreamProject { exprs: [SubtractWithTimeZone(now, '00:00:01':Interval, 'UTC':Varchar) as $expr2], output_watermarks: [[$expr2]], noop_update_hint: true }
         │         └─StreamNow { output: [now] }
         └─StreamExchange { dist: HashShard(id) }
           └─StreamFilter { predicate: (initial_bid = 2:Int32) }

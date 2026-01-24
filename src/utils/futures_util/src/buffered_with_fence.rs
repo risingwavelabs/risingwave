@@ -16,11 +16,11 @@ use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 
+use futures::TryFutureExt;
 use futures::future::{FusedFuture, IntoFuture, TryFuture};
 use futures::stream::{
     Fuse, FuturesOrdered, IntoStream, Stream, StreamExt, TryStream, TryStreamExt,
 };
-use futures::TryFutureExt;
 use pin_project_lite::pin_project;
 
 pub trait MaybeFence {
@@ -80,7 +80,8 @@ where
             match this.stream.as_mut().poll_next(cx)? {
                 Poll::Ready(Some(fut)) => {
                     let is_fence = fut.is_fence();
-                    this.in_progress_queue.push_back(fut.into_future());
+                    this.in_progress_queue
+                        .push_back(TryFutureExt::into_future(fut));
                     if is_fence {
                         // While receiving a fence, don't buffer more data.
                         *this.syncing = true;
@@ -179,11 +180,10 @@ mod tests {
                 }
                 tokio::time::sleep(Duration::from_millis(10 * (n - i) as u64)).await;
                 if is_fence {
-                    let all_later_unpolled =
-                        polled_flags2[(i + 1)..n].iter().cloned().all(|flag| {
-                            let flag = flag.lock().unwrap();
-                            !*flag
-                        });
+                    let all_later_unpolled = polled_flags2[(i + 1)..n].iter().all(|flag| {
+                        let flag = flag.lock().unwrap();
+                        !*flag
+                    });
                     assert!(all_later_unpolled);
                 }
                 tokio::time::sleep(Duration::from_millis(10 * (n - i) as u64)).await;

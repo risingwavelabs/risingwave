@@ -1,0 +1,142 @@
+# description: Test Row IDs used in different types of operations
+# group: [projection]
+
+# test row ids on different operations
+# this is interesting because rowids are emitted as compressed vectors
+# hence this is really a test of correct handling of compressed vectors in the execution engine
+statement ok
+drop table if exists a;
+
+statement ok
+create table a(rowid integer, i integer);
+
+statement ok
+insert into a values (0, 42);
+
+statement ok
+FLUSH;
+
+# arithmetic
+query IIII
+SELECT rowid + 1, rowid - 1, rowid + rowid, i + rowid FROM a
+----
+1	-1	0	42
+
+# unary ops
+query III
+SELECT -rowid, +rowid, abs(rowid) FROM a
+----
+0	0	0
+
+# ternary ops
+query TTT
+SELECT rowid BETWEEN -1 AND 1, 0 BETWEEN rowid AND 1, 1 BETWEEN -3 AND rowid FROM a
+----
+t	t	f
+
+# comparisons
+query TTTT
+SELECT rowid < i, rowid = NULL, rowid = i, rowid <> 0 FROM a
+----
+t	NULL	f	f
+
+# simple (ungrouped) aggregates
+query RIIII
+SELECT SUM(rowid), MIN(rowid), MAX(rowid), COUNT(rowid) FROM a
+----
+0	0	0	1
+
+query RIIII
+SELECT SUM(rowid), MIN(rowid), MAX(rowid), COUNT(rowid) FROM a
+----
+0	0	0	1
+
+query I
+SELECT COUNT(*) FROM a
+----
+1
+
+# grouped aggregates
+query RIIIII
+SELECT SUM(rowid), MIN(rowid), MAX(rowid), COUNT(rowid) FROM a GROUP BY i
+----
+0	0	0	1
+
+# group by rowid
+query R
+SELECT SUM(i) FROM a GROUP BY rowid
+----
+42
+
+# inequality
+query II
+SELECT * FROM a, a a2 WHERE a.rowid<>a2.rowid
+----
+
+# order by
+query I
+SELECT i FROM a ORDER BY rowid
+----
+42
+
+# insert into table
+statement ok
+insert into a values (1, 42);
+
+statement ok
+FLUSH
+
+# update value
+statement ok
+UPDATE a SET i=rowid
+
+query I
+SELECT rowid FROM a WHERE rowid BETWEEN -100 AND 100 ORDER BY 1
+----
+0
+1
+
+query I
+SELECT rowid FROM a WHERE rowid=0 OR rowid=1 order by rowid
+----
+0
+1
+
+#query I
+#SELECT row_number() OVER (ORDER BY rowid) FROM a ORDER BY rowid
+#----
+#1
+#2
+
+#query I
+#SELECT row_number() OVER (ORDER BY rowid DESC) FROM a ORDER BY rowid
+#----
+#2
+#1
+
+# uncorrelated subqueries
+query I
+SELECT (SELECT rowid FROM a  order by rowid LIMIT 1)
+----
+0
+
+query T
+SELECT EXISTS(SELECT rowid FROM a)
+----
+t
+
+# correlated subqueries
+#query I
+#SELECT (SELECT a2.rowid FROM a a2 WHERE a.rowid=a2.rowid) FROM a
+#----
+#0
+#1
+
+query T
+SELECT EXISTS(SELECT a2.rowid FROM a a2 WHERE a.rowid>=a2.rowid) FROM a
+----
+t
+t
+
+statement ok
+drop table if exists a;

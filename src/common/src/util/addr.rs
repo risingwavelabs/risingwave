@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,7 @@ impl FromStr for HostAddr {
 impl From<&PbHostAddress> for HostAddr {
     fn from(addr: &PbHostAddress) -> Self {
         HostAddr {
-            host: addr.get_host().to_string(),
+            host: addr.get_host().clone(),
             port: addr.get_port() as u16,
         }
     }
@@ -123,7 +123,7 @@ pub async fn try_resolve_dns(host: &str, port: i32) -> Result<SocketAddr, String
 
 #[cfg(test)]
 mod tests {
-    use crate::util::addr::{is_local_address, HostAddr};
+    use crate::util::addr::{HostAddr, is_local_address};
 
     #[test]
     fn test_is_local_address() {

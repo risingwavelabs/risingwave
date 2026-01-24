@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,16 +14,17 @@
 
 use std::sync::LazyLock;
 
-use prometheus::core::{AtomicI64, AtomicU64, GenericCounter, GenericGauge};
+use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
-    exponential_buckets, histogram_opts, register_histogram_with_registry,
-    register_int_counter_with_registry, register_int_gauge_with_registry, Histogram, Registry,
+    Histogram, IntGauge, Registry, exponential_buckets, histogram_opts,
+    register_histogram_with_registry, register_int_counter_with_registry,
+    register_int_gauge_with_registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 
 #[derive(Clone)]
 pub struct DistributedQueryMetrics {
-    pub running_query_num: GenericGauge<AtomicI64>,
+    pub running_query_num: IntGauge,
     pub rejected_query_counter: GenericCounter<AtomicU64>,
     pub completed_query_counter: GenericCounter<AtomicU64>,
     pub query_latency: Histogram,

@@ -7,30 +7,25 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
-[package.metadata.cargo-machete]
-ignored = ["workspace-hack"]
-
-[package.metadata.cargo-udeps.ignore]
-normal = ["workspace-hack"]
+[features]
+all-sources = ["risingwave_stream/all-sources"]
 
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
 await-tree = { workspace = true }
-chrono = { version = "0.4" }
 clap = { workspace = true }
 either = "1"
 foyer = { workspace = true }
 futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 http = "1"
-hyper = "1"
 itertools = { workspace = true }
 maplit = "1.0.2"
-pprof = { version = "0.13", features = ["flamegraph"] }
-prometheus = { version = "0.13" }
+prometheus = { version = "0.14" }
 prost = { workspace = true }
 risingwave_batch = { workspace = true }
+risingwave_batch_executors = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_common_heap_profiling = { workspace = true }
 risingwave_common_service = { workspace = true }
@@ -42,7 +37,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 risingwave_stream = { workspace = true }
-serde = { version = "1", features = ["derive"] }
+serde = { workspace = true }
 serde_json = "1"
 thiserror-ext = { workspace = true }
 tikv-jemalloc-ctl = { workspace = true }
@@ -57,9 +52,8 @@ tokio = { version = "0.2", package = "madsim-tokio", features = [
 ] }
 tokio-stream = { workspace = true }
 tonic = { workspace = true }
-tower = { version = "0.4", features = ["util", "load-shed"] }
+tower = { version = "0.5", features = ["util", "load-shed"] }
 tracing = "0.1"
-uuid = { version = "1.8.0", features = ["v4"] }
 
 [target.'cfg(not(madsim))'.dependencies]
 workspace-hack = { path = "../workspace-hack" }
@@ -67,8 +61,11 @@ workspace-hack = { path = "../workspace-hack" }
 [dev-dependencies]
 futures-async-stream = { workspace = true }
 rand = { workspace = true }
+risingwave_common_rate_limit = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
+risingwave_stream = { workspace = true, features = ["test"] }
 tempfile = "3"
+tokio-retry = "0.3"
 
 [lints]
 workspace = true

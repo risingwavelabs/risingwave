@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -59,7 +59,7 @@ impl<D: ToDatumRef> Row for RepeatN<D> {
 
     #[inline]
     fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
-        std::iter::repeat(self.datum.to_datum_ref()).take(self.n)
+        std::iter::repeat_n(self.datum.to_datum_ref(), self.n)
     }
 }
 

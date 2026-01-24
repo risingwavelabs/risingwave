@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use bae::FromAttributes;
+use proc_macro_error::{ResultExt, abort};
 use proc_macro2::TokenStream;
-use proc_macro_error::{abort, ResultExt};
 use quote::quote;
 use syn::DeriveInput;
 
@@ -31,17 +31,16 @@ pub struct OverrideOpts {
 
 // TODO(bugen): the implementation is not robust but it works for now.
 fn type_is_option(ty: &syn::Type) -> bool {
-    if let syn::Type::Path(syn::TypePath { path, .. }) = ty {
-        if let Some(segment) = path.segments.last() {
-            if segment.ident == "Option" {
-                return true;
-            }
-        }
+    if let syn::Type::Path(syn::TypePath { path, .. }) = ty
+        && let Some(segment) = path.segments.last()
+        && segment.ident == "Option"
+    {
+        true
+    } else {
+        false
     }
-    false
 }
 
-#[cfg_attr(coverage, coverage(off))]
 pub fn produce_override_config(input: DeriveInput) -> TokenStream {
     let syn::Data::Struct(syn::DataStruct { fields, .. }) = input.data else {
         abort!(input, "Only struct is supported");

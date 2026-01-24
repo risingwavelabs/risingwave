@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,10 +15,11 @@
 pub mod hummock_version_ext;
 
 use parse_display::Display;
+use risingwave_common::catalog::TableId;
 
 use crate::CompactionGroupId;
 
-pub type StateTableId = u32;
+pub type StateTableId = TableId;
 
 /// A compaction task's `StaticCompactionGroupId` indicates the compaction group that all its input
 /// SSTs belong to.
@@ -44,6 +45,10 @@ impl From<StaticCompactionGroupId> for CompactionGroupId {
     }
 }
 
+/// The split will follow the following rules:
+/// 1. Ssts with `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.right`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`].
+/// 2. Currently only `vnode` 0 and `vnode` max is supported.
+/// 3. Due to the above rule, `vnode` max will be rewritten as `table_id` + 1, vnode 0
 pub mod group_split {
     use std::cmp::Ordering;
     use std::collections::BTreeSet;
@@ -53,18 +58,13 @@ pub mod group_split {
     use risingwave_common::hash::VirtualNode;
     use risingwave_pb::hummock::PbLevelType;
 
-    use super::hummock_version_ext::insert_new_sub_level;
     use super::StateTableId;
+    use super::hummock_version_ext::insert_new_sub_level;
     use crate::key::{FullKey, TableKey};
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels};
     use crate::sstable_info::SstableInfo;
-    use crate::{can_concat, HummockEpoch, KeyComparator};
-
-    /// The split will follow the following rules:
-    /// 1. Ssts with `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.right`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`].
-    /// 2. Currently only `vnode` 0 and `vnode` max is supported.
-    /// 3. Due to the above rule, `vnode` max will be rewritten as `table_id` + 1, vnode 0
+    use crate::{HummockEpoch, HummockSstableId, KeyComparator, can_concat};
 
     // By default, the split key is constructed with vnode = 0 and epoch = MAX, so that we can split table_id to the right group
     pub fn build_split_key(table_id: StateTableId, vnode: VirtualNode) -> Bytes {
@@ -78,12 +78,12 @@ pub mod group_split {
     ) -> FullKey<Vec<u8>> {
         if VirtualNode::MAX_REPRESENTABLE == vnode {
             // Modify `table_id` to `next_table_id` to satisfy the `split_to_right`` rule, so that the `table_id`` originally passed in will be split to left.
-            table_id = table_id.strict_add(1);
+            table_id = table_id.as_raw_id().strict_add(1).into();
             vnode = VirtualNode::ZERO;
         }
 
         FullKey::new(
-            TableId::from(table_id),
+            table_id,
             TableKey(vnode.to_be_bytes().to_vec()),
             HummockEpoch::MAX,
         )
@@ -136,12 +136,13 @@ pub mod group_split {
     ///    `sst_size`: `right_size`,
     /// }
     pub fn split_sst(
-        mut origin_sst_info: SstableInfo,
-        new_sst_id: &mut u64,
+        origin_sst_info: SstableInfo,
+        new_sst_id: &mut HummockSstableId,
         split_key: Bytes,
         left_size: u64,
         right_size: u64,
     ) -> (Option<SstableInfo>, Option<SstableInfo>) {
+        let mut origin_sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = origin_sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
         *new_sst_id += 1;
@@ -165,28 +166,28 @@ pub mod group_split {
             (l, r)
         };
         let (table_ids_l, table_ids_r) =
-            split_table_ids_with_split_key(&origin_sst_info.table_ids, split_key.clone());
+            split_table_ids_with_split_key(&origin_sst_info.table_ids, split_key);
 
         // rebuild the key_range and size and sstable file size
         {
             // origin_sst_info
             origin_sst_info.key_range = key_range_l;
-            origin_sst_info.sst_size = left_size;
+            origin_sst_info.sst_size = std::cmp::max(1, left_size);
             origin_sst_info.table_ids = table_ids_l;
         }
 
         {
             // new sst
             branch_table_info.key_range = key_range_r;
-            branch_table_info.sst_size = right_size;
+            branch_table_info.sst_size = std::cmp::max(1, right_size);
             branch_table_info.table_ids = table_ids_r;
         }
 
         // This function does not make any assumptions about the incoming sst, so add some judgement to ensure that the generated sst meets the restrictions.
         if origin_sst_info.table_ids.is_empty() {
-            (None, Some(branch_table_info))
+            (None, Some(branch_table_info.into()))
         } else if branch_table_info.table_ids.is_empty() {
-            (Some(origin_sst_info), None)
+            (Some(origin_sst_info.into()), None)
         } else if KeyComparator::compare_encoded_full_key(
             &origin_sst_info.key_range.left,
             &origin_sst_info.key_range.right,
@@ -194,9 +195,9 @@ pub mod group_split {
         .is_eq()
         {
             // avoid empty key_range of origin_sst
-            (None, Some(branch_table_info))
+            (None, Some(branch_table_info.into()))
         } else {
-            (Some(origin_sst_info), Some(branch_table_info))
+            (Some(origin_sst_info.into()), Some(branch_table_info.into()))
         }
     }
 
@@ -204,19 +205,20 @@ pub mod group_split {
     /// This function is used to split the sst into two parts based on the `table_ids`.
     /// In contrast to `split_sst`, this function does not modify the `key_range` and does not guarantee that the split ssts can be merged, which needs to be guaranteed by the caller.
     pub fn split_sst_with_table_ids(
-        sst_info: &mut SstableInfo,
-        new_sst_id: &mut u64,
+        origin_sst_info: &SstableInfo,
+        new_sst_id: &mut HummockSstableId,
         old_sst_size: u64,
         new_sst_size: u64,
-        new_table_ids: Vec<u32>,
-    ) -> SstableInfo {
+        new_table_ids: Vec<TableId>,
+    ) -> (SstableInfo, SstableInfo) {
+        let mut sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
-        branch_table_info.sst_size = new_sst_size;
+        branch_table_info.sst_size = std::cmp::max(1, new_sst_size);
         *new_sst_id += 1;
 
         sst_info.sst_id = *new_sst_id;
-        sst_info.sst_size = old_sst_size;
+        sst_info.sst_size = std::cmp::max(1, old_sst_size);
         *new_sst_id += 1;
 
         {
@@ -236,27 +238,27 @@ pub mod group_split {
                 .retain(|table_id| !branch_table_info.table_ids.contains(table_id));
         }
 
-        branch_table_info
+        (sst_info.into(), branch_table_info.into())
     }
 
     // Should avoid split same table_id into two groups
     pub fn split_table_ids_with_split_key(
-        table_ids: &Vec<u32>,
+        table_ids: &Vec<TableId>,
         split_key: Bytes,
-    ) -> (Vec<u32>, Vec<u32>) {
+    ) -> (Vec<TableId>, Vec<TableId>) {
         assert!(table_ids.is_sorted());
         let split_full_key = FullKey::decode(&split_key);
         let split_user_key = split_full_key.user_key;
         let vnode = split_user_key.get_vnode_id();
-        let table_id = split_user_key.table_id.table_id();
+        let table_id = split_user_key.table_id;
         split_table_ids_with_table_id_and_vnode(table_ids, table_id, vnode)
     }
 
     pub fn split_table_ids_with_table_id_and_vnode(
-        table_ids: &Vec<u32>,
+        table_ids: &Vec<TableId>,
         table_id: StateTableId,
         vnode: usize,
-    ) -> (Vec<u32>, Vec<u32>) {
+    ) -> (Vec<TableId>, Vec<TableId>) {
         assert!(table_ids.is_sorted());
         assert_eq!(VirtualNode::ZERO, VirtualNode::from_index(vnode));
         let pos = table_ids.partition_point(|&id| id < table_id);
@@ -379,7 +381,7 @@ pub mod group_split {
     /// Split the SSTs in the level according to the split key.
     pub fn split_sst_info_for_level_v2(
         level: &mut Level,
-        new_sst_id: &mut u64,
+        new_sst_id: &mut HummockSstableId,
         split_key: Bytes,
     ) -> Vec<SstableInfo> {
         if level.table_infos.is_empty() {
@@ -397,19 +399,30 @@ pub mod group_split {
                         false
                     }
                     SstSplitType::Both => {
+                        let sst_size = sst.sst_size;
+                        if sst_size / 2 == 0 {
+                            tracing::warn!(
+                                id = %sst.sst_id,
+                                object_id = %sst.object_id,
+                                sst_size = sst.sst_size,
+                                file_size = sst.file_size,
+                                "Sstable sst_size is under expected",
+                            );
+                        };
+
                         let (left, right) = split_sst(
                             sst.clone(),
                             new_sst_id,
                             split_key.clone(),
-                            sst.sst_size / 2,
-                            sst.sst_size / 2,
+                            sst_size / 2,
+                            sst_size / 2,
                         );
                         if let Some(branch_sst) = right {
                             insert_table_infos.push(branch_sst);
                         }
 
-                        if left.is_some() {
-                            *sst = left.unwrap();
+                        if let Some(s) = left {
+                            *sst = s;
                             true
                         } else {
                             false
@@ -438,6 +451,16 @@ pub mod group_split {
                     // split the sst
                     let sst = level.table_infos[pos].clone();
                     let sst_size = sst.sst_size;
+                    if sst_size / 2 == 0 {
+                        tracing::warn!(
+                            id = %sst.sst_id,
+                            object_id = %sst.object_id,
+                            sst_size = sst.sst_size,
+                            file_size = sst.file_size,
+                            "Sstable sst_size is under expected",
+                        );
+                    };
+
                     let (left, right) = split_sst(
                         sst,
                         new_sst_id,
@@ -472,46 +495,90 @@ pub mod group_split {
 
 #[cfg(test)]
 mod tests {
+    use itertools::Itertools;
+    use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
 
     #[test]
     fn test_split_table_ids() {
-        let table_ids = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let table_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            .into_iter()
+            .map(Into::<TableId>::into)
+            .collect();
         let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
             &table_ids,
-            5,
+            5.into(),
             VirtualNode::ZERO.to_index(),
         );
-        assert_eq!(left, vec![1, 2, 3, 4]);
-        assert_eq!(right, vec![5, 6, 7, 8, 9]);
+        assert_eq!(
+            left,
+            [1, 2, 3, 4]
+                .into_iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
+        );
+        assert_eq!(
+            right,
+            [5, 6, 7, 8, 9]
+                .into_iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
+        );
 
         // test table_id not in the table_ids
 
         let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
             &table_ids,
-            10,
+            10.into(),
             VirtualNode::ZERO.to_index(),
         );
-        assert_eq!(left, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(
+            left,
+            [1, 2, 3, 4, 5, 6, 7, 8, 9]
+                .into_iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
+        );
         assert!(right.is_empty());
 
         let (left, right) = super::group_split::split_table_ids_with_table_id_and_vnode(
             &table_ids,
-            0,
+            0.into(),
             VirtualNode::ZERO.to_index(),
         );
 
         assert!(left.is_empty());
-        assert_eq!(right, vec![1, 2, 3, 4, 5, 6, 7, 8, 9]);
+        assert_eq!(
+            right,
+            [1, 2, 3, 4, 5, 6, 7, 8, 9]
+                .into_iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
+        );
     }
 
     #[test]
     fn test_split_table_ids_with_split_key() {
-        let table_ids = vec![1, 2, 3, 4, 5, 6, 7, 8, 9];
-        let split_key = super::group_split::build_split_key(5, VirtualNode::ZERO);
+        let table_ids = [1, 2, 3, 4, 5, 6, 7, 8, 9]
+            .into_iter()
+            .map(Into::<TableId>::into)
+            .collect();
+        let split_key = super::group_split::build_split_key(5.into(), VirtualNode::ZERO);
         let (left, right) =
             super::group_split::split_table_ids_with_split_key(&table_ids, split_key);
-        assert_eq!(left, vec![1, 2, 3, 4]);
-        assert_eq!(right, vec![5, 6, 7, 8, 9]);
+        assert_eq!(
+            left,
+            [1, 2, 3, 4]
+                .into_iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
+        );
+        assert_eq!(
+            right,
+            [5, 6, 7, 8, 9]
+                .into_iter()
+                .map(Into::<TableId>::into)
+                .collect_vec()
+        );
     }
 }

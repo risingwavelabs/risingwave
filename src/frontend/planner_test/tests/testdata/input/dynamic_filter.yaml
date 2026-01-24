@@ -13,14 +13,22 @@
   - stream_plan
 - name: |
     With Top-1 on inner side
-    TODO: currently not possible due to https://github.com/risingwavelabs/risingwave/issues/5764
   before:
   - create_tables
   sql: |
-    with max_v2 as (select v2 max from t2 order by v2 desc limit 1) select v1 from t1, max_v2 where v1 > max;
+    with max_v2 as (select v2 max from t2 order by max desc limit 1) select v1 from t1, max_v2 where v1 > max;
   expected_outputs:
   - optimized_logical_plan_for_stream
-  - stream_error
+  - stream_plan
+- name: |
+    With Limit-1 on inner side
+  before:
+  - create_tables
+  sql: |
+    with limit_v2 as (select v2 from t2 limit 1) select v1 from t1, limit_v2 where v1 > v2;
+  expected_outputs:
+  - optimized_logical_plan_for_stream
+  - stream_plan
 - name: With Simple Agg upstream materialized view on inner side
   before:
   - create_tables

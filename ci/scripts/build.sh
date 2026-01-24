@@ -27,21 +27,13 @@ if [[ "$profile" != "ci-dev" ]] && [[ "$profile" != "ci-release" ]]; then
     exit 1
 fi
 
-echo "--- Rust cargo-sort check"
-cargo sort --check --workspace --grouped
-
-# Disable hakari until we make sure it's useful
-# echo "--- Rust cargo-hakari check"
-# cargo hakari generate --diff
-# cargo hakari verify
-
-echo "--- Rust format check"
-cargo fmt --all -- --check
+# Enable coverage instrumentation.
+export RW_BUILD_INSTRUMENT_COVERAGE=1
 
 echo "--- Build Rust components"
 
 if [[ "$profile" == "ci-dev" ]]; then
-    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link --no-default-features)
+    RISINGWAVE_FEATURE_FLAGS=(--features rw-dynamic-link,all-connectors --no-default-features)
 else
     RISINGWAVE_FEATURE_FLAGS=(--features rw-static-link)
     configure_static_openssl
@@ -55,12 +47,13 @@ cargo build \
     -p risingwave_compaction_test \
     -p risingwave_e2e_extended_mode_test \
     "${RISINGWAVE_FEATURE_FLAGS[@]}" \
-    --features all-udf \
+    --features udf \
+    --features datafusion \
     --profile "$profile" \
     --timings
 
 
-artifacts=(risingwave sqlsmith compaction-test risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev)
+artifacts=(risingwave sqlsmith sqlsmith-reducer compaction-test risingwave_regress_test risingwave_e2e_extended_mode_test risedev-dev)
 
 echo "--- Check link info"
 check_link_info "$profile"

@@ -14,7 +14,7 @@
 
 use core::fmt;
 use std::collections::BTreeMap;
-use std::ops::{Bound, RangeInclusive};
+use std::ops::{Bound, RangeBounds, RangeFull, RangeInclusive};
 
 use crate::{EstimateSize, KvSize};
 
@@ -180,13 +180,13 @@ where
     pub fn extract_if<'a, F>(
         &'a mut self,
         mut pred: F,
-    ) -> ExtractIf<'a, K, V, impl FnMut(&K, &mut V) -> bool>
+    ) -> ExtractIf<'a, K, V, RangeFull, impl FnMut(&K, &mut V) -> bool + use<F, K, V>>
     where
         F: 'a + FnMut(&K, &V) -> bool,
     {
         let pred_immut = move |key: &K, value: &mut V| pred(key, value);
         ExtractIf {
-            inner: self.inner.extract_if(pred_immut),
+            inner: self.inner.extract_if(.., pred_immut),
             heap_size: &mut self.heap_size,
         }
     }
@@ -224,7 +224,7 @@ pub struct OccupiedEntry<'a, K, V> {
     heap_size: &'a mut KvSize,
 }
 
-impl<'a, K, V> OccupiedEntry<'a, K, V>
+impl<K, V> OccupiedEntry<'_, K, V>
 where
     K: EstimateSize + Ord,
     V: EstimateSize,
@@ -240,19 +240,20 @@ where
     }
 }
 
-pub struct ExtractIf<'a, K, V, F>
+pub struct ExtractIf<'a, K, V, R, F>
 where
     F: FnMut(&K, &mut V) -> bool,
 {
-    inner: std::collections::btree_map::ExtractIf<'a, K, V, F>,
+    inner: std::collections::btree_map::ExtractIf<'a, K, V, R, F>,
     heap_size: &'a mut KvSize,
 }
 
-impl<'a, K, V, F> Iterator for ExtractIf<'a, K, V, F>
+impl<K, V, R, F> Iterator for ExtractIf<'_, K, V, R, F>
 where
-    K: EstimateSize,
+    K: EstimateSize + PartialOrd,
     V: EstimateSize,
     F: FnMut(&K, &mut V) -> bool,
+    R: RangeBounds<K>,
 {
     type Item = (K, V);
 
@@ -279,25 +280,25 @@ mod tests {
         assert!(left.is_empty());
         assert!(right.is_empty());
 
-        map.insert(1, "hello".to_string());
-        map.insert(6, "world".to_string());
+        map.insert(1, "hello".to_owned());
+        map.insert(6, "world".to_owned());
         let (left, right) = map.retain_range(&6..=&6);
         assert_eq!(map.len(), 1);
-        assert_eq!(map.inner[&6], "world".to_string());
+        assert_eq!(map.inner[&6], "world".to_owned());
         assert_eq!(left.len(), 1);
-        assert_eq!(left[&1], "hello".to_string());
+        assert_eq!(left[&1], "hello".to_owned());
         assert!(right.is_empty());
 
-        map.insert(8, "risingwave".to_string());
-        map.insert(3, "great".to_string());
-        map.insert(0, "wooow".to_string());
+        map.insert(8, "risingwave".to_owned());
+        map.insert(3, "great".to_owned());
+        map.insert(0, "wooow".to_owned());
         let (left, right) = map.retain_range(&2..=&7);
         assert_eq!(map.len(), 2);
-        assert_eq!(map.inner[&3], "great".to_string());
-        assert_eq!(map.inner[&6], "world".to_string());
+        assert_eq!(map.inner[&3], "great".to_owned());
+        assert_eq!(map.inner[&6], "world".to_owned());
         assert_eq!(left.len(), 1);
-        assert_eq!(left[&0], "wooow".to_string());
+        assert_eq!(left[&0], "wooow".to_owned());
         assert_eq!(right.len(), 1);
-        assert_eq!(right[&8], "risingwave".to_string());
+        assert_eq!(right[&8], "risingwave".to_owned());
     }
 }

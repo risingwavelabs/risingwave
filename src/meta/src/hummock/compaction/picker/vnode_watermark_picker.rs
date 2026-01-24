@@ -22,6 +22,7 @@ use risingwave_hummock_sdk::table_watermark::ReadTableWatermark;
 
 use crate::hummock::compaction::picker::CompactionInput;
 use crate::hummock::level_handler::LevelHandler;
+
 pub struct VnodeWatermarkCompactionPicker {}
 
 impl VnodeWatermarkCompactionPicker {
@@ -30,7 +31,7 @@ impl VnodeWatermarkCompactionPicker {
     }
 
     /// The current implementation only picks trivial reclaim task for the bottommost level.
-    /// Must modify [`crate::hummock::compaction::CompactStatus::is_trivial_reclaim`], if nontrivial reclaim is supported in the future.
+    /// Must modify `is_trivial_reclaim`, if non-trivial reclaim is supported in the future.
     pub fn pick_compaction(
         &mut self,
         levels: &Levels,
@@ -100,7 +101,7 @@ fn should_delete_key_by_watermark(
     let Some(w) = watermark.vnode_watermarks.get(&vnode) else {
         return false;
     };
-    watermark.direction.filter_by_watermark(key, w)
+    watermark.direction.key_filter_by_watermark(key, w)
 }
 
 #[cfg(test)]
@@ -109,7 +110,7 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_hummock_sdk::key::{FullKey, TableKey};
     use risingwave_hummock_sdk::key_range::KeyRange;
-    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
     use risingwave_hummock_sdk::table_watermark::{ReadTableWatermark, WatermarkDirection};
 
     use crate::hummock::compaction::picker::vnode_watermark_picker::should_delete_sst_by_watermark;
@@ -132,9 +133,9 @@ mod tests {
             TableKey(builder.freeze())
         };
 
-        let sst_info = SstableInfo {
-            object_id: 1,
-            sst_id: 1,
+        let sst_info = SstableInfoInner {
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(2.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -144,17 +145,18 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![2],
+            table_ids: vec![2.into()],
             ..Default::default()
-        };
+        }
+        .into();
         assert!(
             !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because no matching watermark found"
         );
 
-        let sst_info = SstableInfo {
-            object_id: 1,
-            sst_id: 1,
+        let sst_info = SstableInfoInner {
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(13, "some_watermark_key_1"), 0)
                     .encode()
@@ -164,17 +166,18 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
-        };
+        }
+        .into();
         assert!(
             !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because no matching vnode found"
         );
 
-        let sst_info = SstableInfo {
-            object_id: 1,
-            sst_id: 1,
+        let sst_info = SstableInfoInner {
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -184,17 +187,18 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
-        };
+        }
+        .into();
         assert!(
             !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because different vnodes found"
         );
 
-        let sst_info = SstableInfo {
-            object_id: 1,
-            sst_id: 1,
+        let sst_info = SstableInfoInner {
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -204,17 +208,18 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
-        };
+        }
+        .into();
         assert!(
             !should_delete_sst_by_watermark(&sst_info, &table_watermarks),
             "should fail because right key is greater than watermark"
         );
 
-        let sst_info = SstableInfo {
-            object_id: 1,
-            sst_id: 1,
+        let sst_info = SstableInfoInner {
+            object_id: 1.into(),
+            sst_id: 1.into(),
             key_range: KeyRange {
                 left: FullKey::new(1.into(), table_key(16, "some_watermark_key_1"), 0)
                     .encode()
@@ -224,9 +229,10 @@ mod tests {
                     .into(),
                 right_exclusive: true,
             },
-            table_ids: vec![1],
+            table_ids: vec![1.into()],
             ..Default::default()
-        };
+        }
+        .into();
         assert!(should_delete_sst_by_watermark(&sst_info, &table_watermarks));
     }
 }

@@ -1,10 +1,10 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
 // You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
@@ -87,8 +87,8 @@ impl<Id: Ord + Hash + std::fmt::Debug> BufferedWatermarks<Id> {
         let mut watermark_to_emit = None;
         while !self.first_buffered_watermarks.is_empty()
             && (self.first_buffered_watermarks.len() == len
-                || watermark_to_emit.as_ref().map_or(false, |watermark| {
-                    watermark == &self.first_buffered_watermarks.peek().unwrap().0 .0
+                || watermark_to_emit.as_ref().is_some_and(|watermark| {
+                    watermark == &self.first_buffered_watermarks.peek().unwrap().0.0
                 }))
         {
             let Reverse((watermark, id)) = self.first_buffered_watermarks.pop().unwrap();

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,15 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor};
+use super::prelude::*;
+use crate::expr::{ExprImpl, ExprVisitor};
 use crate::optimizer::plan_expr_visitor::InputRefCounter;
-use crate::optimizer::plan_node::{generic, BatchProject, PlanTreeNodeUnary};
-use crate::optimizer::{BoxedRule, PlanRef, Rule};
+use crate::optimizer::plan_node::{BatchProject, PlanTreeNodeUnary};
 use crate::utils::Substitute;
 
 /// Merge contiguous [`BatchProject`] nodes.
 pub struct BatchProjectMergeRule {}
-impl Rule for BatchProjectMergeRule {
+impl Rule<Batch> for BatchProjectMergeRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let outer_project = plan.as_batch_project()?;
         let input = outer_project.input();
@@ -37,17 +37,13 @@ impl Rule for BatchProjectMergeRule {
             }
         }
 
-        let mut subst = Substitute {
+        let mut core = outer_project.core().clone();
+        core.rewrite_exprs(&mut Substitute {
             mapping: inner_project.exprs().clone(),
-        };
-        let exprs = outer_project
-            .exprs()
-            .iter()
-            .cloned()
-            .map(|expr| subst.rewrite_expr(expr))
-            .collect();
-        let logical_project = generic::Project::new(exprs, inner_project.input());
-        Some(BatchProject::new(logical_project).into())
+        });
+        core.input = inner_project.input();
+
+        Some(BatchProject::new(core).into())
     }
 }
 

@@ -1,0 +1,115 @@
+# https://github.com/risingwavelabs/risingwave/issues/17263
+
+statement ok
+create table t (a int, b int);
+
+statement ok
+create function add(a int, b int) returns int language python as $$
+def add(a, b):
+  return a+b
+$$;
+
+statement error function with name add\(integer,integer\) exists
+create function add(int, int) returns int language sql as $$select $1 + $2$$;
+
+statement ok
+create function if not exists add(int, int) returns int language sql as $$select $1 + $2$$;
+
+statement ok
+create function add_v2(int, int) returns int language sql as $$select $1 + $2$$;
+
+statement ok
+create aggregate mysum(value int) returns int language python as $$
+def create_state():
+    return 0
+def accumulate(state, value):
+    return state + value
+def finish(state):
+    return state
+$$;
+
+statement error function with name mysum\(integer\) exists
+create aggregate mysum(value int) returns int language python as $$
+def create_state():
+    return 0
+def accumulate(state, value):
+    return state + value
+def finish(state):
+    return state
+$$;
+
+statement ok
+create aggregate if not exists mysum(value int) returns int language python as $$
+def create_state():
+    return 0
+def accumulate(state, value):
+    return state + value
+def finish(state):
+    return state
+$$;
+
+statement ok
+create materialized view mv as select add(a, b) + add_v2(a, b) as c from t;
+
+statement ok
+create materialized view mv2 as select mysum(a) as s from t;
+
+statement error function used by 1 other objects
+drop function add;
+
+statement error function used by 1 other objects
+drop function if exists add;
+
+statement error function used by 1 other objects
+drop function add_v2;
+
+statement error function used by 1 other objects
+drop aggregate mysum;
+
+statement ok
+drop materialized view mv;
+
+statement ok
+drop materialized view mv2;
+
+statement ok
+drop function add;
+
+statement error function not found
+drop function add;
+
+statement ok
+drop function if exists add;
+
+statement ok
+drop function add_v2;
+
+statement ok
+drop function if exists add_v2;
+
+statement ok
+drop aggregate mysum;
+
+statement ok
+drop aggregate if exists mysum;
+
+statement ok
+create function add(a int, b int) returns int language python as $$
+def add(a, b):
+  return a+b
+$$;
+
+statement ok
+create sink s as select add(a, b) as c from t with (connector = 'blackhole');
+
+statement error function used by 1 other objects
+drop function add;
+
+statement ok
+drop sink s;
+
+statement ok
+drop function add;
+
+statement ok
+drop table t;

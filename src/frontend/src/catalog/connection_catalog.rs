@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,10 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
-use std::sync::Arc;
-
-use anyhow::anyhow;
-use risingwave_connector::source::kafka::private_link::insert_privatelink_broker_rewrite_map;
-use risingwave_connector::WithPropertiesExt;
-use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
 use risingwave_pb::catalog::connection::Info;
-use risingwave_pb::catalog::{connection, PbConnection};
+use risingwave_pb::catalog::{PbConnection, connection};
 
 use crate::catalog::{ConnectionId, OwnedByUserCatalog};
-use crate::error::{Result, RwError};
 use crate::user::UserId;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -38,12 +30,14 @@ impl ConnectionCatalog {
     pub fn connection_type(&self) -> &str {
         match &self.info {
             Info::PrivateLinkService(srv) => srv.get_provider().unwrap().as_str_name(),
+            Info::ConnectionParams(params) => params.get_connection_type().unwrap().as_str_name(),
         }
     }
 
     pub fn provider(&self) -> &str {
         match &self.info {
             Info::PrivateLinkService(_) => "PRIVATELINK",
+            Info::ConnectionParams(_) => panic!("ConnectionParams is not supported as provider."),
         }
     }
 }
@@ -63,25 +57,4 @@ impl OwnedByUserCatalog for ConnectionCatalog {
     fn owner(&self) -> UserId {
         self.owner
     }
-}
-
-pub(crate) fn resolve_private_link_connection(
-    connection: &Arc<ConnectionCatalog>,
-    properties: &mut BTreeMap<String, String>,
-) -> Result<()> {
-    #[allow(irrefutable_let_patterns)]
-    if let connection::Info::PrivateLinkService(svc) = &connection.info {
-        if !properties.is_kafka_connector() {
-            return Err(RwError::from(anyhow!(
-                "Private link is only supported for Kafka connector"
-            )));
-        }
-        // skip all checks for mock connection
-        if svc.get_provider()? == PrivateLinkProvider::Mock {
-            return Ok(());
-        }
-        insert_privatelink_broker_rewrite_map(properties, Some(svc), None)
-            .map_err(RwError::from)?;
-    }
-    Ok(())
 }

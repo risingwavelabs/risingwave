@@ -1,0 +1,31 @@
+[package]
+name = "risingwave_common_rate_limit"
+version = { workspace = true }
+edition = { workspace = true }
+homepage = { workspace = true }
+keywords = { workspace = true }
+license = { workspace = true }
+repository = { workspace = true }
+
+[dependencies]
+parking_lot = { workspace = true }
+risingwave_common = { workspace = true }
+risingwave_common_metrics = { workspace = true }
+pin-project-lite = { workspace = true }
+tokio = { version = "0.2", package = "madsim-tokio", features = [
+    "rt",
+    "rt-multi-thread",
+    "sync",
+    "macros",
+    "time",
+] }
+arc-swap = { workspace = true }
+prometheus = "0.14"
+rand = { workspace = true }
+
+
+[package.metadata.cargo-machete]
+ignored = ["prometheus"]
+
+[lints]
+workspace = true

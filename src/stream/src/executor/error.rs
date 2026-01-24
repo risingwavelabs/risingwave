@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use risingwave_common::array::ArrayError;
 use risingwave_common::error::{BoxedError, NotImplemented};
+use risingwave_common::id::SinkId;
 use risingwave_common::util::value_encoding::error::ValueEncodingError;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::SinkError;
@@ -24,8 +25,8 @@ use risingwave_rpc_client::error::RpcError;
 use risingwave_storage::error::StorageError;
 use strum_macros::AsRefStr;
 
-use super::exchange::error::ExchangeChannelClosed;
 use super::Barrier;
+use super::exchange::error::ExchangeChannelClosed;
 
 /// A specialized Result type for streaming executors.
 pub type StreamExecutorResult<T> = std::result::Result<T, StreamExecutorError>;
@@ -71,7 +72,7 @@ pub enum ErrorKind {
         #[source]
         #[backtrace]
         SinkError,
-        u32,
+        SinkId,
     ),
 
     #[error(transparent)]
@@ -153,8 +154,8 @@ impl From<String> for StreamExecutorError {
     }
 }
 
-impl From<(SinkError, u32)> for StreamExecutorError {
-    fn from((err, sink_id): (SinkError, u32)) -> Self {
+impl From<(SinkError, SinkId)> for StreamExecutorError {
+    fn from((err, sink_id): (SinkError, SinkId)) -> Self {
         ErrorKind::SinkError(err, sink_id).into()
     }
 }

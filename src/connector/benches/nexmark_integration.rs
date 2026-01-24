@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -20,17 +20,17 @@
 
 use std::sync::LazyLock;
 
-use criterion::{criterion_group, criterion_main, BatchSize, Criterion};
+use criterion::{BatchSize, Criterion, criterion_group, criterion_main};
 use futures::{FutureExt, StreamExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, StructType};
 use risingwave_connector::parser::{
     ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxChunkSourceStream, BoxSourceStream, SourceColumnDesc, SourceMessage, SourceMeta,
+    BoxSourceChunkStream, BoxSourceMessageStream, SourceColumnDesc, SourceMessage, SourceMeta,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
@@ -72,7 +72,7 @@ fn make_batch(use_struct: bool) -> Vec<SourceMessage> {
         .collect_vec()
 }
 
-fn make_data_stream(use_struct: bool) -> BoxSourceStream {
+fn make_data_stream(use_struct: bool) -> BoxSourceMessageStream {
     futures::future::ready(Ok(if use_struct {
         STRUCT_BATCH.clone()
     } else {
@@ -94,12 +94,8 @@ fn make_parser(use_struct: bool) -> ByteStreamSourceParserImpl {
     ];
 
     let rw_columns = if use_struct {
-        let fields = fields
-            .into_iter()
-            .enumerate()
-            .map(|(i, (n, t))| ColumnDesc::named(n, ColumnId::new(i as _), t))
-            .collect();
-        let struct_col = ColumnDesc::new_struct("bid", 114514, "bid", fields);
+        let struct_type = StructType::new(fields).into();
+        let struct_col = ColumnDesc::named("bid", 114514.into(), struct_type);
         vec![(&struct_col).into()]
     } else {
         fields
@@ -118,8 +114,8 @@ fn make_parser(use_struct: bool) -> ByteStreamSourceParserImpl {
 }
 
 fn make_stream_iter(use_struct: bool) -> impl Iterator<Item = StreamChunk> {
-    let mut stream: BoxChunkSourceStream = make_parser(use_struct)
-        .into_stream(make_data_stream(use_struct))
+    let mut stream: BoxSourceChunkStream = make_parser(use_struct)
+        .parse_stream(make_data_stream(use_struct))
         .boxed();
 
     std::iter::from_fn(move || {

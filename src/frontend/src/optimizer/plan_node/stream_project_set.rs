@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,17 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use fixedbitset::FixedBitSet;
-use itertools::Itertools;
-use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::ProjectSetNode;
+use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::stream::prelude::*;
 use super::utils::impl_distill_by_unit;
-use super::{generic, ExprRewritable, PlanBase, PlanRef, PlanTreeNodeUnary, StreamNode};
+use super::{
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamPlanRef as PlanRef, TryToStreamPb, generic,
+};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::property::{analyze_monotonicity, monotonicity_variants, MonotonicityMap};
+use crate::optimizer::property::{
+    MonotonicityMap, WatermarkColumns, analyze_monotonicity, monotonicity_variants,
+};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
 
@@ -40,6 +43,7 @@ pub struct StreamProjectSet {
 
 impl StreamProjectSet {
     pub fn new(core: generic::ProjectSet<PlanRef>) -> Self {
+        let ctx = core.input.ctx();
         let input = core.input.clone();
         let distribution = core
             .i2o_col_mapping()
@@ -47,7 +51,7 @@ impl StreamProjectSet {
 
         let mut watermark_derivations = vec![];
         let mut nondecreasing_exprs = vec![];
-        let mut out_watermark_columns = FixedBitSet::with_capacity(core.output_len());
+        let mut out_watermark_columns = WatermarkColumns::new();
         for (expr_idx, expr) in core.select_list.iter().enumerate() {
             let out_expr_idx = expr_idx + 1;
 
@@ -57,14 +61,18 @@ impl StreamProjectSet {
                     if monotonicity.is_non_decreasing() && !monotonicity.is_constant() {
                         // TODO(rc): may be we should also derive watermark for constant later
                         // FIXME(rc): we need to check expr is not table function
-                        nondecreasing_exprs.push(expr_idx); // to produce watermarks
-                        out_watermark_columns.insert(out_expr_idx);
+                        // to produce watermarks
+                        nondecreasing_exprs.push(expr_idx);
+                        // each inherently non-decreasing expr creates a new watermark group
+                        out_watermark_columns.insert(out_expr_idx, ctx.next_watermark_group_id());
                     }
                 }
                 FollowingInput(input_idx) => {
-                    if input.watermark_columns().contains(input_idx) {
-                        watermark_derivations.push((input_idx, expr_idx)); // to propagate watermarks
-                        out_watermark_columns.insert(out_expr_idx);
+                    if let Some(wtmk_group) = input.watermark_columns().get_group(input_idx) {
+                        // to propagate watermarks
+                        watermark_derivations.push((input_idx, expr_idx));
+                        // join an existing watermark group
+                        out_watermark_columns.insert(out_expr_idx, wtmk_group);
                     }
                 }
                 _FollowingInputInversely(_) => {}
@@ -76,7 +84,7 @@ impl StreamProjectSet {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            input.append_only(),
+            input.stream_kind(),
             input.emit_on_window_close(),
             out_watermark_columns,
             MonotonicityMap::new(), // TODO: derive monotonicity
@@ -90,9 +98,9 @@ impl StreamProjectSet {
     }
 }
 impl_distill_by_unit!(StreamProjectSet, core, "StreamProjectSet");
-impl_plan_tree_node_for_unary! { StreamProjectSet }
+impl_plan_tree_node_for_unary! { Stream, StreamProjectSet }
 
-impl PlanTreeNodeUnary for StreamProjectSet {
+impl PlanTreeNodeUnary<Stream> for StreamProjectSet {
     fn input(&self) -> PlanRef {
         self.core.input.clone()
     }
@@ -104,28 +112,36 @@ impl PlanTreeNodeUnary for StreamProjectSet {
     }
 }
 
-impl StreamNode for StreamProjectSet {
-    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+impl TryToStreamPb for StreamProjectSet {
+    fn try_to_stream_prost_body(
+        &self,
+        _state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbNodeBody> {
         let (watermark_input_cols, watermark_expr_indices) = self
             .watermark_derivations
             .iter()
             .map(|(i, o)| (*i as u32, *o as u32))
             .unzip();
-        PbNodeBody::ProjectSet(ProjectSetNode {
-            select_list: self
-                .core
-                .select_list
-                .iter()
-                .map(|select_item| select_item.to_project_set_select_item_proto())
-                .collect_vec(),
+        let select_list = self
+            .core
+            .select_list
+            .iter()
+            .map(|select_item| {
+                select_item.to_project_set_select_item_proto_checked_pure(
+                    self.input().stream_kind().is_retract(),
+                )
+            })
+            .collect::<crate::error::Result<Vec<_>>>()?;
+        Ok(PbNodeBody::ProjectSet(Box::new(ProjectSetNode {
+            select_list,
             watermark_input_cols,
             watermark_expr_indices,
             nondecreasing_exprs: self.nondecreasing_exprs.iter().map(|i| *i as _).collect(),
-        })
+        })))
     }
 }
 
-impl ExprRewritable for StreamProjectSet {
+impl ExprRewritable<Stream> for StreamProjectSet {
     fn has_rewritable_expr(&self) -> bool {
         true
     }

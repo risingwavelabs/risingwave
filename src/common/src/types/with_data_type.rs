@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -18,8 +18,8 @@ use std::sync::Arc;
 use bytes::Bytes;
 
 use super::{
-    DataType, Date, Decimal, Fields, Int256, Interval, JsonbRef, JsonbVal, Serial, StructType,
-    Time, Timestamp, Timestamptz, F32, F64,
+    DataType, Date, Decimal, F32, F64, Fields, Int256, Interval, JsonbRef, JsonbVal, Serial,
+    StructType, Time, Timestamp, Timestamptz,
 };
 
 /// A trait for all physical types that can be associated with a [`DataType`].
@@ -92,7 +92,7 @@ impl_with_data_type!(rust_decimal::Decimal, DataType::Decimal);
 impl_with_data_type!(Decimal, DataType::Decimal);
 impl_with_data_type!(Serial, DataType::Serial);
 
-impl<'a> WithDataType for &'a str {
+impl WithDataType for &str {
     fn default_data_type() -> DataType {
         DataType::Varchar
     }
@@ -109,7 +109,7 @@ impl_with_data_type!(Vec<u8>, DataType::Bytea);
 impl_with_data_type!(Bytes, DataType::Bytea);
 impl_with_data_type!(JsonbVal, DataType::Jsonb);
 
-impl<'a> WithDataType for JsonbRef<'a> {
+impl WithDataType for JsonbRef<'_> {
     fn default_data_type() -> DataType {
         DataType::Jsonb
     }
@@ -120,7 +120,7 @@ where
     T: WithDataType,
 {
     fn default_data_type() -> DataType {
-        DataType::List(Box::new(T::default_data_type()))
+        DataType::list(T::default_data_type())
     }
 }
 
@@ -129,7 +129,7 @@ where
     T: WithDataType,
 {
     fn default_data_type() -> DataType {
-        DataType::List(Box::new(T::default_data_type()))
+        DataType::list(T::default_data_type())
     }
 }
 

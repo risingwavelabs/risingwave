@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -15,91 +15,80 @@
 use std::collections::BTreeMap;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_connector::source::kafka::PRIVATELINK_CONNECTION;
-use risingwave_pb::catalog::connection::private_link_service::PrivateLinkProvider;
+use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_connector::connector_common::SCHEMA_REGISTRY_CONNECTION_TYPE;
+use risingwave_connector::sink::elasticsearch_opensearch::elasticsearch::ES_SINK;
+use risingwave_connector::source::enforce_secret_connection;
+use risingwave_connector::source::iceberg::ICEBERG_CONNECTOR;
+use risingwave_connector::source::kafka::{KAFKA_CONNECTOR, PRIVATELINK_CONNECTION};
+use risingwave_pb::catalog::connection_params::ConnectionType;
+use risingwave_pb::catalog::{ConnectionParams, PbConnectionParams};
 use risingwave_pb::ddl_service::create_connection_request;
+use risingwave_pb::secret::SecretRef;
+use risingwave_pb::secret::secret_ref::RefAsType;
 use risingwave_sqlparser::ast::CreateConnectionStatement;
 
 use super::RwPgResponse;
+use crate::WithOptions;
 use crate::binder::Binder;
+use crate::catalog::SecretId;
+use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::error::ErrorCode::ProtocolError;
-use crate::error::{Result, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
+use crate::session::SessionImpl;
+use crate::utils::{resolve_privatelink_in_with_option, resolve_secret_ref_in_with_options};
 
 pub(crate) const CONNECTION_TYPE_PROP: &str = "type";
-pub(crate) const CONNECTION_PROVIDER_PROP: &str = "provider";
-pub(crate) const CONNECTION_SERVICE_NAME_PROP: &str = "service.name";
-pub(crate) const CONNECTION_TAGS_PROP: &str = "tags";
-
-pub(crate) const CLOUD_PROVIDER_MOCK: &str = "mock"; // fake privatelink provider for testing
-pub(crate) const CLOUD_PROVIDER_AWS: &str = "aws";
 
 #[inline(always)]
 fn get_connection_property_required(
-    with_properties: &BTreeMap<String, String>,
+    with_properties: &mut BTreeMap<String, String>,
     property: &str,
 ) -> Result<String> {
-    with_properties
-        .get(property)
-        .map(|s| s.to_lowercase())
-        .ok_or_else(|| {
-            RwError::from(ProtocolError(format!(
-                "Required property \"{property}\" is not provided"
-            )))
-        })
+    with_properties.remove(property).ok_or_else(|| {
+        RwError::from(ProtocolError(format!(
+            "Required property \"{property}\" is not provided"
+        )))
+    })
 }
-
-fn resolve_private_link_properties(
-    with_properties: &BTreeMap<String, String>,
-) -> Result<create_connection_request::PrivateLink> {
-    let provider =
-        match get_connection_property_required(with_properties, CONNECTION_PROVIDER_PROP)?.as_str()
-        {
-            CLOUD_PROVIDER_MOCK => PrivateLinkProvider::Mock,
-            CLOUD_PROVIDER_AWS => PrivateLinkProvider::Aws,
-            provider => {
-                return Err(RwError::from(ProtocolError(format!(
-                    "Unsupported privatelink provider {}",
-                    provider
-                ))));
-            }
-        };
-    match provider {
-        PrivateLinkProvider::Mock => Ok(create_connection_request::PrivateLink {
-            provider: provider.into(),
-            service_name: String::new(),
-            tags: None,
-        }),
-        PrivateLinkProvider::Aws => {
-            let service_name =
-                get_connection_property_required(with_properties, CONNECTION_SERVICE_NAME_PROP)?;
-            Ok(create_connection_request::PrivateLink {
-                provider: provider.into(),
-                service_name,
-                tags: with_properties.get(CONNECTION_TAGS_PROP).cloned(),
-            })
-        }
-        PrivateLinkProvider::Unspecified => Err(RwError::from(ProtocolError(
-            "Privatelink provider unspecified".to_string(),
-        ))),
-    }
-}
-
 fn resolve_create_connection_payload(
-    with_properties: &BTreeMap<String, String>,
+    with_properties: WithOptions,
+    session: &SessionImpl,
 ) -> Result<create_connection_request::Payload> {
-    let connection_type = get_connection_property_required(with_properties, CONNECTION_TYPE_PROP)?;
-    let create_connection_payload = match connection_type.as_str() {
-        PRIVATELINK_CONNECTION => create_connection_request::Payload::PrivateLink(
-            resolve_private_link_properties(with_properties)?,
-        ),
+    if !with_properties.connection_ref().is_empty() {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(
+            "Connection reference is not allowed in options in CREATE CONNECTION".to_owned(),
+        )));
+    }
+
+    let (mut props, secret_refs) =
+        resolve_secret_ref_in_with_options(with_properties, session)?.into_parts();
+    let connection_type = get_connection_property_required(&mut props, CONNECTION_TYPE_PROP)?;
+    let connection_type = match connection_type.as_str() {
+        PRIVATELINK_CONNECTION => {
+            return Err(RwError::from(ErrorCode::Deprecated(
+            "CREATE CONNECTION to Private Link".to_owned(),
+            "RisingWave Cloud Portal (Please refer to the doc https://docs.risingwave.com/cloud/create-a-connection/)".to_owned(),
+        )));
+        }
+        KAFKA_CONNECTOR => ConnectionType::Kafka,
+        ICEBERG_CONNECTOR => ConnectionType::Iceberg,
+        SCHEMA_REGISTRY_CONNECTION_TYPE => ConnectionType::SchemaRegistry,
+        ES_SINK => ConnectionType::Elasticsearch,
         _ => {
             return Err(RwError::from(ProtocolError(format!(
                 "Connection type \"{connection_type}\" is not supported"
             ))));
         }
     };
-    Ok(create_connection_payload)
+    Ok(create_connection_request::Payload::ConnectionParams(
+        ConnectionParams {
+            connection_type: connection_type as i32,
+            properties: props.into_iter().collect(),
+            secret_refs: secret_refs.into_iter().collect(),
+        },
+    ))
 }
 
 pub async fn handle_create_connection(
@@ -107,9 +96,9 @@ pub async fn handle_create_connection(
     stmt: CreateConnectionStatement,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let db_name = session.database();
+    let db_name = &session.database();
     let (schema_name, connection_name) =
-        Binder::resolve_schema_qualified_name(db_name, stmt.connection_name.clone())?;
+        Binder::resolve_schema_qualified_name(db_name, &stmt.connection_name)?;
 
     if let Err(e) = session.check_connection_name_duplicated(stmt.connection_name) {
         return if stmt.if_not_exists {
@@ -124,11 +113,29 @@ pub async fn handle_create_connection(
         };
     }
     let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
-    let with_properties = handler_args.with_options.clone().into_connector_props();
-
-    let create_connection_payload = resolve_create_connection_payload(&with_properties)?;
+    let mut with_properties = handler_args.with_options.clone().into_connector_props();
+    resolve_privatelink_in_with_option(&mut with_properties)?;
+    let create_connection_payload = resolve_create_connection_payload(with_properties, &session)?;
 
     let catalog_writer = session.catalog_writer()?;
+
+    if session
+        .env()
+        .system_params_manager()
+        .get_params()
+        .load()
+        .enforce_secret()
+    {
+        use risingwave_pb::ddl_service::create_connection_request::Payload::ConnectionParams;
+        let ConnectionParams(cp) = &create_connection_payload else {
+            unreachable!()
+        };
+        enforce_secret_connection(
+            &cp.connection_type(),
+            cp.properties.keys().map(|s| s.as_str()),
+        )?;
+    }
+
     catalog_writer
         .create_connection(
             connection_name,
@@ -140,4 +147,30 @@ pub async fn handle_create_connection(
         .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_CONNECTION))
+}
+
+pub fn print_connection_params(
+    db_name: &str,
+    params: &PbConnectionParams,
+    catalog_reader: &CatalogReadGuard,
+) -> String {
+    let print_secret_ref = |secret_ref: &SecretRef| -> String {
+        // the lookup across all schemas in the database but should guarantee the secret exists
+        let (schema_name, secret_name) = catalog_reader
+            .find_schema_secret_by_secret_id(db_name, SecretId::from(secret_ref.secret_id))
+            .unwrap();
+        let maybe_print_as = match secret_ref.get_ref_as().unwrap() {
+            RefAsType::Text => "",
+            RefAsType::File => " AS FILE",
+            RefAsType::Unspecified => "",
+        };
+        format!("SECRET {}.{}{}", schema_name, secret_name, maybe_print_as,)
+    };
+    let deref_secrets = params
+        .get_secret_refs()
+        .iter()
+        .map(|(k, v)| (k.clone(), print_secret_ref(v)));
+    let mut props = params.get_properties().clone();
+    props.extend(deref_secrets);
+    serde_json::to_string(&props).unwrap()
 }

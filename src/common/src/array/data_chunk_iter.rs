@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -85,7 +85,7 @@ impl<'a> Iterator for DataChunkRefIter<'a> {
     }
 }
 
-impl<'a> FusedIterator for DataChunkRefIter<'a> {}
+impl FusedIterator for DataChunkRefIter<'_> {}
 
 pub struct DataChunkRefIterWithHoles<'a> {
     chunk: &'a DataChunk,
@@ -125,14 +125,14 @@ unsafe impl TrustedLen for DataChunkRefIterWithHoles<'_> {}
 mod row_ref {
     use super::*;
 
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Default)]
     pub struct RowRef<'a> {
         columns: &'a [ArrayRef],
 
         idx: usize,
     }
 
-    impl<'a> std::fmt::Debug for RowRef<'a> {
+    impl std::fmt::Debug for RowRef<'_> {
         fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
             f.debug_list().entries(self.iter()).finish()
         }
@@ -191,9 +191,11 @@ mod row_ref {
         }
 
         unsafe fn datum_at_unchecked(&self, index: usize) -> DatumRef<'_> {
-            self.columns
-                .get_unchecked(index)
-                .value_at_unchecked(self.idx)
+            unsafe {
+                self.columns
+                    .get_unchecked(index)
+                    .value_at_unchecked(self.idx)
+            }
         }
 
         fn len(&self) -> usize {

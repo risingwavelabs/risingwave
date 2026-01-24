@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -41,155 +41,196 @@ struct RwRelationInfo {
 
 #[system_catalog(table, "rw_catalog.rw_relation_info")]
 async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelationInfo>> {
-    let mut table_ids = Vec::new();
+    let mut job_ids = Vec::new();
     {
         let catalog_reader = reader.catalog_reader.read_guard();
         let schemas = catalog_reader.get_all_schema_names(&reader.auth_context.database)?;
+        let user_reader = reader.user_info_reader.read_guard();
+        let current_user = user_reader
+            .get_user_by_name(&reader.auth_context.user_name)
+            .expect("user not found");
         for schema in &schemas {
             let schema_catalog =
                 catalog_reader.get_schema_by_name(&reader.auth_context.database, schema)?;
 
-            schema_catalog.iter_created_mvs().for_each(|t| {
-                table_ids.push(t.id.table_id);
-            });
+            schema_catalog
+                .iter_created_mvs_with_acl(current_user)
+                .for_each(|t| {
+                    job_ids.push(t.id.as_job_id());
+                });
 
-            schema_catalog.iter_table().for_each(|t| {
-                table_ids.push(t.id.table_id);
-            });
+            schema_catalog
+                .iter_user_table_with_acl(current_user)
+                .for_each(|t| {
+                    job_ids.push(t.id.as_job_id());
+                });
 
-            schema_catalog.iter_sink().for_each(|t| {
-                table_ids.push(t.id.sink_id);
-            });
+            schema_catalog
+                .iter_source_with_acl(current_user)
+                .filter(|s| s.info.is_shared())
+                .for_each(|s| {
+                    job_ids.push(s.id.as_share_source_job_id());
+                });
 
-            schema_catalog.iter_index().for_each(|t| {
-                table_ids.push(t.index_table.id.table_id);
-            });
+            schema_catalog
+                .iter_sink_with_acl(current_user)
+                .for_each(|t| {
+                    job_ids.push(t.id.as_job_id());
+                });
 
-            schema_catalog.iter_subscription().for_each(|t| {
-                table_ids.push(t.id.subscription_id);
-            });
+            schema_catalog
+                .iter_index_with_acl(current_user)
+                .for_each(|t| {
+                    job_ids.push(t.index_table().id.as_job_id());
+                });
         }
     }
 
-    let table_fragments = reader.meta_client.list_table_fragments(&table_ids).await?;
+    let table_fragments = reader.meta_client.list_table_fragments(&job_ids).await?;
     let mut rows = Vec::new();
     let catalog_reader = reader.catalog_reader.read_guard();
     let schemas = catalog_reader.get_all_schema_names(&reader.auth_context.database)?;
+    let user_reader = reader.user_info_reader.read_guard();
+    let current_user = user_reader
+        .get_user_by_name(&reader.auth_context.user_name)
+        .expect("user not found");
     for schema in &schemas {
         let schema_catalog =
             catalog_reader.get_schema_by_name(&reader.auth_context.database, schema)?;
-        schema_catalog.iter_created_mvs().for_each(|t| {
-            if let Some(fragments) = table_fragments.get(&t.id.table_id) {
-                rows.push(RwRelationInfo {
-                    schemaname: schema.clone(),
-                    relationname: t.name.clone(),
-                    relationowner: t.owner as i32,
-                    definition: t.definition.clone(),
-                    relationtype: "MATERIALIZED VIEW".into(),
-                    relationid: t.id.table_id as i32,
-                    relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
-                    fragments: Some(json!(fragments.get_fragments()).to_string()),
-                    initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                    created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
-                    initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
-                    created_at_cluster_version: t.created_at_cluster_version.clone(),
-                });
-            }
-        });
+        schema_catalog
+            .iter_created_mvs_with_acl(current_user)
+            .for_each(|t| {
+                if let Some(fragments) = table_fragments.get(&t.id.as_job_id()) {
+                    rows.push(RwRelationInfo {
+                        schemaname: schema.clone(),
+                        relationname: t.name.clone(),
+                        relationowner: t.owner as i32,
+                        definition: t.create_sql(),
+                        relationtype: "MATERIALIZED VIEW".into(),
+                        relationid: t.id.as_i32_id(),
+                        relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
+                        fragments: Some(json!(fragments.get_fragments()).to_string()),
+                        initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                        created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
+                        initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
+                        created_at_cluster_version: t.created_at_cluster_version.clone(),
+                    });
+                }
+            });
 
-        schema_catalog.iter_table().for_each(|t| {
-            if let Some(fragments) = table_fragments.get(&t.id.table_id) {
-                rows.push(RwRelationInfo {
-                    schemaname: schema.clone(),
-                    relationname: t.name.clone(),
-                    relationowner: t.owner as i32,
-                    definition: t.definition.clone(),
-                    relationtype: "TABLE".into(),
-                    relationid: t.id.table_id as i32,
-                    relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
-                    fragments: Some(json!(fragments.get_fragments()).to_string()),
-                    initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                    created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
-                    initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
-                    created_at_cluster_version: t.created_at_cluster_version.clone(),
-                });
-            }
-        });
+        schema_catalog
+            .iter_user_table_with_acl(current_user)
+            .for_each(|t| {
+                if let Some(fragments) = table_fragments.get(&t.id.as_job_id()) {
+                    rows.push(RwRelationInfo {
+                        schemaname: schema.clone(),
+                        relationname: t.name.clone(),
+                        relationowner: t.owner as i32,
+                        definition: t.create_sql_purified(),
+                        relationtype: "TABLE".into(),
+                        relationid: t.id.as_i32_id(),
+                        relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
+                        fragments: Some(json!(fragments.get_fragments()).to_string()),
+                        initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                        created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
+                        initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
+                        created_at_cluster_version: t.created_at_cluster_version.clone(),
+                    });
+                }
+            });
 
-        schema_catalog.iter_sink().for_each(|t| {
-            if let Some(fragments) = table_fragments.get(&t.id.sink_id) {
-                rows.push(RwRelationInfo {
-                    schemaname: schema.clone(),
-                    relationname: t.name.clone(),
-                    relationowner: t.owner.user_id as i32,
-                    definition: t.definition.clone(),
-                    relationtype: "SINK".into(),
-                    relationid: t.id.sink_id as i32,
-                    relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
-                    fragments: Some(json!(fragments.get_fragments()).to_string()),
-                    initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                    created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
-                    initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
-                    created_at_cluster_version: t.created_at_cluster_version.clone(),
-                });
-            }
-        });
+        schema_catalog
+            .iter_sink_with_acl(current_user)
+            .for_each(|t| {
+                if let Some(fragments) = table_fragments.get(&t.id.as_job_id()) {
+                    rows.push(RwRelationInfo {
+                        schemaname: schema.clone(),
+                        relationname: t.name.clone(),
+                        relationowner: t.owner.user_id as i32,
+                        definition: t.definition.clone(),
+                        relationtype: "SINK".into(),
+                        relationid: t.id.as_i32_id(),
+                        relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
+                        fragments: Some(json!(fragments.get_fragments()).to_string()),
+                        initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                        created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
+                        initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
+                        created_at_cluster_version: t.created_at_cluster_version.clone(),
+                    });
+                }
+            });
 
-        schema_catalog.iter_index().for_each(|t| {
-            if let Some(fragments) = table_fragments.get(&t.index_table.id.table_id) {
-                rows.push(RwRelationInfo {
-                    schemaname: schema.clone(),
-                    relationname: t.name.clone(),
-                    relationowner: t.index_table.owner as i32,
-                    definition: t.index_table.definition.clone(),
-                    relationtype: "INDEX".into(),
-                    relationid: t.index_table.id.table_id as i32,
-                    relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
-                    fragments: Some(json!(fragments.get_fragments()).to_string()),
-                    initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                    created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
-                    initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
-                    created_at_cluster_version: t.created_at_cluster_version.clone(),
-                });
-            }
-        });
+        schema_catalog
+            .iter_index_with_acl(current_user)
+            .for_each(|t| {
+                if let Some(fragments) = table_fragments.get(&t.index_table().id.as_job_id()) {
+                    let index_table = t.index_table();
+                    rows.push(RwRelationInfo {
+                        schemaname: schema.clone(),
+                        relationname: t.name.clone(),
+                        relationowner: index_table.owner as i32,
+                        definition: index_table.create_sql(),
+                        relationtype: "INDEX".into(),
+                        relationid: index_table.id.as_i32_id(),
+                        relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
+                        fragments: Some(json!(fragments.get_fragments()).to_string()),
+                        initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                        created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
+                        initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
+                        created_at_cluster_version: t.created_at_cluster_version.clone(),
+                    });
+                }
+            });
 
         // Sources have no fragments.
-        schema_catalog.iter_source().for_each(|t| {
-            rows.push(RwRelationInfo {
-                schemaname: schema.clone(),
-                relationname: t.name.clone(),
-                relationowner: t.owner as i32,
-                definition: t.definition.clone(),
-                relationtype: "SOURCE".into(),
-                relationid: t.id as i32,
-                relationtimezone: "".into(),
-                fragments: None,
-                initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
-                created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
-                initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
-                created_at_cluster_version: t.created_at_cluster_version.clone(),
-            });
-        });
+        schema_catalog
+            .iter_source_with_acl(current_user)
+            .for_each(|t| {
+                let (timezone, fragments) = if t.info.is_shared()
+                    && let Some(fragments) = table_fragments.get(&t.id.as_share_source_job_id())
+                {
+                    (
+                        fragments.get_ctx().unwrap().get_timezone().clone(),
+                        Some(json!(fragments.get_fragments()).to_string()),
+                    )
+                } else {
+                    ("".into(), None)
+                };
 
-        schema_catalog.iter_subscription().for_each(|t| {
-            if let Some(fragments) = table_fragments.get(&t.id.subscription_id) {
+                rows.push(RwRelationInfo {
+                    schemaname: schema.clone(),
+                    relationname: t.name.clone(),
+                    relationowner: t.owner as i32,
+                    definition: t.create_sql_purified(),
+                    relationtype: "SOURCE".into(),
+                    relationid: t.id.as_i32_id(),
+                    relationtimezone: timezone,
+                    fragments,
+                    initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
+                    created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
+                    initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
+                    created_at_cluster_version: t.created_at_cluster_version.clone(),
+                });
+            });
+
+        schema_catalog
+            .iter_subscription_with_acl(current_user)
+            .for_each(|t| {
                 rows.push(RwRelationInfo {
                     schemaname: schema.clone(),
                     relationname: t.name.clone(),
                     relationowner: t.owner.user_id as i32,
                     definition: t.definition.clone(),
                     relationtype: "SUBSCRIPTION".into(),
-                    relationid: t.id.subscription_id as i32,
-                    relationtimezone: fragments.get_ctx().unwrap().get_timezone().clone(),
-                    fragments: Some(json!(fragments.get_fragments()).to_string()),
+                    relationid: t.id.as_i32_id(),
+                    relationtimezone: "".into(),
+                    fragments: None,
                     initialized_at: t.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: t.created_at_epoch.map(|e| e.as_timestamptz()),
                     initialized_at_cluster_version: t.initialized_at_cluster_version.clone(),
                     created_at_cluster_version: t.created_at_cluster_version.clone(),
                 });
-            }
-        });
+            });
     }
 
     Ok(rows)

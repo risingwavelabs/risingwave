@@ -16,7 +16,7 @@ use std::sync::Arc;
 
 use futures::FutureExt;
 use risingwave_common::transaction::transaction_message::TxnMsg;
-use tokio::sync::{mpsc, oneshot, Semaphore};
+use tokio::sync::{Semaphore, mpsc, oneshot};
 
 pub struct PermitValue(u32);
 
@@ -99,7 +99,7 @@ impl Sender {
                     .forget();
                 Some(PermitValue(card as _))
             }
-            TxnMsg::Begin(_) | TxnMsg::Rollback(_) | TxnMsg::End(_) => None,
+            TxnMsg::Begin(_) | TxnMsg::Rollback(_) | TxnMsg::End(..) => None,
         };
 
         self.tx

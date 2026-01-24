@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_expr::{capture_context, function, ExprError, Result};
+use risingwave_expr::{ExprError, Result, capture_context, function};
 
 use super::context::CATALOG_READER;
 use crate::catalog::CatalogReader;
@@ -42,7 +42,7 @@ fn pg_relation_size_impl(catalog: &CatalogReader, oid: i32, fork: &str) -> Resul
         }),
     }
     let catalog = catalog.read_guard();
-    if let Some(stats) = catalog.table_stats().table_stats.get(&(oid as u32)) {
+    if let Some(stats) = catalog.table_stats().table_stats.get(&(oid as u32).into()) {
         Ok(stats.total_key_size + stats.total_value_size)
     } else {
         Ok(0)
