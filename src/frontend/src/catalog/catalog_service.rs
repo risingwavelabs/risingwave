@@ -201,7 +201,7 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_connection(&self, connection_id: ConnectionId, cascade: bool) -> Result<()>;
 
-    async fn drop_secret(&self, secret_id: SecretId) -> Result<()>;
+    async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<()>;
 
     async fn alter_secret(
         &self,
@@ -589,8 +589,8 @@ impl CatalogWriter for CatalogWriterImpl {
         self.wait_version(version).await
     }
 
-    async fn drop_secret(&self, secret_id: SecretId) -> Result<()> {
-        let version = self.meta_client.drop_secret(secret_id).await?;
+    async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<()> {
+        let version = self.meta_client.drop_secret(secret_id, cascade).await?;
         self.wait_version(version).await
     }
 

@@ -531,10 +531,12 @@ message CreateSecretResponse {
 
 message DropSecretRequest {
   uint32 secret_id = 1;
+  bool cascade = 2;
 }
 
 message DropSecretResponse {
-  WaitVersion version = 1;
+  common.Status status = 1;
+  WaitVersion version = 2;
 }
 
 message AlterSecretRequest {

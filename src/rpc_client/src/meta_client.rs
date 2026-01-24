@@ -248,8 +248,8 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_secret(&self, secret_id: SecretId) -> Result<WaitVersion> {
-        let request = DropSecretRequest { secret_id };
+    pub async fn drop_secret(&self, secret_id: SecretId, cascade: bool) -> Result<WaitVersion> {
+        let request = DropSecretRequest { secret_id, cascade };
         let resp = self.inner.drop_secret(request).await?;
         Ok(resp
             .version
