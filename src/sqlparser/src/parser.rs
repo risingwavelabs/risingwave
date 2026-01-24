@@ -99,7 +99,7 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
-use crate::ast::ddl::AlterFragmentOperation;
+use crate::ast::ddl::{AlterCompactionGroupOperation, AlterFragmentOperation};
 
 pub type IncludeOption = Vec<IncludeOptionItem>;
 
@@ -3152,11 +3152,13 @@ impl Parser<'_> {
             self.parse_alter_secret()
         } else if self.parse_word("FRAGMENT") {
             self.parse_alter_fragment()
+        } else if self.parse_word("COMPACTION") {
+            self.parse_alter_compaction_group()
         } else if self.parse_keywords(&[Keyword::DEFAULT, Keyword::PRIVILEGES]) {
             self.parse_alter_default_privileges()
         } else {
             self.expected(
-                "DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
+                "COMPACTION, DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
             )
         }
     }
@@ -3915,6 +3917,25 @@ impl Parser<'_> {
         };
         Ok(Statement::AlterFragment {
             fragment_ids,
+            operation,
+        })
+    }
+
+    pub fn parse_alter_compaction_group(&mut self) -> ModalResult<Statement> {
+        if !self.parse_keyword(Keyword::GROUP) {
+            return self.expected("GROUP after ALTER COMPACTION");
+        }
+        let mut group_ids = vec![self.parse_literal_u64()?];
+        while self.consume_token(&Token::Comma) {
+            group_ids.push(self.parse_literal_u64()?);
+        }
+        if !self.parse_keyword(Keyword::SET) {
+            return self.expected("SET after ALTER COMPACTION GROUP <id>");
+        }
+        let configs = self.parse_comma_separated(Parser::parse_sql_option)?;
+        let operation = AlterCompactionGroupOperation::Set { configs };
+        Ok(Statement::AlterCompactionGroup {
+            group_ids,
             operation,
         })
     }

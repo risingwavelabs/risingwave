@@ -1323,6 +1323,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
     async fn list_unmigrated_tables(&self) -> RpcResult<HashMap<crate::catalog::TableId, String>> {
         unimplemented!()
     }
+
+    async fn update_compaction_config(
+        &self,
+        _compaction_group_ids: Vec<u64>,
+        _configs: Vec<risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig>,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
 }
 
 #[cfg(test)]
