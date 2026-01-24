@@ -3864,13 +3864,33 @@ impl Parser<'_> {
 
     pub fn parse_alter_secret(&mut self) -> ModalResult<Statement> {
         let secret_name = self.parse_object_name()?;
-        let with_options = self.parse_with_properties()?;
-        self.expect_keyword(Keyword::AS)?;
-        let new_credential = self.ensure_parse_value()?;
-        let operation = AlterSecretOperation::ChangeCredential { new_credential };
+        let operation = if self.parse_keyword(Keyword::WITH) {
+            let with_options = self.parse_options()?;
+            if self.parse_keyword(Keyword::AS) {
+                let new_credential = self.ensure_parse_value()?;
+                AlterSecretOperation::ChangeCredential {
+                    with_options,
+                    new_credential,
+                }
+            } else {
+                return self.expected("Keyword AS after Options");
+            }
+        } else if self.parse_keyword(Keyword::AS) {
+            let new_credential = self.ensure_parse_value()?;
+            AlterSecretOperation::ChangeCredential {
+                with_options: vec![],
+                new_credential,
+            }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSecretOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
+        } else {
+            return self.expected("WITH, AS or OWNER TO after ALTER SECRET");
+        };
         Ok(Statement::AlterSecret {
             name: secret_name,
-            with_options,
             operation,
         })
     }

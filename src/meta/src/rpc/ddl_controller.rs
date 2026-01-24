@@ -2236,6 +2236,7 @@ impl DdlController {
             Object::SubscriptionId(id) => (ObjectType::Subscription, id),
             Object::ConnectionId(id) => (ObjectType::Connection, id),
             Object::FunctionId(id) => (ObjectType::Function, id),
+            Object::SecretId(id) => (ObjectType::Secret, id),
         };
         self.metadata_manager
             .catalog_controller
