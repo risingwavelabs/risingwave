@@ -29,6 +29,7 @@ use risingwave_common::row::OwnedRow;
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common_rate_limit::RateLimit;
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::PbThrottleType;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::ChangeLogRow;
@@ -46,7 +47,8 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{StateTable, StreamExt, try_stream};
 use crate::executor::{
     ActorContextRef, Barrier, BoxedMessageStream, DispatcherBarrier, DispatcherMessage, Execute,
-    MergeExecutorInput, Message, StreamExecutorError, StreamExecutorResult, expect_first_barrier,
+    MergeExecutorInput, Message, Mutation, StreamExecutorError, StreamExecutorResult,
+    expect_first_barrier,
 };
 use crate::task::CreateMviewProgressReporter;
 
@@ -204,7 +206,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                             &self.upstream_table,
                             snapshot_epoch,
                             self.chunk_size,
-                            self.rate_limit,
+                            &mut self.rate_limit,
                             &mut self.barrier_rx,
                             &mut self.progress,
                             &mut backfill_state,
@@ -823,7 +825,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     upstream_table: &'a BatchTable<S>,
     snapshot_epoch: u64,
     chunk_size: usize,
-    rate_limit: RateLimit,
+    rate_limit: &'a mut RateLimit,
     barrier_rx: &'a mut UnboundedReceiver<Barrier>,
     progress: &'a mut CreateMviewProgressReporter,
     backfill_state: &'a mut BackfillState<S>,
@@ -838,7 +840,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         upstream_table,
         snapshot_epoch,
         &*backfill_state,
-        rate_limit,
+        *rate_limit,
         chunk_size,
     )
     .await?;
@@ -875,6 +877,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
             Either::Left(barrier) => {
                 assert_eq!(barrier.epoch.prev, barrier_epoch.curr);
                 barrier_epoch = barrier.epoch;
+
                 if barrier_epoch.curr >= snapshot_epoch {
                     return Err(anyhow!("should not receive barrier with epoch {barrier_epoch:?} later than snapshot epoch {snapshot_epoch}").into());
                 }
@@ -911,8 +914,24 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
                 progress.update(barrier_epoch, barrier_epoch.prev, count as _);
                 epoch_row_count = 0;
 
+                let new_rate_limit = barrier.mutation.as_ref().and_then(|m| {
+                    if let Mutation::Throttle(config) = &**m
+                        && let Some(config) = config.get(&actor_ctx.fragment_id)
+                        && config.throttle_type() == PbThrottleType::Backfill
+                    {
+                        Some(config.rate_limit)
+                    } else {
+                        None
+                    }
+                });
                 yield Message::Barrier(barrier);
                 post_commit.post_yield_barrier(None).await?;
+
+                if let Some(new_rate_limit) = new_rate_limit {
+                    let new_rate_limit = new_rate_limit.into();
+                    *rate_limit = new_rate_limit;
+                    snapshot_stream.update_rate_limiter(new_rate_limit, chunk_size);
+                }
             }
             Either::Right(Some(chunk)) => {
                 if backfill_paused {

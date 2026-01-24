@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::borrow::Borrow;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use risingwave_common::catalog::TableId;
 use risingwave_pb::hummock::PbTableStats;
@@ -114,6 +114,7 @@ pub fn from_prost_table_stats_map(
 pub fn purge_prost_table_stats(
     table_stats: &mut PbTableStatsMap,
     hummock_version: &HummockVersion,
+    truncate_tables: &HashSet<TableId>,
 ) -> bool {
     let prev_count = table_stats.len();
     table_stats.retain(|table_id, _| {
@@ -122,5 +123,15 @@ pub fn purge_prost_table_stats(
             .info()
             .contains_key(table_id)
     });
-    prev_count != table_stats.len()
+
+    let mut truncate_updated = false;
+    for table_id in truncate_tables {
+        if let Some(stats) = table_stats.get_mut(table_id) {
+            // Reset all fields
+            *stats = PbTableStats::default();
+            truncate_updated = true;
+        }
+    }
+
+    prev_count != table_stats.len() || truncate_updated
 }

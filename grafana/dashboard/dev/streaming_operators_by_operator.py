@@ -1,7 +1,6 @@
 from ..common import *
 from . import section
 
-
 @section
 def _(outer_panels: Panels):
     # The actor_id can be masked due to metrics level settings.
@@ -10,132 +9,9 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Streaming] Streaming Actors",
+            "Streaming Operator Metrics by Operator Type",
             [
-                panels.subheader("General"),
-                panels.timeseries_rowsps(
-                    "Actor Input Throughput (rows/s)",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('stream_actor_in_record_cnt')}[$__rate_interval])) by (fragment_id, upstream_fragment_id)",
-                            "fragment total {{fragment_id}}<-{{upstream_fragment_id}}",
-                        ),
-                        panels.target(
-                            f"rate({metric('stream_actor_in_record_cnt', actor_level_filter)}[$__rate_interval])",
-                            "actor {{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_rowsps(
-                    "Actor Output Throughput (rows/s)",
-                    "",
-                    [
-                        panels.target(
-                            f"sum(rate({metric('stream_actor_out_record_cnt')}[$__rate_interval])) by (fragment_id)",
-                            "fragment total {{fragment_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_actor_out_record_cnt', actor_level_filter)}[$__rate_interval])",
-                            "actor {{actor_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Executor Cache Memory Usage",
-                    "The operator-level memory usage statistics collected by each LRU cache",
-                    [
-                        panels.target(
-                            f"sum({metric('stream_memory_usage')}) by (table_id, desc)",
-                            "table total {{table_id}}: {{desc}}",
-                        ),
-                        panels.target_hidden(
-                            f"{metric('stream_memory_usage', actor_level_filter)}",
-                            "actor {{actor_id}} table {{table_id}}: {{desc}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_bytes(
-                    "Executor Cache Memory Usage of Materialized Views",
-                    "Memory usage aggregated by materialized views",
-                    [
-                        panels.target(
-                            f"sum({metric('stream_memory_usage')} * on(table_id) group_left(materialized_view_id) {metric('table_info')}) by (materialized_view_id)",
-                            "materialized view {{materialized_view_id}}",
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Executor Cache Miss Ratio",
-                    "",
-                    [
-                        panels.target(
-                            f"(sum(rate({metric('stream_join_lookup_miss_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, fragment_id) ) / (sum(rate({metric('stream_join_lookup_total_count')}[$__rate_interval])) by (side, join_table_id, degree_table_id, fragment_id)) >= 0",
-                            "Join executor cache miss ratio - - {{side}} side, join_table_id {{join_table_id}} degree_table_id {{degree_table_id}} fragment {{fragment_id}}",
-                        ),
-                        panels.target(
-                            f"(sum(rate({metric('stream_agg_lookup_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_lookup_total_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Agg cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
-                        ),
-                        panels.target(
-                            f"(sum(rate({metric('stream_agg_state_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_state_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Agg state cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
-                        ),
-                        panels.target(
-                            f"(sum(rate({metric('stream_agg_distinct_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_agg_distinct_total_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Distinct agg cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
-                        ),
-                        panels.target(
-                            f"(sum(rate({metric('stream_group_top_n_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_group_top_n_total_query_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Stream group top n cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
-                        ),
-                        panels.target(
-                            f"(sum(rate({metric('stream_group_top_n_appendonly_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_group_top_n_appendonly_total_query_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Stream group top n appendonly cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
-                        ),
-                        panels.target(
-                            f"(sum(rate({metric('stream_lookup_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_lookup_total_query_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Stream lookup cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
-                        ),
-                        panels.target(
-                            f"(sum(rate({metric('stream_temporal_join_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_temporal_join_total_query_cache_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Stream temporal join cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
-                        ),
-                        panels.target(
-                            f"1 - (sum(rate({metric('stream_materialize_cache_hit_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_materialize_cache_total_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Materialize executor cache miss ratio - table {{table_id}} fragment {{fragment_id}}",
-                        ),
-                        panels.target(
-                            f"(sum(rate({metric('stream_over_window_cache_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Over window cache miss ratio - table {{table_id}} fragment {{fragment_id}} ",
-                        ),
-                        panels.target(
-                            f"(sum(rate({metric('stream_over_window_range_cache_left_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Over window partition range cache left miss ratio - table {{table_id}} fragment {{fragment_id}} ",
-                        ),
-                        panels.target(
-                            f"(sum(rate({metric('stream_over_window_range_cache_right_miss_count')}[$__rate_interval])) by (table_id, fragment_id) ) / (sum(rate({metric('stream_over_window_range_cache_lookup_count')}[$__rate_interval])) by (table_id, fragment_id)) >= 0",
-                            "Over window partition range cache right miss ratio - table {{table_id}} fragment {{fragment_id}} ",
-                        ),
-                    ],
-                ),
-                panels.timeseries_percentage(
-                    "Executor Barrier Align Per Second",
-                    "",
-                    [
-                        # The metrics might be pre-aggregated locally on each compute node when `actor_id` is masked due to metrics level settings.
-                        # Thus to calculate the average, we need to manually divide the actor count.
-                        panels.target(
-                            f"sum(rate({metric('stream_barrier_align_duration_ns')}[$__rate_interval]) / 1000000000) by (fragment_id, wait_side, executor) \
-                            / ignoring (wait_side, executor) group_left sum({metric('stream_actor_count')}) by (fragment_id)",
-                            "fragment avg {{fragment_id}} {{wait_side}} {{executor}}",
-                        ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_barrier_align_duration_ns', actor_level_filter)}[$__rate_interval]) / 1000000000",
-                            "actor {{actor_id}} fragment {{fragment_id}} {{wait_side}} {{executor}}",
-                        ),
-                    ],
-                ),
+                panels.subheader("Exchange"),
                 panels.timeseries_percentage(
                     "Merger Barrier Align",
                     "",
@@ -151,29 +27,23 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_actor_rowsps(
-                    "Executor Throughput",
-                    "When enabled, this metric shows the input throughput of each executor.",
+                panels.timeseries_bytes_per_sec(
+                    "Fragment-level Remote Exchange Send Throughput",
+                    "",
                     [
                         panels.target(
-                            f"sum(rate({metric('stream_executor_row_count')}[$__rate_interval])) by (executor_identity, fragment_id)",
-                            "{{executor_identity}} fragment total {{fragment_id}}",
-                        ),
-                        panels.target_hidden(
-                            f"rate({metric('stream_executor_row_count', actor_level_filter)}[$__rate_interval])",
-                            "{{executor_identity}} actor {{actor_id}}",
+                            f"rate({metric('stream_exchange_frag_send_size')}[$__rate_interval])",
+                            "{{up_fragment_id}}->{{down_fragment_id}}",
                         ),
                     ],
                 ),
-                panels.timeseries_epoch(
-                    "Current Epoch of Actors",
-                    "The current epoch that the actors are processing. If an actor's epoch is far behind the others, "
-                    "it's very likely to be the performance bottleneck",
+                panels.timeseries_bytes_per_sec(
+                    "Fragment-level Remote Exchange Recv Throughput",
+                    "",
                     [
                         panels.target(
-                            # Here we use `min` but actually no much difference. Any of the sampled epochs makes sense.
-                            f"min({metric('stream_actor_current_epoch')} != 0) by (fragment_id)",
-                            "fragment {{fragment_id}}",
+                            f"rate({metric('stream_exchange_frag_recv_size')}[$__rate_interval])",
+                            "{{up_fragment_id}}->{{down_fragment_id}}",
                         ),
                     ],
                 ),

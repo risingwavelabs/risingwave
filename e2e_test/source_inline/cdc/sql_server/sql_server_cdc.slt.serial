@@ -187,7 +187,7 @@ CREATE TABLE shared_orders (
 )  from mssql_source table 'mydb.wrong_dbo.orders';
 
 # wrong database name
-statement error The database name `wrong_mydb` in the FROM clause is not the same as the database name `mydb` in source definition
+statement error The database name 'wrong_mydb' in FROM clause does not match the database name 'mydb' specified in source definition
 CREATE TABLE shared_orders (
     order_id INT,
     order_date BIGINT,
@@ -570,8 +570,12 @@ SELECT commit_ts > '2024-08-16 00:00:00.000+00:00' from upper_table where "ID" =
 ----
 t
 
-# Test auto-fill functionality for SQL Server CDC table names
-# Test with schema.table format (should auto-fill database name)
+# Test table name formats for SQL Server CDC
+# According to PR #23739, only two formats are allowed:
+# 1. database.schema.table (full format)
+# 2. schema.table (omit database)
+
+# Test 1: schema.table format (correct - should auto-fill database name)
 statement ok
 CREATE TABLE shared_orders_schema_table (
     order_id INT,
@@ -583,19 +587,7 @@ CREATE TABLE shared_orders_schema_table (
     PRIMARY KEY (order_id)
 ) from mssql_source table 'dbo.orders';
 
-# Test with table only format (should auto-fill database name and use default schema 'dbo')
-statement ok
-CREATE TABLE shared_orders_table_only (
-    order_id INT,
-    order_date BIGINT,
-    customer_name VARCHAR,
-    price DECIMAL,
-    product_id INT,
-    order_status SMALLINT,
-    PRIMARY KEY (order_id)
-) from mssql_source table 'orders';
-
-# Test with full format (should work as before)
+# Test 2: full database.schema.table format (correct)
 statement ok
 CREATE TABLE shared_orders_full_format (
     order_id INT,
@@ -607,8 +599,20 @@ CREATE TABLE shared_orders_full_format (
     PRIMARY KEY (order_id)
 ) from mssql_source table 'mydb.dbo.orders';
 
-# Test with invalid format (should still fail)
-statement error The upstream table name must be in one of these formats: 'database.schema.table', 'schema.table', or 'table'
+# Test 3: table only format (incorrect - should fail)
+statement error Invalid table name format
+CREATE TABLE shared_orders_table_only (
+    order_id INT,
+    order_date BIGINT,
+    customer_name VARCHAR,
+    price DECIMAL,
+    product_id INT,
+    order_status SMALLINT,
+    PRIMARY KEY (order_id)
+) from mssql_source table 'orders';
+
+# Test 4: invalid format with too many parts (incorrect - should fail)
+statement error Invalid table name format
 CREATE TABLE shared_orders_invalid (
     order_id INT,
     order_date BIGINT,
@@ -619,9 +623,9 @@ CREATE TABLE shared_orders_invalid (
     PRIMARY KEY (order_id)
 ) from mssql_source table 'mydb.dbo.orders.extra';
 
-# Test with wrong database name in full format (should still fail)
-statement error The database name `wrong_mydb` in the FROM clause is not the same as the database name `mydb` in source definition
-CREATE TABLE shared_orders_wrong_db (
+# Test 6: wrong schema name in database.schema.table format (incorrect - should fail)
+statement error Sql Server table 'wrong_schema'.'orders' doesn't exist in 'mydb'
+CREATE TABLE shared_orders_wrong_schema (
     order_id INT,
     order_date BIGINT,
     customer_name VARCHAR,
@@ -629,34 +633,21 @@ CREATE TABLE shared_orders_wrong_db (
     product_id INT,
     order_status SMALLINT,
     PRIMARY KEY (order_id)
-) from mssql_source table 'wrong_mydb.dbo.orders';
+) from mssql_source table 'mydb.wrong_schema.orders';
 
-# Test with custom schema in schema.table format
+# Test 7: another correct case with schema.table format
 statement ok
-CREATE TABLE shared_single_type_custom_schema (
+CREATE TABLE shared_single_type_schema_table (
     id INT,
     c_time time,
     PRIMARY KEY (id)
 ) from mssql_source table 'dbo.single_type';
 
-# Test with table only format for single_type
-statement ok
-CREATE TABLE shared_single_type_table_only (
-    id INT,
-    c_time time,
-    PRIMARY KEY (id)
-) from mssql_source table 'single_type';
-
 sleep 5s
 
-# Verify the new tables work correctly
+# Verify the correctly created tables work
 query I
 select count(*) from shared_orders_schema_table;
-----
-6
-
-query I
-select count(*) from shared_orders_table_only;
 ----
 6
 
@@ -666,12 +657,7 @@ select count(*) from shared_orders_full_format;
 6
 
 query I
-select count(*) from shared_single_type_custom_schema;
-----
-2
-
-query I
-select count(*) from shared_single_type_table_only;
+select count(*) from shared_single_type_schema_table;
 ----
 2
 

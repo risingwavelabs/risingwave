@@ -29,7 +29,13 @@ updates:
   groups:
     aws:
       patterns:
-        - "aws*"
+        - "aws-*"
+      exclude-patterns:
+        - "aws-lc-*"
+        - "aws-msk-iam-sasl-signer"
+    adbc:
+      patterns:
+        - "adbc_*"
     tonic:
       patterns:
         - "tonic*"

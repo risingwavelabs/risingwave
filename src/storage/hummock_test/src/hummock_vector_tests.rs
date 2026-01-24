@@ -17,7 +17,7 @@ use std::collections::HashSet;
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::array::VectorDistanceType;
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_common::vector::distance::{DistanceMeasurement, InnerProductDistance};
 use risingwave_hummock_sdk::HummockReadEpoch;
@@ -145,6 +145,7 @@ async fn test_flat_vector() {
                 HummockReadEpoch::Committed(epoch),
                 NewReadSnapshotOptions {
                     table_id: TEST_TABLE_ID,
+                    table_option: TableOption::default(),
                 },
             )
             .await
@@ -325,6 +326,7 @@ async fn test_hnsw_vector() {
                 HummockReadEpoch::Committed(epoch),
                 NewReadSnapshotOptions {
                     table_id: TEST_TABLE_ID,
+                    table_option: TableOption::default(),
                 },
             )
             .await

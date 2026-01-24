@@ -162,10 +162,8 @@ impl LocalInstanceUnsyncData {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
-    use std::ops::Deref;
 
     use futures::FutureExt;
-    use futures::future::join_all;
     use itertools::Itertools;
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::EpochExt;
@@ -198,7 +196,7 @@ mod tests {
         let epoch3 = epoch2.next_epoch();
         let epoch4 = epoch3.next_epoch();
         let memory_limiter = buffer_tracker.get_memory_limiter().clone();
-        let memory_limiter = Some(memory_limiter.deref());
+        let memory_limiter = Some(memory_limiter.as_ref());
 
         // epoch1
         uploader.start_epoch(epoch1, HashSet::from_iter([table_id1]));
@@ -209,12 +207,15 @@ mod tests {
         uploader.init_instance(instance_id2, table_id2, epoch1);
 
         // naming: imm<table>_<instance>_<epoch>
-        let imm1_1_1 = gen_imm_inner(table_id1, epoch1, 0, memory_limiter).await;
-        uploader.add_imm(instance_id1_1, imm1_1_1.clone());
-        let imm1_2_1 = gen_imm_inner(table_id1, epoch1, 0, memory_limiter).await;
-        uploader.add_imm(instance_id1_2, imm1_2_1.clone());
-        let imm2_1 = gen_imm_inner(table_id2, epoch1, 0, memory_limiter).await;
-        uploader.add_imm(instance_id2, imm2_1.clone());
+        let imm1_1_1 = gen_imm_inner(table_id1, epoch1, 0);
+        let tracker = tracker_for_test(&imm1_1_1, memory_limiter).await;
+        uploader.add_imm(instance_id1_1, (imm1_1_1.clone(), tracker));
+        let imm1_2_1 = gen_imm_inner(table_id1, epoch1, 0);
+        let tracker = tracker_for_test(&imm1_2_1, memory_limiter).await;
+        uploader.add_imm(instance_id1_2, (imm1_2_1.clone(), tracker));
+        let imm2_1 = gen_imm_inner(table_id2, epoch1, 0);
+        let tracker = tracker_for_test(&imm2_1, memory_limiter).await;
+        uploader.add_imm(instance_id2, (imm2_1.clone(), tracker));
 
         // epoch2
         uploader.start_epoch(epoch2, HashSet::from_iter([table_id1]));
@@ -224,12 +225,13 @@ mod tests {
         uploader.local_seal_epoch(instance_id1_2, epoch2, SealCurrentEpochOptions::for_test());
         uploader.local_seal_epoch(instance_id2, epoch2, SealCurrentEpochOptions::for_test());
 
-        let imms1_1_2 = join_all(
-            [0, 1, 2].map(|offset| gen_imm_inner(table_id1, epoch2, offset, memory_limiter)),
-        )
-        .await;
+        let imms1_1_2 = [0, 1, 2]
+            .into_iter()
+            .map(|offset| gen_imm_inner(table_id1, epoch2, offset))
+            .collect_vec();
         for imm in imms1_1_2.clone() {
-            uploader.add_imm(instance_id1_1, imm);
+            let tracker = tracker_for_test(&imm, memory_limiter).await;
+            uploader.add_imm(instance_id1_1, (imm, tracker));
         }
 
         // epoch3
@@ -240,12 +242,13 @@ mod tests {
         uploader.local_seal_epoch(instance_id1_2, epoch3, SealCurrentEpochOptions::for_test());
         uploader.local_seal_epoch(instance_id2, epoch3, SealCurrentEpochOptions::for_test());
 
-        let imms1_2_3 = join_all(
-            [0, 1, 2, 3].map(|offset| gen_imm_inner(table_id1, epoch3, offset, memory_limiter)),
-        )
-        .await;
+        let imms1_2_3 = [0, 1, 2, 3]
+            .into_iter()
+            .map(|offset| gen_imm_inner(table_id1, epoch3, offset))
+            .collect_vec();
         for imm in imms1_2_3.clone() {
-            uploader.add_imm(instance_id1_2, imm);
+            let tracker = tracker_for_test(&imm, memory_limiter).await;
+            uploader.add_imm(instance_id1_2, (imm, tracker));
         }
 
         // epoch4
@@ -255,12 +258,15 @@ mod tests {
         uploader.local_seal_epoch(instance_id1_2, epoch4, SealCurrentEpochOptions::for_test());
         uploader.local_seal_epoch(instance_id2, epoch4, SealCurrentEpochOptions::for_test());
 
-        let imm1_1_4 = gen_imm_inner(table_id1, epoch4, 0, memory_limiter).await;
-        uploader.add_imm(instance_id1_1, imm1_1_4.clone());
-        let imm1_2_4 = gen_imm_inner(table_id1, epoch4, 0, memory_limiter).await;
-        uploader.add_imm(instance_id1_2, imm1_2_4.clone());
-        let imm2_4_1 = gen_imm_inner(table_id2, epoch4, 0, memory_limiter).await;
-        uploader.add_imm(instance_id2, imm2_4_1.clone());
+        let imm1_1_4 = gen_imm_inner(table_id1, epoch4, 0);
+        let tracker = tracker_for_test(&imm1_1_4, memory_limiter).await;
+        uploader.add_imm(instance_id1_1, (imm1_1_4.clone(), tracker));
+        let imm1_2_4 = gen_imm_inner(table_id1, epoch4, 0);
+        let tracker = tracker_for_test(&imm1_2_4, memory_limiter).await;
+        uploader.add_imm(instance_id1_2, (imm1_2_4.clone(), tracker));
+        let imm2_4_1 = gen_imm_inner(table_id2, epoch4, 0);
+        let tracker = tracker_for_test(&imm2_4_1, memory_limiter).await;
+        uploader.add_imm(instance_id2, (imm2_4_1.clone(), tracker));
 
         // uploader state:
         //          table_id1:                                      table_id2:
@@ -303,7 +309,7 @@ mod tests {
             vec![imm2_4_1.batch_id()],
         )]));
 
-        uploader.may_flush();
+        uploader.may_flush_for_test();
         await_start1_1.await;
         await_start3.await;
         await_start2.await;
@@ -313,8 +319,9 @@ mod tests {
 
         assert_uploader_pending(&mut uploader).await;
 
-        let imm2_4_2 = gen_imm_inner(table_id2, epoch4, 1, memory_limiter).await;
-        uploader.add_imm(instance_id2, imm2_4_2.clone());
+        let imm2_4_2 = gen_imm_inner(table_id2, epoch4, 1);
+        let tracker = tracker_for_test(&imm2_4_2, memory_limiter).await;
+        uploader.add_imm(instance_id2, (imm2_4_2.clone(), tracker));
 
         uploader.local_seal_epoch(
             instance_id1_1,

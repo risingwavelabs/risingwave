@@ -24,7 +24,7 @@ message HostAddress {
 message ActorInfo {
   uint32 actor_id = 1;
   HostAddress host = 2;
-  uint32 partial_graph_id = 3;
+  uint64 partial_graph_id = 3;
 }
 
 enum WorkerType {
@@ -194,4 +194,12 @@ enum DistanceType {
   DISTANCE_TYPE_L2_SQR = 2;
   DISTANCE_TYPE_COSINE = 3;
   DISTANCE_TYPE_INNER_PRODUCT = 4;
+}
+
+enum ThrottleType {
+  THROTTLE_TYPE_UNSPECIFIED = 0;
+  THROTTLE_TYPE_DML = 1;
+  THROTTLE_TYPE_BACKFILL = 2;
+  THROTTLE_TYPE_SOURCE = 3;
+  THROTTLE_TYPE_SINK = 4;
 }

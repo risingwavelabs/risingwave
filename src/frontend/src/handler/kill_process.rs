@@ -18,9 +18,7 @@ use risingwave_pb::frontend_service::CancelRunningSqlRequest;
 
 use crate::error::{ErrorCode, Result};
 use crate::handler::{HandlerArgs, RwPgResponse};
-use crate::session::{
-    SessionMapRef, WorkerProcessId, cancel_creating_jobs_in_session, cancel_queries_in_session,
-};
+use crate::session::{SessionMapRef, WorkerProcessId, cancel_queries_in_session};
 
 pub(super) async fn handle_kill(handler_args: HandlerArgs, s: String) -> Result<RwPgResponse> {
     let worker_process_id =
@@ -64,12 +62,19 @@ pub async fn handle_kill_local(
     let session_id = (process_id, process_id);
     tracing::trace!("kill query in session: {:?}", session_id);
     // TODO: cancel queries with await.
-    let mut session_exists = cancel_queries_in_session(session_id, sessions_map.clone());
-    session_exists |= cancel_creating_jobs_in_session(session_id, sessions_map);
-
-    if session_exists {
-        Ok(PgResponse::empty_result(StatementType::KILL))
-    } else {
-        Err(ErrorCode::SessionNotFound.into())
-    }
+    let session_exists = cancel_queries_in_session(session_id, sessions_map.clone());
+    let session = { sessions_map.read().get(&session_id).cloned() };
+    let Some(session) = session else {
+        if session_exists {
+            return Ok(PgResponse::empty_result(StatementType::KILL));
+        }
+        return Err(ErrorCode::SessionNotFound.into());
+    };
+    session
+        .env()
+        .creating_streaming_job_tracker()
+        .cancel_jobs(session_id)
+        .await
+        .map_err(crate::error::RwError::from)?;
+    Ok(PgResponse::empty_result(StatementType::KILL))
 }

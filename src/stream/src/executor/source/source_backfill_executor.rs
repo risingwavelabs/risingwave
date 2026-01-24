@@ -34,6 +34,7 @@ use risingwave_connector::source::{
     SplitMetaData,
 };
 use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::TryWaitEpochOptions;
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -595,16 +596,17 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                             }
                                         }
                                         Mutation::Throttle(fragment_to_apply) => {
-                                            if let Some(new_rate_limit) =
+                                            if let Some(entry) =
                                                 fragment_to_apply.get(&self.actor_ctx.fragment_id)
-                                                && *new_rate_limit != self.rate_limit_rps
+                                                && entry.throttle_type() == ThrottleType::Backfill
+                                                && entry.rate_limit != self.rate_limit_rps
                                             {
                                                 tracing::info!(
                                                     "updating rate limit from {:?} to {:?}",
                                                     self.rate_limit_rps,
-                                                    *new_rate_limit
+                                                    entry.rate_limit
                                                 );
-                                                self.rate_limit_rps = *new_rate_limit;
+                                                self.rate_limit_rps = entry.rate_limit;
                                                 // rebuild reader
                                                 let (reader, _backfill_info) = self
                                                     .build_stream_source_reader(

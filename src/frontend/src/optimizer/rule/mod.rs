@@ -257,8 +257,10 @@ mod empty_agg_remove_rule;
 pub use empty_agg_remove_rule::*;
 mod add_logstore_rule;
 mod correlated_topn_to_vector_search;
+mod iceberg_count_star_rule;
+mod iceberg_intermediate_scan_rule;
 mod pull_up_correlated_predicate_agg_rule;
-mod source_to_iceberg_scan_rule;
+mod source_to_iceberg_intermediate_scan_rule;
 mod source_to_kafka_scan_rule;
 mod table_function_to_file_scan_rule;
 mod table_function_to_internal_backfill_progress;
@@ -268,14 +270,13 @@ mod table_function_to_mysql_query_rule;
 mod table_function_to_postgres_query_rule;
 mod top_n_to_vector_search_rule;
 mod values_extract_project_rule;
-
 pub use add_logstore_rule::*;
-pub use batch::batch_iceberg_count_star::*;
-pub use batch::batch_iceberg_predicate_pushdown::*;
 pub use batch::batch_push_limit_to_scan_rule::*;
 pub use correlated_topn_to_vector_search::*;
+pub use iceberg_count_star_rule::IcebergCountStarRule;
+pub use iceberg_intermediate_scan_rule::*;
 pub use pull_up_correlated_predicate_agg_rule::*;
-pub use source_to_iceberg_scan_rule::*;
+pub use source_to_iceberg_intermediate_scan_rule::*;
 pub use source_to_kafka_scan_rule::*;
 pub use table_function_to_file_scan_rule::*;
 pub use table_function_to_internal_backfill_progress::*;
@@ -371,11 +372,11 @@ macro_rules! for_all_rules {
             , { UnifyFirstLastValueRule }
             , { ValuesExtractProjectRule }
             , { BatchPushLimitToScanRule }
-            , { BatchIcebergPredicatePushDownRule }
-            , { BatchIcebergCountStar }
             , { PullUpCorrelatedPredicateAggRule }
             , { SourceToKafkaScanRule }
-            , { SourceToIcebergScanRule }
+            , { SourceToIcebergIntermediateScanRule }
+            , { IcebergCountStarRule}
+            , { IcebergIntermediateScanRule }
             , { AddLogstoreRule }
             , { EmptyAggRemoveRule }
             , { TopNToVectorSearchRule }

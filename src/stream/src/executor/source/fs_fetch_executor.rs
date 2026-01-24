@@ -32,6 +32,7 @@ use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{
     BoxStreamingFileSourceChunkStream, SourceContext, SourceCtrlOpts, SplitImpl, SplitMetaData,
 };
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::store::PrefetchOptions;
 use thiserror_ext::AsReport;
 
@@ -294,16 +295,17 @@ impl<S: StateStore, Src: OpendalSource> FsFetchExecutor<S, Src> {
                                             Mutation::Pause => stream.pause_stream(),
                                             Mutation::Resume => stream.resume_stream(),
                                             Mutation::Throttle(fragment_to_apply) => {
-                                                if let Some(new_rate_limit) = fragment_to_apply
+                                                if let Some(entry) = fragment_to_apply
                                                     .get(&self.actor_ctx.fragment_id)
-                                                    && *new_rate_limit != self.rate_limit_rps
+                                                    && entry.throttle_type() == ThrottleType::Source
+                                                    && entry.rate_limit != self.rate_limit_rps
                                                 {
                                                     tracing::info!(
                                                         "updating rate limit from {:?} to {:?}",
                                                         self.rate_limit_rps,
-                                                        *new_rate_limit
+                                                        entry.rate_limit
                                                     );
-                                                    self.rate_limit_rps = *new_rate_limit;
+                                                    self.rate_limit_rps = entry.rate_limit;
                                                     splits_on_fetch = 0;
                                                     reading_file = None;
                                                 }

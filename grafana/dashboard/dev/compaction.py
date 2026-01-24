@@ -9,8 +9,9 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Storage] Compaction",
+            "Compaction",
             [
+                panels.subheader("SSTables"),
                 panels.timeseries_count(
                     "SSTable Count",
                     "The number of SSTables at each level",
@@ -22,7 +23,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_kilobytes(
-                    "SSTable Size(KB)",
+                    "SSTable Size (KB)",
                     "The size(KB) of SSTables at each level",
                     [
                         panels.target(
@@ -31,9 +32,10 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Tasks & Results"),
                 panels.timeseries_bytesps(
                     "Commit Flush Bytes by Table",
-                    "The  of bytes that have been written by commit epoch per second.",
+                    "The number of bytes that have been written by commit epoch per second.",
                     [
                         panels.target(
                             f"sum(rate({metric('storage_commit_write_throughput')}[$__rate_interval])) by (table_id)",
@@ -120,6 +122,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Performance"),
                 panels.timeseries_latency(
                     "Compaction Duration",
                     "compact-task: The total time have been spent on compaction.",
@@ -239,6 +242,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Per-Level IO & LSM"),
                 panels.timeseries_bytes_per_sec(
                     "KBs Read/Write by Level",
                     "",
@@ -258,7 +262,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_ops(
-                    "Count of SSTs Read/Write by level",
+                    "Count of SSTs Read/Write by Level",
                     "",
                     [
                         panels.target(
@@ -276,7 +280,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Hummock Sstable Bloom Filter Size",
+                    "Hummock SSTable Bloom Filter Size",
                     "For observing bloom_filter size, sstable file size, sstable block size etc.",
                     [
                         panels.target(
@@ -292,7 +296,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Hummock Sstable File Size",
+                    "Hummock SSTable File Size",
                     "For observing sstable file size",
                     [
                         panels.target(
@@ -308,7 +312,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Hummock Sstable Block Size",
+                    "Hummock SSTable Block Size",
                     "For observing sstable block size",
                     [
                         panels.target(
@@ -324,7 +328,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Hummock Sstable Avg Key And Value Count",
+                    "Hummock SSTable Avg Key/Value Size",
                     "For observing avg key and value count",
                     [
                         panels.target(
@@ -365,7 +369,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Lsm Compact Pending Bytes",
+                    "LSM Compact Pending Bytes",
                     "bytes of Lsm tree needed to reach balance",
                     [
                         panels.target(
@@ -375,7 +379,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
-                    "Lsm Level Compression Ratio",
+                    "LSM Level Compression Ratio",
                     "compression ratio of each level of the lsm tree",
                     [
                         panels.target(

@@ -751,6 +751,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             case "bytea":
                 // BYTEA -> BYTEA
                 return val == Data.DataType.TypeName.BYTEA_VALUE;
+            case "geometry":
+                // PostGIS GEOMETRY -> BYTEA (stored as EWKB bytes)
+                return val == Data.DataType.TypeName.BYTEA_VALUE;
             case "json":
             case "jsonb":
                 // JSON, JSONB -> JSONB
@@ -773,12 +776,15 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 // ARRAY -> LIST
                 return val == Data.DataType.TypeName.LIST_VALUE;
             case "USER-DEFINED":
-                // Handle user-defined types like enum, citext, etc.
+                // Handle user-defined types like enum, citext, geometry, etc.
                 if (colInfo.udtName != null) {
                     switch (colInfo.udtName.toLowerCase()) {
                         case "citext":
                             // CITEXT -> CHARACTER VARYING
                             return val == Data.DataType.TypeName.VARCHAR_VALUE;
+                        case "geometry":
+                            // PostGIS GEOMETRY -> BYTEA (stored as EWKB bytes)
+                            return val == Data.DataType.TypeName.BYTEA_VALUE;
                         case "ltree":
                             return false;
                         case "hstore":

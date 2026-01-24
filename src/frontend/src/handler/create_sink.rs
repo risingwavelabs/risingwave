@@ -37,7 +37,7 @@ use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    Sink, enforce_secret_sink,
+    SINK_USER_IGNORE_DELETE_OPTION, Sink, enforce_secret_sink,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
@@ -320,6 +320,9 @@ pub async fn gen_sink_plan(
                 session.notice_to_user("Consider using the newer syntax `FORMAT ... ENCODE ...` instead of `type = '...'`.");
                 if let Some(v) = resolved_with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
                     f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
+                }
+                if let Some(v) = resolved_with_options.get(SINK_USER_IGNORE_DELETE_OPTION) {
+                    f.options.insert(SINK_USER_IGNORE_DELETE_OPTION.into(), v.into());
                 }
                 f
             }),

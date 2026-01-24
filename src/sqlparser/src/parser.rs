@@ -2600,16 +2600,22 @@ impl Parser<'_> {
             None
         };
 
+        let webhook_wait_for_persistence = with_options
+            .iter()
+            .find(|&opt| opt.name.real_value() == WEBHOOK_WAIT_FOR_PERSISTENCE)
+            .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
+            .unwrap_or(true);
+        let webhook_is_batched = with_options
+            .iter()
+            .find(|&opt| opt.name.real_value() == WEBHOOK_IS_BATCHED)
+            .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
         let webhook_info = if self.parse_keyword(Keyword::VALIDATE) {
             if !contain_webhook {
                 parser_err!("VALIDATE is only supported for tables created with webhook source");
             }
 
-            let wait_for_persistence = with_options
-                .iter()
-                .find(|&opt| opt.name.real_value() == WEBHOOK_WAIT_FOR_PERSISTENCE)
-                .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
-                .unwrap_or(true);
             let secret_ref = if self.parse_keyword(Keyword::SECRET) {
                 let secret_ref = self.parse_secret_ref()?;
                 if secret_ref.ref_as == SecretRefAsType::File {
@@ -2623,17 +2629,18 @@ impl Parser<'_> {
             self.expect_keyword(Keyword::AS)?;
             let signature_expr = self.parse_function()?;
 
-            let is_batched = with_options
-                .iter()
-                .find(|&opt| opt.name.real_value() == WEBHOOK_IS_BATCHED)
-                .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-
             Some(WebhookSourceInfo {
                 secret_ref,
-                signature_expr,
-                wait_for_persistence,
-                is_batched,
+                signature_expr: Some(signature_expr),
+                wait_for_persistence: webhook_wait_for_persistence,
+                is_batched: webhook_is_batched,
+            })
+        } else if contain_webhook {
+            Some(WebhookSourceInfo {
+                secret_ref: None,
+                signature_expr: None,
+                wait_for_persistence: webhook_wait_for_persistence,
+                is_batched: webhook_is_batched,
             })
         } else {
             None
@@ -3629,12 +3636,14 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
+                AlterSinkOperation::SetBackfillRateLimit { rate_limit }
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterSinkOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
+                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
@@ -3796,8 +3805,13 @@ impl Parser<'_> {
             } else {
                 return self.expected("SCHEMA after SET");
             }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterFunctionOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else {
-            return self.expected("SET after ALTER FUNCTION");
+            return self.expected("SET or OWNER TO after ALTER FUNCTION");
         };
 
         Ok(Statement::AlterFunction {

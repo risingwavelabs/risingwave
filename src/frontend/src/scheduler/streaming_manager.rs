@@ -22,6 +22,7 @@ use pgwire::pg_server::SessionId;
 use risingwave_pb::meta::cancel_creating_jobs_request::{
     CreatingJobInfo, CreatingJobInfos, PbJobs,
 };
+use risingwave_rpc_client::error::Result;
 use uuid::Uuid;
 
 use crate::catalog::{DatabaseId, SchemaId};
@@ -116,21 +117,36 @@ impl StreamingJobTracker {
         self.creating_streaming_job.write().remove(task_id);
     }
 
-    pub fn abort_jobs(&self, session_id: SessionId) {
-        let jobs = self
-            .creating_streaming_job
+    fn jobs_for_session(&self, session_id: SessionId) -> Vec<CreatingJobInfo> {
+        self.creating_streaming_job
             .read()
             .values()
             .filter(|job| job.session_id == session_id)
-            .cloned()
-            .collect_vec();
+            .map(|job| job.info.clone())
+            .collect_vec()
+    }
+
+    pub async fn cancel_jobs(&self, session_id: SessionId) -> Result<bool> {
+        let jobs = self.jobs_for_session(session_id);
+        if jobs.is_empty() {
+            return Ok(false);
+        }
+        self.meta_client
+            .cancel_creating_jobs(PbJobs::Infos(CreatingJobInfos { infos: jobs }))
+            .await?;
+        Ok(true)
+    }
+
+    pub fn abort_jobs(&self, session_id: SessionId) {
+        let jobs = self.jobs_for_session(session_id);
+        if jobs.is_empty() {
+            return;
+        }
 
         let client = self.meta_client.clone();
         tokio::spawn(async move {
             client
-                .cancel_creating_jobs(PbJobs::Infos(CreatingJobInfos {
-                    infos: jobs.into_iter().map(|job| job.info).collect_vec(),
-                }))
+                .cancel_creating_jobs(PbJobs::Infos(CreatingJobInfos { infos: jobs }))
                 .await
         });
     }

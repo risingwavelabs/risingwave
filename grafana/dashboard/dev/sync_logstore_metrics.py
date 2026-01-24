@@ -9,7 +9,7 @@ def _(outer_panels: Panels):
     dirty_state = 'state="dirty"'
     return [
         outer_panels.row_collapsed(
-            "[Storage] Sync Log Store Metrics",
+            "Sync Log Store Metrics",
             [
                 panels.timeseries_epoch(
                     "Log Store Read/Write Epoch",

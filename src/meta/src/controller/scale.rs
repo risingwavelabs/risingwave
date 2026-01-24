@@ -1289,8 +1289,10 @@ mod tests {
             config_override: None,
             parallelism: StreamingParallelism::Fixed(1),
             backfill_parallelism: None,
+            backfill_orders: None,
             max_parallelism: 1,
             specific_resource_group: None,
+            is_serverless_backfill: false,
         };
 
         let database_model = database::Model {
@@ -1385,8 +1387,10 @@ mod tests {
             config_override: None,
             parallelism: StreamingParallelism::Fixed(2),
             backfill_parallelism: None,
+            backfill_orders: None,
             max_parallelism: 2,
             specific_resource_group: None,
+            is_serverless_backfill: false,
         };
 
         let database_model = database::Model {
@@ -1509,8 +1513,10 @@ mod tests {
             config_override: None,
             parallelism: StreamingParallelism::Fixed(2),
             backfill_parallelism: None,
+            backfill_orders: None,
             max_parallelism: 2,
             specific_resource_group: None,
+            is_serverless_backfill: false,
         };
 
         let database_model = database::Model {

@@ -21,15 +21,17 @@ use std::task::{Context, Poll};
 use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
-use futures::FutureExt;
-use futures::stream::FuturesOrdered;
+use futures::future::BoxFuture;
+use futures::stream::{FuturesOrdered, FuturesUnordered};
+use futures::{FutureExt, StreamExt};
 use prometheus::HistogramTimer;
-use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::catalog::TableId;
 use risingwave_common::id::SourceId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbCdcTableBackfillProgress, PbCreateMviewProgress, PbListFinishedSource, PbLoadFinishedSource,
+    PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
+    PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::mpsc;
@@ -72,6 +74,7 @@ enum ManagedBarrierStateInner {
         list_finished_source_ids: Vec<PbListFinishedSource>,
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+        cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
         truncate_tables: Vec<TableId>,
         refresh_finished_tables: Vec<TableId>,
     },
@@ -89,6 +92,7 @@ use risingwave_common::must_match;
 use risingwave_pb::id::FragmentId;
 use risingwave_pb::stream_service::InjectBarrierRequest;
 
+use crate::executor::exchange::permit;
 use crate::executor::exchange::permit::channel_from_config;
 use crate::task::barrier_worker::await_epoch_completed_future::AwaitEpochCompletedFuture;
 use crate::task::barrier_worker::{ScoredStreamError, TakeReceiverRequest};
@@ -96,7 +100,7 @@ use crate::task::cdc_progress::CdcTableBackfillState;
 
 pub(super) struct ManagedBarrierStateDebugInfo<'a> {
     running_actors: BTreeSet<ActorId>,
-    graph_states: &'a HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
+    graph_state: &'a PartialGraphManagedBarrierState,
 }
 
 impl Display for ManagedBarrierStateDebugInfo<'_> {
@@ -105,9 +109,9 @@ impl Display for ManagedBarrierStateDebugInfo<'_> {
         for actor_id in &self.running_actors {
             write!(f, "{}, ", actor_id)?;
         }
-        for (partial_graph_id, graph_states) in self.graph_states {
-            writeln!(f, "--- Partial Group {}", partial_graph_id)?;
-            write!(f, "{}", graph_states)?;
+        {
+            writeln!(f, "graph states")?;
+            write!(f, "{}", self.graph_state)?;
         }
         Ok(())
     }
@@ -198,7 +202,6 @@ impl InflightActorStatus {
 pub(crate) struct InflightActorState {
     actor_id: ActorId,
     barrier_senders: Vec<mpsc::UnboundedSender<Barrier>>,
-    pub(crate) partial_graph_id: PartialGraphId,
     /// `prev_epoch`. `push_back` and `pop_front`
     pub(in crate::task) inflight_barriers: VecDeque<u64>,
     status: InflightActorStatus,
@@ -213,7 +216,6 @@ pub(crate) struct InflightActorState {
 impl InflightActorState {
     pub(super) fn start(
         actor_id: ActorId,
-        partial_graph_id: PartialGraphId,
         initial_barrier: &Barrier,
         new_output_request_tx: UnboundedSender<(ActorId, NewOutputRequest)>,
         join_handle: JoinHandle<()>,
@@ -222,7 +224,6 @@ impl InflightActorState {
         Self {
             actor_id,
             barrier_senders: vec![],
-            partial_graph_id,
             inflight_barriers: VecDeque::from_iter([initial_barrier.epoch.prev]),
             status: InflightActorStatus::IssuedFirst(vec![initial_barrier.clone()]),
             is_stopping: false,
@@ -232,13 +233,7 @@ impl InflightActorState {
         }
     }
 
-    pub(super) fn issue_barrier(
-        &mut self,
-        partial_graph_id: PartialGraphId,
-        barrier: &Barrier,
-        is_stop: bool,
-    ) -> StreamResult<()> {
-        assert_eq!(self.partial_graph_id, partial_graph_id);
+    pub(super) fn issue_barrier(&mut self, barrier: &Barrier, is_stop: bool) -> StreamResult<()> {
         assert!(barrier.epoch.prev > self.status.max_issued_epoch());
 
         for barrier_sender in &self.barrier_senders {
@@ -292,7 +287,7 @@ impl InflightActorState {
     }
 }
 
-/// Part of [`DatabaseManagedBarrierState`]
+/// Part of [`PartialGraphState`]
 pub(crate) struct PartialGraphManagedBarrierState {
     /// Record barrier state for each epoch of concurrent checkpoints.
     ///
@@ -322,6 +317,10 @@ pub(crate) struct PartialGraphManagedBarrierState {
 
     pub(crate) cdc_table_backfill_progress: HashMap<u64, HashMap<ActorId, CdcTableBackfillState>>,
 
+    /// Record CDC source offset updated reports for each epoch of concurrent checkpoints.
+    /// Used to track when CDC sources have updated their offset at least once.
+    pub(crate) cdc_source_offset_updated: HashMap<u64, Vec<PbCdcSourceOffsetUpdated>>,
+
     /// Record the tables to truncate for each epoch of concurrent checkpoints.
     pub(crate) truncate_tables: HashMap<u64, HashSet<TableId>>,
     /// Record the tables that have finished refresh for each epoch of concurrent checkpoints.
@@ -349,6 +348,7 @@ impl PartialGraphManagedBarrierState {
             list_finished_source_ids: Default::default(),
             load_finished_source_ids: Default::default(),
             cdc_table_backfill_progress: Default::default(),
+            cdc_source_offset_updated: Default::default(),
             truncate_tables: Default::default(),
             refresh_finished_tables: Default::default(),
             state_store,
@@ -369,15 +369,15 @@ impl PartialGraphManagedBarrierState {
     }
 }
 
-pub(crate) struct SuspendedDatabaseState {
+pub(crate) struct SuspendedPartialGraphState {
     pub(super) suspend_time: Instant,
-    inner: DatabaseManagedBarrierState,
+    inner: PartialGraphState,
     failure: Option<(Option<ActorId>, StreamError)>,
 }
 
-impl SuspendedDatabaseState {
+impl SuspendedPartialGraphState {
     fn new(
-        state: DatabaseManagedBarrierState,
+        state: PartialGraphState,
         failure: Option<(Option<ActorId>, StreamError)>,
         _completing_futures: Option<FuturesOrdered<AwaitEpochCompletedFuture>>, /* discard the completing futures */
     ) -> Self {
@@ -388,72 +388,60 @@ impl SuspendedDatabaseState {
         }
     }
 
-    async fn reset(mut self) -> ResetDatabaseOutput {
+    async fn reset(mut self) -> ResetPartialGraphOutput {
         let root_err = self.inner.try_find_root_actor_failure(self.failure).await;
         self.inner.abort_and_wait_actors().await;
-        if let Some(hummock) = self.inner.actor_manager.env.state_store().as_hummock() {
-            hummock.clear_tables(self.inner.table_ids).await;
-        }
-        ResetDatabaseOutput { root_err }
+        ResetPartialGraphOutput { root_err }
     }
 }
 
-pub(crate) struct ResettingDatabaseState {
-    join_handle: JoinHandle<ResetDatabaseOutput>,
-    reset_request_id: u32,
-}
-
-pub(crate) struct ResetDatabaseOutput {
+pub(crate) struct ResetPartialGraphOutput {
     pub(crate) root_err: Option<ScoredStreamError>,
 }
 
-pub(crate) enum DatabaseStatus {
-    ReceivedExchangeRequest(Vec<(PartialGraphId, UpDownActorIds, TakeReceiverRequest)>),
-    Running(DatabaseManagedBarrierState),
-    Suspended(SuspendedDatabaseState),
-    Resetting(ResettingDatabaseState),
+pub(in crate::task) enum PartialGraphStatus {
+    ReceivedExchangeRequest(Vec<(UpDownActorIds, TakeReceiverRequest)>),
+    Running(PartialGraphState),
+    Suspended(SuspendedPartialGraphState),
+    Resetting,
     /// temporary place holder
     Unspecified,
 }
 
-impl DatabaseStatus {
+impl PartialGraphStatus {
     pub(crate) async fn abort(&mut self) {
         match self {
-            DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
-                for (_, _, request) in pending_requests.drain(..) {
+            PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
+                for (_, request) in pending_requests.drain(..) {
                     if let TakeReceiverRequest::Remote(sender) = request {
-                        let _ = sender.send(Err(anyhow!("database aborted").into()));
+                        let _ = sender.send(Err(anyhow!("partial graph aborted").into()));
                     }
                 }
             }
-            DatabaseStatus::Running(state) => {
+            PartialGraphStatus::Running(state) => {
                 state.abort_and_wait_actors().await;
             }
-            DatabaseStatus::Suspended(SuspendedDatabaseState { inner: state, .. }) => {
+            PartialGraphStatus::Suspended(SuspendedPartialGraphState { inner: state, .. }) => {
                 state.abort_and_wait_actors().await;
             }
-            DatabaseStatus::Resetting(state) => {
-                (&mut state.join_handle)
-                    .await
-                    .expect("failed to join reset database join handle");
-            }
-            DatabaseStatus::Unspecified => {
+            PartialGraphStatus::Resetting => {}
+            PartialGraphStatus::Unspecified => {
                 unreachable!()
             }
         }
     }
 
-    pub(crate) fn state_for_request(&mut self) -> Option<&mut DatabaseManagedBarrierState> {
+    pub(crate) fn state_for_request(&mut self) -> Option<&mut PartialGraphState> {
         match self {
-            DatabaseStatus::ReceivedExchangeRequest(_) => {
+            PartialGraphStatus::ReceivedExchangeRequest(_) => {
                 unreachable!("should not handle request")
             }
-            DatabaseStatus::Running(state) => Some(state),
-            DatabaseStatus::Suspended(_) => None,
-            DatabaseStatus::Resetting(_) => {
+            PartialGraphStatus::Running(state) => Some(state),
+            PartialGraphStatus::Suspended(_) => None,
+            PartialGraphStatus::Resetting => {
                 unreachable!("should not receive further request during cleaning")
             }
-            DatabaseStatus::Unspecified => {
+            PartialGraphStatus::Unspecified => {
                 unreachable!()
             }
         }
@@ -464,14 +452,10 @@ impl DatabaseStatus {
         cx: &mut Context<'_>,
     ) -> Poll<ManagedBarrierStateEvent> {
         match self {
-            DatabaseStatus::ReceivedExchangeRequest(_) => Poll::Pending,
-            DatabaseStatus::Running(state) => state.poll_next_event(cx),
-            DatabaseStatus::Suspended(_) => Poll::Pending,
-            DatabaseStatus::Resetting(state) => state.join_handle.poll_unpin(cx).map(|result| {
-                let output = result.expect("should be able to join");
-                ManagedBarrierStateEvent::DatabaseReset(output, state.reset_request_id)
-            }),
-            DatabaseStatus::Unspecified => {
+            PartialGraphStatus::ReceivedExchangeRequest(_) => Poll::Pending,
+            PartialGraphStatus::Running(state) => state.poll_next_event(cx),
+            PartialGraphStatus::Suspended(_) | PartialGraphStatus::Resetting => Poll::Pending,
+            PartialGraphStatus::Unspecified => {
                 unreachable!()
             }
         }
@@ -483,8 +467,8 @@ impl DatabaseStatus {
         err: StreamError,
         completing_futures: Option<FuturesOrdered<AwaitEpochCompletedFuture>>,
     ) {
-        let state = must_match!(replace(self, DatabaseStatus::Unspecified), DatabaseStatus::Running(state) => state);
-        *self = DatabaseStatus::Suspended(SuspendedDatabaseState::new(
+        let state = must_match!(replace(self, PartialGraphStatus::Unspecified), PartialGraphStatus::Running(state) => state);
+        *self = PartialGraphStatus::Suspended(SuspendedPartialGraphState::new(
             state,
             Some((failed_actor, err)),
             completing_futures,
@@ -493,64 +477,59 @@ impl DatabaseStatus {
 
     pub(super) fn start_reset(
         &mut self,
-        database_id: DatabaseId,
+        partial_graph_id: PartialGraphId,
         completing_futures: Option<FuturesOrdered<AwaitEpochCompletedFuture>>,
-        reset_request_id: u32,
-    ) {
-        let join_handle = match replace(self, DatabaseStatus::Unspecified) {
-            DatabaseStatus::ReceivedExchangeRequest(pending_requests) => {
-                for (_, _, request) in pending_requests {
+        table_ids_to_clear: &mut HashSet<TableId>,
+    ) -> BoxFuture<'static, ResetPartialGraphOutput> {
+        match replace(self, PartialGraphStatus::Resetting) {
+            PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
+                for (_, request) in pending_requests {
                     if let TakeReceiverRequest::Remote(sender) = request {
-                        let _ = sender.send(Err(anyhow!("database graph reset").into()));
+                        let _ = sender.send(Err(anyhow!("partial graph reset").into()));
                     }
                 }
-                tokio::spawn(async move { ResetDatabaseOutput { root_err: None } })
+                async move { ResetPartialGraphOutput { root_err: None } }.boxed()
             }
-            DatabaseStatus::Running(state) => {
-                assert_eq!(database_id, state.database_id);
+            PartialGraphStatus::Running(state) => {
+                assert_eq!(partial_graph_id, state.partial_graph_id);
                 info!(
-                    %database_id,
-                    reset_request_id, "start database reset from Running"
+                    %partial_graph_id,
+                    "start partial graph reset from Running"
                 );
-                tokio::spawn(SuspendedDatabaseState::new(state, None, completing_futures).reset())
+                table_ids_to_clear.extend(state.table_ids.iter().copied());
+                SuspendedPartialGraphState::new(state, None, completing_futures)
+                    .reset()
+                    .boxed()
             }
-            DatabaseStatus::Suspended(state) => {
+            PartialGraphStatus::Suspended(state) => {
                 assert!(
                     completing_futures.is_none(),
                     "should have been clear when suspended"
                 );
-                assert_eq!(database_id, state.inner.database_id);
+                assert_eq!(partial_graph_id, state.inner.partial_graph_id);
                 info!(
-                    %database_id,
-                    reset_request_id,
+                    %partial_graph_id,
                     suspend_elapsed = ?state.suspend_time.elapsed(),
-                    "start database reset after suspended"
+                    "start partial graph reset after suspended"
                 );
-                tokio::spawn(state.reset())
+                table_ids_to_clear.extend(state.inner.table_ids.iter().copied());
+                state.reset().boxed()
             }
-            DatabaseStatus::Resetting(state) => {
-                let prev_request_id = state.reset_request_id;
-                info!(
-                    %database_id,
-                    reset_request_id, prev_request_id, "receive duplicate reset request"
-                );
-                assert!(reset_request_id > prev_request_id);
-                state.join_handle
+            PartialGraphStatus::Resetting => {
+                unreachable!("should not reset for twice");
             }
-            DatabaseStatus::Unspecified => {
+            PartialGraphStatus::Unspecified => {
                 unreachable!()
             }
-        };
-        *self = DatabaseStatus::Resetting(ResettingDatabaseState {
-            join_handle,
-            reset_request_id,
-        });
+        }
     }
 }
 
 #[derive(Default)]
-pub(crate) struct ManagedBarrierState {
-    pub(crate) databases: HashMap<DatabaseId, DatabaseStatus>,
+pub(in crate::task) struct ManagedBarrierState {
+    pub(super) partial_graphs: HashMap<PartialGraphId, PartialGraphStatus>,
+    pub(super) resetting_graphs:
+        FuturesUnordered<JoinHandle<Vec<(PartialGraphId, ResetPartialGraphOutput)>>>,
 }
 
 pub(super) enum ManagedBarrierStateEvent {
@@ -559,38 +538,56 @@ pub(super) enum ManagedBarrierStateEvent {
         barrier: Barrier,
     },
     ActorError {
+        partial_graph_id: PartialGraphId,
         actor_id: ActorId,
         err: StreamError,
     },
-    DatabaseReset(ResetDatabaseOutput, u32),
+    PartialGraphsReset(Vec<(PartialGraphId, ResetPartialGraphOutput)>),
+    RegisterLocalUpstreamOutput {
+        actor_id: ActorId,
+        upstream_actor_id: ActorId,
+        upstream_partial_graph_id: PartialGraphId,
+        tx: permit::Sender,
+    },
 }
 
 impl ManagedBarrierState {
-    pub(super) fn next_event(
-        &mut self,
-    ) -> impl Future<Output = (DatabaseId, ManagedBarrierStateEvent)> + '_ {
+    pub(super) fn next_event(&mut self) -> impl Future<Output = ManagedBarrierStateEvent> + '_ {
         poll_fn(|cx| {
-            for (database_id, database) in &mut self.databases {
-                if let Poll::Ready(event) = database.poll_next_event(cx) {
-                    return Poll::Ready((*database_id, event));
+            for graph in self.partial_graphs.values_mut() {
+                if let Poll::Ready(event) = graph.poll_next_event(cx) {
+                    return Poll::Ready(event);
                 }
+            }
+            if let Poll::Ready(Some(result)) = self.resetting_graphs.poll_next_unpin(cx) {
+                let outputs = result.expect("failed to join resetting future");
+                for (partial_graph_id, _) in &outputs {
+                    let PartialGraphStatus::Resetting = self
+                        .partial_graphs
+                        .remove(partial_graph_id)
+                        .expect("should exist")
+                    else {
+                        panic!("should be resetting")
+                    };
+                }
+                return Poll::Ready(ManagedBarrierStateEvent::PartialGraphsReset(outputs));
             }
             Poll::Pending
         })
     }
 }
 
-/// Per-database barrier state manager. Handles barriers for one specific database.
+/// Per-partial-graph barrier state manager. Handles barriers for one specific partial graph.
 /// Part of [`ManagedBarrierState`] in [`super::LocalBarrierWorker`].
 ///
 /// See [`crate::task`] for architecture overview.
-pub(crate) struct DatabaseManagedBarrierState {
-    database_id: DatabaseId,
+pub(crate) struct PartialGraphState {
+    partial_graph_id: PartialGraphId,
     pub(crate) actor_states: HashMap<ActorId, InflightActorState>,
     pub(super) actor_pending_new_output_requests:
         HashMap<ActorId, Vec<(ActorId, NewOutputRequest)>>,
 
-    pub(crate) graph_states: HashMap<PartialGraphId, PartialGraphManagedBarrierState>,
+    pub(crate) graph_state: PartialGraphManagedBarrierState,
 
     table_ids: HashSet<TableId>,
 
@@ -602,20 +599,20 @@ pub(crate) struct DatabaseManagedBarrierState {
     pub(super) actor_failure_rx: UnboundedReceiver<(ActorId, StreamError)>,
 }
 
-impl DatabaseManagedBarrierState {
+impl PartialGraphState {
     /// Create a barrier manager state. This will be called only once.
     pub(super) fn new(
-        database_id: DatabaseId,
+        partial_graph_id: PartialGraphId,
         term_id: String,
         actor_manager: Arc<StreamActorManager>,
     ) -> Self {
         let (local_barrier_manager, barrier_event_rx, actor_failure_rx) =
-            LocalBarrierManager::new(database_id, term_id, actor_manager.env.clone());
+            LocalBarrierManager::new(term_id, actor_manager.env.clone());
         Self {
-            database_id,
+            partial_graph_id,
             actor_states: Default::default(),
             actor_pending_new_output_requests: Default::default(),
-            graph_states: Default::default(),
+            graph_state: PartialGraphManagedBarrierState::new(&actor_manager),
             table_ids: Default::default(),
             actor_manager,
             local_barrier_manager,
@@ -627,7 +624,7 @@ impl DatabaseManagedBarrierState {
     pub(super) fn to_debug_info(&self) -> ManagedBarrierStateDebugInfo<'_> {
         ManagedBarrierStateDebugInfo {
             running_actors: self.actor_states.keys().cloned().collect(),
-            graph_states: &self.graph_states,
+            graph_state: &self.graph_state,
         }
     }
 
@@ -674,7 +671,7 @@ impl InflightActorState {
     }
 }
 
-impl DatabaseManagedBarrierState {
+impl PartialGraphState {
     pub(super) fn register_barrier_sender(
         &mut self,
         actor_id: ActorId,
@@ -687,28 +684,24 @@ impl DatabaseManagedBarrierState {
     }
 }
 
-impl DatabaseManagedBarrierState {
+impl PartialGraphState {
     pub(super) fn transform_to_issued(
         &mut self,
         barrier: &Barrier,
         request: InjectBarrierRequest,
     ) -> StreamResult<()> {
-        let partial_graph_id = request.partial_graph_id;
+        assert_eq!(self.partial_graph_id, request.partial_graph_id);
         let actor_to_stop = barrier.all_stop_actors();
         let is_stop_actor = |actor_id| {
             actor_to_stop
                 .map(|actors| actors.contains(&actor_id))
                 .unwrap_or(false)
         };
-        let graph_state = self
-            .graph_states
-            .get_mut(&partial_graph_id)
-            .expect("should exist");
 
         let table_ids = HashSet::from_iter(request.table_ids_to_sync);
         self.table_ids.extend(table_ids.iter().cloned());
 
-        graph_state.transform_to_issued(
+        self.graph_state.transform_to_issued(
             barrier,
             request.actor_ids_to_collect.iter().copied(),
             table_ids,
@@ -751,7 +744,6 @@ impl DatabaseManagedBarrierState {
                         actor_id,
                         InflightActorState::start(
                             actor_id,
-                            partial_graph_id,
                             barrier,
                             new_output_request_tx,
                             join_handle,
@@ -778,14 +770,7 @@ impl DatabaseManagedBarrierState {
                         self.actor_states
                             .try_insert(
                                 actor_id,
-                                InflightActorState::start(
-                                    actor_id,
-                                    partial_graph_id,
-                                    barrier,
-                                    tx,
-                                    join_handle,
-                                    None,
-                                )
+                                InflightActorState::start(actor_id, barrier, tx, join_handle, None,)
                             )
                             .is_ok()
                     );
@@ -808,7 +793,7 @@ impl DatabaseManagedBarrierState {
                         actor_id, request.actor_ids_to_collect
                     );
                 })
-                .issue_barrier(partial_graph_id, barrier, is_stop_actor(actor_id))?;
+                .issue_barrier(barrier, is_stop_actor(actor_id))?;
         }
 
         Ok(())
@@ -818,7 +803,6 @@ impl DatabaseManagedBarrierState {
         &mut self,
         actor_id: ActorId,
         upstream_actor_id: ActorId,
-        upstream_partial_graph_id: PartialGraphId,
         request: TakeReceiverRequest,
     ) {
         let request = match request {
@@ -830,7 +814,6 @@ impl DatabaseManagedBarrierState {
             TakeReceiverRequest::Local(tx) => NewOutputRequest::Local(tx),
         };
         if let Some(actor) = self.actor_states.get_mut(&upstream_actor_id) {
-            assert_eq!(actor.partial_graph_id, upstream_partial_graph_id);
             let _ = actor.new_output_request_tx.send((actor_id, request));
         } else {
             self.actor_pending_new_output_requests
@@ -847,24 +830,28 @@ impl DatabaseManagedBarrierState {
     ) -> Poll<ManagedBarrierStateEvent> {
         if let Poll::Ready(option) = self.actor_failure_rx.poll_recv(cx) {
             let (actor_id, err) = option.expect("non-empty when tx in local_barrier_manager");
-            return Poll::Ready(ManagedBarrierStateEvent::ActorError { actor_id, err });
+            return Poll::Ready(ManagedBarrierStateEvent::ActorError {
+                actor_id,
+                err,
+                partial_graph_id: self.partial_graph_id,
+            });
         }
         // yield some pending collected epochs
-        for (partial_graph_id, graph_state) in &mut self.graph_states {
-            if let Some(barrier) = graph_state.may_have_collected_all() {
+        {
+            if let Some(barrier) = self.graph_state.may_have_collected_all() {
                 return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected {
-                    partial_graph_id: *partial_graph_id,
                     barrier,
+                    partial_graph_id: self.partial_graph_id,
                 });
             }
         }
         while let Poll::Ready(event) = self.barrier_event_rx.poll_recv(cx) {
             match event.expect("non-empty when tx in local_barrier_manager") {
                 LocalBarrierEvent::ReportActorCollected { actor_id, epoch } => {
-                    if let Some((partial_graph_id, barrier)) = self.collect(actor_id, epoch) {
+                    if let Some(barrier) = self.collect(actor_id, epoch) {
                         return Poll::Ready(ManagedBarrierStateEvent::BarrierCollected {
-                            partial_graph_id,
                             barrier,
+                            partial_graph_id: self.partial_graph_id,
                         });
                     }
                 }
@@ -915,7 +902,11 @@ impl DatabaseManagedBarrierState {
                     barrier_sender,
                 } => {
                     if let Err(err) = self.register_barrier_sender(actor_id, barrier_sender) {
-                        return Poll::Ready(ManagedBarrierStateEvent::ActorError { actor_id, err });
+                        return Poll::Ready(ManagedBarrierStateEvent::ActorError {
+                            actor_id,
+                            err,
+                            partial_graph_id: self.partial_graph_id,
+                        });
                     }
                 }
                 LocalBarrierEvent::RegisterLocalUpstreamOutput {
@@ -924,12 +915,12 @@ impl DatabaseManagedBarrierState {
                     upstream_partial_graph_id,
                     tx,
                 } => {
-                    self.new_actor_output_request(
+                    return Poll::Ready(ManagedBarrierStateEvent::RegisterLocalUpstreamOutput {
                         actor_id,
                         upstream_actor_id,
                         upstream_partial_graph_id,
-                        TakeReceiverRequest::Local(tx),
-                    );
+                        tx,
+                    });
                 }
                 LocalBarrierEvent::ReportCdcTableBackfillProgress {
                     actor_id,
@@ -938,54 +929,41 @@ impl DatabaseManagedBarrierState {
                 } => {
                     self.update_cdc_table_backfill_progress(epoch, actor_id, state);
                 }
+                LocalBarrierEvent::ReportCdcSourceOffsetUpdated {
+                    epoch,
+                    actor_id,
+                    source_id,
+                } => {
+                    self.report_cdc_source_offset_updated(epoch, actor_id, source_id);
+                }
             }
         }
 
-        debug_assert!(
-            self.graph_states
-                .values_mut()
-                .all(|graph_state| graph_state.may_have_collected_all().is_none())
-        );
+        debug_assert!(self.graph_state.may_have_collected_all().is_none());
         Poll::Pending
     }
 }
 
-impl DatabaseManagedBarrierState {
+impl PartialGraphState {
     #[must_use]
-    pub(super) fn collect(
-        &mut self,
-        actor_id: ActorId,
-        epoch: EpochPair,
-    ) -> Option<(PartialGraphId, Barrier)> {
-        let actor = self.actor_states.get_mut(&actor_id).expect("should exist");
-        let partial_graph_id = actor.partial_graph_id;
-        let is_finished = actor.collect(epoch);
+    pub(super) fn collect(&mut self, actor_id: ActorId, epoch: EpochPair) -> Option<Barrier> {
+        let is_finished = self
+            .actor_states
+            .get_mut(&actor_id)
+            .expect("should exist")
+            .collect(epoch);
         if is_finished {
             let state = self.actor_states.remove(&actor_id).expect("should exist");
             if let Some(monitor_task_handle) = state.monitor_task_handle {
                 monitor_task_handle.abort();
             }
         }
-        let graph_state = self
-            .graph_states
-            .get_mut(&partial_graph_id)
-            .expect("should exist");
-        graph_state.collect(actor_id, epoch);
-        graph_state
-            .may_have_collected_all()
-            .map(|barrier| (partial_graph_id, barrier))
+        self.graph_state.collect(actor_id, epoch);
+        self.graph_state.may_have_collected_all()
     }
 
-    #[allow(clippy::type_complexity)]
-    pub(super) fn pop_barrier_to_complete(
-        &mut self,
-        partial_graph_id: PartialGraphId,
-        prev_epoch: u64,
-    ) -> BarrierToComplete {
-        self.graph_states
-            .get_mut(&partial_graph_id)
-            .expect("should exist")
-            .pop_barrier_to_complete(prev_epoch)
+    pub(super) fn pop_barrier_to_complete(&mut self, prev_epoch: u64) -> BarrierToComplete {
+        self.graph_state.pop_barrier_to_complete(prev_epoch)
     }
 
     /// Collect actor errors for a while and find the one that might be the root cause.
@@ -1029,9 +1007,9 @@ impl DatabaseManagedBarrierState {
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
-            && let Some(graph_state) = self.graph_states.get_mut(&actor_state.partial_graph_id)
+            && actor_state.inflight_barriers.contains(&epoch.prev)
         {
-            graph_state
+            self.graph_state
                 .list_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
@@ -1058,9 +1036,9 @@ impl DatabaseManagedBarrierState {
     ) {
         // Find the correct partial graph state by matching the actor's partial graph id
         if let Some(actor_state) = self.actor_states.get(&actor_id)
-            && let Some(graph_state) = self.graph_states.get_mut(&actor_state.partial_graph_id)
+            && actor_state.inflight_barriers.contains(&epoch.prev)
         {
-            graph_state
+            self.graph_state
                 .load_finished_source_ids
                 .entry(epoch.curr)
                 .or_default()
@@ -1073,6 +1051,32 @@ impl DatabaseManagedBarrierState {
             warn!(
                 ?epoch,
                 %actor_id, %table_id, %associated_source_id, "ignore source load finished"
+            );
+        }
+    }
+
+    /// Report that a CDC source has updated its offset at least once
+    pub(super) fn report_cdc_source_offset_updated(
+        &mut self,
+        epoch: EpochPair,
+        actor_id: ActorId,
+        source_id: SourceId,
+    ) {
+        if let Some(actor_state) = self.actor_states.get(&actor_id)
+            && actor_state.inflight_barriers.contains(&epoch.prev)
+        {
+            self.graph_state
+                .cdc_source_offset_updated
+                .entry(epoch.curr)
+                .or_default()
+                .push(PbCdcSourceOffsetUpdated {
+                    reporter_actor_id: actor_id.as_raw_id(),
+                    source_id: source_id.as_raw_id(),
+                });
+        } else {
+            warn!(
+                ?epoch,
+                %actor_id, %source_id, "ignore cdc source offset updated"
             );
         }
     }
@@ -1103,19 +1107,12 @@ impl DatabaseManagedBarrierState {
             );
             return;
         };
-        let Some(graph_state) = self.graph_states.get_mut(&actor_state.partial_graph_id) else {
-            warn!(
-                ?epoch,
-                %actor_id, %table_id, "ignore refresh finished table: graph_state not found"
-            );
-            return;
-        };
-        graph_state
+        self.graph_state
             .refresh_finished_tables
             .entry(epoch.curr)
             .or_default()
             .insert(table_id);
-        graph_state
+        self.graph_state
             .truncate_tables
             .entry(epoch.curr)
             .or_default()
@@ -1169,6 +1166,11 @@ impl PartialGraphManagedBarrierState {
                 .map(|(actor, state)| state.to_pb(actor, barrier_state.barrier.epoch.curr))
                 .collect();
 
+            let cdc_source_offset_updated = self
+                .cdc_source_offset_updated
+                .remove(&barrier_state.barrier.epoch.curr)
+                .unwrap_or_default();
+
             let truncate_tables = self
                 .truncate_tables
                 .remove(&barrier_state.barrier.epoch.curr)
@@ -1191,6 +1193,7 @@ impl PartialGraphManagedBarrierState {
                     truncate_tables,
                     refresh_finished_tables,
                     cdc_table_backfill_progress,
+                    cdc_source_offset_updated,
                 },
             );
 
@@ -1219,6 +1222,7 @@ impl PartialGraphManagedBarrierState {
             list_finished_source_ids,
             load_finished_source_ids,
             cdc_table_backfill_progress,
+            cdc_source_offset_updated,
             truncate_tables,
             refresh_finished_tables,
         ) = must_match!(barrier_state.inner, ManagedBarrierStateInner::AllCollected {
@@ -1228,8 +1232,9 @@ impl PartialGraphManagedBarrierState {
             truncate_tables,
             refresh_finished_tables,
             cdc_table_backfill_progress,
+            cdc_source_offset_updated,
         } => {
-            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, cdc_table_backfill_progress, truncate_tables, refresh_finished_tables)
+            (create_mview_progress, list_finished_source_ids, load_finished_source_ids, cdc_table_backfill_progress, cdc_source_offset_updated, truncate_tables, refresh_finished_tables)
         });
         BarrierToComplete {
             barrier: barrier_state.barrier,
@@ -1240,6 +1245,7 @@ impl PartialGraphManagedBarrierState {
             truncate_tables,
             refresh_finished_tables,
             cdc_table_backfill_progress,
+            cdc_source_offset_updated,
         }
     }
 }
@@ -1253,6 +1259,7 @@ pub(crate) struct BarrierToComplete {
     pub truncate_tables: Vec<TableId>,
     pub refresh_finished_tables: Vec<TableId>,
     pub cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
+    pub cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
 }
 
 impl PartialGraphManagedBarrierState {

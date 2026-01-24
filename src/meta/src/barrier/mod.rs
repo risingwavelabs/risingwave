@@ -106,7 +106,6 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
 
 pub(crate) struct BackfillProgress {
     pub(crate) progress: String,
-    pub(crate) is_serverless: bool,
     pub(crate) backfill_type: PbBackfillType,
 }
 
@@ -127,6 +126,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
     database_job_infos:
         HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>,
+    backfill_orders: HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -229,6 +229,7 @@ impl BarrierWorkerRuntimeInfoSnapshot {
 #[derive(Debug)]
 struct DatabaseRuntimeInfoSnapshot {
     job_infos: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
+    backfill_orders: HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,

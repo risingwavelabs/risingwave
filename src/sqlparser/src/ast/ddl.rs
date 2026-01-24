@@ -228,6 +228,9 @@ pub enum AlterSinkOperation {
     SetSinkRateLimit {
         rate_limit: i32,
     },
+    SetBackfillRateLimit {
+        rate_limit: i32,
+    },
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -291,6 +294,7 @@ pub enum AlterSourceOperation {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterFunctionOperation {
     SetSchema { new_schema_name: ObjectName },
+    ChangeOwner { new_owner_name: Ident },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -563,6 +567,9 @@ impl fmt::Display for AlterSinkOperation {
             AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
                 write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
             }
+            AlterSinkOperation::SetBackfillRateLimit { rate_limit } => {
+                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
+            }
             AlterSinkOperation::AlterConnectorProps {
                 alter_props: changed_props,
             } => {
@@ -663,6 +670,9 @@ impl fmt::Display for AlterFunctionOperation {
         match self {
             AlterFunctionOperation::SetSchema { new_schema_name } => {
                 write!(f, "SET SCHEMA {new_schema_name}")
+            }
+            AlterFunctionOperation::ChangeOwner { new_owner_name } => {
+                write!(f, "OWNER TO {new_owner_name}")
             }
         }
     }
@@ -1053,7 +1063,7 @@ impl fmt::Display for ReferentialAction {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct WebhookSourceInfo {
     pub secret_ref: Option<SecretRefValue>,
-    pub signature_expr: Expr,
+    pub signature_expr: Option<Expr>,
     pub wait_for_persistence: bool,
     pub is_batched: bool,
 }

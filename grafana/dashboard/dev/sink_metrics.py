@@ -7,8 +7,9 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Sink] Sink Metrics",
+            "Sink Metrics",
             [
+                panels.subheader("Remote Sink"),
                 panels.timeseries_rowsps(
                     "Remote Sink (Java) Throughput",
                     "The rows sent by remote sink to the Java connector process",
@@ -19,6 +20,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Commit"),
                 panels.timeseries_latency(
                     "Commit Duration",
                     "",
@@ -37,6 +39,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Log Store"),
                 panels.timeseries_epoch(
                     "Log Store Read/Write Epoch",
                     "",
@@ -88,7 +91,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Log Store Consume Throughput(rows)",
+                    "Log Store Consume Throughput (rows)",
                     "",
                     [
                         panels.target(
@@ -98,7 +101,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Executor Log Store Consume Throughput(rows)",
+                    "Executor Log Store Consume Throughput (rows)",
                     "",
                     [
                         panels.target(
@@ -109,7 +112,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytesps(
-                    "Log Store Consume Throughput(MB/s)",
+                    "Log Store Consume Throughput (MB/s)",
                     "",
                     [
                         panels.target(
@@ -119,7 +122,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytesps(
-                    "Executor Log Store Consume Throughput(MB/s)",
+                    "Executor Log Store Consume Throughput (MB/s)",
                     "",
                     [
                         panels.target(
@@ -130,7 +133,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_rowsps(
-                    "Log Store Write Throughput(rows)",
+                    "Log Store Write Throughput (rows)",
                     "",
                     [
                         panels.target(
@@ -144,6 +147,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("KV Log Store"),
                 panels.timeseries_ops(
                     "Kv Log Store Read Storage Row Ops",
                     "",
@@ -213,7 +217,7 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_latency(
-                    "Rewind delay (second)",
+                    "Rewind Delay (s)",
                     "",
                     [
                         panels.target(
@@ -222,12 +226,45 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("Buffers"),
                 panels.timeseries_bytes(
                     "Chunk Buffer Size",
                     "Total size of chunks buffered in a barrier",
                     [
                         panels.target(
                             f"sum({metric('stream_sink_chunk_buffer_size')}) by (sink_id, actor_id, sink_name) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
+                            "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.subheader("Sink without Log Store"),
+                # TODO: These 2 metrics should be deprecated because they are unaware of Log Store
+                # Let's remove them when all sinks are migrated to Log Store
+                # NOTE(kwannoel): Need to confirm for sink-into-table sinks
+                panels.timeseries_rowsps(
+                    "Sink Executor Throughput (rows/s)",
+                    "The number of rows streamed into the SinkExecutor per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
+                            "sink {{sink_id}} {{sink_name}}",
+                        ),
+                        panels.target_hidden(
+                            f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
+                            "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytesps(
+                    "Sink Executor Throughput (MB/s)",
+                    "The figure shows the number of bytes written SinkExecutor per second. For sinks with 'sink_decouple = true', please refer to the 'Sink Metrics' section",
+                    [
+                        panels.target(
+                            f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)) / (1000*1000)",
+                            "sink {{sink_id}} {{sink_name}}",
+                        ),
+                        panels.target_hidden(
+                            f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}) / (1000*1000)",
                             "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],

@@ -1,0 +1,225 @@
+control substitution on
+
+# PostGIS geometry type CDC test
+
+system ok
+psql -c "
+    CREATE EXTENSION IF NOT EXISTS postgis;
+    DROP TABLE IF EXISTS test_geo CASCADE;
+    CREATE TABLE test_geo (
+        id int PRIMARY KEY,
+        name varchar,
+        location geometry(Point, 4326)
+    );
+    INSERT INTO test_geo VALUES
+        (1, 'Chicago', ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326)),
+        (2, 'NewYork', ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326));
+"
+
+statement ok
+create source geo_source with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'geo_slot'
+);
+
+statement ok
+create table test_geo (
+    id int primary key,
+    name varchar,
+    location bytea
+) from geo_source table 'public.test_geo';
+
+# Test backfill: verify EWKB length (25 bytes: 9-byte header + 16-byte coordinates)
+query ITI retry 3 backoff 1s
+select id, name, length(location) from test_geo order by id;
+----
+1 Chicago 25
+2 NewYork 25
+
+# Compare the full EWKB hex from upstream and RisingWave are identical.
+# This prints both sides for easier debugging when it fails.
+query IIITTT retry 3 backoff 1s
+select
+  ours.id,
+  length(ours.location) as ours_bytes,
+  length(upstream.upstream_hex) / 2 as upstream_bytes,
+  substring(encode(ours.location, 'hex') from 1 for 50) as ours_prefix,
+  substring(upstream.upstream_hex from 1 for 50) as upstream_prefix,
+  encode(ours.location, 'hex') = upstream.upstream_hex as same_full
+from test_geo as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, encode(location, ''hex'') as upstream_hex from test_geo where id in (1,2) order by id'
+  )
+) as upstream(id, upstream_hex)
+on ours.id = upstream.id
+order by ours.id;
+----
+1 25 25 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 t
+2 25 25 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440 t
+
+# Test incremental INSERT
+system ok
+psql -c "INSERT INTO test_geo VALUES (3, 'London', ST_SetSRID(ST_MakePoint(-0.1278, 51.5074), 4326));"
+
+query ITI retry 3 backoff 1s
+select id, name, length(location) from test_geo where id = 3;
+----
+3 London 25
+
+# Compare upstream vs RisingWave EWKB for the inserted row.
+query IIITTT retry 3 backoff 1s
+select
+  ours.id,
+  length(ours.location) as ours_bytes,
+  length(upstream.upstream_hex) / 2 as upstream_bytes,
+  substring(encode(ours.location, 'hex') from 1 for 50) as ours_prefix,
+  substring(upstream.upstream_hex from 1 for 50) as upstream_prefix,
+  encode(ours.location, 'hex') = upstream.upstream_hex as same_full
+from test_geo as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, encode(location, ''hex'') as upstream_hex from test_geo where id = 3'
+  )
+) as upstream(id, upstream_hex)
+on ours.id = upstream.id;
+----
+3 25 25 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940 t
+
+# Test incremental UPDATE
+system ok
+psql -c "UPDATE test_geo SET location = ST_SetSRID(ST_MakePoint(0, 0), 4326) WHERE id = 1;"
+
+# Verify UPDATE: length should still be 25, but data changed
+query ITI retry 3 backoff 1s
+select id, name, length(location) from test_geo where id = 1;
+----
+1 Chicago 25
+
+# Compare upstream vs RisingWave EWKB for the updated row.
+query IIITTT retry 3 backoff 1s
+select
+  ours.id,
+  length(ours.location) as ours_bytes,
+  length(upstream.upstream_hex) / 2 as upstream_bytes,
+  substring(encode(ours.location, 'hex') from 1 for 50) as ours_prefix,
+  substring(upstream.upstream_hex from 1 for 50) as upstream_prefix,
+  encode(ours.location, 'hex') = upstream.upstream_hex as same_full
+from test_geo as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, encode(location, ''hex'') as upstream_hex from test_geo where id = 1'
+  )
+) as upstream(id, upstream_hex)
+on ours.id = upstream.id;
+----
+1 25 25 0101000020e610000000000000000000000000000000000000 0101000020e610000000000000000000000000000000000000 t
+
+# Test incremental DELETE
+system ok
+psql -c "DELETE FROM test_geo WHERE id = 2;"
+
+# Compare upstream vs RisingWave row counts after DELETE.
+# This avoids flaky assertions when CDC consumption is still catching up.
+query IIIIII retry 6 backoff 1s
+select
+  (select count(*) from test_geo) as ours_total,
+  (select count(*) filter (where id = 2) from test_geo) as ours_id2,
+  upstream.upstream_total,
+  upstream.upstream_id2,
+  (select count(*) from test_geo) = upstream.upstream_total as total_same,
+  (select count(*) filter (where id = 2) from test_geo) = upstream.upstream_id2 as id2_same
+from (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select count(*)::int as upstream_total, count(*) filter (where id = 2)::int as upstream_id2 from test_geo'
+  )
+) as upstream(upstream_total, upstream_id2);
+----
+2 0 2 0 t t
+
+# Test with NULL geometry
+system ok
+psql -c "
+    INSERT INTO test_geo VALUES (4, 'NullLocation', NULL);
+"
+
+query ITI retry 10 backoff 1s
+select id, name, location from test_geo where id = 4;
+----
+4 NullLocation NULL
+
+# Test with different geometry types (LineString)
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geo_line CASCADE;
+    CREATE TABLE test_geo_line (
+        id int PRIMARY KEY,
+        name varchar,
+        path geometry(LineString, 4326)
+    );
+    INSERT INTO test_geo_line VALUES
+        (1, 'Route1', ST_SetSRID(ST_MakeLine(ST_MakePoint(-87.6298, 41.8781), ST_MakePoint(-74.0060, 40.7128)), 4326));
+"
+
+statement ok
+create table test_geo_line (
+    id int primary key,
+    name varchar,
+    path bytea
+) from geo_source table 'public.test_geo_line';
+
+# LineString should have different length (more coordinates)
+# EWKB length = 9 (header) + 4 (num points) + 16 * 2 (coords) = 45
+query ITI retry 3 backoff 1s
+select id, name, length(path) from test_geo_line;
+----
+1 Route1 45
+
+# Verify LineString EWKB header (0x02 for LineString type)
+# Use 12 hex chars to include the start of SRID
+query IT retry 3 backoff 1s
+select id, substring(encode(path, 'hex') from 1 for 12) from test_geo_line where id = 1;
+----
+1 0102000020e6
+
+# Clean up
+statement ok
+drop table test_geo_line;
+
+statement ok
+drop table test_geo;
+
+statement ok
+drop source geo_source;
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geo CASCADE;
+    DROP TABLE IF EXISTS test_geo_line CASCADE;
+"
