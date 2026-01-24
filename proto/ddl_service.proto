@@ -535,8 +535,8 @@ message DropSecretRequest {
 }
 
 message DropSecretResponse {
-  common.Status status = 1;
-  WaitVersion version = 2;
+  WaitVersion version = 1;
+  common.Status status = 2;
 }
 
 message AlterSecretRequest {
