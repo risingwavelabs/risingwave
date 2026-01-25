@@ -122,7 +122,8 @@ pub struct Join<PlanRef> {
 }
 
 pub(crate) fn has_repeated_element(slice: &[usize]) -> bool {
-    (1..slice.len()).any(|i| slice[i..].contains(&slice[i - 1]))
+    let mut seen = std::collections::HashSet::with_capacity(slice.len());
+    slice.iter().any(|x| !seen.insert(x))
 }
 
 impl<PlanRef: GenericPlanRef> Join<PlanRef> {
