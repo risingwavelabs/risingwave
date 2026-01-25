@@ -167,19 +167,23 @@ impl ReplaceStreamJobPlan {
         }
         if let Some(sinks) = &self.auto_refresh_schema_sinks {
             for sink in sinks {
-                let fragment_change = CommandFragmentChanges::NewFragment {
-                    job_id: sink.original_sink.id.as_job_id(),
-                    info: sink.new_fragment_info(),
-                };
-                fragment_changes
-                    .try_insert(sink.new_fragment.fragment_id, fragment_change)
-                    .expect("non-duplicate");
-                fragment_changes
-                    .try_insert(
-                        sink.original_fragment.fragment_id,
-                        CommandFragmentChanges::RemoveFragment,
-                    )
-                    .expect("non-duplicate");
+                for (fragment_id, info) in sink.new_fragment_infos() {
+                    let fragment_change = CommandFragmentChanges::NewFragment {
+                        job_id: sink.original_sink.id.as_job_id(),
+                        info,
+                    };
+                    fragment_changes
+                        .try_insert(fragment_id, fragment_change)
+                        .expect("non-duplicate");
+                }
+                for original_fragment in &sink.original_fragments {
+                    fragment_changes
+                        .try_insert(
+                            original_fragment.fragment_id,
+                            CommandFragmentChanges::RemoveFragment,
+                        )
+                        .expect("non-duplicate");
+                }
             }
         }
         fragment_changes
@@ -1060,10 +1064,9 @@ impl Command {
                             .into_iter()
                             .flat_map(|sinks| {
                                 sinks.iter().flat_map(|sink| {
-                                    sink.original_fragment
-                                        .actors
-                                        .iter()
-                                        .map(|actor| actor.actor_id)
+                                    sink.original_fragments.iter().flat_map(|fragment| {
+                                        fragment.actors.iter().map(|actor| actor.actor_id)
+                                    })
                                 })
                             }),
                     ),
@@ -1408,23 +1411,27 @@ impl Command {
                     ),
                 );
                 if let Some(sinks) = &replace_table.auto_refresh_schema_sinks {
-                    let sink_actors = edges.collect_actors_to_create(sinks.iter().map(|sink| {
-                        (
-                            sink.new_fragment.fragment_id,
-                            &sink.new_fragment.nodes,
-                            sink.new_fragment.actors.iter().map(|actor| {
+                    let sink_actors =
+                        edges.collect_actors_to_create(sinks.iter().flat_map(|sink| {
+                            sink.new_fragments.iter().map(|fragment| {
                                 (
-                                    actor,
-                                    sink.actor_status[&actor.actor_id]
-                                        .location
-                                        .as_ref()
-                                        .unwrap()
-                                        .worker_node_id,
+                                    fragment.fragment_id,
+                                    &fragment.nodes,
+                                    fragment.actors.iter().map(|actor| {
+                                        (
+                                            actor,
+                                            sink.actor_status[&actor.actor_id]
+                                                .location
+                                                .as_ref()
+                                                .unwrap()
+                                                .worker_node_id,
+                                        )
+                                    }),
+                                    database_info
+                                        .job_subscribers(sink.original_sink.id.as_job_id()),
                                 )
-                            }),
-                            database_info.job_subscribers(sink.original_sink.id.as_job_id()),
-                        )
-                    }));
+                            })
+                        }));
                     for (worker_id, fragment_actors) in sink_actors {
                         actors.entry(worker_id).or_default().extend(fragment_actors);
                     }

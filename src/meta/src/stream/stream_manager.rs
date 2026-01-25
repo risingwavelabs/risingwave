@@ -22,6 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, Field, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, SinkId};
+use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
 use risingwave_meta_model::{StreamingParallelism, fragment};
@@ -185,24 +186,43 @@ type CreatingStreamingJobInfoRef = Arc<CreatingStreamingJobInfo>;
 pub struct AutoRefreshSchemaSinkContext {
     pub tmp_sink_id: SinkId,
     pub original_sink: PbSink,
-    pub original_fragment: Fragment,
     pub new_schema: Vec<PbColumnCatalog>,
     pub newly_add_fields: Vec<Field>,
-    pub new_fragment: Fragment,
+    pub original_fragments: Vec<Fragment>,
+    pub new_fragments: Vec<Fragment>,
+    pub new_fragment_relation: FragmentDownstreamRelation,
     pub new_log_store_table: Option<PbTable>,
     pub actor_status: BTreeMap<ActorId, ActorStatus>,
 }
 
 impl AutoRefreshSchemaSinkContext {
-    pub fn new_fragment_info(&self) -> InflightFragmentInfo {
+    pub fn new_fragment_info_by_original_id(
+        &self,
+        original_fragment_id: FragmentId,
+    ) -> Option<InflightFragmentInfo> {
+        self.original_fragments
+            .iter()
+            .zip_eq_debug(self.new_fragments.iter())
+            .find(|(original_fragment, _)| original_fragment.fragment_id == original_fragment_id)
+            .map(|(_, new_fragment)| self.new_fragment_info(new_fragment))
+    }
+
+    pub fn new_fragment_infos(
+        &self,
+    ) -> impl Iterator<Item = (FragmentId, InflightFragmentInfo)> + '_ {
+        self.new_fragments
+            .iter()
+            .map(|fragment| (fragment.fragment_id, self.new_fragment_info(fragment)))
+    }
+
+    fn new_fragment_info(&self, fragment: &Fragment) -> InflightFragmentInfo {
         InflightFragmentInfo {
-            fragment_id: self.new_fragment.fragment_id,
-            distribution_type: self.new_fragment.distribution_type.into(),
-            fragment_type_mask: self.new_fragment.fragment_type_mask,
-            vnode_count: self.new_fragment.vnode_count(),
-            nodes: self.new_fragment.nodes.clone(),
-            actors: self
-                .new_fragment
+            fragment_id: fragment.fragment_id,
+            distribution_type: fragment.distribution_type.into(),
+            fragment_type_mask: fragment.fragment_type_mask,
+            vnode_count: fragment.vnode_count(),
+            nodes: fragment.nodes.clone(),
+            actors: fragment
                 .actors
                 .iter()
                 .map(|actor| {
@@ -220,8 +240,16 @@ impl AutoRefreshSchemaSinkContext {
                     )
                 })
                 .collect(),
-            state_table_ids: self.new_fragment.state_table_ids.iter().copied().collect(),
+            state_table_ids: fragment.state_table_ids.iter().copied().collect(),
         }
+    }
+
+    pub fn new_stream_scan_fragment(&self) -> Option<&Fragment> {
+        self.new_fragments.iter().find(|fragment| {
+            fragment
+                .fragment_type_mask
+                .contains(FragmentTypeFlag::StreamScan)
+        })
     }
 }
 

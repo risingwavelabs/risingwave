@@ -495,13 +495,13 @@ pub async fn get_partition_compute_info(
 
 #[allow(clippy::unused_async)]
 async fn get_partition_compute_info_for_iceberg(
-    _iceberg_config: &IcebergConfig,
+    iceberg_config: &IcebergConfig,
 ) -> Result<Option<PartitionComputeInfo>> {
     // TODO: check table if exists
-    if _iceberg_config.create_table_if_not_exists {
+    if iceberg_config.create_table_if_not_exists {
         return Ok(None);
     }
-    let table = _iceberg_config.load_table().await?;
+    let table = iceberg_config.load_table().await?;
     let partition_spec = table.metadata().default_partition_spec();
     if partition_spec.is_unpartitioned() {
         return Ok(None);

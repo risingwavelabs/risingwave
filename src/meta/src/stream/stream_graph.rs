@@ -17,6 +17,7 @@ mod assignment;
 mod fragment;
 mod id;
 mod schedule;
+mod schema_rewrite;
 pub mod state_match;
 
 pub use actor::{ActorGraphBuildResult, ActorGraphBuilder};
