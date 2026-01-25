@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -150,7 +150,9 @@ impl TryFrom<&ConfluentSchemaRegistryConnection> for Client {
         )
         .map_err(|e| match e {
             SchemaRegistryClientError::InvalidOption(e) => e,
-            e => invalid_option_error!("failed to create schema registry client: {}", e),
+            e => {
+                invalid_option_error!("failed to create schema registry client: {}", e.as_report())
+            }
         })
     }
 }
