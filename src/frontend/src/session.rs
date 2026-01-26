@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -50,7 +50,7 @@ use risingwave_common::catalog::{
 };
 use risingwave_common::config::{
     AuthMethod, BatchConfig, ConnectionType, FrontendConfig, MetaConfig, MetricLevel,
-    StreamingConfig, UdfConfig, load_config,
+    RpcClientConfig, StreamingConfig, UdfConfig, load_config,
 };
 use risingwave_common::id::WorkerId;
 use risingwave_common::memory::MemoryContext;
@@ -76,9 +76,11 @@ use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::Property as AddWorkerNodeProperty;
 use risingwave_pb::frontend_service::frontend_service_server::FrontendServiceServer;
 use risingwave_pb::health::health_server::HealthServer;
+use risingwave_pb::monitor_service::monitor_service_server::MonitorServiceServer;
 use risingwave_pb::user::auth_info::EncryptionType;
 use risingwave_rpc_client::{
     ComputeClientPool, ComputeClientPoolRef, FrontendClientPool, FrontendClientPoolRef, MetaClient,
+    MonitorClientPool, MonitorClientPoolRef,
 };
 use risingwave_sqlparser::ast::{ObjectName, Statement};
 use risingwave_sqlparser::parser::Parser;
@@ -100,9 +102,12 @@ use crate::catalog::secret_catalog::SecretCatalog;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::catalog::{
-    CatalogError, DatabaseId, OwnedByUserCatalog, SchemaId, TableId, check_schema_writable,
+    CatalogError, CatalogErrorInner, DatabaseId, OwnedByUserCatalog, SchemaId, TableId,
+    check_schema_writable,
 };
-use crate::error::{ErrorCode, Result, RwError};
+use crate::error::{
+    ErrorCode, Result, RwError, bail_catalog_error, bail_permission_denied, bail_protocol_error,
+};
 use crate::handler::describe::infer_describe;
 use crate::handler::extended_handle::{
     Portal, PrepareStatement, handle_bind, handle_execute, handle_parse,
@@ -116,7 +121,7 @@ use crate::health_service::HealthServiceImpl;
 use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
-use crate::rpc::FrontendServiceImpl;
+use crate::rpc::{FrontendServiceImpl, MonitorServiceImpl};
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, GLOBAL_DISTRIBUTED_QUERY_METRICS, HummockSnapshotManager,
@@ -152,6 +157,7 @@ pub(crate) struct FrontendEnv {
     server_addr: HostAddr,
     client_pool: ComputeClientPoolRef,
     frontend_client_pool: FrontendClientPoolRef,
+    monitor_client_pool: MonitorClientPoolRef,
 
     /// Each session is identified by (`process_id`,
     /// `secret_key`). When Cancel Request received, find corresponding session and cancel all
@@ -220,6 +226,7 @@ impl FrontendEnv {
         let system_params_manager = Arc::new(LocalSystemParamsManager::for_test());
         let compute_client_pool = Arc::new(ComputeClientPool::for_test());
         let frontend_client_pool = Arc::new(FrontendClientPool::for_test());
+        let monitor_client_pool = Arc::new(MonitorClientPool::for_test());
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool,
@@ -262,6 +269,7 @@ impl FrontendEnv {
             server_addr,
             client_pool,
             frontend_client_pool,
+            monitor_client_pool,
             sessions_map,
             frontend_metrics: Arc::new(FrontendMetrics::for_test()),
             cursor_metrics: Arc::new(CursorMetrics::for_test()),
@@ -354,6 +362,7 @@ impl FrontendEnv {
             1,
             config.batch.developer.frontend_client_config.clone(),
         ));
+        let monitor_client_pool = Arc::new(MonitorClientPool::new(1, RpcClientConfig::default()));
         let query_manager = QueryManager::new(
             worker_node_manager.clone(),
             compute_client_pool.clone(),
@@ -412,6 +421,7 @@ impl FrontendEnv {
 
         let health_srv = HealthServiceImpl::new();
         let frontend_srv = FrontendServiceImpl::new(sessions_map.clone());
+        let monitor_srv = MonitorServiceImpl::new(config.server.clone());
         let frontend_rpc_addr = opts.frontend_rpc_listener_addr.parse().unwrap();
 
         let telemetry_manager = TelemetryManager::new(
@@ -433,6 +443,7 @@ impl FrontendEnv {
             tonic::transport::Server::builder()
                 .add_service(HealthServer::new(health_srv))
                 .add_service(FrontendServiceServer::new(frontend_srv))
+                .add_service(MonitorServiceServer::new(monitor_srv))
                 .serve(frontend_rpc_addr)
                 .await
                 .unwrap();
@@ -539,6 +550,7 @@ impl FrontendEnv {
                 server_addr: frontend_address,
                 client_pool: compute_client_pool,
                 frontend_client_pool,
+                monitor_client_pool,
                 frontend_metrics,
                 cursor_metrics,
                 spill_metrics,
@@ -639,6 +651,10 @@ impl FrontendEnv {
 
     pub fn frontend_client_pool(&self) -> FrontendClientPoolRef {
         self.frontend_client_pool.clone()
+    }
+
+    pub fn monitor_client_pool(&self) -> MonitorClientPoolRef {
+        self.monitor_client_pool.clone()
     }
 
     pub fn batch_config(&self) -> &BatchConfig {
@@ -1032,30 +1048,39 @@ impl SessionImpl {
             (schema_name, relation_name)
         };
         match catalog_reader.check_relation_name_duplicated(db_name, &schema_name, &relation_name) {
-            Err(CatalogError::Duplicated(_, name, is_creating)) if if_not_exists => {
-                // If relation is created, return directly.
-                // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, We can't
-                // determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
-                // Only the type in StreamingJob (defined in streaming_job.rs) and Subscription may be `is_creating`.
-                if !is_creating {
-                    Ok(Either::Right(
-                        PgResponse::builder(stmt_type)
-                            .notice(format!("relation \"{}\" already exists, skipping", name))
-                            .into(),
-                    ))
-                } else if stmt_type == StatementType::CREATE_SUBSCRIPTION {
-                    // For now, when a Subscription is creating, we return directly with an additional message.
-                    // TODO: Subscription should also be processed in the same way as StreamingJob.
-                    Ok(Either::Right(
-                        PgResponse::builder(stmt_type)
-                            .notice(format!(
-                                "relation \"{}\" already exists but still creating, skipping",
-                                name
-                            ))
-                            .into(),
-                    ))
+            Err(e) if if_not_exists => {
+                if let CatalogErrorInner::Duplicated {
+                    name,
+                    under_creation,
+                    ..
+                } = e.inner()
+                {
+                    // If relation is created, return directly.
+                    // Otherwise, the job status is `is_creating`. Since frontend receives the catalog asynchronously, we can't
+                    // determine the real status of the meta at this time. We regard it as `not_exists` and delay the check to meta.
+                    // Only the type in StreamingJob (defined in streaming_job.rs) and Subscription may be `is_creating`.
+                    if !*under_creation {
+                        Ok(Either::Right(
+                            PgResponse::builder(stmt_type)
+                                .notice(format!("relation \"{}\" already exists, skipping", name))
+                                .into(),
+                        ))
+                    } else if stmt_type == StatementType::CREATE_SUBSCRIPTION {
+                        // For now, when a Subscription is creating, we return directly with an additional message.
+                        // TODO: Subscription should also be processed in the same way as StreamingJob.
+                        Ok(Either::Right(
+                            PgResponse::builder(stmt_type)
+                                .notice(format!(
+                                    "relation \"{}\" already exists but still creating, skipping",
+                                    name
+                                ))
+                                .into(),
+                        ))
+                    } else {
+                        Ok(Either::Left(()))
+                    }
                 } else {
-                    Ok(Either::Left(()))
+                    Err(e.into())
                 }
             }
             Err(e) => Err(e.into()),
@@ -1481,27 +1506,22 @@ pub struct SessionManagerImpl {
 }
 
 impl SessionManager for SessionManagerImpl {
+    type Error = RwError;
     type Session = SessionImpl;
 
-    fn create_dummy_session(
-        &self,
-        database_id: DatabaseId,
-        user_id: u32,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    fn create_dummy_session(&self, database_id: DatabaseId) -> Result<Arc<Self::Session>> {
         let dummy_addr = Address::Tcp(SocketAddr::new(
             IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
             5691, // port of meta
         ));
-        let user_reader = self.env.user_info_reader();
-        let reader = user_reader.read_guard();
-        if let Some(user_name) = reader.get_user_name_by_id(user_id) {
-            self.connect_inner(database_id, user_name.as_str(), Arc::new(dummy_addr))
-        } else {
-            Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Role id {} does not exist", user_id),
-            )))
-        }
+
+        // Always use the built-in super user for dummy sessions.
+        // This avoids permission checks tied to a specific user_id.
+        self.connect_inner(
+            database_id,
+            risingwave_common::catalog::DEFAULT_SUPER_USER,
+            Arc::new(dummy_addr),
+        )
     }
 
     fn connect(
@@ -1509,18 +1529,10 @@ impl SessionManager for SessionManagerImpl {
         database: &str,
         user_name: &str,
         peer_addr: AddressRef,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    ) -> Result<Arc<Self::Session>> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
-        let database_id = reader
-            .get_database_by_name(database)
-            .map_err(|_| {
-                Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("database \"{}\" does not exist", database),
-                ))
-            })?
-            .id();
+        let database_id = reader.get_database_by_name(database)?.id();
 
         self.connect_inner(database_id, user_name, peer_addr)
     }
@@ -1591,16 +1603,11 @@ impl SessionManagerImpl {
         database_id: DatabaseId,
         user_name: &str,
         peer_addr: AddressRef,
-    ) -> std::result::Result<Arc<SessionImpl>, BoxedError> {
+    ) -> Result<Arc<SessionImpl>> {
         let catalog_reader = self.env.catalog_reader();
         let reader = catalog_reader.read_guard();
         let (database_name, database_owner) = {
-            let db = reader.get_database_by_id(database_id).map_err(|_| {
-                Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("database \"{}\" does not exist", database_id),
-                ))
-            })?;
+            let db = reader.get_database_by_id(database_id)?;
             (db.name(), db.owner())
         };
 
@@ -1608,17 +1615,11 @@ impl SessionManagerImpl {
         let reader = user_reader.read_guard();
         if let Some(user) = reader.get_user_by_name(user_name) {
             if !user.can_login {
-                return Err(Box::new(Error::new(
-                    ErrorKind::InvalidInput,
-                    format!("User {} is not allowed to login", user_name),
-                )));
+                bail_permission_denied!("User {} is not allowed to login", user_name);
             }
             let has_privilege = user.has_privilege(database_id, AclMode::Connect);
             if !user.is_super && database_owner != user.id && !has_privilege {
-                return Err(Box::new(Error::new(
-                    ErrorKind::PermissionDenied,
-                    "User does not have CONNECT privilege.",
-                )));
+                bail_permission_denied!("User does not have CONNECT privilege.");
             }
 
             // Check HBA configuration for LDAP authentication
@@ -1641,16 +1642,13 @@ impl SessionManagerImpl {
 
             // TODO: adding `FATAL` message support for no matching HBA entry.
             let Some(hba_entry_opt) = hba_entry_opt else {
-                return Err(Box::new(Error::new(
-                    ErrorKind::PermissionDenied,
-                    format!(
-                        "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
-                    ),
-                )));
+                bail_permission_denied!(
+                    "no pg_hba.conf entry for host \"{peer_addr}\", user \"{user_name}\", database \"{database_name}\""
+                );
             };
 
             // Determine the user authenticator based on the user's auth info.
-            let authenticator_by_info = || -> std::result::Result<UserAuthenticator, BoxedError> {
+            let authenticator_by_info = || -> Result<UserAuthenticator> {
                 let authenticator = match &user.auth_info {
                     None => UserAuthenticator::None,
                     Some(auth_info) => match auth_info.encryption_type() {
@@ -1674,13 +1672,10 @@ impl SessionManagerImpl {
                             cluster_id: self.env.meta_client().cluster_id().to_owned(),
                         },
                         _ => {
-                            return Err(Box::new(Error::new(
-                                ErrorKind::Unsupported,
-                                format!(
-                                    "Unsupported auth type: {}",
-                                    auth_info.encryption_type().as_str_name()
-                                ),
-                            )));
+                            bail_protocol_error!(
+                                "Unsupported auth type: {}",
+                                auth_info.encryption_type().as_str_name()
+                            );
                         }
                     },
                 };
@@ -1705,10 +1700,9 @@ impl SessionManagerImpl {
                     UserAuthenticator::Ldap(user_name.to_owned(), hba_entry_opt.clone())
                 }
                 _ => {
-                    return Err(Box::new(Error::new(
-                        ErrorKind::PermissionDenied,
-                        format!("password authentication failed for user \"{user_name}\""),
-                    )));
+                    bail_permission_denied!(
+                        "password authentication failed for user \"{user_name}\""
+                    );
                 }
             };
 
@@ -1732,15 +1726,13 @@ impl SessionManagerImpl {
 
             Ok(session_impl)
         } else {
-            Err(Box::new(Error::new(
-                ErrorKind::InvalidInput,
-                format!("Role {} does not exist", user_name),
-            )))
+            bail_catalog_error!("Role {} does not exist", user_name);
         }
     }
 }
 
 impl Session for SessionImpl {
+    type Error = RwError;
     type Portal = Portal;
     type PreparedStatement = PrepareStatement;
     type ValuesStream = PgResponseStream;
@@ -1751,7 +1743,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         stmt: Statement,
         format: Format,
-    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+    ) -> Result<PgResponse<PgResponseStream>> {
         let string = stmt.to_string();
         let sql_str = string.as_str();
         let sql: Arc<str> = Arc::from(sql_str);
@@ -1773,7 +1765,7 @@ impl Session for SessionImpl {
         self: Arc<Self>,
         statement: Option<Statement>,
         params_types: Vec<Option<DataType>>,
-    ) -> std::result::Result<PrepareStatement, BoxedError> {
+    ) -> Result<PrepareStatement> {
         Ok(if let Some(statement) = statement {
             handle_parse(self, statement, params_types).await?
         } else {
@@ -1787,19 +1779,11 @@ impl Session for SessionImpl {
         params: Vec<Option<Bytes>>,
         param_formats: Vec<Format>,
         result_formats: Vec<Format>,
-    ) -> std::result::Result<Portal, BoxedError> {
-        Ok(handle_bind(
-            prepare_statement,
-            params,
-            param_formats,
-            result_formats,
-        )?)
+    ) -> Result<Portal> {
+        handle_bind(prepare_statement, params, param_formats, result_formats)
     }
 
-    async fn execute(
-        self: Arc<Self>,
-        portal: Portal,
-    ) -> std::result::Result<PgResponse<PgResponseStream>, BoxedError> {
+    async fn execute(self: Arc<Self>, portal: Portal) -> Result<PgResponse<PgResponseStream>> {
         let rsp = handle_execute(self, portal).await?;
         Ok(rsp)
     }
@@ -1807,7 +1791,7 @@ impl Session for SessionImpl {
     fn describe_statement(
         self: Arc<Self>,
         prepare_statement: PrepareStatement,
-    ) -> std::result::Result<(Vec<DataType>, Vec<PgFieldDescriptor>), BoxedError> {
+    ) -> Result<(Vec<DataType>, Vec<PgFieldDescriptor>)> {
         Ok(match prepare_statement {
             PrepareStatement::Empty => (vec![], vec![]),
             PrepareStatement::Prepared(prepare_statement) => (
@@ -1821,15 +1805,13 @@ impl Session for SessionImpl {
         })
     }
 
-    fn describe_portal(
-        self: Arc<Self>,
-        portal: Portal,
-    ) -> std::result::Result<Vec<PgFieldDescriptor>, BoxedError> {
+    fn describe_portal(self: Arc<Self>, portal: Portal) -> Result<Vec<PgFieldDescriptor>> {
         match portal {
             Portal::Empty => Ok(vec![]),
             Portal::Portal(portal) => {
                 let mut columns = infer(Some(portal.bound_result.bound), portal.statement)?;
-                let formats = FormatIterator::new(&portal.result_formats, columns.len())?;
+                let formats = FormatIterator::new(&portal.result_formats, columns.len())
+                    .map_err(|e| RwError::from(ErrorCode::ProtocolError(e)))?;
                 columns.iter_mut().zip_eq_fast(formats).for_each(|(c, f)| {
                     if f == Format::Binary {
                         c.set_to_binary()
@@ -1841,12 +1823,12 @@ impl Session for SessionImpl {
         }
     }
 
-    fn get_config(&self, key: &str) -> std::result::Result<String, BoxedError> {
+    fn get_config(&self, key: &str) -> Result<String> {
         self.config().get(key).map_err(Into::into)
     }
 
-    fn set_config(&self, key: &str, value: String) -> std::result::Result<String, BoxedError> {
-        Self::set_config(self, key, value).map_err(Into::into)
+    fn set_config(&self, key: &str, value: String) -> Result<String> {
+        Self::set_config(self, key, value)
     }
 
     async fn next_notice(self: &Arc<Self>) -> String {

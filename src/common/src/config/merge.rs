@@ -116,7 +116,7 @@ mod tests {
     #[test]
     fn test_merge_streaming_config() {
         let base = StreamingConfig::default();
-        assert_ne!(base.unsafe_enable_strict_consistency, false);
+        assert_eq!(base.unsafe_disable_strict_consistency, false);
         assert_ne!(base.developer.chunk_size, 114514);
         assert_ne!(
             base.developer.compute_client_config.connect_timeout_secs,
@@ -125,7 +125,7 @@ mod tests {
 
         let partial = r#"
             [streaming]
-            unsafe_enable_strict_consistency = false
+            unsafe_disable_strict_consistency = true
 
             [streaming.developer]
             chunk_size = 114514
@@ -136,7 +136,7 @@ mod tests {
             .unwrap();
 
         // Demonstrate that the entries are merged.
-        assert_eq!(merged.unsafe_enable_strict_consistency, false);
+        assert_eq!(merged.unsafe_disable_strict_consistency, true);
         assert_eq!(merged.developer.chunk_size, 114514);
         assert_eq!(
             merged.developer.compute_client_config.connect_timeout_secs,
@@ -146,7 +146,7 @@ mod tests {
         // Demonstrate that the rest of the config is not affected.
         {
             let mut merged = merged;
-            merged.unsafe_enable_strict_consistency = base.unsafe_enable_strict_consistency;
+            merged.unsafe_disable_strict_consistency = base.unsafe_disable_strict_consistency;
             merged.developer.chunk_size = base.developer.chunk_size;
             merged.developer.compute_client_config.connect_timeout_secs =
                 base.developer.compute_client_config.connect_timeout_secs;

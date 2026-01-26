@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -84,7 +84,9 @@ impl ToBatchPb for BatchDelete {
         NodeBody::Delete(DeleteNode {
             table_id: self.core.table_id,
             table_version_id: self.core.table_version_id,
+            pk_indices: self.core.pk_indices.iter().map(|&idx| idx as u32).collect(),
             returning: self.core.returning,
+            upsert: self.base.ctx().session_ctx().config().upsert_dml(),
             session_id: self.base.ctx().session_ctx().session_id().0 as u32,
         })
     }

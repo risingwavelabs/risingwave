@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -88,6 +88,7 @@ impl From<WorkerInfo> for PbWorkerNode {
                 internal_rpc_host_addr: p.internal_rpc_host_addr.clone().unwrap_or_default(),
                 resource_group: p.resource_group.clone(),
                 parallelism: info.1.as_ref().map(|p| p.parallelism).unwrap_or_default() as u32,
+                is_iceberg_compactor: p.is_iceberg_compactor,
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
             resource: Some(info.2.resource),
@@ -165,6 +166,7 @@ impl ClusterController {
             )
             .await?;
 
+        // Keep license manager in sync with the latest cluster resource.
         self.update_cluster_resource_for_license().await?;
 
         Ok(worker_id)
@@ -199,10 +201,10 @@ impl ClusterController {
                 .notification_manager()
                 .notify_frontend(Operation::Delete, Info::Node(worker.clone()))
                 .await;
-            if worker.r#type() == PbWorkerType::ComputeNode {
-                self.update_cluster_resource_for_license().await?;
-            }
         }
+
+        // Keep license manager in sync with the latest cluster resource.
+        self.update_cluster_resource_for_license().await?;
 
         // Notify local subscribers.
         // Note: Any type of workers may pin some hummock resource. So `HummockManager` expect this
@@ -335,8 +337,12 @@ impl ClusterController {
         worker_status: Option<WorkerStatus>,
     ) -> MetaResult<Vec<PbWorkerNode>> {
         let mut workers = vec![];
-        // fill meta info.
-        if worker_type.is_none() {
+        // Meta node is not stored in the cluster manager DB, so we synthesize it here.
+        // Include it when listing all workers, or when explicitly listing meta nodes.
+        let include_meta = worker_type.is_none() || worker_type == Some(WorkerType::Meta);
+        // Meta node is always "running" once the service is up.
+        let include_meta = include_meta && worker_status != Some(WorkerStatus::Starting);
+        if include_meta {
             workers.push(meta_node_info(
                 &self.env.opts.advertise_addr,
                 Some(self.started_at),
@@ -615,9 +621,19 @@ impl ClusterControllerInner {
         // For each hostname, we only consider the maximum resource, in case a host has multiple nodes.
         let mut per_host = HashMap::new();
 
+        // Note: Meta node itself is not a "worker" and thus won't register via `add_worker_node`.
+        // Still, for license/RWU enforcement we should include the resources used by the meta node.
+        per_host.insert(
+            hostname(),
+            ClusterResource {
+                total_cpu_cores: total_cpu_available() as _,
+                total_memory_bytes: system_memory_available_bytes() as _,
+            },
+        );
+
         for info in self.worker_extra_info.values() {
             let r = per_host
-                .entry(info.resource.hostname.as_str())
+                .entry(info.resource.hostname.clone())
                 .or_insert_with(ClusterResource::default);
 
             r.total_cpu_cores = max(r.total_cpu_cores, info.resource.total_cpu_cores);
@@ -725,8 +741,38 @@ impl ClusterControllerInner {
                     is_unschedulable: Set(add_property.is_unschedulable),
                     internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
                     resource_group: Set(None),
+                    is_iceberg_compactor: Set(false),
                 };
                 WorkerProperty::insert(worker_property).exec(&txn).await?;
+                txn.commit().await?;
+                self.update_worker_ttl(worker.worker_id, ttl)?;
+                self.update_resource_and_started_at(worker.worker_id, resource)?;
+                Ok(worker.worker_id)
+            } else if worker.worker_type == WorkerType::Compactor {
+                if let Some(property) = property {
+                    let mut property: worker_property::ActiveModel = property.into();
+                    property.is_iceberg_compactor = Set(add_property.is_iceberg_compactor);
+                    property.internal_rpc_host_addr =
+                        Set(Some(add_property.internal_rpc_host_addr));
+
+                    WorkerProperty::update(property).exec(&txn).await?;
+                } else {
+                    let property = worker_property::ActiveModel {
+                        worker_id: Set(worker.worker_id),
+                        parallelism: Set(add_property
+                            .parallelism
+                            .try_into()
+                            .expect("invalid parallelism")),
+                        is_streaming: Set(false),
+                        is_serving: Set(false),
+                        is_unschedulable: Set(false),
+                        internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
+                        resource_group: Set(None),
+                        is_iceberg_compactor: Set(add_property.is_iceberg_compactor),
+                    };
+
+                    WorkerProperty::insert(property).exec(&txn).await?;
+                }
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
                 self.update_resource_and_started_at(worker.worker_id, resource)?;
@@ -737,6 +783,7 @@ impl ClusterControllerInner {
                 Ok(worker.worker_id)
             };
         }
+
         let txn_id = self.apply_transaction_id(r#type)?;
 
         let worker = worker::ActiveModel {
@@ -749,22 +796,44 @@ impl ClusterControllerInner {
         };
         let insert_res = Worker::insert(worker).exec(&txn).await?;
         let worker_id = insert_res.last_insert_id as WorkerId;
-        if r#type == PbWorkerType::ComputeNode || r#type == PbWorkerType::Frontend {
+        if r#type == PbWorkerType::ComputeNode
+            || r#type == PbWorkerType::Frontend
+            || r#type == PbWorkerType::Compactor
+        {
+            let (is_serving, is_streaming, is_unschedulable, is_iceberg_compactor, resource_group) =
+                match r#type {
+                    PbWorkerType::ComputeNode => (
+                        add_property.is_serving,
+                        add_property.is_streaming,
+                        add_property.is_unschedulable,
+                        false,
+                        add_property.resource_group.clone(),
+                    ),
+                    PbWorkerType::Frontend => (
+                        add_property.is_serving,
+                        add_property.is_streaming,
+                        add_property.is_unschedulable,
+                        false,
+                        None,
+                    ),
+                    PbWorkerType::Compactor => {
+                        (false, false, false, add_property.is_iceberg_compactor, None)
+                    }
+                    _ => unreachable!(),
+                };
+
             let property = worker_property::ActiveModel {
                 worker_id: Set(worker_id),
                 parallelism: Set(add_property
                     .parallelism
                     .try_into()
                     .expect("invalid parallelism")),
-                is_streaming: Set(add_property.is_streaming),
-                is_serving: Set(add_property.is_serving),
-                is_unschedulable: Set(add_property.is_unschedulable),
+                is_streaming: Set(is_streaming),
+                is_serving: Set(is_serving),
+                is_unschedulable: Set(is_unschedulable),
                 internal_rpc_host_addr: Set(Some(add_property.internal_rpc_host_addr)),
-                resource_group: if r#type == PbWorkerType::ComputeNode {
-                    Set(add_property.resource_group.clone())
-                } else {
-                    Set(None)
-                },
+                resource_group: Set(resource_group),
+                is_iceberg_compactor: Set(is_iceberg_compactor),
             };
             WorkerProperty::insert(property).exec(&txn).await?;
         }
@@ -1136,6 +1205,31 @@ mod tests {
         assert!(workers[0].property.as_ref().unwrap().is_unschedulable);
 
         cluster_ctl.delete_worker(host).await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_list_workers_include_meta_node() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+
+        // List all workers should include the synthesized meta node.
+        let workers = cluster_ctl.list_workers(None, None).await?;
+        assert!(workers.iter().any(|w| w.r#type() == PbWorkerType::Meta));
+
+        // Explicitly listing meta workers should also include it.
+        let workers = cluster_ctl
+            .list_workers(Some(WorkerType::Meta), None)
+            .await?;
+        assert_eq!(workers.len(), 1);
+        assert_eq!(workers[0].r#type(), PbWorkerType::Meta);
+
+        // Listing starting workers should not include meta.
+        let workers = cluster_ctl
+            .list_workers(Some(WorkerType::Meta), Some(WorkerStatus::Starting))
+            .await?;
+        assert!(workers.is_empty());
 
         Ok(())
     }

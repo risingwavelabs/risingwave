@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -130,7 +130,7 @@ impl<T: TrivialSinkType> LogSinker for TrivialSink<T> {
 
                     log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
                 }
-                LogStoreReadItem::Barrier { add_columns, .. } => {
+                LogStoreReadItem::Barrier { schema_change, .. } => {
                     if T::TRACE_LOG {
                         tracing::trace!(
                             target: "events::sink::message::barrier",
@@ -140,8 +140,8 @@ impl<T: TrivialSinkType> LogSinker for TrivialSink<T> {
                         );
                     }
 
-                    if let Some(add_columns) = add_columns {
-                        info!(?add_columns, "trivial sink receive add columns");
+                    if let Some(schema_change) = schema_change {
+                        info!(?schema_change, "trivial sink receive schema change");
                     }
 
                     log_reader.truncate(TruncateOffset::Barrier { epoch })?;

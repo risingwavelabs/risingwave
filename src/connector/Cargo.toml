@@ -7,6 +7,9 @@ keywords = { workspace = true }
 license = { workspace = true }
 repository = { workspace = true }
 
+[package.metadata.cargo-machete]
+ignored = ["adbc_core"]
+
 [features]
 default = []
 all-sinks = [
@@ -17,29 +20,29 @@ all-sinks = [
     "sink-doris",
     "sink-starrocks",
 ]
-all-sources = []
+all-sources = ["source-adbc_snowflake"]
+source-adbc_snowflake = ["dep:adbc_core", "dep:adbc_snowflake"]
 sink-bigquery = [
     "dep:gcp-bigquery-client",
     "dep:google-cloud-bigquery",
-    "dep:google-cloud-gax",
     "dep:google-cloud-googleapis",
 ]
 sink-deltalake = ["dep:deltalake"]
-sink-google_pubsub = [
-    # "dep:google-cloud-pubsub",
-    "dep:google-cloud-gax",
-    "dep:google-cloud-googleapis",
-]
+# TODO: pubsub source is not feature-gated, thus `google-cloud-pubsub` cannot be optional.
+sink-google_pubsub = ["dep:google-cloud-googleapis"]
 sink-clickhouse = ["dep:clickhouse"]
 sink-doris = []
 sink-starrocks = []
 
 [dependencies]
+# Rust ADBC crates (e.g., adbc_core 0.21) are built against the ADBC C/C++ core driver library version 0.19
+adbc_core = { workspace = true, optional = true }
+adbc_snowflake = { workspace = true, optional = true, default-features = false }
 anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = { version = "0.45", features = ["websockets"] }
+async-nats = { version = "0.46", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -67,7 +70,7 @@ clickhouse = { git = "https://github.com/risingwavelabs/clickhouse.rs", rev = "f
 ], optional = true }
 csv = "1.4"
 deltalake = { workspace = true, optional = true }
-duration-str = "0.17.0"
+duration-str = "0.18.0"
 easy-ext = "1"
 either = "1"
 elasticsearch = { version = "8.17.0-alpha.1", features = ["rustls-tls"] }
@@ -76,15 +79,15 @@ futures = { version = "0.3", default-features = false, features = ["alloc"] }
 futures-async-stream = { workspace = true }
 gcp-bigquery-client = { version = "0.18.0", optional = true }
 glob = "0.3"
-google-cloud-bigquery = { package = "gcloud-bigquery", version = "1", features = [
+google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.4", features = [
     "auth",
 ], optional = true }
-google-cloud-gax = { package = "gcloud-gax", version = "1", optional = true }
+google-cloud-gax = { package = "gcloud-gax", version = "1" }
 google-cloud-googleapis = { package = "gcloud-googleapis", version = "1", features = [
     "pubsub",
     "bigquery",
 ], optional = true }
-google-cloud-pubsub = { package = "gcloud-pubsub", version = "1" }
+google-cloud-pubsub = { package = "gcloud-pubsub", version = "1.5" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }
 iceberg-catalog-rest = { workspace = true }
@@ -119,8 +122,11 @@ phf = { version = "0.13", features = ["macros"] }
 postgres-openssl = "0.5.0"
 prometheus = { version = "0.14", features = ["process"] }
 prost = { workspace = true, features = ["no-recursion-limit"] }
+prost-011 = { package = "prost", version = "0.11" }
+prost-014 = { package = "prost", version = "0.14" }
 prost-reflect = { version = "0.15", features = ["serde"] }
 prost-types = "0.13"
+prost-types-014 = { package = "prost-types", version = "0.14" }
 pulsar = { version = "6.3", default-features = false, features = [
     "tokio-runtime",
     "telemetry",
@@ -128,8 +134,6 @@ pulsar = { version = "6.3", default-features = false, features = [
     "lz4",
     "zstd",
 ] }
-# should align with pulsar's prost version
-pulsar-prost = { package = "prost", version = "0.11.9" }
 rdkafka = { workspace = true, features = [
     "cmake-build",
     "ssl",
@@ -152,7 +156,6 @@ risingwave_common_estimate_size = { workspace = true }
 risingwave_common_rate_limit = { workspace = true }
 risingwave_connector_codec = { workspace = true }
 risingwave_jni_core = { workspace = true }
-risingwave_meta_model = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 rumqttc = { version = "0.25.0", features = ["url"] }
@@ -209,7 +212,7 @@ tracing = "0.1"
 typed-builder = "^0.23"
 url = "2"
 urlencoding = "2"
-uuid = { version = "1", features = ["v4", "fast-rng"] }
+uuid = { version = "1", features = ["v4", "v7", "fast-rng"] }
 with_options = { path = "./with_options" }
 yup-oauth2 = "8.3"
 

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -344,9 +344,16 @@ impl Cluster {
     pub async fn throttle_mv(&mut self, table_id: TableId, rate_limit: Option<u32>) -> Result<()> {
         self.ctl
             .spawn(async move {
-                let mut command: Vec<String> =
-                    vec!["throttle".into(), "mv".into(), table_id.to_string()];
+                let mut command: Vec<String> = vec![
+                    "throttle".into(),
+                    "mv".into(),
+                    "--id".into(),
+                    table_id.to_string(),
+                    "--throttle-type".into(),
+                    "backfill".into(),
+                ];
                 if let Some(rate_limit) = rate_limit {
+                    command.push("--rate".into());
                     command.push(rate_limit.to_string());
                 }
                 start_ctl(command).await

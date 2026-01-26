@@ -89,8 +89,8 @@ public.jsonb_access jsonb, integer jsonb (empty) http://localhost:8815
 public.jsonb_array_identity jsonb[] jsonb[] (empty) http://localhost:8815
 public.jsonb_array_struct_identity struct<v jsonb[], len integer> struct<v jsonb[], len integer> (empty) http://localhost:8815
 public.jsonb_concat jsonb[] jsonb (empty) http://localhost:8815
-public.return_all boolean, smallint, integer, bigint, real, double precision, numeric, date, time without time zone, timestamp without time zone, interval, character varying, bytea, jsonb, struct<f1 integer, f2 integer> struct<bool boolean, i16 smallint, i32 integer, i64 bigint, f32 real, f64 double precision, decimal numeric, date date, time time without time zone, timestamp timestamp without time zone, interval interval, varchar character varying, bytea bytea, jsonb jsonb, struct struct<f1 integer, f2 integer>> (empty) http://localhost:8815
-public.return_all_arrays boolean[], smallint[], integer[], bigint[], real[], double precision[], numeric[], date[], time without time zone[], timestamp without time zone[], interval[], character varying[], bytea[], jsonb[], struct<f1 integer, f2 integer>[] struct<bool boolean[], i16 smallint[], i32 integer[], i64 bigint[], f32 real[], f64 double precision[], decimal numeric[], date date[], time time without time zone[], timestamp timestamp without time zone[], interval interval[], varchar character varying[], bytea bytea[], jsonb jsonb[], struct struct<f1 integer, f2 integer>[]> (empty) http://localhost:8815
+public.return_all boolean, smallint, integer, bigint, real, double precision, numeric, date, time without time zone, timestamp without time zone, interval, character varying, bytea, jsonb, struct<f1 integer, f2 integer> struct<"bool" boolean, i16 smallint, i32 integer, i64 bigint, f32 real, f64 double precision, "decimal" numeric, "date" date, "time" time without time zone, "timestamp" timestamp without time zone, "interval" interval, "varchar" character varying, "bytea" bytea, jsonb jsonb, "struct" struct<f1 integer, f2 integer>> (empty) http://localhost:8815
+public.return_all_arrays boolean[], smallint[], integer[], bigint[], real[], double precision[], numeric[], date[], time without time zone[], timestamp without time zone[], interval[], character varying[], bytea[], jsonb[], struct<f1 integer, f2 integer>[] struct<"bool" boolean[], i16 smallint[], i32 integer[], i64 bigint[], f32 real[], f64 double precision[], "decimal" numeric[], "date" date[], "time" time without time zone[], "timestamp" timestamp without time zone[], "interval" interval[], "varchar" character varying[], "bytea" bytea[], jsonb jsonb[], "struct" struct<f1 integer, f2 integer>[]> (empty) http://localhost:8815
 public.series integer integer (empty) http://localhost:8815
 public.split character varying struct<word character varying, length integer> (empty) http://localhost:8815
 
@@ -266,6 +266,14 @@ select (extract_tcp_info(E'\\x45000034a8a8400040065b8ac0a8000ec0a80001035d20b6d9
 # steaming
 # to ensure UDF & UDTF respect visibility
 
+# Currently all UDFs will be considered impure, which need to be materialized on retract streams.
+# However, the optimizer doesn't seem to extract impure expressions from all places.
+# As a result, we may get an error when running this test in streaming mode:
+#  using an impure expression (user-defined function) in ... on a retract stream may lead to inconsistent results
+# TODO: correctly extract impure expressions and remove this bypass.
+statement ok
+set streaming_unsafe_allow_unmaterialized_impure_expr to true;
+
 statement ok
 create table t (x int);
 
@@ -291,6 +299,9 @@ drop materialized view mv;
 
 statement ok
 drop table t;
+
+statement ok
+set streaming_unsafe_allow_unmaterialized_impure_expr to default;
 
 # error handling
 

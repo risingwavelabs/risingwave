@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 mod non_zero64;
 mod opt;
-mod over_window;
 pub mod parallelism;
 mod query_mode;
 mod search_path;
@@ -25,7 +24,6 @@ mod visibility_mode;
 use chrono_tz::Tz;
 use itertools::Itertools;
 pub use opt::OptionConfig;
-pub use over_window::OverWindowCachePolicy;
 pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
 pub use search_path::{SearchPath, USER_NAME_WILD_CARD};
@@ -33,7 +31,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
-use crate::config::streaming::JoinEncodingType;
+use crate::config::mutate::TomlTableMutateExt;
+use crate::config::streaming::{JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
 use crate::session_config::parallelism::ConfigParallelism;
@@ -171,6 +170,10 @@ pub struct SessionConfig {
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism: ConfigParallelism,
 
+    /// Specific parallelism for backfill. By default, it will fall back to `STREAMING_PARALLELISM`.
+    #[parameter(default = ConfigParallelism::default())]
+    streaming_parallelism_for_backfill: ConfigParallelism,
+
     /// Specific parallelism for table. By default, it will fall back to `STREAMING_PARALLELISM`.
     #[parameter(default = ConfigParallelism::default())]
     streaming_parallelism_for_table: ConfigParallelism,
@@ -219,9 +222,11 @@ pub struct SessionConfig {
     #[parameter(default = false, alias = "rw_streaming_allow_jsonb_in_stream_key")]
     streaming_allow_jsonb_in_stream_key: bool,
 
-    /// Enable materialized expressions for impure functions (typically UDF).
-    #[parameter(default = true)]
-    streaming_enable_materialized_expressions: bool,
+    /// Unsafe: allow impure expressions on non-append-only streams without materialization.
+    ///
+    /// This may lead to inconsistent results or panics due to re-evaluation on updates/retracts.
+    #[parameter(default = false)]
+    streaming_unsafe_allow_unmaterialized_impure_expr: bool,
 
     /// Separate consecutive `StreamHashJoin` by no-shuffle `StreamExchange`
     #[parameter(default = false)]
@@ -350,9 +355,12 @@ pub struct SessionConfig {
     sink_rate_limit: i32,
 
     /// Cache policy for partition cache in streaming over window.
-    /// Can be "full", "recent", "`recent_first_n`" or "`recent_last_n`".
-    #[parameter(default = OverWindowCachePolicy::default(), alias = "rw_streaming_over_window_cache_policy")]
-    streaming_over_window_cache_policy: OverWindowCachePolicy,
+    /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None, alias = "rw_streaming_over_window_cache_policy")]
+    streaming_over_window_cache_policy: OptionConfig<OverWindowCachePolicy>,
 
     /// Run DDL statements in background
     #[parameter(default = false)]
@@ -402,12 +410,18 @@ pub struct SessionConfig {
     /// The timeout for reading from the buffer of the sync log store on barrier.
     /// Every epoch we will attempt to read the full buffer of the sync log store.
     /// If we hit the timeout, we will stop reading and continue.
-    #[parameter(default = 64_usize)]
-    streaming_sync_log_store_pause_duration_ms: usize,
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None)]
+    streaming_sync_log_store_pause_duration_ms: OptionConfig<usize>,
 
     /// The max buffer size for sync logstore, before we start flushing.
-    #[parameter(default = 2048_usize)]
-    streaming_sync_log_store_buffer_size: usize,
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None)]
+    streaming_sync_log_store_buffer_size: OptionConfig<usize>,
 
     /// Whether to disable purifying the definition of the table or source upon retrieval.
     /// Only set this if encountering issues with functionalities like `SHOW` or `ALTER TABLE/SOURCE`.
@@ -437,6 +451,20 @@ pub struct SessionConfig {
     /// if there is any row INSERT/UPDATE/DELETE operation corresponding to the ttled primary key.
     #[parameter(default = false)]
     unsafe_enable_storage_retention_for_non_append_only_tables: bool,
+
+    /// Enable DataFusion Engine
+    /// When enabled, queries involving Iceberg tables will be executed using the DataFusion engine.
+    #[parameter(default = false)]
+    enable_datafusion_engine: bool,
+
+    /// Emit chunks in upsert format for `UPDATE` and `DELETE` DMLs.
+    /// May lead to undefined behavior if the table is created with `ON CONFLICT DO NOTHING`.
+    ///
+    /// When enabled:
+    /// - `UPDATE` will only emit `Insert` records for new rows, instead of `Update` records.
+    /// - `DELETE` will only include key columns and pad the rest with NULL, instead of emitting complete rows.
+    #[parameter(default = false)]
+    upsert_dml: bool,
 }
 
 fn check_iceberg_engine_connection(val: &str) -> Result<(), String> {
@@ -545,46 +573,41 @@ impl SessionConfig {
     pub fn to_initial_streaming_config_override(
         &self,
     ) -> Result<String, SessionConfigToOverrideError> {
-        type Map = toml::map::Map<String, toml::Value>;
-        let mut map = Map::new();
+        let mut table = toml::Table::new();
 
         // TODO: make this more type safe.
-        fn add(map: &mut Map, path: &str, val: impl Serialize) -> Result<(), toml::ser::Error> {
-            let value = toml::Value::try_from(val)?;
-            let segments = path.split('.').collect_vec();
-            let (key, segments) = segments.split_last().expect("empty path");
-
-            let mut map = map;
-            for segment in segments {
-                map = map
-                    .entry(segment.to_owned())
-                    .or_insert_with(|| toml::Value::Table(Map::new()))
-                    .as_table_mut()
-                    .expect("expect table");
-            }
-            map.insert(key.to_string(), value);
-
-            Ok(())
-        }
-
+        // We `unwrap` here to assert the hard-coded keys are correct.
         if let Some(v) = self.streaming_join_encoding.as_ref() {
-            add(&mut map, "streaming.developer.join_encoding_type", v)?;
+            table
+                .upsert("streaming.developer.join_encoding_type", v)
+                .unwrap();
+        }
+        if let Some(v) = self.streaming_sync_log_store_pause_duration_ms.as_ref() {
+            table
+                .upsert("streaming.developer.sync_log_store_pause_duration_ms", v)
+                .unwrap();
+        }
+        if let Some(v) = self.streaming_sync_log_store_buffer_size.as_ref() {
+            table
+                .upsert("streaming.developer.sync_log_store_buffer_size", v)
+                .unwrap();
+        }
+        if let Some(v) = self.streaming_over_window_cache_policy.as_ref() {
+            table
+                .upsert("streaming.developer.over_window_cache_policy", v)
+                .unwrap();
         }
 
-        let res = toml::to_string(&map)?;
+        let res = toml::to_string(&table)?;
 
         // Validate all fields are valid by trying to merge it to the default config.
         if !res.is_empty() {
             let merged =
                 merge_streaming_config_section(&StreamingConfig::default(), res.as_str())?.unwrap();
 
-            for u in [
-                merged.unrecognized.into_inner(),
-                merged.developer.unrecognized.into_inner(),
-            ] {
-                if !u.is_empty() {
-                    bail!("unrecognized config entries: {:?}", u);
-                }
+            let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+            if !unrecognized_keys.is_empty() {
+                bail!("unrecognized configs: {:?}", unrecognized_keys);
             }
         }
 
@@ -622,12 +645,19 @@ mod test {
         config
             .set_streaming_join_encoding(Some(JoinEncodingType::Cpu).into(), &mut ())
             .unwrap();
+        config
+            .set_streaming_over_window_cache_policy(
+                Some(OverWindowCachePolicy::RecentFirstN).into(),
+                &mut (),
+            )
+            .unwrap();
 
         // Check the converted config override string.
         let override_str = config.to_initial_streaming_config_override().unwrap();
         expect![[r#"
             [streaming.developer]
             join_encoding_type = "cpu_optimized"
+            over_window_cache_policy = "recent_first_n"
         "#]]
         .assert_eq(&override_str);
 
@@ -636,5 +666,9 @@ mod test {
             .unwrap()
             .unwrap();
         assert_eq!(merged.developer.join_encoding_type, JoinEncodingType::Cpu);
+        assert_eq!(
+            merged.developer.over_window_cache_policy,
+            OverWindowCachePolicy::RecentFirstN
+        );
     }
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,6 +26,8 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::debug;
 
 use crate::barrier::BarrierKind;
+use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
+use crate::barrier::notifier::Notifier;
 use crate::barrier::utils::{NodeToCollect, is_valid_after_worker_err};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 
@@ -34,8 +36,9 @@ struct CreatingStreamingJobEpochState {
     epoch: u64,
     node_to_collect: NodeToCollect,
     resps: Vec<BarrierCompleteResponse>,
+    notifiers: Vec<Notifier>,
     kind: BarrierKind,
-    is_first_commit: bool,
+    first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
     enqueue_time: Instant,
 }
 
@@ -44,9 +47,9 @@ pub(super) struct CreatingStreamingJobBarrierControl {
     job_id: JobId,
     // key is prev_epoch of barrier
     inflight_barrier_queue: BTreeMap<u64, CreatingStreamingJobEpochState>,
-    backfill_epoch: u64,
-    is_first_committed: bool,
+    snapshot_epoch: u64,
     max_collected_epoch: Option<u64>,
+    max_committed_epoch: Option<u64>,
     // newer epoch at the front.
     pending_barriers_to_complete: VecDeque<CreatingStreamingJobEpochState>,
     completing_barrier: Option<(CreatingStreamingJobEpochState, HistogramTimer)>,
@@ -60,14 +63,14 @@ pub(super) struct CreatingStreamingJobBarrierControl {
 }
 
 impl CreatingStreamingJobBarrierControl {
-    pub(super) fn new(job_id: JobId, backfill_epoch: u64, is_first_committed: bool) -> Self {
+    pub(super) fn new(job_id: JobId, snapshot_epoch: u64, committed_epoch: Option<u64>) -> Self {
         let table_id_str = format!("{}", job_id);
         Self {
             job_id,
             inflight_barrier_queue: Default::default(),
-            backfill_epoch,
-            is_first_committed,
-            max_collected_epoch: None,
+            snapshot_epoch,
+            max_collected_epoch: committed_epoch,
+            max_committed_epoch: committed_epoch,
             pending_barriers_to_complete: Default::default(),
             completing_barrier: None,
 
@@ -90,10 +93,10 @@ impl CreatingStreamingJobBarrierControl {
         self.inflight_barrier_queue.len()
     }
 
-    pub(super) fn is_valid_after_worker_err(&mut self, worker_id: WorkerId) -> bool {
+    pub(super) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
         self.inflight_barrier_queue
-            .values_mut()
-            .all(|state| is_valid_after_worker_err(&mut state.node_to_collect, worker_id))
+            .values()
+            .all(|state| is_valid_after_worker_err(&state.node_to_collect, worker_id))
     }
 
     fn latest_epoch(&self) -> Option<u64> {
@@ -103,8 +106,8 @@ impl CreatingStreamingJobBarrierControl {
             .or(self.max_collected_epoch)
     }
 
-    pub(super) fn max_collected_epoch(&self) -> Option<u64> {
-        self.max_collected_epoch
+    pub(super) fn max_committed_epoch(&self) -> Option<u64> {
+        self.max_committed_epoch
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -118,6 +121,8 @@ impl CreatingStreamingJobBarrierControl {
         epoch: u64,
         node_to_collect: NodeToCollect,
         kind: BarrierKind,
+        notifiers: Vec<Notifier>,
+        first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
     ) {
         debug!(
             epoch,
@@ -125,23 +130,35 @@ impl CreatingStreamingJobBarrierControl {
             job_id = %self.job_id,
             "creating job enqueue epoch"
         );
-        let is_first_commit = !self.is_first_committed;
-        if !self.is_first_committed {
-            self.is_first_committed = true;
+        if first_create_info.is_some() {
             assert!(
                 kind.is_checkpoint(),
                 "first barrier must be checkpoint barrier"
             );
         }
-        if let Some(latest_epoch) = self.latest_epoch() {
-            assert!(epoch > latest_epoch, "{} {}", epoch, latest_epoch);
+        match &kind {
+            BarrierKind::Initial => {
+                assert_eq!(
+                    self.latest_epoch().expect(
+                        "should have committed when recovered and injecting Initial barrier"
+                    ),
+                    epoch
+                );
+            }
+            BarrierKind::Barrier | BarrierKind::Checkpoint(_) => {
+                if let Some(latest_epoch) = self.latest_epoch() {
+                    assert!(epoch > latest_epoch, "{} {}", epoch, latest_epoch);
+                }
+            }
         }
+
         let epoch_state = CreatingStreamingJobEpochState {
             epoch,
             node_to_collect,
             resps: vec![],
+            notifiers,
             kind,
-            is_first_commit,
+            first_create_info,
             enqueue_time: Instant::now(),
         };
         if epoch_state.node_to_collect.is_empty() && self.inflight_barrier_queue.is_empty() {
@@ -167,7 +184,7 @@ impl CreatingStreamingJobBarrierControl {
             .inflight_barrier_queue
             .get_mut(&epoch)
             .expect("should exist");
-        assert!(state.node_to_collect.remove(&worker_id).is_some());
+        assert!(state.node_to_collect.remove(&worker_id));
         state.resps.push(resp);
         while let Some((_, state)) = self.inflight_barrier_queue.first_key_value()
             && state.node_to_collect.is_empty()
@@ -188,7 +205,11 @@ impl CreatingStreamingJobBarrierControl {
     pub(super) fn start_completing(
         &mut self,
         epoch_end_bound: Bound<u64>,
-    ) -> Option<(u64, Vec<BarrierCompleteResponse>, bool)> {
+    ) -> Option<(
+        u64,
+        Vec<BarrierCompleteResponse>,
+        Option<CreateSnapshotBackfillJobCommandInfo>,
+    )> {
         assert!(self.completing_barrier.is_none());
         let epoch_range: (Bound<u64>, Bound<u64>) = (Unbounded, epoch_end_bound);
         while let Some(epoch_state) = self.pending_barriers_to_complete.back()
@@ -199,8 +220,8 @@ impl CreatingStreamingJobBarrierControl {
                 .pop_back()
                 .expect("non-empty");
             let epoch = epoch_state.epoch;
-            let is_first = epoch_state.is_first_commit;
-            if is_first {
+            let first_create_info = epoch_state.first_create_info.take();
+            if first_create_info.is_some() {
                 assert!(epoch_state.kind.is_checkpoint());
             } else if !epoch_state.kind.is_checkpoint() {
                 continue;
@@ -208,7 +229,7 @@ impl CreatingStreamingJobBarrierControl {
 
             let resps = take(&mut epoch_state.resps);
             self.completing_barrier = Some((epoch_state, self.wait_commit_latency.start_timer()));
-            return Some((epoch, resps, is_first));
+            return Some((epoch, resps, first_create_info));
         }
         None
     }
@@ -221,6 +242,12 @@ impl CreatingStreamingJobBarrierControl {
             self.completing_barrier.take().expect("should exist");
         wait_commit_timer.observe_duration();
         assert_eq!(epoch_state.epoch, completed_epoch);
+        for notifier in epoch_state.notifiers {
+            notifier.notify_collected();
+        }
+        if let Some(prev_max_committed_epoch) = self.max_committed_epoch.replace(completed_epoch) {
+            assert!(completed_epoch > prev_max_committed_epoch);
+        }
     }
 
     fn add_collected(&mut self, epoch_state: CreatingStreamingJobEpochState) {
@@ -229,11 +256,18 @@ impl CreatingStreamingJobBarrierControl {
             assert!(prev_epoch_state.epoch < epoch_state.epoch);
         }
         if let Some(max_collected_epoch) = self.max_collected_epoch {
-            assert!(epoch_state.epoch > max_collected_epoch);
+            match &epoch_state.kind {
+                BarrierKind::Initial => {
+                    assert_eq!(epoch_state.epoch, max_collected_epoch);
+                }
+                BarrierKind::Barrier | BarrierKind::Checkpoint(_) => {
+                    assert!(epoch_state.epoch > max_collected_epoch);
+                }
+            }
         }
         self.max_collected_epoch = Some(epoch_state.epoch);
         let barrier_latency = epoch_state.enqueue_time.elapsed().as_secs_f64();
-        let barrier_latency_metrics = if epoch_state.epoch < self.backfill_epoch {
+        let barrier_latency_metrics = if epoch_state.epoch < self.snapshot_epoch {
             &self.consuming_snapshot_barrier_latency
         } else {
             &self.consuming_log_store_barrier_latency

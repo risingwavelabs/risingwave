@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::iter;
 use std::sync::Arc;
 
 use await_tree::span;
@@ -23,7 +22,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, Field, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, SinkId};
-use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
+use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
 use risingwave_meta_model::{StreamingParallelism, fragment};
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
@@ -52,9 +51,6 @@ use crate::model::{
     SubscriptionId,
 };
 use crate::stream::SourceManagerRef;
-use crate::stream::cdc::{
-    assign_cdc_table_snapshot_splits, is_parallelized_backfill_enabled_cdc_scan_fragment,
-};
 use crate::{MetaError, MetaResult};
 
 pub type GlobalStreamManagerRef = Arc<GlobalStreamManager>;
@@ -100,6 +96,8 @@ pub struct CreateStreamingJobContext {
     pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
 
+    pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
+
     pub option: CreateStreamingJobOption,
 
     pub streaming_job: StreamingJob,
@@ -107,6 +105,8 @@ pub struct CreateStreamingJobContext {
     pub fragment_backfill_ordering: FragmentBackfillOrder,
 
     pub locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
+
+    pub is_serverless_backfill: bool,
 }
 
 struct StreamingJobExecution {
@@ -386,7 +386,7 @@ impl GlobalStreamManager {
             }
         };
 
-        tracing::info!("cleaning creating job info: {}", job_id);
+        tracing::debug!("cleaning creating job info: {}", job_id);
         self.creating_job_info.delete_job(job_id).await;
         result
     }
@@ -410,6 +410,8 @@ impl GlobalStreamManager {
             cross_db_snapshot_backfill_info,
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
+            cdc_table_snapshot_splits,
+            is_serverless_backfill,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -437,41 +439,6 @@ impl GlobalStreamManager {
                 .await?,
         );
 
-        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
-            stream_job_fragments.stream_job_id,
-            &stream_job_fragments,
-            self.env.meta_store_ref(),
-        )
-        .await?;
-        let cdc_table_snapshot_split_assignment = if !cdc_table_snapshot_split_assignment.is_empty()
-        {
-            self.env.cdc_table_backfill_tracker.track_new_job(
-                stream_job_fragments.stream_job_id,
-                cdc_table_snapshot_split_assignment
-                    .values()
-                    .map(|s| u64::try_from(s.len()).unwrap())
-                    .sum(),
-            );
-            self.env
-                .cdc_table_backfill_tracker
-                .add_fragment_table_mapping(
-                    stream_job_fragments
-                        .fragments
-                        .values()
-                        .filter(|f| is_parallelized_backfill_enabled_cdc_scan_fragment(f))
-                        .map(|f| f.fragment_id),
-                    stream_job_fragments.stream_job_id,
-                );
-            CdcTableSnapshotSplitAssignmentWithGeneration::new(
-                cdc_table_snapshot_split_assignment,
-                self.env
-                    .cdc_table_backfill_tracker
-                    .next_generation(iter::once(stream_job_fragments.stream_job_id)),
-            )
-        } else {
-            CdcTableSnapshotSplitAssignmentWithGeneration::empty()
-        };
-
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
             upstream_fragment_downstreams,
@@ -481,8 +448,9 @@ impl GlobalStreamManager {
             job_type,
             create_type,
             fragment_backfill_ordering,
-            cdc_table_snapshot_split_assignment,
+            cdc_table_snapshot_splits,
             locality_fragment_state_table_mapping,
+            is_serverless: is_serverless_backfill,
         };
 
         let job_type = if let Some(snapshot_backfill_info) = snapshot_backfill_info {
@@ -547,13 +515,6 @@ impl GlobalStreamManager {
             init_split_assignment
         );
 
-        let cdc_table_snapshot_split_assignment = assign_cdc_table_snapshot_splits(
-            old_fragments.stream_job_id,
-            &new_fragments.inner,
-            self.env.meta_store_ref(),
-        )
-        .await?;
-
         self.barrier_scheduler
             .run_command(
                 streaming_job.database_id(),
@@ -573,7 +534,6 @@ impl GlobalStreamManager {
                         }
                     },
                     auto_refresh_schema_sinks,
-                    cdc_table_snapshot_split_assignment,
                 }),
             )
             .await?;
@@ -709,16 +669,15 @@ impl GlobalStreamManager {
             .await?;
 
         if !background_jobs.is_empty() {
-            let related_jobs = self
-                .scale_controller
-                .resolve_related_no_shuffle_jobs(&background_jobs)
+            let unreschedulable = self
+                .metadata_manager
+                .collect_unreschedulable_backfill_jobs(&background_jobs)
                 .await?;
 
-            if related_jobs.contains(&job_id) {
+            if unreschedulable.contains(&job_id) {
                 bail!(
-                    "Cannot alter the job {} because the related job {:?} is currently being created",
+                    "Cannot alter the job {} because it is a non-reschedulable background backfill job",
                     job_id,
-                    background_jobs,
                 );
             }
         }

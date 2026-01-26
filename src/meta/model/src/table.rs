@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -215,6 +215,7 @@ pub struct Model {
     pub webhook_info: Option<WebhookSourceInfo>,
     pub engine: Option<Engine>,
     pub clean_watermark_index_in_pk: Option<i32>,
+    pub clean_watermark_indices: Option<I32Array>,
     pub refreshable: bool,
     pub vector_index_info: Option<VectorIndexInfo>,
     pub cdc_table_type: Option<CdcTableType>,
@@ -288,6 +289,13 @@ impl Related<super::source::Entity> for Entity {
 
 impl ActiveModelBehavior for ActiveModel {}
 
+impl Model {
+    pub fn job_id(&self) -> JobId {
+        self.belongs_to_job_id
+            .unwrap_or_else(|| self.table_id.as_job_id())
+    }
+}
+
 impl From<PbTable> for ActiveModel {
     fn from(pb_table: PbTable) -> Self {
         let table_type = pb_table.table_type();
@@ -347,6 +355,7 @@ impl From<PbTable> for ActiveModel {
             dist_key_in_pk: Set(pb_table.dist_key_in_pk.into()),
             dml_fragment_id,
             cardinality: Set(pb_table.cardinality.as_ref().map(|x| x.into())),
+            #[expect(deprecated)]
             cleaned_by_watermark: Set(pb_table.cleaned_by_watermark),
             description: Set(pb_table.description),
             version: Set(pb_table.version.as_ref().map(|v| v.into())),
@@ -357,7 +366,20 @@ impl From<PbTable> for ActiveModel {
             engine: Set(pb_table
                 .engine
                 .map(|engine| Engine::from(PbEngine::try_from(engine).expect("Invalid engine")))),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: Set(pb_table.clean_watermark_index_in_pk),
+            clean_watermark_indices: Set(if pb_table.clean_watermark_indices.is_empty() {
+                None
+            } else {
+                Some(
+                    pb_table
+                        .clean_watermark_indices
+                        .iter()
+                        .map(|x| *x as i32)
+                        .collect::<Vec<_>>()
+                        .into(),
+                )
+            }),
             refreshable: Set(pb_table.refreshable),
             vector_index_info: Set(pb_table
                 .vector_index_info

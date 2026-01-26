@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -21,10 +21,11 @@ use risingwave_sqlparser::ast::{ObjectName, SetVariableValue, SetVariableValueSi
 use risingwave_sqlparser::keywords::Keyword;
 use thiserror_ext::AsReport;
 
-use super::alter_utils::resolve_streaming_job_id_for_alter;
+use super::alter_utils::resolve_streaming_job_id_for_alter_parallelism;
 use super::{HandlerArgs, RwPgResponse};
 use crate::catalog::FragmentId;
 use crate::error::{ErrorCode, Result};
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 
 pub async fn handle_alter_parallelism(
     handler_args: HandlerArgs,
@@ -35,16 +36,25 @@ pub async fn handle_alter_parallelism(
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
 
-    let job_id = resolve_streaming_job_id_for_alter(&session, obj_name, stmt_type, "parallelism")?;
+    let job_id = resolve_streaming_job_id_for_alter_parallelism(
+        &session,
+        obj_name,
+        stmt_type,
+        "parallelism",
+    )?;
 
     let target_parallelism = extract_table_parallelism(parallelism)?;
 
     let mut builder = RwPgResponse::builder(stmt_type);
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .alter_parallelism(job_id, target_parallelism, deferred)
-        .await?;
+    execute_with_long_running_notification(
+        catalog_writer.alter_parallelism(job_id, target_parallelism, deferred),
+        &session,
+        "ALTER PARALLELISM",
+        LongRunningNotificationAction::SuggestRecover,
+    )
+    .await?;
 
     if deferred {
         builder = builder.notice("DEFERRED is used, please ensure that automatic parallelism control is enabled on the meta, otherwise, the alter will not take effect.".to_owned());

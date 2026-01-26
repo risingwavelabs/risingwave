@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -22,7 +22,7 @@ use futures_async_stream::for_await;
 use parking_lot::RwLock;
 use pgwire::net::{Address, AddressRef};
 use pgwire::pg_response::StatementType;
-use pgwire::pg_server::{BoxedError, SessionId, SessionManager, UserAuthenticator};
+use pgwire::pg_server::{SessionId, SessionManager, UserAuthenticator};
 use pgwire::types::Row;
 use risingwave_common::catalog::{
     AlterDatabaseParam, DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, DEFAULT_SUPER_USER,
@@ -48,7 +48,7 @@ use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 use risingwave_pb::ddl_service::{
     DdlProgress, PbTableJobType, TableJobType, alter_name_request, alter_set_schema_request,
-    alter_swap_rename_request, create_connection_request,
+    alter_swap_rename_request, create_connection_request, streaming_job_resource_type,
 };
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
@@ -81,7 +81,7 @@ use crate::FrontendOpts;
 use crate::catalog::catalog_service::CatalogWriter;
 use crate::catalog::root_catalog::Catalog;
 use crate::catalog::{DatabaseId, FragmentId, SchemaId, SecretId, SinkId};
-use crate::error::{ErrorCode, Result};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::RwPgResponse;
 use crate::meta_client::FrontendMetaClient;
 use crate::scheduler::HummockSnapshotManagerRef;
@@ -97,13 +97,13 @@ pub struct LocalFrontend {
 }
 
 impl SessionManager for LocalFrontend {
+    type Error = RwError;
     type Session = SessionImpl;
 
     fn create_dummy_session(
         &self,
         _database_id: DatabaseId,
-        _user_name: u32,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    ) -> std::result::Result<Arc<Self::Session>, Self::Error> {
         unreachable!()
     }
 
@@ -112,7 +112,7 @@ impl SessionManager for LocalFrontend {
         _database: &str,
         _user_name: &str,
         _peer_addr: AddressRef,
-    ) -> std::result::Result<Arc<Self::Session>, BoxedError> {
+    ) -> std::result::Result<Arc<Self::Session>, Self::Error> {
         Ok(self.session_ref())
     }
 
@@ -300,7 +300,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut table: PbTable,
         _graph: StreamFragmentGraph,
         _dependencies: HashSet<ObjectId>,
-        _specific_resource_group: Option<String>,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         table.id = self.gen_id();
@@ -343,8 +343,14 @@ impl CatalogWriter for MockCatalogWriter {
             let source_id = self.create_source_inner(source)?;
             table.optional_associated_source_id = Some(source_id.into());
         }
-        self.create_materialized_view(table, graph, HashSet::new(), None, if_not_exists)
-            .await?;
+        self.create_materialized_view(
+            table,
+            graph,
+            HashSet::new(),
+            streaming_job_resource_type::ResourceType::Regular(true),
+            if_not_exists,
+        )
+        .await?;
         Ok(())
     }
 
@@ -515,6 +521,10 @@ impl CatalogWriter for MockCatalogWriter {
         self.catalog
             .write()
             .drop_source(database_id, schema_id, source_id);
+        Ok(())
+    }
+
+    async fn reset_source(&self, _source_id: SourceId) -> Result<()> {
         Ok(())
     }
 
@@ -1187,7 +1197,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
 
     async fn apply_throttle(
         &self,
-        _kind: PbThrottleTarget,
+        _throttle_target: PbThrottleTarget,
+        _throttle_type: risingwave_pb::common::PbThrottleType,
         _id: u32,
         _rate_limit: Option<u32>,
     ) -> RpcResult<()> {
@@ -1252,6 +1263,15 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _connector_conn_ref: Option<ConnectionId>,
     ) -> RpcResult<()> {
         unimplemented!()
+    }
+
+    async fn alter_connection_connector_props(
+        &self,
+        _connection_id: u32,
+        _changed_props: BTreeMap<String, String>,
+        _changed_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn list_hosted_iceberg_tables(&self) -> RpcResult<Vec<IcebergTable>> {

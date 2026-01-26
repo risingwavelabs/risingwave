@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -31,7 +31,6 @@ use risingwave_common::util::epoch::EPOCH_SPILL_TIME_MASK;
 use risingwave_pb::common::{BatchQueryEpoch, batch_query_epoch};
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use sstable_info::SstableInfo;
-use tracing::warn;
 
 use crate::key_range::KeyRangeCommon;
 use crate::table_stats::TableStatsMap;
@@ -40,6 +39,7 @@ pub mod change_log;
 pub mod compact;
 pub mod compact_task;
 pub mod compaction_group;
+pub mod filter_utils;
 pub mod key;
 pub mod key_range;
 pub mod level;
@@ -449,15 +449,7 @@ impl From<BatchQueryEpoch> for HummockReadEpoch {
                 epoch.epoch,
                 HummockVersionId::new(epoch.hummock_version_id),
             ),
-            batch_query_epoch::Epoch::Current(epoch) => {
-                if epoch != HummockEpoch::MAX {
-                    warn!(
-                        epoch,
-                        "ignore specified current epoch and set it to u64::MAX"
-                    );
-                }
-                HummockReadEpoch::NoWait(HummockEpoch::MAX)
-            }
+            batch_query_epoch::Epoch::Current(epoch) => HummockReadEpoch::NoWait(epoch),
             batch_query_epoch::Epoch::Backup(epoch) => HummockReadEpoch::Backup(epoch),
             batch_query_epoch::Epoch::TimeTravel(epoch) => HummockReadEpoch::TimeTravel(epoch),
         }

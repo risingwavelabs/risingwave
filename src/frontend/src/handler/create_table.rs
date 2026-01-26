@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -76,7 +76,9 @@ use crate::handler::create_source::{
     UPSTREAM_SOURCE_KEY, bind_connector_props, bind_create_source_or_table_with_connector,
     bind_source_watermark, handle_addition_columns,
 };
-use crate::handler::util::SourceSchemaCompatExt;
+use crate::handler::util::{
+    LongRunningNotificationAction, SourceSchemaCompatExt, execute_with_long_running_notification,
+};
 use crate::optimizer::plan_node::generic::{SourceNodeKind, build_cdc_scan_options_with_options};
 use crate::optimizer::plan_node::{
     LogicalCdcScan, LogicalPlanRef, LogicalSource, StreamPlanRef as PlanRef,
@@ -95,11 +97,11 @@ use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::iceberg::{
     COMPACTION_DELETE_FILES_COUNT_THRESHOLD, COMPACTION_INTERVAL_SEC, COMPACTION_MAX_SNAPSHOTS_NUM,
     COMPACTION_SMALL_FILES_THRESHOLD_MB, COMPACTION_TARGET_FILE_SIZE_MB,
-    COMPACTION_TRIGGER_SNAPSHOT_COUNT, ENABLE_COMPACTION, ENABLE_SNAPSHOT_EXPIRATION,
-    ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ, IcebergSink,
-    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA,
-    SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS, SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE,
-    parse_partition_by_exprs,
+    COMPACTION_TRIGGER_SNAPSHOT_COUNT, COMPACTION_TYPE, CompactionType, ENABLE_COMPACTION,
+    ENABLE_SNAPSHOT_EXPIRATION, ICEBERG_WRITE_MODE_COPY_ON_WRITE, ICEBERG_WRITE_MODE_MERGE_ON_READ,
+    IcebergSink, IcebergWriteMode, SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES,
+    SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA, SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS,
+    SNAPSHOT_EXPIRATION_RETAIN_LAST, WRITE_MODE, parse_partition_by_exprs,
 };
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
 
@@ -594,7 +596,7 @@ pub(crate) fn gen_create_table_plan_without_source(
     let (mut columns, pk_column_ids, row_id_index) =
         bind_pk_and_row_id_on_relation(columns, pk_names, true)?;
 
-    let watermark_descs: Vec<WatermarkDesc> = bind_source_watermark(
+    let watermark_descs = bind_source_watermark(
         context.session_ctx(),
         table_name.real_value(),
         source_watermarks,
@@ -773,7 +775,9 @@ fn gen_table_plan_inner(
         vec![],
     );
 
-    if !append_only && !watermark_descs.is_empty() {
+    let has_non_ttl_watermark = watermark_descs.iter().any(|d| !d.with_ttl);
+
+    if !append_only && has_non_ttl_watermark {
         return Err(ErrorCode::NotSupported(
             "Defining watermarks on table requires the table to be append only.".to_owned(),
             "Use the key words `APPEND ONLY`".to_owned(),
@@ -953,10 +957,17 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     Ok((materialize.into(), table))
 }
 
+/// Derive connector properties and normalize `external_table_name` for CDC tables.
+///
+/// Returns (`connector_properties`, `normalized_external_table_name`) where:
+/// - For SQL Server: Normalizes 'db.schema.table' (3 parts) to 'schema.table' (2 parts),
+///   because users can optionally include database name for verification, but it needs to be
+///   stripped to match the format returned by Debezium's `extract_table_name()`.
+/// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
 fn derive_with_options_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,
     external_table_name: String,
-) -> Result<WithOptionsSecResolved> {
+) -> Result<(WithOptionsSecResolved, String)> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
     // we should remove the prefix from `full_table_name`
     let source_database_name: &str = source_with_properties
@@ -986,6 +997,8 @@ fn derive_with_options_for_cdc_table(
                 }
                 with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+                // Return original external_table_name unchanged for MySQL
+                return Ok((with_options, external_table_name));
             }
             POSTGRES_CDC_CONNECTOR => {
                 let (schema_name, table_name) = external_table_name
@@ -995,52 +1008,72 @@ fn derive_with_options_for_cdc_table(
                 // insert 'schema.name' into connect properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+                // Return original external_table_name unchanged for Postgres
+                return Ok((with_options, external_table_name));
             }
             SQL_SERVER_CDC_CONNECTOR => {
-                // SQL Server external table name can be in different formats:
-                // 1. 'databaseName.schemaName.tableName' (full format)
-                // 2. 'schemaName.tableName' (schema and table only)
-                // 3. 'tableName' (table only, will use default schema 'dbo')
-                // We will auto-fill missing parts from source configuration
+                // SQL Server external table name must be in one of two formats:
+                // 1. 'schemaName.tableName' (2 parts) - database is already specified in source
+                // 2. 'databaseName.schemaName.tableName' (3 parts) - for explicit verification
+                //
+                // We do NOT allow single table name (e.g., 't') because:
+                // - Unlike database name (already in source), schema name is NOT pre-specified
+                // - User must explicitly provide schema (even if it's 'dbo')
                 let parts: Vec<&str> = external_table_name.split('.').collect();
-                let (_, schema_name, table_name) = match parts.len() {
+                let (schema_name, table_name) = match parts.len() {
                     3 => {
-                        // Full format: database.schema.table
+                        // Format: database.schema.table
+                        // Verify that the database name matches the one in source definition
                         let db_name = parts[0];
                         let schema_name = parts[1];
                         let table_name = parts[2];
 
-                        // Verify database name matches source configuration
                         if db_name != source_database_name {
                             return Err(anyhow!(
-                                "The database name `{}` in the FROM clause is not the same as the database name `{}` in source definition",
+                                "The database name '{}' in FROM clause does not match the database name '{}' specified in source definition. \
+                                 You can either use 'schema.table' format (recommended) or ensure the database name matches.",
                                 db_name,
                                 source_database_name
                             ).into());
                         }
-                        (db_name, schema_name, table_name)
+                        (schema_name, table_name)
                     }
                     2 => {
-                        // Schema and table only: schema.table
+                        // Format: schema.table (recommended)
+                        // Database name is taken from source definition
                         let schema_name = parts[0];
                         let table_name = parts[1];
-                        (source_database_name, schema_name, table_name)
+                        (schema_name, table_name)
                     }
                     1 => {
-                        // Table only: table (use default schema 'dbo')
-                        let table_name = parts[0];
-                        (source_database_name, "dbo", table_name)
+                        // Format: table only
+                        // Reject with clear error message
+                        return Err(anyhow!(
+                            "Invalid table name format '{}'. For SQL Server CDC, you must specify the schema name. \
+                             Use 'schema.table' format (e.g., 'dbo.{}') or 'database.schema.table' format (e.g., '{}.dbo.{}').",
+                            external_table_name,
+                            external_table_name,
+                            source_database_name,
+                            external_table_name
+                        ).into());
                     }
                     _ => {
+                        // Invalid format (4+ parts or empty)
                         return Err(anyhow!(
-                            "The upstream table name must be in one of these formats: 'database.schema.table', 'schema.table', or 'table'"
+                            "Invalid table name format '{}'. Expected 'schema.table' or 'database.schema.table'.",
+                            external_table_name
                         ).into());
                     }
                 };
 
-                // insert 'schema.name' into connect properties
+                // Insert schema and table names into connector properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
+
+                // Normalize external_table_name to 'schema.table' format
+                // This ensures consistency with extract_table_name() in message.rs
+                let normalized_external_table_name = format!("{}.{}", schema_name, table_name);
+                return Ok((with_options, normalized_external_table_name));
             }
             _ => {
                 return Err(RwError::from(anyhow!(
@@ -1050,7 +1083,7 @@ fn derive_with_options_for_cdc_table(
             }
         };
     }
-    Ok(with_options)
+    unreachable!("All valid CDC connectors should have returned by now")
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -1158,13 +1191,13 @@ pub(super) async fn handle_create_table_plan(
                 session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
             // cdc table cannot be append-only
-            let (format_encode, source_name) =
+            let (source_schema, source_name) =
                 Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name)?;
 
             let source = {
                 let catalog_reader = session.env().catalog_reader().read_guard();
                 let schema_path =
-                    SchemaPath::new(format_encode.as_deref(), &search_path, user_name);
+                    SchemaPath::new(source_schema.as_deref(), &search_path, user_name);
 
                 let (source, _) = catalog_reader.get_source_by_name(
                     db_name,
@@ -1173,10 +1206,11 @@ pub(super) async fn handle_create_table_plan(
                 )?;
                 source.clone()
             };
-            let cdc_with_options: WithOptionsSecResolved = derive_with_options_for_cdc_table(
-                &source.with_properties,
-                cdc_table.external_table_name.clone(),
-            )?;
+            let (cdc_with_options, normalized_external_table_name) =
+                derive_with_options_for_cdc_table(
+                    &source.with_properties,
+                    cdc_table.external_table_name.clone(),
+                )?;
 
             let (columns, pk_names) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
@@ -1212,7 +1246,7 @@ pub(super) async fn handle_create_table_plan(
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
-                cdc_table.external_table_name.clone(),
+                normalized_external_table_name,
                 column_defs,
                 columns,
                 pk_names,
@@ -1473,16 +1507,24 @@ pub async fn handle_create_table(
     match engine {
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
-            catalog_writer
-                .create_table(
+            let action = match job_type {
+                TableJobType::SharedCdcSource => LongRunningNotificationAction::MonitorBackfillJob,
+                _ => LongRunningNotificationAction::DiagnoseBarrierLatency,
+            };
+            execute_with_long_running_notification(
+                catalog_writer.create_table(
                     source.map(|s| s.to_prost()),
                     hummock_table.to_prost(),
                     graph,
                     job_type,
                     if_not_exists,
                     dependencies,
-                )
-                .await?;
+                ),
+                &session,
+                "CREATE TABLE",
+                action,
+            )
+            .await?;
         }
         Engine::Iceberg => {
             let hummock_table_name = hummock_table.name.clone();
@@ -1525,68 +1567,6 @@ pub async fn create_iceberg_engine_table(
     job_type: PbTableJobType,
     if_not_exists: bool,
 ) -> Result<()> {
-    let meta_client = session.env().meta_client();
-    let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
-
-    let meta_store_endpoint = url::Url::parse(&meta_store_endpoint).map_err(|_| {
-        ErrorCode::InternalError("failed to parse the meta store endpoint".to_owned())
-    })?;
-    let meta_store_backend = meta_store_endpoint.scheme().to_owned();
-    let meta_store_user = meta_store_endpoint.username().to_owned();
-    let meta_store_password = match meta_store_endpoint.password() {
-        Some(password) => percent_decode_str(password)
-            .decode_utf8()
-            .map_err(|_| {
-                ErrorCode::InternalError(
-                    "failed to parse password from meta store endpoint".to_owned(),
-                )
-            })?
-            .into_owned(),
-        None => "".to_owned(),
-    };
-    let meta_store_host = meta_store_endpoint
-        .host_str()
-        .ok_or_else(|| {
-            ErrorCode::InternalError("failed to parse host from meta store endpoint".to_owned())
-        })?
-        .to_owned();
-    let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
-        ErrorCode::InternalError("failed to parse port from meta store endpoint".to_owned())
-    })?;
-    let meta_store_database = meta_store_endpoint
-        .path()
-        .trim_start_matches('/')
-        .to_owned();
-
-    let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
-        bail!("failed to parse meta backend: {}", meta_store_backend);
-    };
-
-    let catalog_uri = match meta_backend {
-        MetaBackend::Postgres => {
-            format!(
-                "jdbc:postgresql://{}:{}/{}",
-                meta_store_host.clone(),
-                meta_store_port.clone(),
-                meta_store_database.clone()
-            )
-        }
-        MetaBackend::Mysql => {
-            format!(
-                "jdbc:mysql://{}:{}/{}",
-                meta_store_host.clone(),
-                meta_store_port.clone(),
-                meta_store_database.clone()
-            )
-        }
-        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
-            bail!(
-                "Unsupported meta backend for iceberg engine table: {}",
-                meta_store_backend
-            );
-        }
-    };
-
     let rw_db_name = session
         .env()
         .catalog_reader()
@@ -1639,16 +1619,81 @@ pub async fn create_iceberg_engine_table(
                 with_common.insert("database.name".to_owned(), iceberg_database_name);
                 with_common.insert("table.name".to_owned(), iceberg_table_name);
 
-                if let Some(s) = params.properties.get("hosted_catalog")
-                    && s.eq_ignore_ascii_case("true")
-                {
+                let hosted_catalog = params
+                    .properties
+                    .get("hosted_catalog")
+                    .map(|s| s.eq_ignore_ascii_case("true"))
+                    .unwrap_or(false);
+                if hosted_catalog {
+                    let meta_client = session.env().meta_client();
+                    let meta_store_endpoint = meta_client.get_meta_store_endpoint().await?;
+
+                    let meta_store_endpoint =
+                        url::Url::parse(&meta_store_endpoint).map_err(|_| {
+                            ErrorCode::InternalError(
+                                "failed to parse the meta store endpoint".to_owned(),
+                            )
+                        })?;
+                    let meta_store_backend = meta_store_endpoint.scheme().to_owned();
+                    let meta_store_user = meta_store_endpoint.username().to_owned();
+                    let meta_store_password = match meta_store_endpoint.password() {
+                        Some(password) => percent_decode_str(password)
+                            .decode_utf8()
+                            .map_err(|_| {
+                                ErrorCode::InternalError(
+                                    "failed to parse password from meta store endpoint".to_owned(),
+                                )
+                            })?
+                            .into_owned(),
+                        None => "".to_owned(),
+                    };
+                    let meta_store_host = meta_store_endpoint
+                        .host_str()
+                        .ok_or_else(|| {
+                            ErrorCode::InternalError(
+                                "failed to parse host from meta store endpoint".to_owned(),
+                            )
+                        })?
+                        .to_owned();
+                    let meta_store_port = meta_store_endpoint.port().ok_or_else(|| {
+                        ErrorCode::InternalError(
+                            "failed to parse port from meta store endpoint".to_owned(),
+                        )
+                    })?;
+                    let meta_store_database = meta_store_endpoint
+                        .path()
+                        .trim_start_matches('/')
+                        .to_owned();
+
+                    let Ok(meta_backend) = MetaBackend::from_str(&meta_store_backend, true) else {
+                        bail!("failed to parse meta backend: {}", meta_store_backend);
+                    };
+
+                    let catalog_uri = match meta_backend {
+                        MetaBackend::Postgres => {
+                            format!(
+                                "jdbc:postgresql://{}:{}/{}",
+                                meta_store_host, meta_store_port, meta_store_database
+                            )
+                        }
+                        MetaBackend::Mysql => {
+                            format!(
+                                "jdbc:mysql://{}:{}/{}",
+                                meta_store_host, meta_store_port, meta_store_database
+                            )
+                        }
+                        MetaBackend::Sqlite | MetaBackend::Sql | MetaBackend::Mem => {
+                            bail!(
+                                "Unsupported meta backend for iceberg engine table: {}",
+                                meta_store_backend
+                            );
+                        }
+                    };
+
                     with_common.insert("catalog.type".to_owned(), "jdbc".to_owned());
                     with_common.insert("catalog.uri".to_owned(), catalog_uri);
                     with_common.insert("catalog.jdbc.user".to_owned(), meta_store_user);
-                    with_common.insert(
-                        "catalog.jdbc.password".to_owned(),
-                        meta_store_password.clone(),
-                    );
+                    with_common.insert("catalog.jdbc.password".to_owned(), meta_store_password);
                     with_common.insert("catalog.name".to_owned(), iceberg_catalog_name);
                 }
 
@@ -1908,15 +1953,19 @@ pub async fn create_iceberg_engine_table(
     }
 
     if let Some(write_mode) = handler_args.with_options.get(WRITE_MODE) {
-        match write_mode.to_lowercase().as_str() {
-            ICEBERG_WRITE_MODE_MERGE_ON_READ => {
-                sink_with.insert(
-                    WRITE_MODE.to_owned(),
-                    ICEBERG_WRITE_MODE_MERGE_ON_READ.to_owned(),
-                );
+        let write_mode = IcebergWriteMode::try_from(write_mode.as_str()).map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "invalid write_mode: {}, must be one of: {}, {}",
+                write_mode, ICEBERG_WRITE_MODE_MERGE_ON_READ, ICEBERG_WRITE_MODE_COPY_ON_WRITE
+            ))
+        })?;
+
+        match write_mode {
+            IcebergWriteMode::MergeOnRead => {
+                sink_with.insert(WRITE_MODE.to_owned(), write_mode.as_str().to_owned());
             }
 
-            ICEBERG_WRITE_MODE_COPY_ON_WRITE => {
+            IcebergWriteMode::CopyOnWrite => {
                 if table.append_only {
                     return Err(ErrorCode::NotSupported(
                         "COPY ON WRITE is not supported for append-only iceberg table".to_owned(),
@@ -1925,18 +1974,7 @@ pub async fn create_iceberg_engine_table(
                     .into());
                 }
 
-                sink_with.insert(
-                    WRITE_MODE.to_owned(),
-                    ICEBERG_WRITE_MODE_COPY_ON_WRITE.to_owned(),
-                );
-            }
-
-            _ => {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "write_mode must be one of: {}, {}",
-                    ICEBERG_WRITE_MODE_MERGE_ON_READ, ICEBERG_WRITE_MODE_COPY_ON_WRITE
-                ))
-                .into());
+                sink_with.insert(WRITE_MODE.to_owned(), write_mode.as_str().to_owned());
             }
         }
 
@@ -1962,12 +2000,14 @@ pub async fn create_iceberg_engine_table(
                     COMPACTION_MAX_SNAPSHOTS_NUM, max_snapshots_num_before_compaction
                 ))
             })?;
+
         if max_snapshots_num_before_compaction == 0 {
             bail!(format!(
                 "{} must be greater than 0",
                 COMPACTION_MAX_SNAPSHOTS_NUM
             ));
         }
+
         sink_with.insert(
             COMPACTION_MAX_SNAPSHOTS_NUM.to_owned(),
             max_snapshots_num_before_compaction.to_string(),
@@ -2087,6 +2127,30 @@ pub async fn create_iceberg_engine_table(
         source
             .as_mut()
             .map(|x| x.with_properties.remove(COMPACTION_TARGET_FILE_SIZE_MB));
+    }
+
+    if let Some(compaction_type) = handler_args.with_options.get(COMPACTION_TYPE) {
+        let compaction_type = CompactionType::try_from(compaction_type.as_str()).map_err(|_| {
+            ErrorCode::InvalidInputSyntax(format!(
+                "invalid compaction_type: {}, must be one of {:?}",
+                compaction_type,
+                &[
+                    CompactionType::Full,
+                    CompactionType::SmallFiles,
+                    CompactionType::FilesWithDelete
+                ]
+            ))
+        })?;
+
+        sink_with.insert(
+            COMPACTION_TYPE.to_owned(),
+            compaction_type.as_str().to_owned(),
+        );
+
+        // remove from source options, otherwise it will be considered as an unknown field.
+        source
+            .as_mut()
+            .map(|x| x.with_properties.remove(COMPACTION_TYPE));
     }
 
     let partition_by = handler_args
@@ -2210,8 +2274,12 @@ pub async fn create_iceberg_engine_table(
     let _ = Jvm::get_or_init()?;
 
     let catalog_writer = session.catalog_writer()?;
-    let res = catalog_writer
-        .create_iceberg_table(
+    let action = match job_type {
+        TableJobType::SharedCdcSource => LongRunningNotificationAction::MonitorBackfillJob,
+        _ => LongRunningNotificationAction::DiagnoseBarrierLatency,
+    };
+    let res = execute_with_long_running_notification(
+        catalog_writer.create_iceberg_table(
             PbTableJobInfo {
                 source,
                 table: Some(table.to_prost()),
@@ -2224,8 +2292,13 @@ pub async fn create_iceberg_engine_table(
             },
             iceberg_source_catalog.to_prost(),
             if_not_exists,
-        )
-        .await;
+        ),
+        &session,
+        "CREATE TABLE",
+        action,
+    )
+    .await;
+
     if res.is_err() {
         let _ = iceberg_catalog
             .drop_table(&table_identifier)
@@ -2391,13 +2464,14 @@ pub async fn generate_stream_graph_for_replace_table(
         }
         (None, Some(cdc_table)) => {
             let session = &handler_args.session;
-            let (source, resolved_table_name, database_id, schema_id) =
+            let (source, resolved_table_name) =
                 get_source_and_resolved_table_name(session, cdc_table.clone(), table_name.clone())?;
 
-            let cdc_with_options = derive_with_options_for_cdc_table(
-                &source.with_properties,
-                cdc_table.external_table_name.clone(),
-            )?;
+            let (cdc_with_options, normalized_external_table_name) =
+                derive_with_options_for_cdc_table(
+                    &source.with_properties,
+                    cdc_table.external_table_name.clone(),
+                )?;
 
             let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
 
@@ -2406,7 +2480,7 @@ pub async fn generate_stream_graph_for_replace_table(
             let (plan, table) = gen_create_table_plan_for_cdc_table(
                 context,
                 source,
-                cdc_table.external_table_name.clone(),
+                normalized_external_table_name,
                 columns,
                 column_catalogs,
                 pk_names,
@@ -2420,8 +2494,8 @@ pub async fn generate_stream_graph_for_replace_table(
                 include_column_options,
                 table_name,
                 resolved_table_name,
-                database_id,
-                schema_id,
+                original_catalog.database_id,
+                original_catalog.schema_id,
                 original_catalog.id(),
                 engine,
             )?;
@@ -2463,18 +2537,16 @@ fn get_source_and_resolved_table_name(
     session: &Arc<SessionImpl>,
     cdc_table: CdcTableInfo,
     table_name: ObjectName,
-) -> Result<(Arc<SourceCatalog>, String, DatabaseId, SchemaId)> {
+) -> Result<(Arc<SourceCatalog>, String)> {
     let db_name = &session.database();
-    let (schema_name, resolved_table_name) =
-        Binder::resolve_schema_qualified_name(db_name, &table_name)?;
-    let (database_id, schema_id) = session.get_database_and_schema_id_for_create(schema_name)?;
+    let (_, resolved_table_name) = Binder::resolve_schema_qualified_name(db_name, &table_name)?;
 
-    let (format_encode, source_name) =
+    let (source_schema, source_name) =
         Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name)?;
 
     let source = {
         let catalog_reader = session.env().catalog_reader().read_guard();
-        let schema_name = format_encode.unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
+        let schema_name = source_schema.unwrap_or(DEFAULT_SCHEMA_NAME.to_owned());
         let (source, _) = catalog_reader.get_source_by_name(
             db_name,
             SchemaPath::Name(schema_name.as_str()),
@@ -2483,7 +2555,7 @@ fn get_source_and_resolved_table_name(
         source.clone()
     };
 
-    Ok((source, resolved_table_name, database_id, schema_id))
+    Ok((source, resolved_table_name))
 }
 
 // validate the webhook_info and also bind the webhook_info to protobuf
@@ -2529,27 +2601,36 @@ fn bind_webhook_info(
         (None, None)
     };
 
-    let secure_compare_context = SecureCompareContext {
-        column_name: columns_defs[0].name.real_value(),
-        secret_name,
-    };
-    let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
-    let expr = binder.bind_expr(&signature_expr)?;
+    let signature_expr = if let Some(signature_expr) = signature_expr {
+        let secure_compare_context = SecureCompareContext {
+            column_name: columns_defs[0].name.real_value(),
+            secret_name,
+        };
+        let mut binder = Binder::new_for_ddl(session).with_secure_compare(secure_compare_context);
+        let expr = binder.bind_expr(&signature_expr)?;
 
-    // validate expr, ensuring it is SECURE_COMPARE()
-    if expr.as_function_call().is_none()
-        || expr.as_function_call().unwrap().func_type()
-            != crate::optimizer::plan_node::generic::ExprType::SecureCompare
-    {
-        return Err(ErrorCode::InvalidInputSyntax(
-            "The signature verification function must be SECURE_COMPARE()".to_owned(),
-        )
-        .into());
-    }
+        // validate expr, ensuring it is SECURE_COMPARE()
+        if expr.as_function_call().is_none()
+            || expr.as_function_call().unwrap().func_type()
+                != crate::optimizer::plan_node::generic::ExprType::SecureCompare
+        {
+            return Err(ErrorCode::InvalidInputSyntax(
+                "The signature verification function must be SECURE_COMPARE()".to_owned(),
+            )
+            .into());
+        }
+
+        Some(expr.to_expr_proto())
+    } else {
+        session.notice_to_user(
+            "VALIDATE clause is strongly recommended for safety or production usages",
+        );
+        None
+    };
 
     let pb_webhook_info = PbWebhookSourceInfo {
         secret_ref: pb_secret_ref,
-        signature_expr: Some(expr.to_expr_proto()),
+        signature_expr,
         wait_for_persistence,
         is_batched,
     };

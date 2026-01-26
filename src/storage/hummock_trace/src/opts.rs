@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -257,7 +257,7 @@ pub struct TracedInitOptions {
 #[derive(Debug, Clone, PartialEq, Eq, Decode, Encode)]
 pub struct TracedSealCurrentEpochOptions {
     // The watermark is serialized into protobuf
-    pub table_watermarks: Option<(bool, Vec<Vec<u8>>, bool)>,
+    pub table_watermarks: Option<(bool, Vec<Vec<u8>>, i32)>,
     pub switch_op_consistency_level: Option<bool>,
 }
 

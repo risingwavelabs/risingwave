@@ -1,0 +1,11 @@
+statement ok
+set streaming_use_snapshot_backfill = true;
+
+include ../../streaming/alter_mv/alter_mv_simple.slt
+include ../../batch/explain_analyze.slt
+include ../../background_ddl/basic.slt
+include ../../batch/catalog/rw_depend.slt.part
+include ../../background_ddl/basic.slt
+include ../../background_ddl/sink.slt
+
+

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -64,7 +64,6 @@ use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerN
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
-use risingwave_pb::ddl_service::create_materialized_view_request::PbBackfillType;
 use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::compact_task::TaskStatus;
@@ -420,15 +419,16 @@ impl MetaClient {
         table: PbTable,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
-        specific_resource_group: Option<String>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateMaterializedViewRequest {
             materialized_view: Some(table),
             fragment_graph: Some(graph),
-            backfill: PbBackfillType::Regular as _,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
             dependencies: dependencies.into_iter().collect(),
-            specific_resource_group,
             if_not_exists,
         };
         let resp = self.inner.create_materialized_view(request).await?;
@@ -851,6 +851,14 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
+    pub async fn reset_source(&self, source_id: SourceId) -> Result<WaitVersion> {
+        let request = ResetSourceRequest { source_id };
+        let resp = self.inner.reset_source(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
+    }
+
     pub async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<WaitVersion> {
         let request = DropSinkRequest { sink_id, cascade };
         let resp = self.inner.drop_sink(request).await?;
@@ -1234,12 +1242,14 @@ impl MetaClient {
 
     pub async fn apply_throttle(
         &self,
-        kind: PbThrottleTarget,
+        throttle_target: PbThrottleTarget,
+        throttle_type: risingwave_pb::common::PbThrottleType,
         id: u32,
         rate: Option<u32>,
     ) -> Result<ApplyThrottleResponse> {
         let request = ApplyThrottleRequest {
-            kind: kind as i32,
+            throttle_target: throttle_target as i32,
+            throttle_type: throttle_type as i32,
             id,
             rate,
         };
@@ -1507,6 +1517,24 @@ impl MetaClient {
             changed_secret_refs: changed_secret_refs.into_iter().collect(),
             connector_conn_ref,
             object_type: AlterConnectorPropsObject::Source as i32,
+            extra_options: None,
+        };
+        let _resp = self.inner.alter_connector_props(req).await?;
+        Ok(())
+    }
+
+    pub async fn alter_connection_connector_props(
+        &self,
+        connection_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> Result<()> {
+        let req = AlterConnectorPropsRequest {
+            object_id: connection_id,
+            changed_props: changed_props.into_iter().collect(),
+            changed_secret_refs: changed_secret_refs.into_iter().collect(),
+            connector_conn_ref: None, // Connections don't reference other connections
+            object_type: AlterConnectorPropsObject::Connection as i32,
             extra_options: None,
         };
         let _resp = self.inner.alter_connector_props(req).await?;
@@ -2513,6 +2541,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, drop_materialized_view, DropMaterializedViewRequest, DropMaterializedViewResponse }
             ,{ ddl_client, drop_view, DropViewRequest, DropViewResponse }
             ,{ ddl_client, drop_source, DropSourceRequest, DropSourceResponse }
+            ,{ ddl_client, reset_source, ResetSourceRequest, ResetSourceResponse }
             ,{ ddl_client, drop_secret, DropSecretRequest, DropSecretResponse}
             ,{ ddl_client, drop_sink, DropSinkRequest, DropSinkResponse }
             ,{ ddl_client, drop_subscription, DropSubscriptionRequest, DropSubscriptionResponse }

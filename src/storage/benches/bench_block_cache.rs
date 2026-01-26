@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -159,14 +159,12 @@ impl CacheBase for FoyerCache {
         let latency = self.fake_io_latency;
         let entry = self
             .inner
-            .get_or_fetch(&(sst_object_id, block_idx), move |_| async move {
+            .get_or_fetch(&(sst_object_id, block_idx), || async move {
                 get_fake_block(sst_object_id, block_idx, latency)
                     .await
                     .map(Arc::new)
-                    .map_err(foyer::MemoryError::other)
             })
             .await
-            .map_err(foyer::Error::from)
             .map_err(HummockError::foyer_error)?;
         Ok(entry.value().clone())
     }
@@ -222,11 +220,10 @@ impl CacheBase for FoyerHybridCache {
         let latency = self.fake_io_latency;
         let entry = self
             .inner
-            .get_or_fetch(&(sst_object_id, block_idx), move |_| async move {
+            .get_or_fetch(&(sst_object_id, block_idx), || async move {
                 get_fake_block(sst_object_id, block_idx, latency)
                     .await
                     .map(Arc::new)
-                    .map_err(foyer::Error::other)
             })
             .await
             .map_err(HummockError::foyer_error)?;

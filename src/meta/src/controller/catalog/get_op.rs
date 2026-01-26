@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
+
 use risingwave_common::catalog::ColumnCatalog;
 use risingwave_common::id::JobId;
+use sea_orm::ConnectionTrait;
 
 use super::*;
 use crate::controller::utils::{
     StreamingJobExtraInfo, get_database_resource_group, get_existing_job_resource_group,
     get_streaming_job_extra_info as fetch_streaming_job_extra_info, get_table_columns,
+    load_streaming_jobs_by_ids,
 };
 
 impl CatalogController {
@@ -29,7 +33,7 @@ impl CatalogController {
             .one(&inner.db)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_id))?;
-        Ok(ObjectModel(secret, obj.unwrap()).into())
+        Ok(ObjectModel(secret, obj.unwrap(), None).into())
     }
 
     pub async fn get_object_database_id(
@@ -59,7 +63,7 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("connection", connection_id))?;
 
-        Ok(ObjectModel(conn, obj.unwrap()).into())
+        Ok(ObjectModel(conn, obj.unwrap(), None).into())
     }
 
     pub async fn get_table_catalog_by_name(
@@ -79,7 +83,14 @@ impl CatalogController {
             )
             .one(&inner.db)
             .await?;
-        Ok(table_obj.map(|(table, obj)| ObjectModel(table, obj.unwrap()).into()))
+        if let Some((table, obj)) = table_obj {
+            let streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+                .one(&inner.db)
+                .await?;
+            Ok(Some(ObjectModel(table, obj.unwrap(), streaming_job).into()))
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn get_table_by_name(
@@ -98,7 +109,14 @@ impl CatalogController {
             )
             .one(&inner.db)
             .await?;
-        Ok(table_obj.map(|(table, obj)| ObjectModel(table, obj.unwrap()).into()))
+        if let Some((table, obj)) = table_obj {
+            let streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+                .one(&inner.db)
+                .await?;
+            Ok(Some(ObjectModel(table, obj.unwrap(), streaming_job).into()))
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn get_table_associated_source_id(
@@ -120,15 +138,19 @@ impl CatalogController {
         associated_source_id: SourceId,
     ) -> MetaResult<PbTable> {
         let inner = self.inner.read().await;
-        Table::find()
+        let table_obj = Table::find()
             .find_also_related(Object)
             .filter(table::Column::OptionalAssociatedSourceId.eq(associated_source_id))
             .one(&inner.db)
             .await?
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
             .ok_or_else(|| {
                 MetaError::catalog_id_not_found("table associated source", associated_source_id)
-            })
+            })?;
+        let (table, obj) = table_obj;
+        let streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+            .one(&inner.db)
+            .await?;
+        Ok(ObjectModel(table, obj.unwrap(), streaming_job).into())
     }
 
     pub async fn get_table_by_id(&self, table_id: TableId) -> MetaResult<PbTable> {
@@ -138,7 +160,10 @@ impl CatalogController {
             .one(&inner.db)
             .await?;
         if let Some((table, obj)) = table_obj {
-            Ok(ObjectModel(table, obj.unwrap()).into())
+            let streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+                .one(&inner.db)
+                .await?;
+            Ok(ObjectModel(table, obj.unwrap(), streaming_job).into())
         } else {
             Err(MetaError::catalog_id_not_found("table", table_id))
         }
@@ -149,6 +174,18 @@ impl CatalogController {
         job_ids: impl Iterator<Item = JobId>,
     ) -> MetaResult<Vec<PbTable>> {
         let inner = self.inner.read().await;
+        self.get_user_created_table_by_ids_in_txn(&inner.db, job_ids)
+            .await
+    }
+
+    pub async fn get_user_created_table_by_ids_in_txn<C>(
+        &self,
+        txn: &C,
+        job_ids: impl Iterator<Item = JobId>,
+    ) -> MetaResult<Vec<PbTable>>
+    where
+        C: ConnectionTrait,
+    {
         let table_objs = Table::find()
             .find_also_related(Object)
             .filter(
@@ -156,13 +193,30 @@ impl CatalogController {
                     .is_in(job_ids.map(|job_id| job_id.as_mv_table_id()).collect_vec())
                     .and(table::Column::TableType.eq(TableType::Table)),
             )
-            .all(&inner.db)
+            .all(txn)
             .await?;
-        let tables = table_objs
+        let streaming_jobs = streaming_job::Entity::find()
+            .filter(
+                streaming_job::Column::JobId.is_in(
+                    table_objs
+                        .iter()
+                        .map(|(table, _)| table.job_id())
+                        .collect_vec(),
+                ),
+            )
+            .all(txn)
+            .await?
             .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
-            .collect();
-        Ok(tables)
+            .map(|job| (job.job_id, job))
+            .collect::<HashMap<JobId, streaming_job::Model>>();
+        Ok(table_objs
+            .into_iter()
+            .map(|(table, obj)| {
+                let job_id = table.job_id();
+                let streaming_job = streaming_jobs.get(&job_id).cloned();
+                ObjectModel(table, obj.unwrap(), streaming_job).into()
+            })
+            .collect())
     }
 
     pub async fn get_table_by_ids(
@@ -176,9 +230,16 @@ impl CatalogController {
             .filter(table::Column::TableId.is_in(table_ids.clone()))
             .all(&inner.db)
             .await?;
-        let tables = table_objs
-            .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into());
+        let streaming_jobs = load_streaming_jobs_by_ids(
+            &inner.db,
+            table_objs.iter().map(|(table, _)| table.job_id()),
+        )
+        .await?;
+        let tables = table_objs.into_iter().map(|(table, obj)| {
+            let job_id = table.job_id();
+            let streaming_job = streaming_jobs.get(&job_id).cloned();
+            ObjectModel(table, obj.unwrap(), streaming_job).into()
+        });
         let tables = if include_dropped_table {
             tables
                 .chain(inner.dropped_tables.iter().filter_map(|(id, t)| {
@@ -205,26 +266,20 @@ impl CatalogController {
             .collect())
     }
 
-    pub async fn get_table_incoming_sinks(&self, table_id: TableId) -> MetaResult<Vec<PbSink>> {
-        let inner = self.inner.read().await;
-        let sink_objs = Sink::find()
-            .find_also_related(Object)
-            .filter(sink::Column::TargetTable.eq(table_id))
-            .all(&inner.db)
-            .await?;
-        Ok(sink_objs
-            .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
-            .collect())
-    }
-
     pub async fn get_sink_by_id(&self, sink_id: SinkId) -> MetaResult<Option<PbSink>> {
         let inner = self.inner.read().await;
         let sink_objs = Sink::find_by_id(sink_id)
             .find_also_related(Object)
             .one(&inner.db)
             .await?;
-        Ok(sink_objs.map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into()))
+        if let Some((sink, obj)) = sink_objs {
+            let streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+                .one(&inner.db)
+                .await?;
+            Ok(Some(ObjectModel(sink, obj.unwrap(), streaming_job).into()))
+        } else {
+            Ok(None)
+        }
     }
 
     pub async fn get_sink_auto_refresh_schema_from(
@@ -237,9 +292,17 @@ impl CatalogController {
             .filter(sink::Column::AutoRefreshSchemaFromTable.eq(table_id))
             .all(&inner.db)
             .await?;
+        let streaming_jobs = load_streaming_jobs_by_ids(
+            &inner.db,
+            sink_objs.iter().map(|(sink, _)| sink.sink_id.as_job_id()),
+        )
+        .await?;
         Ok(sink_objs
             .into_iter()
-            .map(|(sink, obj)| ObjectModel(sink, obj.unwrap()).into())
+            .map(|(sink, obj)| {
+                let streaming_job = streaming_jobs.get(&sink.sink_id.as_job_id()).cloned();
+                ObjectModel(sink, obj.unwrap(), streaming_job).into()
+            })
             .collect())
     }
 
@@ -274,7 +337,7 @@ impl CatalogController {
             .await?;
         let subscription: PbSubscription = subscription_objs
             .into_iter()
-            .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap()).into())
+            .map(|(subscription, obj)| ObjectModel(subscription, obj.unwrap(), None).into())
             .find_or_first(|_| true)
             .ok_or_else(|| anyhow!("cannot find subscription with id {}", subscription_id))?;
 
@@ -387,9 +450,18 @@ impl CatalogController {
             .filter(table::Column::CdcTableId.eq(cdc_table_id))
             .all(&inner.db)
             .await?;
+        let streaming_jobs = load_streaming_jobs_by_ids(
+            &inner.db,
+            table_objs.iter().map(|(table, _)| table.job_id()),
+        )
+        .await?;
         Ok(table_objs
             .into_iter()
-            .map(|(table, obj)| ObjectModel(table, obj.unwrap()).into())
+            .map(|(table, obj)| {
+                let job_id = table.job_id();
+                let streaming_job = streaming_jobs.get(&job_id).cloned();
+                ObjectModel(table, obj.unwrap(), streaming_job).into()
+            })
             .collect())
     }
 
@@ -505,6 +577,27 @@ impl CatalogController {
         Ok(job_parallelism)
     }
 
+    pub async fn get_job_parallelisms(
+        &self,
+        streaming_job_id: JobId,
+    ) -> MetaResult<(StreamingParallelism, Option<StreamingParallelism>)> {
+        let inner = self.inner.read().await;
+
+        let (job_parallelism, backfill_parallelism): (
+            StreamingParallelism,
+            Option<StreamingParallelism>,
+        ) = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .column(streaming_job::Column::Parallelism)
+            .column(streaming_job::Column::BackfillParallelism)
+            .into_tuple()
+            .one(&inner.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", streaming_job_id))?;
+
+        Ok((job_parallelism, backfill_parallelism))
+    }
+
     pub async fn get_fragment_streaming_job_id(
         &self,
         fragment_id: FragmentId,
@@ -615,7 +708,18 @@ impl CatalogController {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let result = fetch_streaming_job_extra_info(&txn, job_ids).await?;
-        Ok(result)
+        self.get_streaming_job_extra_info_in_txn(&txn, job_ids)
+            .await
+    }
+
+    pub async fn get_streaming_job_extra_info_in_txn<C>(
+        &self,
+        txn: &C,
+        job_ids: Vec<JobId>,
+    ) -> MetaResult<HashMap<JobId, StreamingJobExtraInfo>>
+    where
+        C: ConnectionTrait,
+    {
+        fetch_streaming_job_extra_info(txn, job_ids).await
     }
 }

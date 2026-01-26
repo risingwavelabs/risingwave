@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -201,7 +201,6 @@ impl TableCatalogBuilder {
             cardinality: Cardinality::unknown(), // TODO(card): cardinality of internal table
             created_at_epoch: None,
             initialized_at_epoch: None,
-            cleaned_by_watermark: false,
             // NOTE(kwannoel): This may not match the create type of the materialized table.
             // It should be ignored for internal tables.
             create_type: CreateType::Foreground,
@@ -216,6 +215,7 @@ impl TableCatalogBuilder {
             job_id: None,
             engine: Engine::Hummock,
             clean_watermark_index_in_pk: None, // TODO: fill this field
+            clean_watermark_indices: vec![],   // TODO: fill this field
             refreshable: false,                // Internal tables are not refreshable
             vector_index_info: None,
             cdc_table_type: None,
@@ -479,10 +479,6 @@ pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
         } else {
             false
         }
-    } else if plan.as_stream_locality_provider().is_some() {
-        // Since backfill ordering doesn't support recovery yet, we don't allow
-        // locality provider to be executed in background ddl.
-        false
     } else {
         assert!(!plan.inputs().is_empty());
         plan.inputs().iter().all(plan_can_use_background_ddl)

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,84 +12,68 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::rc::Rc;
+use std::hash::{Hash, Hasher};
 
 use pretty_xmlish::{Pretty, XmlNode};
+use risingwave_connector::source::iceberg::IcebergFileScanTask;
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 
 use super::generic::GenericPlanRef;
 use super::utils::{Distill, childless_record};
 use super::{
-    ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, LogicalProject, PlanBase,
-    PredicatePushdown, ToBatch, ToStream, generic,
+    ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef, PlanBase, PredicatePushdown,
+    ToBatch, ToStream, generic,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::Result;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::column_names_pretty;
 use crate::optimizer::plan_node::{
-    BatchIcebergScan, ColumnPruningContext, LogicalFilter, LogicalSource, PredicatePushdownContext,
+    BatchIcebergScan, ColumnPruningContext, LogicalFilter, PredicatePushdownContext,
     RewriteStreamContext, ToStreamContext,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
-/// `LogicalIcebergScan` is only used by batch queries. At the beginning of the batch query optimization, `LogicalSource` with a iceberg property would be converted into a `LogicalIcebergScan`.
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+/// `LogicalIcebergScan` is only used by batch queries.
+/// It represents a scan of Iceberg data files, with delete files handled via anti-joins
+/// added on top of this scan.
+///
+/// The conversion flow is:
+/// 1. `LogicalSource` (iceberg) -> `LogicalIcebergIntermediateScan`
+/// 2. Predicate pushdown and column pruning on `LogicalIcebergIntermediateScan`
+/// 3. `LogicalIcebergIntermediateScan` -> `LogicalIcebergScan`
+#[derive(Debug, Clone, PartialEq)]
 pub struct LogicalIcebergScan {
     pub base: PlanBase<Logical>,
     pub core: generic::Source,
-    iceberg_scan_type: IcebergScanType,
-    snapshot_id: Option<i64>,
+    pub task: IcebergFileScanTask,
+}
+
+impl Eq for LogicalIcebergScan {}
+
+impl Hash for LogicalIcebergScan {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.base.hash(state);
+        self.core.hash(state);
+        self.iceberg_scan_type().hash(state);
+    }
 }
 
 impl LogicalIcebergScan {
-    pub fn new(
-        logical_source: &LogicalSource,
-        iceberg_scan_type: IcebergScanType,
-        snapshot_id: Option<i64>,
-    ) -> Self {
-        assert!(logical_source.core.is_iceberg_connector());
-
-        let core = logical_source.core.clone();
+    pub fn new(core: generic::Source, task: IcebergFileScanTask) -> Self {
         let base = PlanBase::new_logical_with_core(&core);
-
-        assert!(logical_source.output_exprs.is_none());
-
-        LogicalIcebergScan {
-            base,
-            core,
-            iceberg_scan_type,
-            snapshot_id,
-        }
+        LogicalIcebergScan { base, core, task }
     }
 
-    pub fn source_catalog(&self) -> Option<Rc<SourceCatalog>> {
-        self.core.catalog.clone()
+    pub fn source_catalog(&self) -> Option<&SourceCatalog> {
+        self.core.catalog.as_deref()
     }
 
-    pub fn clone_with_required_cols(&self, required_cols: &[usize]) -> Self {
-        assert!(!required_cols.is_empty());
-        let mut core = self.core.clone();
-        let mut has_row_id = false;
-        core.column_catalog = required_cols
-            .iter()
-            .map(|idx| {
-                if Some(*idx) == core.row_id_index {
-                    has_row_id = true;
-                }
-                core.column_catalog[*idx].clone()
-            })
-            .collect();
-        if !has_row_id {
-            core.row_id_index = None;
-        }
-        let base = PlanBase::new_logical_with_core(&core);
-
-        LogicalIcebergScan {
-            base,
-            core,
-            iceberg_scan_type: self.iceberg_scan_type,
-            snapshot_id: self.snapshot_id,
+    pub fn iceberg_scan_type(&self) -> IcebergScanType {
+        match &self.task {
+            IcebergFileScanTask::Data(_) => IcebergScanType::DataScan,
+            IcebergFileScanTask::EqualityDelete(_) => IcebergScanType::EqualityDeleteScan,
+            IcebergFileScanTask::PositionDelete(_) => IcebergScanType::PositionDeleteScan,
         }
     }
 }
@@ -102,7 +86,10 @@ impl Distill for LogicalIcebergScan {
             vec![
                 ("source", src),
                 ("columns", column_names_pretty(self.schema())),
-                ("iceberg_scan_type", Pretty::debug(&self.iceberg_scan_type)),
+                (
+                    "iceberg_scan_type",
+                    Pretty::debug(&self.iceberg_scan_type()),
+                ),
             ]
         } else {
             vec![]
@@ -112,15 +99,9 @@ impl Distill for LogicalIcebergScan {
 }
 
 impl ColPrunable for LogicalIcebergScan {
-    fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        if required_cols.is_empty() {
-            let mapping =
-                ColIndexMapping::with_remaining_columns(required_cols, self.schema().len());
-            // If reuqiured_cols is empty, we use the first column of iceberg to avoid the empty schema.
-            LogicalProject::with_mapping(self.clone_with_required_cols(&[0]).into(), mapping).into()
-        } else {
-            self.clone_with_required_cols(required_cols).into()
-        }
+    fn prune_col(&self, _: &[usize], _: &mut ColumnPruningContext) -> PlanRef {
+        // Column pruning should have been done in LogicalIcebergIntermediateScan.
+        unreachable!()
     }
 }
 
@@ -134,16 +115,14 @@ impl PredicatePushdown for LogicalIcebergScan {
         predicate: Condition,
         _ctx: &mut PredicatePushdownContext,
     ) -> PlanRef {
-        // No pushdown.
+        // Predicate pushdown should have been done in LogicalIcebergIntermediateScan.
         LogicalFilter::create(self.clone().into(), predicate)
     }
 }
 
 impl ToBatch for LogicalIcebergScan {
     fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
-        let plan =
-            BatchIcebergScan::new(self.core.clone(), self.iceberg_scan_type, self.snapshot_id)
-                .into();
+        let plan = BatchIcebergScan::new(self.core.clone(), self.task.clone()).into();
         Ok(plan)
     }
 }

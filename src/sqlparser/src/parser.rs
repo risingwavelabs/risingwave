@@ -2600,16 +2600,22 @@ impl Parser<'_> {
             None
         };
 
+        let webhook_wait_for_persistence = with_options
+            .iter()
+            .find(|&opt| opt.name.real_value() == WEBHOOK_WAIT_FOR_PERSISTENCE)
+            .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
+            .unwrap_or(true);
+        let webhook_is_batched = with_options
+            .iter()
+            .find(|&opt| opt.name.real_value() == WEBHOOK_IS_BATCHED)
+            .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
+            .unwrap_or(false);
+
         let webhook_info = if self.parse_keyword(Keyword::VALIDATE) {
             if !contain_webhook {
                 parser_err!("VALIDATE is only supported for tables created with webhook source");
             }
 
-            let wait_for_persistence = with_options
-                .iter()
-                .find(|&opt| opt.name.real_value() == WEBHOOK_WAIT_FOR_PERSISTENCE)
-                .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
-                .unwrap_or(true);
             let secret_ref = if self.parse_keyword(Keyword::SECRET) {
                 let secret_ref = self.parse_secret_ref()?;
                 if secret_ref.ref_as == SecretRefAsType::File {
@@ -2623,17 +2629,18 @@ impl Parser<'_> {
             self.expect_keyword(Keyword::AS)?;
             let signature_expr = self.parse_function()?;
 
-            let is_batched = with_options
-                .iter()
-                .find(|&opt| opt.name.real_value() == WEBHOOK_IS_BATCHED)
-                .map(|opt| opt.value.to_string().eq_ignore_ascii_case("true"))
-                .unwrap_or(false);
-
             Some(WebhookSourceInfo {
                 secret_ref,
-                signature_expr,
-                wait_for_persistence,
-                is_batched,
+                signature_expr: Some(signature_expr),
+                wait_for_persistence: webhook_wait_for_persistence,
+                is_batched: webhook_is_batched,
+            })
+        } else if contain_webhook {
+            Some(WebhookSourceInfo {
+                secret_ref: None,
+                signature_expr: None,
+                wait_for_persistence: webhook_wait_for_persistence,
+                is_batched: webhook_is_batched,
             })
         } else {
             None
@@ -2908,7 +2915,12 @@ impl Parser<'_> {
             let column = self.parse_identifier_non_reserved()?;
             self.expect_keyword(Keyword::AS)?;
             let expr = self.parse_expr()?;
-            Ok(Some(SourceWatermark { column, expr }))
+            let with_ttl = self.parse_keywords(&[Keyword::WITH, Keyword::TTL]);
+            Ok(Some(SourceWatermark {
+                column,
+                expr,
+                with_ttl,
+            }))
         } else {
             Ok(None)
         }
@@ -3624,12 +3636,14 @@ impl Parser<'_> {
                 }
             } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
                 AlterSinkOperation::SetSinkRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
+                AlterSinkOperation::SetBackfillRateLimit { rate_limit }
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterSinkOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
+                    "SCHEMA/PARALLELISM/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
@@ -3748,7 +3762,8 @@ impl Parser<'_> {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterSourceOperation::ResetConfig { keys }
             } else {
-                return self.expected("CONFIG after RESET");
+                // RESET without CONFIG means reset CDC source offset to latest
+                AlterSourceOperation::ResetSource
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();
@@ -3790,8 +3805,13 @@ impl Parser<'_> {
             } else {
                 return self.expected("SCHEMA after SET");
             }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterFunctionOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
         } else {
-            return self.expected("SET after ALTER FUNCTION");
+            return self.expected("SET or OWNER TO after ALTER FUNCTION");
         };
 
         Ok(Statement::AlterFunction {
@@ -3817,8 +3837,13 @@ impl Parser<'_> {
             AlterConnectionOperation::ChangeOwner {
                 new_owner_name: owner_name,
             }
+        } else if self.parse_keyword(Keyword::CONNECTOR) {
+            let with_options = self.parse_with_properties()?;
+            AlterConnectionOperation::AlterConnectorProps {
+                alter_props: with_options,
+            }
         } else {
-            return self.expected("SET, or OWNER TO after ALTER CONNECTION");
+            return self.expected("SET, OWNER TO, or CONNECTOR WITH after ALTER CONNECTION");
         };
 
         Ok(Statement::AlterConnection {
@@ -3839,13 +3864,33 @@ impl Parser<'_> {
 
     pub fn parse_alter_secret(&mut self) -> ModalResult<Statement> {
         let secret_name = self.parse_object_name()?;
-        let with_options = self.parse_with_properties()?;
-        self.expect_keyword(Keyword::AS)?;
-        let new_credential = self.ensure_parse_value()?;
-        let operation = AlterSecretOperation::ChangeCredential { new_credential };
+        let operation = if self.parse_keyword(Keyword::WITH) {
+            let with_options = self.parse_options()?;
+            if self.parse_keyword(Keyword::AS) {
+                let new_credential = self.ensure_parse_value()?;
+                AlterSecretOperation::ChangeCredential {
+                    with_options,
+                    new_credential,
+                }
+            } else {
+                return self.expected("Keyword AS after Options");
+            }
+        } else if self.parse_keyword(Keyword::AS) {
+            let new_credential = self.ensure_parse_value()?;
+            AlterSecretOperation::ChangeCredential {
+                with_options: vec![],
+                new_credential,
+            }
+        } else if self.parse_keywords(&[Keyword::OWNER, Keyword::TO]) {
+            let owner_name: Ident = self.parse_identifier()?;
+            AlterSecretOperation::ChangeOwner {
+                new_owner_name: owner_name,
+            }
+        } else {
+            return self.expected("WITH, AS or OWNER TO after ALTER SECRET");
+        };
         Ok(Statement::AlterSecret {
             name: secret_name,
-            with_options,
             operation,
         })
     }

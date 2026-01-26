@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -16,6 +16,7 @@ use risingwave_common::catalog::FragmentTypeMask;
 
 use super::*;
 use crate::controller::fragment::FragmentTypeMaskExt;
+use crate::controller::utils::load_streaming_jobs_by_ids;
 
 pub(crate) async fn update_internal_tables(
     txn: &DatabaseTransaction,
@@ -38,9 +39,14 @@ pub(crate) async fn update_internal_tables(
             .filter(table::Column::TableId.is_in(internal_tables))
             .all(txn)
             .await?;
+        let streaming_jobs =
+            load_streaming_jobs_by_ids(txn, table_objs.iter().map(|(table, _)| table.job_id()))
+                .await?;
         for (table, table_obj) in table_objs {
+            let job_id = table.job_id();
+            let streaming_job = streaming_jobs.get(&job_id).cloned();
             objects_to_notify.push(PbObjectInfo::Table(
-                ObjectModel(table, table_obj.unwrap()).into(),
+                ObjectModel(table, table_obj.unwrap(), streaming_job).into(),
             ));
         }
     }

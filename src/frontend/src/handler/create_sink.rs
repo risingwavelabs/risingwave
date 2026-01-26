@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -37,7 +37,7 @@ use risingwave_connector::sink::snowflake_redshift::redshift::RedshiftSink;
 use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_USER_FORCE_APPEND_ONLY_OPTION,
-    Sink, enforce_secret_sink,
+    SINK_USER_IGNORE_DELETE_OPTION, Sink, enforce_secret_sink,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
@@ -61,7 +61,11 @@ use crate::expr::{ExprImpl, InputRef, rewrite_now_to_proctime};
 use crate::handler::HandlerArgs;
 use crate::handler::alter_table_column::fetch_table_catalog_for_alter;
 use crate::handler::create_mv::parse_column_names;
-use crate::handler::util::{check_connector_match_connection_type, ensure_connection_type_allowed};
+use crate::handler::util::{
+    LongRunningNotificationAction, check_connector_match_connection_type,
+    ensure_connection_type_allowed, execute_with_long_running_notification,
+};
+use crate::optimizer::backfill_order_strategy::plan_backfill_order;
 use crate::optimizer::plan_node::{
     IcebergPartitionInfo, LogicalSource, PartitionComputeInfo, StreamPlanRef as PlanRef,
     StreamProject, generic,
@@ -70,7 +74,7 @@ use crate::optimizer::{OptimizerContext, RelationCollectorVisitor};
 use crate::scheduler::streaming_manager::CreatingStreamingJobInfo;
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
-use crate::stream_fragmenter::{GraphJobType, build_graph};
+use crate::stream_fragmenter::{GraphJobType, build_graph_with_strategy};
 use crate::utils::{resolve_connection_ref_and_secret_ref, resolve_privatelink_in_with_option};
 use crate::{Explain, Planner, TableCatalog, WithOptions, WithOptionsSecResolved};
 
@@ -317,6 +321,9 @@ pub async fn gen_sink_plan(
                 if let Some(v) = resolved_with_options.get(SINK_USER_FORCE_APPEND_ONLY_OPTION) {
                     f.options.insert(SINK_USER_FORCE_APPEND_ONLY_OPTION.into(), v.into());
                 }
+                if let Some(v) = resolved_with_options.get(SINK_USER_IGNORE_DELETE_OPTION) {
+                    f.options.insert(SINK_USER_IGNORE_DELETE_OPTION.into(), v.into());
+                }
                 f
             }),
             // Case C: no format + encode required
@@ -383,6 +390,8 @@ pub async fn gen_sink_plan(
         }
     }
 
+    let allow_snapshot_backfill = target_table_catalog.is_none() && !is_iceberg_engine_internal;
+
     let sink_plan = plan_root.gen_sink_plan(
         sink_table_name,
         definition,
@@ -396,6 +405,7 @@ pub async fn gen_sink_plan(
         partition_info,
         user_specified_columns,
         auto_refresh_schema_from_table,
+        allow_snapshot_backfill,
     )?;
 
     let sink_desc = sink_plan.sink_desc().clone();
@@ -580,6 +590,8 @@ pub async fn handle_create_sink(
     }
 
     let (mut sink, graph, target_table_catalog, dependencies) = {
+        let backfill_order_strategy = handle_args.with_options.backfill_order_strategy();
+
         let SinkPlanContext {
             query,
             sink_plan: plan,
@@ -596,7 +608,11 @@ pub async fn handle_create_sink(
             );
         }
 
-        let graph = build_graph(plan, Some(GraphJobType::Sink))?;
+        let backfill_order =
+            plan_backfill_order(session.as_ref(), backfill_order_strategy, plan.clone())?;
+
+        let graph =
+            build_graph_with_strategy(plan, Some(GraphJobType::Sink), Some(backfill_order))?;
 
         (sink, graph, target_table_catalog, dependencies)
     };
@@ -617,9 +633,13 @@ pub async fn handle_create_sink(
             ));
 
     let catalog_writer = session.catalog_writer()?;
-    catalog_writer
-        .create_sink(sink.to_proto(), graph, dependencies, if_not_exists)
-        .await?;
+    execute_with_long_running_notification(
+        catalog_writer.create_sink(sink.to_proto(), graph, dependencies, if_not_exists),
+        &session,
+        "CREATE SINK",
+        LongRunningNotificationAction::MonitorBackfillJob,
+    )
+    .await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }
@@ -750,7 +770,8 @@ fn bind_sink_format_desc(
         E::Avro => SinkEncode::Avro,
         E::Template => SinkEncode::Template,
         E::Parquet => SinkEncode::Parquet,
-        e @ (E::Native | E::Csv | E::Bytes | E::None | E::Text) => {
+        E::Bytes => SinkEncode::Bytes,
+        e @ (E::Native | E::Csv | E::None | E::Text) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
@@ -816,7 +837,7 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     Format::Plain => vec![Encode::Json],
                 ),
                 KafkaSink::SINK_NAME => hashmap!(
-                    Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
+                    Format::Plain => vec![Encode::Json, Encode::Avro, Encode::Protobuf, Encode::Bytes],
                     Format::Upsert => vec![Encode::Json, Encode::Avro, Encode::Protobuf],
                     Format::Debezium => vec![Encode::Json],
                 ),

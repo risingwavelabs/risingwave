@@ -128,7 +128,7 @@ message GetStreamRequest {
     uint32 down_actor_id = 2;
     uint32 up_fragment_id = 3;
     uint32 down_fragment_id = 4;
-    uint32 database_id = 5;
+    uint64 up_partial_graph_id = 5;
     string term_id = 6;
   }
 
@@ -148,7 +148,10 @@ message GetStreamResponse {
   Permits permits = 2;
 }
 
-service ExchangeService {
+service BatchExchangeService {
   rpc GetData(GetDataRequest) returns (stream GetDataResponse);
+}
+
+service StreamExchangeService {
   rpc GetStream(stream GetStreamRequest) returns (stream GetStreamResponse);
 }

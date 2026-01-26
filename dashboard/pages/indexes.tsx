@@ -31,9 +31,10 @@ export default function Indexes() {
     content: (s) => s.indexColumnsLen,
   }
 
-  return Relations("Indexes", getIndexes, [
-    indexItemsCountColumn,
-    ...streamingJobColumns,
-    ...tableColumns,
-  ])
+  return Relations(
+    "Indexes",
+    getIndexes,
+    [indexItemsCountColumn, ...streamingJobColumns, ...tableColumns],
+    { withStreamingJobs: true }
+  )
 }

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -242,7 +242,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         ],
         input: vec![],
         stream_key: vec![2],
-        operator_id: 1,
+        operator_id: 1.into(),
         identity: "ExchangeExecutor".to_owned(),
         ..Default::default()
     };
@@ -265,7 +265,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node],
         stream_key: vec![0, 1],
-        operator_id: 2,
+        operator_id: 2.into(),
         identity: "FilterExecutor".to_owned(),
         ..Default::default()
     };
@@ -282,7 +282,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         input: vec![filter_node],
         fields: vec![], // TODO: fill this later
         stream_key: vec![0, 1],
-        operator_id: 3,
+        operator_id: 3.into(),
         identity: "SimpleAggExecutor".to_owned(),
         ..Default::default()
     };
@@ -305,7 +305,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fields: vec![make_field(TypeName::Int64), make_field(TypeName::Int64)],
         input: vec![],
         stream_key: vec![0, 1],
-        operator_id: 4,
+        operator_id: 4.into(),
         identity: "ExchangeExecutor".to_owned(),
         ..Default::default()
     };
@@ -322,7 +322,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fields: vec![], // TODO: fill this later
         input: vec![exchange_node_1],
         stream_key: vec![0, 1],
-        operator_id: 5,
+        operator_id: 5.into(),
         identity: "SimpleAggExecutor".to_owned(),
         ..Default::default()
     };
@@ -350,7 +350,7 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
         fields: vec![], // TODO: fill this later
         input: vec![simple_agg_node_1],
         stream_key: vec![1, 2],
-        operator_id: 6,
+        operator_id: 6.into(),
         identity: "ProjectExecutor".to_owned(),
         ..Default::default()
     };
@@ -366,9 +366,10 @@ fn make_stream_fragments() -> Vec<StreamFragment> {
             column_orders: vec![make_column_order(1), make_column_order(2)],
             staging_table: None,
             refresh_progress_table: None,
+            cleaned_by_ttl_watermark: false,
         }))),
         fields: vec![], // TODO: fill this later
-        operator_id: 7,
+        operator_id: 7.into(),
         identity: "MaterializeExecutor".to_owned(),
         ..Default::default()
     };
@@ -417,6 +418,7 @@ fn make_stream_graph() -> StreamFragmentGraphProto {
         dependent_table_ids: vec![],
         table_ids_cnt: 3,
         parallelism: None,
+        backfill_parallelism: None,
         max_parallelism: VirtualNode::COUNT_FOR_TEST as _,
         backfill_order: Default::default(),
     }

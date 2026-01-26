@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::sync::Arc;
 
 use foyer::HybridCache;
@@ -41,6 +42,7 @@ impl ConfigService for ConfigServiceImpl {
     ) -> Result<Response<ShowConfigResponse>, Status> {
         let batch_config = serde_json::to_string(self.batch_mgr.config())
             .map_err(|e| e.to_status(Code::Internal, "compute"))?;
+        // TODO(config): show overridden config for specific job
         let stream_config = serde_json::to_string(&self.stream_mgr.env.global_config())
             .map_err(|e| e.to_status(Code::Internal, "compute"))?;
 

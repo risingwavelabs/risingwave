@@ -72,7 +72,7 @@ message IcebergScanNode {
     ICEBERG_SCAN_TYPE_DATA_SCAN = 1;
     ICEBERG_SCAN_TYPE_EQUALITY_DELETE_SCAN = 2;
     ICEBERG_SCAN_TYPE_POSITION_DELETE_SCAN = 3;
-    ICEBERG_SCAN_TYPE_COUNT_STAR = 4;
+    ICEBERG_SCAN_TYPE_COUNT_STAR = 4 [deprecated = true];
   }
   repeated plan_common.ColumnCatalog columns = 1;
   map<string, string> with_properties = 2;
@@ -140,6 +140,8 @@ message PostgresQueryNode {
   string password = 5;
   string database = 6;
   string query = 7;
+  string ssl_mode = 8;
+  string ssl_root_cert = 9;
 }
 
 // NOTE(kwannoel): This will only be used in batch mode. We can change the definition as needed.
@@ -202,7 +204,11 @@ message DeleteNode {
   uint32 table_id = 1;
   // Version of the table.
   uint64 table_version_id = 3;
+  // Primary key indices of the table.
+  repeated uint32 pk_indices = 5;
   bool returning = 2;
+  // If enabled, only key columns are kept and the rest are NULL.
+  bool upsert = 6;
 
   // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
   uint32 session_id = 4;
@@ -218,6 +224,8 @@ message UpdateNode {
   // Expressions to generate `U+` records.
   repeated expr.ExprNode new_exprs = 4;
   bool returning = 5;
+  // If enabled, only `Insert` records are emitted for new rows.
+  bool upsert = 7;
 
   // Session id is used to ensure that dml data from the same session should be sent to a fixed worker node and channel.
   uint32 session_id = 6;

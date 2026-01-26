@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ use risingwave_connector::sink::catalog::SinkType;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::{PbSink, PbTable, Table};
 use risingwave_pb::ddl_service::TableJobType;
+use risingwave_pb::id::StreamNodeLocalOperatorId;
 use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
 use risingwave_pb::stream_plan::dispatch_output_mapping::TypePair;
 use risingwave_pb::stream_plan::stream_fragment_graph::{
@@ -657,6 +658,9 @@ pub struct StreamFragmentGraph {
     /// The default parallelism of the job, specified by the `STREAMING_PARALLELISM` session
     /// variable. If not specified, all active worker slots will be used.
     specified_parallelism: Option<NonZeroUsize>,
+    /// The parallelism to use during backfill, specified by the `STREAMING_PARALLELISM_FOR_BACKFILL`
+    /// session variable. If not specified, falls back to `specified_parallelism`.
+    specified_backfill_parallelism: Option<NonZeroUsize>,
 
     /// Specified max parallelism, i.e., expected vnode count for the graph.
     ///
@@ -737,6 +741,15 @@ impl StreamFragmentGraph {
         } else {
             None
         };
+        let specified_backfill_parallelism =
+            if let Some(Parallelism { parallelism }) = proto.backfill_parallelism {
+                Some(
+                    NonZeroUsize::new(parallelism as usize)
+                        .context("backfill parallelism should not be 0")?,
+                )
+            } else {
+                None
+            };
 
         let max_parallelism = proto.max_parallelism as usize;
         let backfill_order = proto.backfill_order.unwrap_or(BackfillOrder {
@@ -749,6 +762,7 @@ impl StreamFragmentGraph {
             upstreams,
             dependent_table_ids,
             specified_parallelism,
+            specified_backfill_parallelism,
             max_parallelism,
             backfill_order,
         })
@@ -846,6 +860,26 @@ impl StreamFragmentGraph {
         }
     }
 
+    pub fn fit_snapshot_backfill_epochs(
+        &mut self,
+        mut snapshot_backfill_epochs: HashMap<StreamNodeLocalOperatorId, u64>,
+    ) {
+        for fragment in self.fragments.values_mut() {
+            visit_stream_node_cont_mut(fragment.node.as_mut().unwrap(), |node| {
+                if let PbNodeBody::StreamScan(scan) = node.node_body.as_mut().unwrap()
+                    && let StreamScanType::SnapshotBackfill
+                    | StreamScanType::CrossDbSnapshotBackfill = scan.stream_scan_type()
+                {
+                    let Some(epoch) = snapshot_backfill_epochs.remove(&node.operator_id) else {
+                        panic!("no snapshot epoch found for node {:?}", node)
+                    };
+                    scan.snapshot_backfill_epoch = Some(epoch);
+                }
+                true
+            })
+        }
+    }
+
     /// Returns the fragment id where the streaming job node located.
     pub fn table_fragment_id(&self) -> FragmentId {
         self.fragments
@@ -876,6 +910,11 @@ impl StreamFragmentGraph {
     /// Get the parallelism of the job, if specified by the user.
     pub fn specified_parallelism(&self) -> Option<NonZeroUsize> {
         self.specified_parallelism
+    }
+
+    /// Get the backfill parallelism of the job, if specified by the user.
+    pub fn specified_backfill_parallelism(&self) -> Option<NonZeroUsize> {
+        self.specified_backfill_parallelism
     }
 
     /// Get the expected vnode count of the graph. See documentation of the field for more details.

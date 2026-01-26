@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use core::ops::Bound::Unbounded;
 
+use risingwave_common::catalog::TableOption;
 use risingwave_common::util::epoch::is_max_epoch;
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_storage::StateStore;
@@ -47,6 +48,7 @@ pub async fn list_kv(
             HummockReadEpoch::Committed(epoch),
             NewReadSnapshotOptions {
                 table_id: table_id.into(),
+                table_option: TableOption::default(),
             },
         )
         .await?;

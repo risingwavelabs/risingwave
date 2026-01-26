@@ -1,8 +1,3 @@
-query ?
-show streaming_enable_materialized_expressions;
-----
-true
-
 statement ok
 create function random_int() returns int as random_int using link 'http://localhost:8815';
 

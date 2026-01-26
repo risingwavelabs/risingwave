@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,13 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::anyhow;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_connector::source::SplitImpl;
 use risingwave_pb::catalog::Database;
-use risingwave_pb::ddl_service::DdlProgress;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::oneshot::Sender;
@@ -50,7 +49,7 @@ mod worker;
 
 pub use backfill_order_control::{BackfillNode, BackfillOrderState};
 use risingwave_common::id::JobId;
-use risingwave_connector::source::cdc::CdcTableSnapshotSplitAssignmentWithGeneration;
+use risingwave_pb::ddl_service::PbBackfillType;
 
 pub use self::command::{
     BarrierKind, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
@@ -60,7 +59,9 @@ pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
+use crate::barrier::cdc_progress::CdcProgress;
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::stream::cdc::CdcTableSnapshotSplits;
 
 /// The reason why the cluster is recovering.
 enum RecoveryReason {
@@ -103,8 +104,14 @@ impl From<&BarrierManagerStatus> for PbRecoveryStatus {
     }
 }
 
+pub(crate) struct BackfillProgress {
+    pub(crate) progress: String,
+    pub(crate) backfill_type: PbBackfillType,
+}
+
 pub(crate) enum BarrierManagerRequest {
-    GetDdlProgress(Sender<HashMap<JobId, DdlProgress>>),
+    GetBackfillProgress(Sender<HashMap<JobId, BackfillProgress>>),
+    GetCdcProgress(Sender<HashMap<JobId, CdcProgress>>),
     AdhocRecovery(Sender<()>),
     UpdateDatabaseBarrier {
         database_id: DatabaseId,
@@ -119,6 +126,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
     database_job_infos:
         HashMap<DatabaseId, HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>>,
+    backfill_orders: HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -126,10 +134,10 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    background_jobs: HashMap<JobId, String>,
+    background_jobs: HashSet<JobId>,
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+    cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
 }
 
 impl BarrierWorkerRuntimeInfoSnapshot {
@@ -221,6 +229,7 @@ impl BarrierWorkerRuntimeInfoSnapshot {
 #[derive(Debug)]
 struct DatabaseRuntimeInfoSnapshot {
     job_infos: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
+    backfill_orders: HashMap<JobId, HashMap<FragmentId, Vec<FragmentId>>>,
     state_table_committed_epochs: HashMap<TableId, u64>,
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
@@ -228,8 +237,8 @@ struct DatabaseRuntimeInfoSnapshot {
     stream_actors: HashMap<ActorId, StreamActor>,
     fragment_relations: FragmentDownstreamRelation,
     source_splits: HashMap<ActorId, Vec<SplitImpl>>,
-    background_jobs: HashMap<JobId, String>,
-    cdc_table_snapshot_split_assignment: CdcTableSnapshotSplitAssignmentWithGeneration,
+    background_jobs: HashSet<JobId>,
+    cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
 }
 
 impl DatabaseRuntimeInfoSnapshot {

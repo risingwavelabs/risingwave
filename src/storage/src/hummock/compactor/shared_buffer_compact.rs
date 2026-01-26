@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -42,10 +42,9 @@ use crate::hummock::shared_buffer::shared_buffer_batch::{
     SharedBufferBatch, SharedBufferBatchInner, SharedBufferBatchOldValues, SharedBufferKeyEntry,
     VersionedSharedBufferValue,
 };
-use crate::hummock::utils::MemoryTracker;
 use crate::hummock::{
-    BlockedXor16FilterBuilder, CachePolicy, GetObjectId, HummockError, HummockResult,
-    ObjectIdManagerRef, SstableBuilderOptions,
+    CachePolicy, GetObjectId, HummockError, HummockResult, ObjectIdManagerRef,
+    SstableBuilderOptions,
 };
 use crate::mem_table::ImmutableMemtable;
 use crate::opts::StorageOpts;
@@ -182,7 +181,13 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
     let mut compact_success = true;
     let mut output_ssts = Vec::with_capacity(parallelism);
     let mut compaction_futures = vec![];
-    let use_block_based_filter = BlockedXor16FilterBuilder::is_kv_count_too_large(total_key_count);
+    // Shared buffer compaction always goes to L0. Use block_based_filter when kv_count is large.
+    // Use None to apply the default threshold since shared buffer flush doesn't have a CompactTask.
+    let use_block_based_filter =
+        risingwave_hummock_sdk::filter_utils::is_kv_count_too_large_for_xor16(
+            total_key_count as u64,
+            None,
+        );
 
     for (split_index, key_range) in splits.into_iter().enumerate() {
         let compactor = SharedBufferCompactRunner::new(
@@ -321,7 +326,6 @@ async fn compact_shared_buffer<const IS_NEW_VALUE: bool>(
 pub async fn merge_imms_in_memory(
     table_id: TableId,
     imms: Vec<ImmutableMemtable>,
-    memory_tracker: Option<MemoryTracker>,
 ) -> ImmutableMemtable {
     let mut epochs = vec![];
     let mut merged_size = 0;
@@ -451,7 +455,6 @@ pub async fn merge_imms_in_memory(
             old_values,
             merged_size,
             max_imm_id,
-            memory_tracker,
         )),
         table_id,
     }

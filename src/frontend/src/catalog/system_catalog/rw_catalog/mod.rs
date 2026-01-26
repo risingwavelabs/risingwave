@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -49,6 +49,7 @@ mod rw_schemas;
 mod rw_secrets;
 pub(crate) mod rw_sinks;
 mod rw_sources;
+mod rw_streaming_job_config;
 mod rw_streaming_parallelism;
 mod rw_subscriptions;
 mod rw_system_tables;

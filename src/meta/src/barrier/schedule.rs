@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -333,12 +333,10 @@ pub struct ScheduledBarriers {
 /// State specific to each database for barrier generation.
 #[derive(Debug)]
 pub struct DatabaseBarrierState {
-    pub barrier_interval: Option<Duration>,
-    pub checkpoint_frequency: Option<u64>,
-    // Force checkpoint in next barrier.
-    pub force_checkpoint: bool,
+    barrier_interval: Option<Duration>,
+    checkpoint_frequency: Option<u64>,
     // The numbers of barrier (checkpoint = false) since the last barrier (checkpoint = true)
-    pub num_uncheckpointed_barrier: u64,
+    num_uncheckpointed_barrier: u64,
 }
 
 impl DatabaseBarrierState {
@@ -346,7 +344,6 @@ impl DatabaseBarrierState {
         Self {
             barrier_interval: barrier_interval_ms.map(|ms| Duration::from_millis(ms as u64)),
             checkpoint_frequency,
-            force_checkpoint: false,
             num_uncheckpointed_barrier: 0,
         }
     }
@@ -363,6 +360,7 @@ pub struct PeriodicBarriers {
     /// Holds `IntervalStream` for each database, keyed by `DatabaseId`.
     /// `StreamMap` will yield `(DatabaseId, Instant)` when a timer ticks.
     timer_streams: StreamMap<DatabaseId, IntervalStream>,
+    force_checkpoint_databases: HashSet<DatabaseId>,
 }
 
 impl PeriodicBarriers {
@@ -396,6 +394,7 @@ impl PeriodicBarriers {
             sys_checkpoint_frequency,
             databases,
             timer_streams,
+            force_checkpoint_databases: Default::default(),
         }
     }
 
@@ -435,7 +434,6 @@ impl PeriodicBarriers {
         for db_state in self.databases.values_mut() {
             if db_state.checkpoint_frequency.is_none() {
                 db_state.num_uncheckpointed_barrier = 0;
-                db_state.force_checkpoint = false;
             }
         }
     }
@@ -454,7 +452,6 @@ impl PeriodicBarriers {
                 db_state.checkpoint_frequency = checkpoint_frequency;
                 // Reset the `num_uncheckpointed_barrier` since the barrier interval or checkpoint frequency is changed.
                 db_state.num_uncheckpointed_barrier = 0;
-                db_state.force_checkpoint = false;
             }
             Entry::Vacant(entry) => {
                 entry.insert(DatabaseBarrierState::new(
@@ -477,8 +474,8 @@ impl PeriodicBarriers {
 
     /// Make the `checkpoint` of the next barrier must be true.
     pub fn force_checkpoint_in_next_barrier(&mut self, database_id: DatabaseId) {
-        if let Some(db_state) = self.databases.get_mut(&database_id) {
-            db_state.force_checkpoint = true;
+        if self.databases.contains_key(&database_id) {
+            self.force_checkpoint_databases.insert(database_id);
         } else {
             warn!(
                 ?database_id,
@@ -487,42 +484,64 @@ impl PeriodicBarriers {
         }
     }
 
+    fn reset_database_timer(&mut self, database_id: DatabaseId) {
+        // Check if the database exists.
+        assert!(
+            self.databases.contains_key(&database_id),
+            "database {} not found in scheduled barriers",
+            database_id
+        );
+        assert!(
+            self.timer_streams.contains_key(&database_id),
+            "timer stream for database {} not found in scheduled barriers",
+            database_id
+        );
+        // New command will trigger the barriers, so reset the timer for the specific database.
+        for (db_id, timer_stream) in self.timer_streams.iter_mut() {
+            if *db_id == database_id {
+                timer_stream.as_mut().reset();
+            }
+        }
+    }
+
     #[await_tree::instrument]
     pub(super) async fn next_barrier(
         &mut self,
         context: &impl GlobalBarrierWorkerContext,
     ) -> NewBarrier {
-        let new_barrier = select! {
-            biased;
-            scheduled = context.next_scheduled() => {
-                let database_id = scheduled.database_id;
-                // Check if the database exists.
-                assert!(self.databases.contains_key(&database_id), "database {} not found in periodic barriers", database_id);
-                assert!(self.timer_streams.contains_key(&database_id), "timer stream for database {} not found in periodic barriers", database_id);
-                // New command will trigger the barriers, so reset the timer for the specific database.
-                for (db_id, timer_stream) in self.timer_streams.iter_mut() {
-                    if *db_id == database_id {
-                        timer_stream.as_mut().reset();
+        let force_checkpoint_database = self.force_checkpoint_databases.drain().next();
+        let new_barrier = if let Some(database_id) = force_checkpoint_database {
+            self.reset_database_timer(database_id);
+            NewBarrier {
+                database_id,
+                command: None,
+                span: tracing_span(),
+                checkpoint: true,
+            }
+        } else {
+            select! {
+                biased;
+                scheduled = context.next_scheduled() => {
+                    let database_id = scheduled.database_id;
+                    self.reset_database_timer(database_id);
+                    let checkpoint = scheduled.command.need_checkpoint() || self.try_get_checkpoint(database_id);
+                    NewBarrier {
+                        database_id: scheduled.database_id,
+                        command: Some((scheduled.command, scheduled.notifiers)),
+                        span: scheduled.span,
+                        checkpoint,
                     }
-                }
-                let checkpoint = scheduled.command.need_checkpoint() || self.try_get_checkpoint(database_id);
-                NewBarrier {
-                    database_id: scheduled.database_id,
-                    command: Some((scheduled.command, scheduled.notifiers)),
-                    span: scheduled.span,
-                    checkpoint,
-                }
-            },
-            // If there is no database, we won't wait for `Interval`, but only wait for command.
-            // Normally it will not return None, because there is always at least one database.
-            next_timer = pending_on_none(self.timer_streams.next()) => {
-                let (database_id, _instant) = next_timer;
-                let checkpoint = self.try_get_checkpoint(database_id);
-                NewBarrier {
-                    database_id,
-                    command: None,
-                    span: tracing_span(),
-                    checkpoint,
+                },
+                // If there is no database, we won't wait for `Interval`, but only wait for command.
+                // Normally it will not return None, because there is always at least one database.
+                (database_id, _instant) = pending_on_none(self.timer_streams.next()) => {
+                    let checkpoint = self.try_get_checkpoint(database_id);
+                    NewBarrier {
+                        database_id,
+                        command: None,
+                        span: tracing_span(),
+                        checkpoint,
+                    }
                 }
             }
         };
@@ -537,7 +556,7 @@ impl PeriodicBarriers {
         let checkpoint_frequency = db_state
             .checkpoint_frequency
             .unwrap_or(self.sys_checkpoint_frequency);
-        db_state.num_uncheckpointed_barrier + 1 >= checkpoint_frequency || db_state.force_checkpoint
+        db_state.num_uncheckpointed_barrier + 1 >= checkpoint_frequency
     }
 
     /// Update the `num_uncheckpointed_barrier`
@@ -545,7 +564,6 @@ impl PeriodicBarriers {
         let db_state = self.databases.get_mut(&database_id).unwrap();
         if checkpoint {
             db_state.num_uncheckpointed_barrier = 0;
-            db_state.force_checkpoint = false;
         } else {
             db_state.num_uncheckpointed_barrier += 1;
         }
@@ -777,6 +795,8 @@ impl ScheduledBarriers {
 
 #[cfg(test)]
 mod tests {
+    use futures::FutureExt;
+
     use super::*;
 
     fn create_test_database(
@@ -834,9 +854,9 @@ mod tests {
             unimplemented!()
         }
 
-        async fn post_collect_command<'a>(
-            &'a self,
-            _command: &'a crate::barrier::command::CommandContext,
+        async fn post_collect_command(
+            &self,
+            _command: crate::barrier::command::PostCollectCommand,
         ) -> MetaResult<()> {
             unimplemented!()
         }
@@ -1056,7 +1076,7 @@ mod tests {
         // Force checkpoint for next barrier
         periodic.force_checkpoint_in_next_barrier(DatabaseId::from(1));
 
-        let barrier = periodic.next_barrier(&context).await;
+        let barrier = periodic.next_barrier(&context).now_or_never().unwrap();
 
         // Should be a checkpoint barrier due to force_checkpoint
         assert!(barrier.checkpoint);
@@ -1091,14 +1111,16 @@ mod tests {
 
         let mut periodic = PeriodicBarriers::new(Duration::from_millis(500), 20, databases);
 
-        // Update existing database
-        periodic.update_database_barrier(DatabaseId::from(1), Some(2000), Some(15));
+        let database_id = DatabaseId::new(1);
 
-        let db_state = periodic.databases.get(&DatabaseId::from(1)).unwrap();
+        // Update existing database
+        periodic.update_database_barrier(database_id, Some(2000), Some(15));
+
+        let db_state = periodic.databases.get(&database_id).unwrap();
         assert_eq!(db_state.barrier_interval, Some(Duration::from_millis(2000)));
         assert_eq!(db_state.checkpoint_frequency, Some(15));
         assert_eq!(db_state.num_uncheckpointed_barrier, 0);
-        assert!(!db_state.force_checkpoint);
+        assert!(!periodic.force_checkpoint_databases.contains(&database_id));
 
         // Add new database
         periodic.update_database_barrier(DatabaseId::from(2), None, None);

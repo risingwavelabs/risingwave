@@ -361,6 +361,7 @@ pub fn start(
             backend,
             max_heartbeat_interval,
             config.meta.meta_leader_lease_secs,
+            config.server.clone(),
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
                 disable_automatic_parallelism_control: config
@@ -552,6 +553,7 @@ pub fn start(
                     .cdc_table_split_init_insert_batch_size,
 
                 enable_legacy_table_migration: config.meta.enable_legacy_table_migration,
+                pause_on_next_bootstrap_offline: config.meta.pause_on_next_bootstrap_offline,
             },
             config.system.into_init_system_params(),
             Default::default(),

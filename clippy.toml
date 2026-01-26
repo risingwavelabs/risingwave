@@ -37,6 +37,7 @@ doc-valid-idents = [
     "TopN",
     "VNode",
     "IPv4",
+    "DataFusion",
 ]
 avoid-breaking-exported-api = false
 upper-case-acronyms-aggressive = true

@@ -18,9 +18,11 @@ use super::*;
 
 mod async_stack_trace;
 mod join_encoding_type;
+mod over_window;
 
 pub use async_stack_trace::*;
 pub use join_encoding_type::*;
+pub use over_window::*;
 
 /// The section `[streaming]` in `risingwave.toml`.
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
@@ -46,9 +48,9 @@ pub struct StreamingConfig {
     #[serde(default = "default::streaming::unique_user_stream_errors")]
     pub unique_user_stream_errors: usize,
 
-    /// Control the strictness of stream consistency.
-    #[serde(default = "default::streaming::unsafe_enable_strict_consistency")]
-    pub unsafe_enable_strict_consistency: bool,
+    /// Disable strict stream consistency checks.
+    #[serde(default = "default::streaming::unsafe_disable_strict_consistency")]
+    pub unsafe_disable_strict_consistency: bool,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -213,6 +215,11 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::iceberg_sink_write_parquet_max_row_group_rows")]
     pub iceberg_sink_write_parquet_max_row_group_rows: usize,
 
+    /// When enabled, materialized views using default `NoCheck` conflict behavior will be forced
+    /// to use `Overwrite`. Useful to avoid propagating inconsistent changelog downstream.
+    #[serde(default = "default::developer::materialize_force_overwrite_on_no_check")]
+    pub materialize_force_overwrite_on_no_check: bool,
+
     /// Whether by default enable preloading all rows in memory for state table.
     /// If true, all capable state tables will preload its state to memory
     #[serde(default = "default::streaming::default_enable_mem_preload_state_table")]
@@ -241,10 +248,42 @@ pub struct StreamingDeveloperConfig {
     #[serde(default)]
     pub join_encoding_type: JoinEncodingType,
 
+    /// The timeout for reading from the buffer of the sync log store on barrier.
+    /// Every epoch we will attempt to read the full buffer of the sync log store.
+    /// If we hit the timeout, we will stop reading and continue.
+    #[serde(default = "default::developer::sync_log_store_pause_duration_ms")]
+    pub sync_log_store_pause_duration_ms: usize,
+
+    /// The max buffer size for sync logstore, before we start flushing.
+    #[serde(default = "default::developer::sync_log_store_buffer_size")]
+    pub sync_log_store_buffer_size: usize,
+
+    /// Cache policy for partition cache in streaming over window.
+    /// Can be `full`, `recent`, `recent_first_n` or `recent_last_n`.
+    #[serde(default)]
+    pub over_window_cache_policy: OverWindowCachePolicy,
+
     #[serde(default, flatten)]
     #[serde_prefix_all(skip)]
     #[config_doc(omitted)]
     pub unrecognized: Unrecognized<Self>,
+}
+
+impl StreamingConfig {
+    /// Returns the dot-separated keys of all unrecognized fields, including those in `developer` section.
+    pub fn unrecognized_keys(&self) -> impl Iterator<Item = String> {
+        std::iter::from_coroutine(
+            #[coroutine]
+            || {
+                for k in self.unrecognized.inner().keys() {
+                    yield format!("streaming.{k}");
+                }
+                for k in self.developer.unrecognized.inner().keys() {
+                    yield format!("streaming.developer.{k}");
+                }
+            },
+        )
+    }
 }
 
 pub mod default {
@@ -270,8 +309,8 @@ pub mod default {
             10
         }
 
-        pub fn unsafe_enable_strict_consistency() -> bool {
-            true
+        pub fn unsafe_disable_strict_consistency() -> bool {
+            false
         }
 
         pub fn default_enable_mem_preload_state_table() -> bool {

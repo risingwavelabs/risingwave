@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -13,15 +13,15 @@
 // limitations under the License.
 
 use fixedbitset::FixedBitSet;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, ScalarImpl};
 use risingwave_expr::window_function::WindowFuncKind;
 
 use super::prelude::{PlanRef, *};
 use crate::expr::{
-    Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, Literal, collect_input_refs,
+    Expr, ExprImpl, ExprRewriter, ExprType, FunctionCall, InputRef, Literal, collect_input_refs,
 };
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalFilter, LogicalTopN, PlanTreeNodeUnary};
+use crate::optimizer::plan_node::{LogicalFilter, LogicalProject, LogicalTopN, PlanTreeNodeUnary};
 use crate::optimizer::property::Order;
 use crate::planner::LIMIT_ALL_COUNT;
 use crate::utils::Condition;
@@ -136,14 +136,16 @@ impl Rule<Logical> for OverWindowToTopNRule {
                 project.clone_with_input(filter).into()
             } else {
                 // Ranking Output, with project
-                project
-                    .clone_with_input(over_window.clone_with_input(filter).into())
-                    .into()
+                let over_window = over_window.clone_with_input(filter).into();
+                let over_window =
+                    add_rank_offset_if_needed(over_window, offset, window_func_pos, output_len);
+                project.clone_with_input(over_window).into()
             }
         } else {
             // Ranking Output, without project
             ctx.warn_to_user("It can be inefficient to output ranking number in Top-N, see https://www.risingwave.dev/docs/current/sql-pattern-topn/ for more information");
-            over_window.clone_with_input(filter).into()
+            let over_window = over_window.clone_with_input(filter).into();
+            add_rank_offset_if_needed(over_window, offset, window_func_pos, output_len)
         };
         Some(plan)
     }
@@ -350,4 +352,34 @@ fn handle_rank_preds(rank_preds: &[ExprImpl], window_func_pos: usize) -> Option<
             (None, None) => unreachable!(),
         }
     }
+}
+
+fn add_rank_offset_if_needed(
+    plan: PlanRef,
+    offset: u64,
+    window_func_pos: usize,
+    output_len: usize,
+) -> PlanRef {
+    if offset == 0 {
+        return plan;
+    }
+
+    let schema = plan.schema();
+    let mut exprs = Vec::with_capacity(output_len);
+
+    for idx in 0..output_len {
+        let input: ExprImpl = InputRef::new(idx, schema.fields()[idx].data_type().clone()).into();
+        if idx == window_func_pos {
+            let offset_expr: ExprImpl =
+                Literal::new(Some(ScalarImpl::Int64(offset as i64)), DataType::Int64).into();
+            let adjusted = FunctionCall::new(ExprType::Add, vec![input, offset_expr])
+                .unwrap()
+                .into();
+            exprs.push(adjusted);
+        } else {
+            exprs.push(input);
+        }
+    }
+
+    LogicalProject::create(plan, exprs)
 }

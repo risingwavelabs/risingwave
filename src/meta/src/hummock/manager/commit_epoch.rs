@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -236,7 +236,11 @@ impl HummockManager {
             self.env.notification_manager(),
         );
         add_prost_table_stats_map(&mut version_stats.table_stats, &table_stats_change);
-        if purge_prost_table_stats(&mut version_stats.table_stats, version.latest_version()) {
+        if purge_prost_table_stats(
+            &mut version_stats.table_stats,
+            version.latest_version(),
+            &truncate_tables,
+        ) {
             self.metrics.version_stats.reset();
             versioning.local_metrics.clear();
         }

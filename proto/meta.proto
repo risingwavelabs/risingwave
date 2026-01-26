@@ -266,6 +266,7 @@ message ListStreamingJobStatesResponse {
     uint32 max_parallelism = 4;
     string name = 5;
     string resource_group = 6;
+    string config_override = 9;
     uint32 database_id = 7;
     uint32 schema_id = 8;
   }
@@ -349,17 +350,16 @@ enum ThrottleTarget {
   THROTTLE_TARGET_UNSPECIFIED = 0;
   SOURCE = 1;
   MV = 2;
-  TABLE_WITH_SOURCE = 3;
-  CDC_TABLE = 4;
-  TABLE_DML = 5;
-  SINK = 6;
-  FRAGMENT = 7;
+  TABLE = 3;
+  SINK = 4;
+  FRAGMENT = 5;
 }
 
 message ApplyThrottleRequest {
-  ThrottleTarget kind = 1;
-  uint32 id = 2;
-  optional uint32 rate = 3;
+  ThrottleTarget throttle_target = 1;
+  common.ThrottleType throttle_type = 2;
+  uint32 id = 3;
+  optional uint32 rate = 4;
 }
 
 message ApplyThrottleResponse {

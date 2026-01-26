@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -36,6 +36,7 @@ use risingwave_error::tonic::ToTonicStatus;
 use thiserror::Error;
 
 use crate::common::WorkerType;
+use crate::ddl_service::streaming_job_resource_type;
 use crate::id::{FragmentId, SourceId, WorkerId};
 use crate::meta::event_log::event_recovery;
 use crate::stream_plan::PbStreamScanType;
@@ -276,11 +277,19 @@ impl common::WorkerNode {
             .parallelism as usize
     }
 
+    fn compactor_node_parallelism(&self) -> usize {
+        assert_eq!(self.r#type(), WorkerType::Compactor);
+        self.property
+            .as_ref()
+            .expect("property should be exist")
+            .parallelism as usize
+    }
+
     pub fn parallelism(&self) -> Option<usize> {
-        if WorkerType::ComputeNode == self.r#type() {
-            Some(self.compute_node_parallelism())
-        } else {
-            None
+        match self.r#type() {
+            WorkerType::ComputeNode => Some(self.compute_node_parallelism()),
+            WorkerType::Compactor => Some(self.compactor_node_parallelism()),
+            _ => None,
         }
     }
 
@@ -519,6 +528,100 @@ impl catalog::Sink {
         // TODO: use a more unique name
         format!("{}", self.id)
     }
+
+    /// Get `ignore_delete` with backward compatibility.
+    ///
+    /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
+    #[allow(deprecated)]
+    pub fn ignore_delete(&self) -> bool {
+        self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    }
+}
+
+impl stream_plan::SinkDesc {
+    /// Get `ignore_delete` with backward compatibility.
+    ///
+    /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
+    #[allow(deprecated)]
+    pub fn ignore_delete(&self) -> bool {
+        self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    }
+}
+
+impl connector_service::SinkParam {
+    /// Get `ignore_delete` with backward compatibility.
+    ///
+    /// Historically we use `sink_type == ForceAppendOnly` to represent this behavior.
+    #[allow(deprecated)]
+    pub fn ignore_delete(&self) -> bool {
+        self.raw_ignore_delete || self.sink_type() == catalog::SinkType::ForceAppendOnly
+    }
+}
+
+impl catalog::Table {
+    /// Get clean watermark column indices with backward compatibility.
+    ///
+    /// Returns the new `clean_watermark_indices` if set, otherwise derives it from the old
+    /// `clean_watermark_index_in_pk` by converting PK index to column index.
+    ///
+    /// Note: a non-empty slice does not imply that the executor **SHOULD** clean this table
+    /// by watermark, but that the storage **CAN** clean this table by watermark. It's actually
+    /// the executor's responsibility to decide whether state cleaning is correct on semantics.
+    /// Besides, due to historical reasons, this method may return `[pk[0]]` even if the table
+    /// has nothing to do with watermark.
+    #[expect(deprecated)]
+    pub fn get_clean_watermark_column_indices(&self) -> Vec<u32> {
+        if !self.clean_watermark_indices.is_empty() {
+            // New format: directly return clean_watermark_indices
+            self.clean_watermark_indices.clone()
+        } else if let Some(pk_idx) = self
+            .clean_watermark_index_in_pk
+            // At the very beginning, the watermark index was hard-coded to the first column of the pk.
+            .or_else(|| (!self.pk.is_empty()).then_some(0))
+        {
+            // Old format: convert PK index to column index
+            // The pk_idx is the position in the PK, we need to find the corresponding column index
+            if let Some(col_order) = self.pk.get(pk_idx as usize) {
+                vec![col_order.column_index]
+            } else {
+                if cfg!(debug_assertions) {
+                    panic!("clean_watermark_index_in_pk is out of range: {self:?}");
+                }
+                vec![]
+            }
+        } else {
+            vec![]
+        }
+    }
+
+    /// Convert clean watermark column indices to PK indices and return the minimum.
+    /// Returns None if no clean watermark is configured.
+    ///
+    /// This is a backward-compatible method to replace the deprecated `clean_watermark_index_in_pk` field.
+    ///
+    /// Note: a `Some` return value does not imply that the executor **SHOULD** clean this table
+    /// by watermark, but that the storage **CAN** clean this table by watermark. It's actually
+    /// the executor's responsibility to decide whether state cleaning is correct on semantics.
+    /// Besides, due to historical reasons, this method may return `Some(pk[0])` even if the table
+    /// has nothing to do with watermark.
+    ///
+    /// TODO: remove this method after totally deprecating `clean_watermark_index_in_pk`.
+    pub fn get_clean_watermark_index_in_pk_compat(&self) -> Option<usize> {
+        let clean_watermark_column_indices = self.get_clean_watermark_column_indices();
+
+        // Convert column indices to PK indices
+        let clean_watermark_indices_in_pk: Vec<usize> = clean_watermark_column_indices
+            .iter()
+            .filter_map(|&col_idx| {
+                self.pk
+                    .iter()
+                    .position(|col_order| col_order.column_index == col_idx)
+            })
+            .collect();
+
+        // Return the minimum PK index
+        clean_watermark_indices_in_pk.iter().min().copied()
+    }
 }
 
 impl std::fmt::Debug for meta::SystemParams {
@@ -674,6 +777,18 @@ impl expr::UserDefinedFunctionMetadata {
     }
 }
 
+impl streaming_job_resource_type::ResourceType {
+    pub fn resource_group(&self) -> Option<String> {
+        match self {
+            streaming_job_resource_type::ResourceType::Regular(_) => None,
+            streaming_job_resource_type::ResourceType::SpecificResourceGroup(group)
+            | streaming_job_resource_type::ResourceType::ServerlessBackfillResourceGroup(group) => {
+                Some(group.clone())
+            }
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use crate::data::{DataType, data_type};
@@ -726,5 +841,50 @@ mod tests {
         // box all fields in NodeBody to avoid large_enum_variant
         // see https://github.com/risingwavelabs/risingwave/issues/19910
         const_assert_eq!(std::mem::size_of::<NodeBody>(), 16);
+    }
+
+    #[test]
+    #[expect(deprecated)]
+    fn test_get_clean_watermark_index_in_pk_compat() {
+        use crate::catalog::Table;
+        use crate::common::{ColumnOrder, OrderType};
+
+        fn create_column_order(column_index: u32) -> ColumnOrder {
+            ColumnOrder {
+                column_index,
+                order_type: Some(OrderType::default()),
+            }
+        }
+
+        // Test case 1: both fields are set
+        let table = Table {
+            clean_watermark_indices: vec![3, 2],
+            clean_watermark_index_in_pk: Some(0),
+            pk: vec![
+                create_column_order(1),
+                create_column_order(2),
+                create_column_order(3),
+                create_column_order(4),
+            ],
+            ..Default::default()
+        };
+        assert_eq!(table.get_clean_watermark_index_in_pk_compat(), Some(1));
+
+        // Test case 2: only old field is set
+        let table = Table {
+            clean_watermark_indices: vec![],
+            clean_watermark_index_in_pk: Some(1),
+            pk: vec![create_column_order(0), create_column_order(2)],
+            ..Default::default()
+        };
+        assert_eq!(table.get_clean_watermark_index_in_pk_compat(), Some(1));
+
+        // Test case 3: no clean watermark configured
+        let table = Table {
+            clean_watermark_indices: vec![],
+            clean_watermark_index_in_pk: None,
+            ..Default::default()
+        };
+        assert_eq!(table.get_clean_watermark_index_in_pk_compat(), None);
     }
 }

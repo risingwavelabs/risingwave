@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -264,7 +264,7 @@ mod tests {
     use futures_async_stream::try_stream;
     use itertools::Itertools;
     use risingwave_common::catalog::ColumnCatalog;
-    use risingwave_pb::connector_service::cdc_message;
+    use risingwave_pb::connector_service::{SourceType, cdc_message};
 
     use super::*;
     use crate::parser::{MessageMeta, SourceStreamChunkBuilder, TransactionControl};
@@ -388,6 +388,7 @@ mod tests {
                         } else {
                             cdc_message::CdcMessageType::Data
                         },
+                        SourceType::Unspecified,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -402,6 +403,7 @@ mod tests {
                         "orders".to_owned(),
                         0,
                         cdc_message::CdcMessageType::Data,
+                        SourceType::Unspecified,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -420,6 +422,7 @@ mod tests {
                         } else {
                             cdc_message::CdcMessageType::Data
                         },
+                        SourceType::Unspecified,
                     )),
                     split_id: SplitId::from("1001"),
                     offset: "0".into(),
@@ -462,6 +465,7 @@ mod tests {
             "orders".to_owned(),
             0,
             cdc_message::CdcMessageType::TransactionMeta,
+            SourceType::Unspecified,
         ));
         let msg_meta = MessageMeta {
             source_meta: &cdc_meta,
@@ -529,6 +533,7 @@ mod tests {
             "mydb.test".to_owned(),
             0,
             cdc_message::CdcMessageType::SchemaChange,
+            SourceType::Mysql,
         ));
         let msg_meta = MessageMeta {
             source_meta: &cdc_meta,

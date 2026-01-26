@@ -43,6 +43,7 @@ anchors:
         config: ci/docker-compose.yml
         mount-buildkite-agent: true
         propagate-environment: true
+        upload-container-logs: always
 
 other-sql-backend: &other-sql-backend
   matrix:
@@ -225,7 +226,6 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose
           run: source-test-env
-          upload-container-logs: always
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 25
     parallelism: 2
@@ -538,6 +538,7 @@ steps:
       # Only upload zipped files, otherwise the logs is too much.
       - ./ci/plugins/upload-failure-logs-zipped
     timeout_in_minutes: 30
+    parallelism: 4
     retry: *auto-retry
 
   - label: "end-to-end test (deterministic simulation)"
@@ -711,7 +712,7 @@ steps:
           <<: *docker-compose
           run: source-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 30
+    timeout_in_minutes: 35
 
   - label: "e2e standalone binary test"
     command: "ci/scripts/e2e-test-serial.sh -p ci-dev -m standalone"

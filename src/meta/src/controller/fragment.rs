@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
+use std::num::NonZeroUsize;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -60,21 +61,23 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::Expr;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, FromQueryResult, JoinType, PaginatorTrait,
-    QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
+    QueryFilter, QuerySelect, RelationTrait, StreamTrait, TransactionTrait,
 };
 use serde::{Deserialize, Serialize};
 
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
 use crate::controller::catalog::CatalogController;
 use crate::controller::scale::{
-    FragmentRenderMap, NoShuffleEnsemble, find_fragment_no_shuffle_dags_detailed,
-    load_fragment_info, resolve_streaming_job_definition,
+    FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble, RenderedGraph, WorkerInfo,
+    find_fragment_no_shuffle_dags_detailed, load_fragment_context_for_jobs,
+    render_actor_assignments, resolve_streaming_job_definition,
 };
 use crate::controller::utils::{
     FragmentDesc, PartialActorLocation, PartialFragmentStateTables, compose_dispatchers,
     get_sink_fragment_by_ids, has_table_been_migrated, rebuild_fragment_mapping,
     resolve_no_shuffle_actor_dispatcher,
 };
+use crate::error::MetaError;
 use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, NotificationManager};
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
@@ -153,6 +156,7 @@ pub struct StreamingJobInfo {
     pub parallelism: StreamingParallelism,
     pub max_parallelism: i32,
     pub resource_group: String,
+    pub config_override: String,
     pub database_id: DatabaseId,
     pub schema_id: SchemaId,
 }
@@ -694,9 +698,21 @@ impl CatalogController {
         fragment_ids: Vec<FragmentId>,
     ) -> MetaResult<FragmentDownstreamRelation> {
         let inner = self.inner.read().await;
+        self.get_fragment_downstream_relations_in_txn(&inner.db, fragment_ids)
+            .await
+    }
+
+    pub async fn get_fragment_downstream_relations_in_txn<C>(
+        &self,
+        txn: &C,
+        fragment_ids: Vec<FragmentId>,
+    ) -> MetaResult<FragmentDownstreamRelation>
+    where
+        C: ConnectionTrait + StreamTrait + Send,
+    {
         let mut stream = FragmentRelation::find()
             .filter(fragment_relation::Column::SourceFragmentId.is_in(fragment_ids))
-            .stream(&inner.db)
+            .stream(txn)
             .await?;
         let mut relations = FragmentDownstreamRelation::new();
         while let Some(relation) = stream.try_next().await? {
@@ -753,6 +769,12 @@ impl CatalogController {
         Ok(result)
     }
 
+    pub async fn count_streaming_jobs(&self) -> MetaResult<usize> {
+        let inner = self.inner.read().await;
+        let count = StreamingJob::find().count(&inner.db).await?;
+        Ok(usize::try_from(count).context("streaming job count overflow")?)
+    }
+
     pub async fn list_streaming_job_infos(&self) -> MetaResult<Vec<StreamingJobInfo>> {
         let inner = self.inner.read().await;
         let job_states = StreamingJob::find()
@@ -791,6 +813,13 @@ impl CatalogController {
                     Expr::col((database::Entity, database::Column::ResourceGroup)),
                 ),
                 "resource_group",
+            )
+            .column_as(
+                Expr::if_null(
+                    Expr::col((streaming_job::Entity, streaming_job::Column::ConfigOverride)),
+                    Expr::val(""),
+                ),
+                "config_override",
             )
             .column(object::Column::DatabaseId)
             .column(object::Column::SchemaId)
@@ -1030,25 +1059,27 @@ impl CatalogController {
         let actor_infos = {
             let info = self.env.shared_actor_infos().read_guard();
 
-            fragment_objects
-                .into_iter()
-                .flat_map(|(fragment_id, object_id, schema_id, object_type)| {
-                    let SharedFragmentInfo {
-                        fragment_id,
-                        actors,
-                        ..
-                    } = info.get_fragment(fragment_id as _).unwrap();
-                    actors.keys().map(move |actor_id| {
-                        (
-                            *actor_id as _,
-                            *fragment_id as _,
-                            object_id,
-                            schema_id,
-                            object_type,
-                        )
-                    })
-                })
-                .collect_vec()
+            let mut result = Vec::new();
+
+            for (fragment_id, object_id, schema_id, object_type) in fragment_objects {
+                let Some(fragment) = info.get_fragment(fragment_id as _) else {
+                    return Err(MetaError::unavailable(format!(
+                        "shared actor info missing for fragment {fragment_id} while listing actors"
+                    )));
+                };
+
+                for actor_id in fragment.actors.keys() {
+                    result.push((
+                        *actor_id as _,
+                        fragment.fragment_id as _,
+                        object_id,
+                        schema_id,
+                        object_type,
+                    ));
+                }
+            }
+
+            result
         };
 
         Ok(actor_infos)
@@ -1311,26 +1342,82 @@ impl CatalogController {
         database_id: Option<DatabaseId>,
         worker_nodes: &ActiveStreamingWorkerNodes,
     ) -> MetaResult<FragmentRenderMap> {
+        let loaded = self.load_fragment_context(database_id).await?;
+
+        if loaded.is_empty() {
+            return Ok(HashMap::new());
+        }
+
         let adaptive_parallelism_strategy = {
             let system_params_reader = self.env.system_params_reader().await;
             system_params_reader.adaptive_parallelism_strategy()
         };
 
+        let available_workers: BTreeMap<_, _> = worker_nodes
+            .current()
+            .values()
+            .filter(|worker| worker.is_streaming_schedulable())
+            .map(|worker| {
+                (
+                    worker.id,
+                    WorkerInfo {
+                        parallelism: NonZeroUsize::new(worker.compute_node_parallelism()).unwrap(),
+                        resource_group: worker.resource_group(),
+                    },
+                )
+            })
+            .collect();
+
+        let RenderedGraph { fragments, .. } = render_actor_assignments(
+            self.env.actor_id_generator(),
+            &available_workers,
+            adaptive_parallelism_strategy,
+            &loaded,
+        )?;
+
+        tracing::trace!(?fragments, "reload all actors");
+
+        Ok(fragments)
+    }
+
+    /// Async load stage: collects all metadata required for rendering actor assignments.
+    pub async fn load_fragment_context(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<LoadedFragmentContext> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let database_fragment_infos = load_fragment_info(
-            &txn,
-            self.env.actor_id_generator(),
-            database_id,
-            worker_nodes,
-            adaptive_parallelism_strategy,
-        )
-        .await?;
+        self.load_fragment_context_in_txn(&txn, database_id).await
+    }
 
-        tracing::trace!(?database_fragment_infos, "reload all actors");
+    pub async fn load_fragment_context_in_txn<C>(
+        &self,
+        txn: &C,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<LoadedFragmentContext>
+    where
+        C: ConnectionTrait,
+    {
+        let mut query = StreamingJob::find()
+            .select_only()
+            .column(streaming_job::Column::JobId);
 
-        Ok(database_fragment_infos)
+        if let Some(database_id) = database_id {
+            query = query
+                .join(JoinType::InnerJoin, streaming_job::Relation::Object.def())
+                .filter(object::Column::DatabaseId.eq(database_id));
+        }
+
+        let jobs: Vec<JobId> = query.into_tuple().all(txn).await?;
+
+        let jobs: HashSet<JobId> = jobs.into_iter().collect();
+
+        if jobs.is_empty() {
+            return Ok(LoadedFragmentContext::default());
+        }
+
+        load_fragment_context_for_jobs(txn, jobs).await
     }
 
     #[await_tree::instrument]
@@ -1694,26 +1781,46 @@ impl CatalogController {
         target_table: &PbTable,
         target_fragment_id: FragmentId,
     ) -> MetaResult<Vec<UpstreamSinkInfo>> {
-        let incoming_sinks = self.get_table_incoming_sinks(target_table.id).await?;
-
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
-        let sink_ids = incoming_sinks.iter().map(|s| s.id).collect_vec();
-        let sink_fragment_ids = get_sink_fragment_by_ids(&txn, sink_ids).await?;
+        self.get_all_upstream_sink_infos_in_txn(&txn, target_table, target_fragment_id)
+            .await
+    }
+
+    pub async fn get_all_upstream_sink_infos_in_txn<C>(
+        &self,
+        txn: &C,
+        target_table: &PbTable,
+        target_fragment_id: FragmentId,
+    ) -> MetaResult<Vec<UpstreamSinkInfo>>
+    where
+        C: ConnectionTrait,
+    {
+        let incoming_sinks = Sink::find()
+            .filter(sink::Column::TargetTable.eq(target_table.id))
+            .all(txn)
+            .await?;
+
+        let sink_ids = incoming_sinks.iter().map(|s| s.sink_id).collect_vec();
+        let sink_fragment_ids = get_sink_fragment_by_ids(txn, sink_ids).await?;
 
         let mut upstream_sink_infos = Vec::with_capacity(incoming_sinks.len());
-        for pb_sink in &incoming_sinks {
+        for sink in &incoming_sinks {
             let sink_fragment_id =
                 sink_fragment_ids
-                    .get(&pb_sink.id)
+                    .get(&sink.sink_id)
                     .cloned()
                     .ok_or(anyhow::anyhow!(
                         "sink fragment not found for sink id {}",
-                        pb_sink.id
+                        sink.sink_id
                     ))?;
             let upstream_info = build_upstream_sink_info(
-                pb_sink,
+                sink.sink_id,
+                sink.original_target_columns
+                    .as_ref()
+                    .map(|cols| cols.to_protobuf())
+                    .unwrap_or_default(),
                 sink_fragment_id,
                 target_table,
                 target_fragment_id,

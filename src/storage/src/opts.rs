@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -83,6 +83,9 @@ pub struct StorageOpts {
     pub max_version_pinning_duration_sec: u64,
     pub compactor_iter_max_io_retry_times: usize,
 
+    /// If set, block metadata keys will be shortened when their length exceeds this threshold.
+    pub shorten_block_meta_key_threshold: Option<usize>,
+
     pub data_file_cache_dir: String,
     pub data_file_cache_capacity_mb: usize,
     pub data_file_cache_file_capacity_mb: usize,
@@ -122,6 +125,7 @@ pub struct StorageOpts {
     pub meta_file_cache_blob_index_size_kb: usize,
     pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
     pub meta_file_cache_throttle: foyer::Throttle,
+    pub sst_skip_bloom_filter_in_serde: bool,
 
     pub vector_file_block_size_kb: usize,
     pub vector_block_cache_capacity_mb: usize,
@@ -266,6 +270,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             meta_file_cache_blob_index_size_kb: c.storage.meta_file_cache.blob_index_size_kb,
             meta_file_cache_runtime_config: c.storage.meta_file_cache.runtime_config.clone(),
             meta_file_cache_throttle,
+            sst_skip_bloom_filter_in_serde: c.storage.sst_skip_bloom_filter_in_serde,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,
@@ -296,6 +301,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
                 .compactor_fast_max_compact_delete_ratio,
             compactor_fast_max_compact_task_size: c.storage.compactor_fast_max_compact_task_size,
             compactor_iter_max_io_retry_times: c.storage.compactor_iter_max_io_retry_times,
+            shorten_block_meta_key_threshold: c.storage.shorten_block_meta_key_threshold,
             compactor_concurrent_uploading_sst_count: c
                 .storage
                 .compactor_concurrent_uploading_sst_count,

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -19,10 +19,11 @@ use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use super::generic::{self, PlanAggCall};
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record, plan_node_name};
-use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef};
+use super::{ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamPlanRef as PlanRef, TryToStreamPb};
 use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -108,19 +109,25 @@ impl PlanTreeNodeUnary<Stream> for StreamSimpleAgg {
 }
 impl_plan_tree_node_for_unary! { Stream, StreamSimpleAgg }
 
-impl StreamNode for StreamSimpleAgg {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
+impl TryToStreamPb for StreamSimpleAgg {
+    fn try_to_stream_prost_body(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbNodeBody> {
         use risingwave_pb::stream_plan::*;
         let (intermediate_state_table, agg_states, distinct_dedup_tables) =
             self.core.infer_tables(&self.base, None, None);
 
-        PbNodeBody::SimpleAgg(Box::new(SimpleAggNode {
-            agg_calls: self
-                .agg_calls()
-                .iter()
-                .map(PlanAggCall::to_protobuf)
-                .collect(),
-            is_append_only: self.input().append_only(),
+        let append_only = self.input().append_only();
+        let agg_calls = self
+            .agg_calls()
+            .iter()
+            .map(|call| call.to_protobuf_checked_pure(self.input().stream_kind().is_retract()))
+            .collect::<crate::error::Result<Vec<_>>>()?;
+
+        Ok(PbNodeBody::SimpleAgg(Box::new(SimpleAggNode {
+            agg_calls,
+            is_append_only: append_only,
             agg_call_states: agg_states
                 .into_iter()
                 .map(|s| s.into_prost(state))
@@ -145,7 +152,7 @@ impl StreamNode for StreamSimpleAgg {
             row_count_index: self.row_count_idx as u32,
             version: PbAggNodeVersion::LATEST as _,
             must_output_per_barrier: self.must_output_per_barrier,
-        }))
+        })))
     }
 }
 

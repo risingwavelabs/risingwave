@@ -37,6 +37,7 @@ pub use storage::{
     extract_storage_memory_config,
 };
 pub mod merge;
+pub mod mutate;
 pub mod system;
 pub mod utils;
 
@@ -345,7 +346,7 @@ pub mod default {
         }
 
         pub fn enable_actor_tokio_metrics() -> bool {
-            false
+            true
         }
 
         pub fn stream_enable_auto_schema_change() -> bool {
@@ -389,8 +390,20 @@ pub mod default {
             100_000
         }
 
+        pub fn materialize_force_overwrite_on_no_check() -> bool {
+            false
+        }
+
         pub fn refresh_scheduler_interval_sec() -> u64 {
             60
+        }
+
+        pub fn sync_log_store_pause_duration_ms() -> usize {
+            64
+        }
+
+        pub fn sync_log_store_buffer_size() -> usize {
+            2048
         }
     }
 }

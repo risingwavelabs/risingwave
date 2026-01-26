@@ -23,10 +23,10 @@ export RW_SECRET_STORE_PRIVATE_KEY_HEX="0123456789abcdef0123456789abcdef"
 export SLT_FAIL_FAST=true
 export SLT_KEEP_DB_ON_FAILURE=true
 export SLT_SHUTDOWN_TIMEOUT=10
-export LLVM_PROFILE_FILE="${REPO_ROOT}/target/risingwave-%p.profraw"
 export CARGO_LLVM_COV=1
 export CARGO_LLVM_COV_SHOW_ENV=1
-export CARGO_LLVM_COV_TARGET_DIR="${REPO_ROOT}/target"
+export CARGO_LLVM_COV_TARGET_DIR="${REPO_ROOT}/target" # used to locate object files, should be same as `CARGO_TARGET_DIR`
+export LLVM_PROFILE_FILE="${CARGO_LLVM_COV_TARGET_DIR}/risingwave-%p.profraw" # used both by executables generating profraw files and `cargo llvm-cov` to find them
 
 unset LANG
 
@@ -41,7 +41,15 @@ function generate_and_upload_coverage_report() {
     len=$(find target -name '*.profraw' 2>/dev/null | wc -l)
     echo "Found ${len} profraw files. Generating coverage report."
 
-    cargo llvm-cov report --lcov --output-path "$coverage_filename" || {
+    local -a profile_args=()
+    # In most steps, we extract the executables to `target/debug` no matter what profile it is built with.
+    # Thus, it's okay to not specify profile and use `debug`.
+    # For exceptions, specify `RW_COVERAGE_CARGO_PROFILE` in the script.
+    if [[ -n "${RW_COVERAGE_CARGO_PROFILE:-}" ]]; then
+      profile_args+=(--profile "${RW_COVERAGE_CARGO_PROFILE}")
+    fi
+
+    cargo llvm-cov report "${profile_args[@]}" --lcov --output-path "$coverage_filename" || {
       echo "Warning: Failed to generate coverage report"
     }
 
@@ -66,9 +74,9 @@ function exit_hook() {
   fi
 
   # Otherwise, print diagnose info
-  echo "^^^ +++"
-  echo "--- Failed to run command! Dumping diagnose info..."
   if [ -f .risingwave/config/risedev-env ]; then
+    echo "^^^ +++"
+    echo "--- Failed to run command! Dumping diagnose info..."
     ./risedev diagnose || true
   fi
 }

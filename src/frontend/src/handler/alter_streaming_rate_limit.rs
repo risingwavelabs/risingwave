@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,19 +14,40 @@
 
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::bail;
+use risingwave_pb::common::ThrottleType as PbThrottleType;
 use risingwave_pb::meta::ThrottleTarget as PbThrottleTarget;
 use risingwave_sqlparser::ast::ObjectName;
 
 use super::{HandlerArgs, RwPgResponse};
-use crate::Binder;
-use crate::catalog::root_catalog::SchemaPath;
+use crate::catalog::root_catalog::{Catalog, SchemaPath};
 use crate::catalog::table_catalog::TableType;
 use crate::error::{ErrorCode, Result};
+use crate::handler::util::{LongRunningNotificationAction, execute_with_long_running_notification};
 use crate::session::SessionImpl;
+use crate::{Binder, TableCatalog};
+
+fn check_table_mismatch<'a>(
+    reader: &'a Catalog,
+    session: &SessionImpl,
+    db_name: &str,
+    schema_path: SchemaPath<'_>,
+    table_name: &str,
+) -> Result<&'a TableCatalog> {
+    let (table, schema_name) =
+        reader.get_created_table_by_name(db_name, schema_path, table_name)?;
+    if table.table_type != TableType::Table {
+        return Err(
+            ErrorCode::InvalidInputSyntax(format!("\"{table_name}\" is not a TABLE",)).into(),
+        );
+    }
+    session.check_privilege_for_drop_alter(schema_name, &**table)?;
+    Ok(table)
+}
 
 pub async fn handle_alter_streaming_rate_limit(
     handler_args: HandlerArgs,
-    kind: PbThrottleTarget,
+    throttle_target: PbThrottleTarget,
+    throttle_type: PbThrottleType,
     table_name: ObjectName,
     rate_limit: i32,
 ) -> Result<RwPgResponse> {
@@ -39,8 +60,8 @@ pub async fn handle_alter_streaming_rate_limit(
 
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let (stmt_type, id) = match kind {
-        PbThrottleTarget::Mv => {
+    let (stmt_type, id) = match (throttle_target, throttle_type) {
+        (PbThrottleTarget::Mv, PbThrottleType::Backfill) => {
             let reader = session.env().catalog_reader().read_guard();
             let (table, schema_name) =
                 reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
@@ -53,50 +74,43 @@ pub async fn handle_alter_streaming_rate_limit(
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             (StatementType::ALTER_MATERIALIZED_VIEW, table.id.as_raw_id())
         }
-        PbThrottleTarget::Source => {
+        (PbThrottleTarget::Source, PbThrottleType::Source) => {
             let reader = session.env().catalog_reader().read_guard();
             let (source, schema_name) =
                 reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
             session.check_privilege_for_drop_alter(schema_name, &**source)?;
             (StatementType::ALTER_SOURCE, source.id.as_raw_id())
         }
-        PbThrottleTarget::TableWithSource => {
+        (PbThrottleTarget::Table, PbThrottleType::Dml) => {
             let reader = session.env().catalog_reader().read_guard();
-            let (table, schema_name) =
-                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
-            session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            // Get the corresponding source catalog.
+            let table =
+                check_table_mismatch(&reader, &session, db_name, schema_path, &real_table_name)?;
+            (StatementType::ALTER_TABLE, table.id.as_raw_id())
+        }
+        (PbThrottleTarget::Table, PbThrottleType::Source) => {
+            let reader = session.env().catalog_reader().read_guard();
+            let table =
+                check_table_mismatch(&reader, &session, db_name, schema_path, &real_table_name)?;
             let source_id = if let Some(id) = table.associated_source_id {
                 id.as_raw_id()
             } else {
                 bail!("ALTER SOURCE_RATE_LIMIT is not for table without source")
             };
-            (StatementType::ALTER_SOURCE, source_id)
+            (StatementType::ALTER_TABLE, source_id)
         }
-        PbThrottleTarget::CdcTable => {
+        (PbThrottleTarget::Table, PbThrottleType::Backfill) => {
             let reader = session.env().catalog_reader().read_guard();
-            let (table, schema_name) =
-                reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
-            if table.table_type != TableType::Table {
-                return Err(ErrorCode::InvalidInputSyntax(format!("\"{table_name}\" ",)).into());
-            }
-            session.check_privilege_for_drop_alter(schema_name, &**table)?;
-            (StatementType::ALTER_TABLE, table.id.as_raw_id())
-        }
-        PbThrottleTarget::TableDml => {
-            let reader = session.env().catalog_reader().read_guard();
-            let (table, schema_name) =
-                reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?;
-            if table.table_type != TableType::Table {
+            let table =
+                check_table_mismatch(&reader, &session, db_name, schema_path, &real_table_name)?;
+            if table.cdc_table_type.is_none() {
                 return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "\"{table_name}\" is not a table",
+                    "\"{table_name}\" is not a CDC table",
                 ))
                 .into());
             }
-            session.check_privilege_for_drop_alter(schema_name, &**table)?;
             (StatementType::ALTER_TABLE, table.id.as_raw_id())
         }
-        PbThrottleTarget::Sink => {
+        (PbThrottleTarget::Sink, PbThrottleType::Sink) => {
             let reader = session.env().catalog_reader().read_guard();
             let (sink, schema_name) =
                 reader.get_any_sink_by_name(db_name, schema_path, &real_table_name)?;
@@ -106,14 +120,39 @@ pub async fn handle_alter_streaming_rate_limit(
             session.check_privilege_for_drop_alter(schema_name, &**sink)?;
             (StatementType::ALTER_SINK, sink.id.as_raw_id())
         }
-        _ => bail!("Unsupported throttle target: {:?}", kind),
+        (PbThrottleTarget::Sink, PbThrottleType::Backfill) => {
+            let reader = session.env().catalog_reader().read_guard();
+            let (sink, schema_name) =
+                reader.get_any_sink_by_name(db_name, schema_path, &real_table_name)?;
+            session.check_privilege_for_drop_alter(schema_name, &**sink)?;
+            (StatementType::ALTER_SINK, sink.id.as_raw_id())
+        }
+        _ => bail!(
+            "Unsupported throttle target: {:?} and throttle type: {:?}",
+            throttle_target,
+            throttle_type
+        ),
     };
-    handle_alter_streaming_rate_limit_by_id(&session, kind, id, rate_limit, stmt_type).await
+    execute_with_long_running_notification(
+        handle_alter_streaming_rate_limit_by_id(
+            &session,
+            throttle_target,
+            throttle_type,
+            id,
+            rate_limit,
+            stmt_type,
+        ),
+        &session,
+        "ALTER STREAMING RATE LIMIT",
+        LongRunningNotificationAction::SuggestRecover,
+    )
+    .await
 }
 
 pub async fn handle_alter_streaming_rate_limit_by_id(
     session: &SessionImpl,
-    kind: PbThrottleTarget,
+    throttle_target: PbThrottleTarget,
+    throttle_type: PbThrottleType,
     id: u32,
     rate_limit: i32,
     stmt_type: StatementType,
@@ -126,7 +165,9 @@ pub async fn handle_alter_streaming_rate_limit_by_id(
         Some(rate_limit as u32)
     };
 
-    meta_client.apply_throttle(kind, id, rate_limit).await?;
+    meta_client
+        .apply_throttle(throttle_target, throttle_type, id, rate_limit)
+        .await?;
 
     Ok(PgResponse::empty_result(stmt_type))
 }

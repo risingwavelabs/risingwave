@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -130,7 +130,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn apply_throttle(
         &self,
-        kind: PbThrottleTarget,
+        throttle_target: PbThrottleTarget,
+        throttle_type: risingwave_pb::common::PbThrottleType,
         id: u32,
         rate_limit: Option<u32>,
     ) -> Result<()>;
@@ -177,6 +178,13 @@ pub trait FrontendMetaClient: Send + Sync {
         changed_props: BTreeMap<String, String>,
         changed_secret_refs: BTreeMap<String, PbSecretRef>,
         connector_conn_ref: Option<ConnectionId>,
+    ) -> Result<()>;
+
+    async fn alter_connection_connector_props(
+        &self,
+        connection_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> Result<()>;
 
     async fn list_hosted_iceberg_tables(&self) -> Result<Vec<IcebergTable>>;
@@ -368,12 +376,13 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn apply_throttle(
         &self,
-        kind: PbThrottleTarget,
+        throttle_target: PbThrottleTarget,
+        throttle_type: risingwave_pb::common::PbThrottleType,
         id: u32,
         rate_limit: Option<u32>,
     ) -> Result<()> {
         self.0
-            .apply_throttle(kind, id, rate_limit)
+            .apply_throttle(throttle_target, throttle_type, id, rate_limit)
             .await
             .map(|_| ())
     }
@@ -460,6 +469,17 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
                 changed_secret_refs,
                 connector_conn_ref,
             )
+            .await
+    }
+
+    async fn alter_connection_connector_props(
+        &self,
+        connection_id: u32,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+    ) -> Result<()> {
+        self.0
+            .alter_connection_connector_props(connection_id, changed_props, changed_secret_refs)
             .await
     }
 

@@ -26,6 +26,7 @@ venv/
 go/bin/
 
 ## Rust - Compilation Artifacts
+.cargo/
 src/**/target
 src/**/target_tarpaulin
 target/

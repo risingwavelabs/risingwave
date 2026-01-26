@@ -10,6 +10,18 @@ create table phases (name varchar primary key, at timestamptz);
 statement ok
 insert into phases values ('00_begin', now());
 
+# Test invalid MongoDB URL - should fail during validation
+statement error Failed to connect to MongoDB
+CREATE TABLE users_invalid (_id JSONB PRIMARY KEY, payload JSONB)
+INCLUDE TIMESTAMP as commit_ts
+INCLUDE DATABASE_NAME as database_name
+INCLUDE COLLECTION_NAME as collection_name
+WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://wrong-host:27017/?replicaSet=rs0',
+  collection.name = 'random_data.*'
+);
+
 system ok
 mongosh 'mongodb://mongodb:27017' <<EOF
 db.all_types.insertOne({

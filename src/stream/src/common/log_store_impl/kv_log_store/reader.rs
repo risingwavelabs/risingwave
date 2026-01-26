@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -489,7 +489,7 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                                     is_checkpoint,
                                     new_vnode_bitmap: None,
                                     is_stop: false,
-                                    add_columns: None,
+                                    schema_change: None,
                                 }
                             }
                         };
@@ -591,6 +591,8 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
             LogStoreBufferItem::Barrier {
                 is_checkpoint,
                 next_epoch,
+                schema_change,
+                is_stop,
             } => {
                 assert!(
                     item_epoch < next_epoch,
@@ -604,8 +606,8 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     LogStoreReadItem::Barrier {
                         is_checkpoint,
                         new_vnode_bitmap: None,
-                        is_stop: false,
-                        add_columns: None,
+                        is_stop,
+                        schema_change,
                     },
                 )
             }
@@ -794,6 +796,7 @@ mod tests {
 
     use bytes::Bytes;
     use itertools::Itertools;
+    use risingwave_common::catalog::TableOption;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
     use risingwave_hummock_sdk::HummockReadEpoch;
@@ -869,6 +872,7 @@ mod tests {
                 HummockReadEpoch::NoWait(epoch),
                 NewReadSnapshotOptions {
                     table_id: TEST_TABLE_ID,
+                    table_option: TableOption::default(),
                 },
             )
             .await

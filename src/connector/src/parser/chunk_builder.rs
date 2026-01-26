@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -329,21 +329,35 @@ impl SourceStreamChunkRowWriter<'_> {
                     &Some(ref col @ AdditionalColumnType::DatabaseName(_))
                     | &Some(ref col @ AdditionalColumnType::TableName(_)),
                 ) => {
-                    match self.row_meta {
-                        Some(row_meta) => {
-                            if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.source_meta {
-                                Ok(A::output_for(extract_cdc_meta_column(
-                                    cdc_meta,
-                                    col,
-                                    desc.name.as_str(),
-                                )?))
-                            } else {
-                                Err(AccessError::Uncategorized {
-                                    message: "CDC metadata not found in the message".to_owned(),
-                                })
+                    // For MongoDB CDC, both database_name and collection_name should be parsed from payload
+                    // Check if this is MongoDB CDC by looking for CollectionName column in schema
+                    let is_mongodb_cdc = self.builder.column_descs.iter().any(|d| {
+                        matches!(
+                            d.additional_column.column_type,
+                            Some(AdditionalColumnType::CollectionName(_))
+                        )
+                    });
+
+                    if matches!(col, AdditionalColumnType::DatabaseName(_)) && is_mongodb_cdc {
+                        // MongoDB CDC database_name should be parsed from payload.source.db
+                        parse_field(desc)
+                    } else {
+                        match self.row_meta {
+                            Some(row_meta) => {
+                                if let SourceMeta::DebeziumCdc(cdc_meta) = row_meta.source_meta {
+                                    Ok(A::output_for(extract_cdc_meta_column(
+                                        cdc_meta,
+                                        col,
+                                        desc.name.as_str(),
+                                    )?))
+                                } else {
+                                    Err(AccessError::Uncategorized {
+                                        message: "CDC metadata not found in the message".to_owned(),
+                                    })
+                                }
                             }
+                            None => parse_field(desc), // parse from payload
                         }
-                        None => parse_field(desc), // parse from payload
                     }
                 }
                 (_, &Some(AdditionalColumnType::Timestamp(_))) => match self.row_meta {

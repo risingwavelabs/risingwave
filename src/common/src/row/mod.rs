@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -312,12 +312,14 @@ macro_rules! impl_slice_row {
 
         #[inline]
         fn len(&self) -> usize {
-            self.as_ref().len()
+            AsRef::<[D]>::as_ref(self).len()
         }
 
         #[inline]
         fn iter(&self) -> impl Iterator<Item = DatumRef<'_>> {
-            self.as_ref().iter().map(ToDatumRef::to_datum_ref)
+            AsRef::<[D]>::as_ref(self)
+                .iter()
+                .map(ToDatumRef::to_datum_ref)
         }
     };
 }

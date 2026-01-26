@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -165,9 +165,6 @@ pub struct TableCatalog {
 
     pub initialized_at_epoch: Option<Epoch>,
 
-    /// Indicate whether to use watermark cache for state table.
-    pub cleaned_by_watermark: bool,
-
     /// Indicate whether to create table in background or foreground.
     pub create_type: CreateType,
 
@@ -201,6 +198,11 @@ pub struct TableCatalog {
     pub engine: Engine,
 
     pub clean_watermark_index_in_pk: Option<usize>,
+
+    /// Indices of watermark columns in all columns that should be used for state cleaning.
+    /// This replaces `clean_watermark_index_in_pk` but is kept for backward compatibility.
+    /// When set, this takes precedence over `clean_watermark_index_in_pk`.
+    pub clean_watermark_indices: Vec<usize>,
 
     /// Whether the table supports manual refresh operations
     pub refreshable: bool,
@@ -337,11 +339,6 @@ impl TableCatalog {
 
     pub fn with_id(mut self, id: TableId) -> Self {
         self.id = id;
-        self
-    }
-
-    pub fn with_cleaned_by_watermark(mut self, cleaned_by_watermark: bool) -> Self {
-        self.cleaned_by_watermark = cleaned_by_watermark;
         self
     }
 
@@ -602,7 +599,8 @@ impl TableCatalog {
             cardinality: Some(self.cardinality.to_protobuf()),
             initialized_at_epoch: self.initialized_at_epoch.map(|epoch| epoch.0),
             created_at_epoch: self.created_at_epoch.map(|epoch| epoch.0),
-            cleaned_by_watermark: self.cleaned_by_watermark,
+            #[expect(deprecated)]
+            cleaned_by_watermark: false,
             stream_job_status: self.stream_job_status.to_proto().into(),
             create_type: self.create_type.to_proto().into(),
             description: self.description.clone(),
@@ -616,7 +614,13 @@ impl TableCatalog {
             webhook_info: self.webhook_info.clone(),
             job_id: self.job_id,
             engine: Some(self.engine.to_protobuf().into()),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: self.clean_watermark_index_in_pk.map(|x| x as i32),
+            clean_watermark_indices: self
+                .clean_watermark_indices
+                .iter()
+                .map(|&x| x as u32)
+                .collect(),
             refreshable: self.refreshable,
             vector_index_info: self.vector_index_info,
             cdc_table_type: self
@@ -833,7 +837,6 @@ impl From<PbTable> for TableCatalog {
                 .unwrap_or_else(Cardinality::unknown),
             created_at_epoch: tb.created_at_epoch.map(Epoch::from),
             initialized_at_epoch: tb.initialized_at_epoch.map(Epoch::from),
-            cleaned_by_watermark: tb.cleaned_by_watermark,
             create_type: CreateType::from_proto(create_type),
             stream_job_status: StreamJobStatus::from_proto(stream_job_status),
             description: tb.description,
@@ -845,7 +848,13 @@ impl From<PbTable> for TableCatalog {
             webhook_info: tb.webhook_info,
             job_id: tb.job_id,
             engine,
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: tb.clean_watermark_index_in_pk.map(|x| x as usize),
+            clean_watermark_indices: tb
+                .clean_watermark_indices
+                .iter()
+                .map(|&x| x as usize)
+                .collect(),
 
             refreshable: tb.refreshable,
             vector_index_info: tb.vector_index_info,
@@ -929,6 +938,7 @@ mod tests {
             dist_key_in_pk: vec![0],
             cardinality: None,
             created_at_epoch: None,
+            #[expect(deprecated)]
             cleaned_by_watermark: false,
             stream_job_status: PbStreamJobStatus::Created.into(),
             create_type: PbCreateType::Foreground.into(),
@@ -943,7 +953,9 @@ mod tests {
             webhook_info: None,
             job_id: None,
             engine: Some(PbEngine::Hummock as i32),
+            #[expect(deprecated)]
             clean_watermark_index_in_pk: None,
+            clean_watermark_indices: vec![],
 
             refreshable: false,
             vector_index_info: None,
@@ -1002,7 +1014,6 @@ mod tests {
                 cardinality: Cardinality::unknown(),
                 created_at_epoch: None,
                 initialized_at_epoch: None,
-                cleaned_by_watermark: false,
                 stream_job_status: StreamJobStatus::Created,
                 create_type: CreateType::Foreground,
                 description: Some("description".to_owned()),
@@ -1015,6 +1026,7 @@ mod tests {
                 job_id: None,
                 engine: Engine::Hummock,
                 clean_watermark_index_in_pk: None,
+                clean_watermark_indices: vec![],
 
                 refreshable: false,
                 vector_index_info: None,

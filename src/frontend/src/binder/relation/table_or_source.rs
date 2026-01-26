@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -14,7 +14,6 @@
 
 use std::sync::Arc;
 
-use either::Either;
 use itertools::Itertools;
 use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
@@ -187,11 +186,7 @@ impl Binder {
                             as_of,
                         )?
                     } else {
-                        return Err(CatalogError::NotFound(
-                            "table or source",
-                            table_name.to_owned(),
-                        )
-                        .into());
+                        return Err(CatalogError::not_found("table or source", table_name).into());
                     }
                 }
                 None => (|| {
@@ -266,7 +261,7 @@ impl Binder {
                         }
                     }
 
-                    Err(CatalogError::NotFound("table or source", table_name.to_owned()).into())
+                    Err(CatalogError::not_found("table or source", table_name).into())
                 })()?,
             }
         };
@@ -453,11 +448,10 @@ impl Binder {
                 share_id
             }
         };
-        let input = Either::Left(query);
         Ok((
             Relation::Share(Box::new(BoundShare {
                 share_id,
-                input: BoundShareInput::Query(input),
+                input: BoundShareInput::Query(query),
             })),
             columns.iter().map(|c| (false, c.clone())).collect_vec(),
         ))

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2024 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -11,6 +11,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 use std::collections::BTreeMap;
 
 use anyhow::Context;
@@ -133,7 +134,9 @@ pub fn extract_cdc_meta_column<'a>(
     match column_type {
         ColumnType::Timestamp(_) => Ok(cdc_meta.extract_timestamp()),
         ColumnType::DatabaseName(_) => Ok(cdc_meta.extract_database_name()),
-        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name()),
+        // `table_name` in additional columns should be the object name only, not the routing key
+        // (which can be `schema.table` or `db.table` depending on the connector).
+        ColumnType::TableName(_) => Ok(cdc_meta.extract_table_name_only()),
         _ => Err(AccessError::UnsupportedAdditionalColumn {
             name: column_name.to_owned(),
         }),

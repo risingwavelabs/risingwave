@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -651,6 +651,9 @@ impl StreamJobFragments {
         let table_id = match stream_node.node_body.as_ref() {
             Some(NodeBody::StreamScan(stream_scan)) => Some(stream_scan.table_id),
             Some(NodeBody::StreamCdcScan(stream_scan)) => Some(stream_scan.table_id),
+            Some(NodeBody::LocalityProvider(state)) => {
+                Some(state.state_table.as_ref().expect("must have state").id)
+            }
             _ => None,
         };
         if let Some(table_id) = table_id {

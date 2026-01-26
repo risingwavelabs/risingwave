@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -17,17 +17,17 @@ use std::sync::Arc;
 use pgwire::pg_response::StatementType;
 use risingwave_common::acl::AclMode;
 use risingwave_common::id::SchemaId;
-use risingwave_sqlparser::ast::{Ident, ObjectName};
+use risingwave_sqlparser::ast::{Ident, ObjectName, OperateFunctionArg};
 
 use super::{HandlerArgs, RwPgResponse};
-use crate::Binder;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::{CatalogError, OwnedByUserCatalog};
-use crate::error::ErrorCode::PermissionDenied;
+use crate::error::ErrorCode::{self, PermissionDenied};
 use crate::error::Result;
 use crate::session::SessionImpl;
 use crate::user::UserId;
 use crate::user::user_catalog::UserCatalog;
+use crate::{Binder, bind_data_type};
 
 pub fn check_schema_create_privilege(
     session: &Arc<SessionImpl>,
@@ -51,6 +51,7 @@ pub async fn handle_alter_owner(
     obj_name: ObjectName,
     new_owner_name: Ident,
     stmt_type: StatementType,
+    func_args: Option<Vec<OperateFunctionArg>>,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session;
     let db_name = &session.database();
@@ -65,7 +66,7 @@ pub async fn handle_alter_owner(
         let user_reader = session.env().user_info_reader().read_guard();
         let new_owner = user_reader
             .get_user_by_name(&new_owner_name)
-            .ok_or(CatalogError::NotFound("user", new_owner_name))?;
+            .ok_or(CatalogError::not_found("user", new_owner_name))?;
 
         let check_owned_by_admin = |owner: &UserId| -> Result<()> {
             let user_catalog = user_reader.get_user_by_id(owner).unwrap();
@@ -193,6 +194,49 @@ pub async fn handle_alter_owner(
                     }
                     check_owned_by_admin(&connection.owner)?;
                     connection.id.into()
+                }
+                StatementType::ALTER_FUNCTION => {
+                    let (function, schema_name) = if let Some(args) = func_args {
+                        let mut arg_types = Vec::with_capacity(args.len());
+                        for arg in args {
+                            arg_types.push(bind_data_type(&arg.data_type)?);
+                        }
+                        catalog_reader.get_function_by_name_args(
+                            db_name,
+                            schema_path,
+                            &real_obj_name,
+                            &arg_types,
+                        )?
+                    } else {
+                        let (functions, old_schema_name) = catalog_reader.get_functions_by_name(
+                            db_name,
+                            schema_path,
+                            &real_obj_name,
+                        )?;
+                        if functions.len() > 1 {
+                            return Err(ErrorCode::CatalogError(format!("function name {real_obj_name:?} is not unique\nHINT: Specify the argument list to select the function unambiguously.").into()).into());
+                        }
+                        (
+                            functions.into_iter().next().expect("no functions"),
+                            old_schema_name,
+                        )
+                    };
+                    session.check_privilege_for_drop_alter(schema_name, &**function)?;
+                    if function.owner == owner_id {
+                        return Ok(RwPgResponse::empty_result(stmt_type));
+                    }
+                    check_owned_by_admin(&function.owner)?;
+                    function.id.into()
+                }
+                StatementType::ALTER_SECRET => {
+                    let (secret, schema_name) =
+                        catalog_reader.get_secret_by_name(db_name, schema_path, &real_obj_name)?;
+                    session.check_privilege_for_drop_alter(schema_name, &**secret)?;
+                    if secret.owner() == owner_id {
+                        return Ok(RwPgResponse::empty_result(stmt_type));
+                    }
+                    check_owned_by_admin(&secret.owner)?;
+                    secret.id.into()
                 }
                 _ => unreachable!(),
             },

@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -23,6 +23,7 @@ use risingwave_common::transaction::transaction_message::TxnMsg;
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_expr::codegen::BoxStream;
+use risingwave_pb::common::ThrottleType;
 
 use crate::executor::prelude::*;
 use crate::executor::stream_reader::StreamReaderWithPause;
@@ -159,11 +160,12 @@ impl DmlExecutor {
                             match mutation {
                                 Mutation::Pause => stream.pause_stream(),
                                 Mutation::Resume => stream.resume_stream(),
-                                Mutation::Throttle(actor_to_apply) => {
-                                    if let Some(new_rate_limit) =
-                                        actor_to_apply.get(&self.actor_ctx.id)
+                                Mutation::Throttle(fragment_to_apply) => {
+                                    if let Some(entry) =
+                                        fragment_to_apply.get(&self.actor_ctx.fragment_id)
+                                        && entry.throttle_type() == ThrottleType::Dml
                                     {
-                                        let new_rate_limit = (*new_rate_limit).into();
+                                        let new_rate_limit = entry.rate_limit.into();
                                         let old_rate_limit =
                                             self.rate_limiter.update(new_rate_limit);
 

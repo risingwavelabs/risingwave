@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -214,12 +214,12 @@ pub async fn handle_alter_user(
 
         let old_info = user_reader
             .get_user_by_name(&user_name)
-            .ok_or(CatalogError::NotFound("user", user_name))?
+            .ok_or(CatalogError::not_found("user", user_name))?
             .to_prost();
 
         let session_user = user_reader
             .get_user_by_name(&session.user_name())
-            .ok_or_else(|| CatalogError::NotFound("user", session.user_name()))?;
+            .ok_or_else(|| CatalogError::not_found("user", session.user_name()))?;
 
         match stmt.mode {
             risingwave_sqlparser::ast::AlterUserMode::Options(options) => {

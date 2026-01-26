@@ -35,7 +35,7 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
 rw_futures_util = { workspace = true }
-thiserror-ext = { workspace = true }
+
 tokio = { version = "0.2", package = "madsim-tokio", features = [
     "rt",
     "rt-multi-thread",
@@ -57,6 +57,7 @@ criterion = { workspace = true, features = ["async_tokio", "async"] }
 rand = { workspace = true }
 risingwave_expr_impl = { workspace = true }
 risingwave_hummock_sdk = { workspace = true }
+risingwave_storage = { workspace = true, features = ["test"] }
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
 tokio-stream = { workspace = true }

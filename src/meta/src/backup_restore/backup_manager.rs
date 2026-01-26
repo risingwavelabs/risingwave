@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -216,6 +216,7 @@ impl BackupManager {
             .load()
             .0
             .manifest()
+            .await
             .snapshot_metadata
             .len();
         if current_number > MAX_META_SNAPSHOT_NUM {
@@ -266,7 +267,7 @@ impl BackupManager {
                     .notify_hummock_without_version(
                         Operation::Update,
                         Info::MetaBackupManifestId(MetaBackupManifestId {
-                            id: self.backup_store.load().0.manifest().manifest_id,
+                            id: self.backup_store.load().0.manifest().await.manifest_id,
                         }),
                     );
                 self.latest_job_info.store(Arc::new((
@@ -308,26 +309,27 @@ impl BackupManager {
             .notify_hummock_without_version(
                 Operation::Update,
                 Info::MetaBackupManifestId(MetaBackupManifestId {
-                    id: self.backup_store.load().0.manifest().manifest_id,
+                    id: self.backup_store.load().0.manifest().await.manifest_id,
                 }),
             );
         Ok(())
     }
 
     /// List id of all objects required by backups.
-    pub fn list_pinned_object_ids(&self) -> HashSet<HummockRawObjectId> {
+    pub async fn list_pinned_object_ids(&self) -> HashSet<HummockRawObjectId> {
         self.backup_store
             .load()
             .0
             .manifest()
+            .await
             .snapshot_metadata
             .iter()
             .flat_map(|s| s.objects.iter().copied())
             .collect()
     }
 
-    pub fn manifest(&self) -> Arc<MetaSnapshotManifest> {
-        self.backup_store.load().0.manifest()
+    pub async fn manifest(&self) -> Arc<MetaSnapshotManifest> {
+        self.backup_store.load().0.manifest().await
     }
 }
 

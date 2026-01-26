@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2023 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -255,6 +255,15 @@ impl NotificationServiceImpl {
 
         let (streaming_worker_slot_mappings, streaming_worker_slot_mapping_version) =
             self.get_worker_slot_mapping_snapshot().await?;
+
+        let streaming_job_count = self.metadata_manager.count_streaming_job().await?;
+        if streaming_job_count > 0 && streaming_worker_slot_mappings.is_empty() {
+            tracing::warn!(
+                streaming_job_count,
+                "frontend subscribe returns empty streaming_worker_slot_mappings while streaming jobs exist; meta may still be recovering"
+            );
+        }
+
         let serving_worker_slot_mappings = self.get_serving_vnode_mappings();
 
         let (nodes, worker_node_version) = self.get_worker_node_snapshot().await?;
@@ -314,7 +323,7 @@ impl NotificationServiceImpl {
             .on_current_version(|version| version.into())
             .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
-        let meta_backup_manifest_id = self.backup_manager.manifest().manifest_id;
+        let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
         let cluster_resource = self.get_cluster_resource().await;
 
         Ok(MetaSnapshot {

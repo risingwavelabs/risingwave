@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -394,7 +394,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
 
         let read_options = ReadOptions {
             prefix_hint,
-            retention_seconds: self.table_option.retention_seconds,
             cache_policy: CachePolicy::Fill(Hint::Normal),
             ..Default::default()
         };
@@ -404,6 +403,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 wait_epoch,
                 NewReadSnapshotOptions {
                     table_id: self.table_id,
+                    table_option: self.table_option,
                 },
             )
             .await?;
@@ -626,6 +626,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 wait_epoch,
                 NewReadSnapshotOptions {
                     table_id: self.table_id,
+                    table_option: self.table_option,
                 },
             )
             .await?;
@@ -678,7 +679,6 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
             {
                 let read_options = ReadOptions {
                     prefix_hint,
-                    retention_seconds: self.table_option.retention_seconds,
                     prefetch_options,
                     cache_policy,
                 };
@@ -924,6 +924,7 @@ impl<S: StateStore, SD: ValueRowSerde> BatchTableInner<S, SD> {
                 epoch,
                 NewReadSnapshotOptions {
                     table_id: self.table_id,
+                    table_option: self.table_option,
                 },
             )
             .await?;

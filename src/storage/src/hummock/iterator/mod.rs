@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2022 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -556,9 +556,9 @@ pub trait SkipWatermarkState: Send {
     fn has_watermark(&self) -> bool;
     /// Returns whether the incoming key needs to be deleted after watermark filtering.
     /// Note: Each `table_id` has multiple `watermarks`, and state defaults to forward traversal of `vnodes`, so you must use forward traversal of the incoming key for it to be filtered correctly.
-    fn should_delete(&mut self, key: &FullKey<&[u8]>) -> bool;
+    fn should_delete(&mut self, key: &FullKey<&[u8]>, value: HummockValue<&[u8]>) -> bool;
     /// Resets the watermark state.
     fn reset_watermark(&mut self);
     /// Determines if the current `watermark` is exhausted by the passed-in key, advances to the next `watermark`, and returns whether the key needs to be deleted.
-    fn advance_watermark(&mut self, key: &FullKey<&[u8]>) -> bool;
+    fn advance_watermark(&mut self, key: &FullKey<&[u8]>, value: HummockValue<&[u8]>) -> bool;
 }
