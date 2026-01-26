@@ -25,10 +25,4 @@ ls -la ./*.lcov || {
 }
 
 echo "--- Upload to codecov"
-
-# TODO: preinstall CLI in CI image
-echo "Installing codecov CLI..."
-curl -Os https://uploader.codecov.io/latest/linux/codecov && chmod +x codecov
-
-echo "Uploading coverage reports to codecov..."
-./codecov -t "$CODECOV_TOKEN" -s . -F "ci-${BUILDKITE_PIPELINE_SLUG}"
+codecovcli upload-process --token "$CODECOV_TOKEN" --dir . --flag "ci-${BUILDKITE_PIPELINE_SLUG}" --fail-on-error
