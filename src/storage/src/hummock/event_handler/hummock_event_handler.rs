@@ -46,7 +46,9 @@ use super::refiller::{CacheRefillConfig, CacheRefiller};
 use super::{LocalInstanceGuard, LocalInstanceId, ReadVersionMappingType};
 use crate::compaction_catalog_manager::CompactionCatalogManagerRef;
 use crate::hummock::compactor::{CompactorContext, await_tree_key, compact};
-use crate::hummock::event_handler::refiller::{CacheRefillerEvent, SpawnRefillTask};
+use crate::hummock::event_handler::refiller::{
+    CacheRefillerEvent, SpawnRefillTask, TableCacheRefillContext,
+};
 use crate::hummock::event_handler::uploader::{
     HummockUploader, SpawnUploadTask, SyncedData, UploadTaskOutput,
 };
@@ -400,6 +402,10 @@ impl HummockEventHandler {
 
     pub fn buffer_tracker(&self) -> &BufferTracker {
         self.uploader.buffer_tracker()
+    }
+
+    pub(crate) fn table_cache_refill_context(&self) -> &Arc<RwLock<TableCacheRefillContext>> {
+        self.refiller.table_cache_refill_context()
     }
 }
 

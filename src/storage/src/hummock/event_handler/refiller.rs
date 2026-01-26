@@ -25,7 +25,7 @@ use foyer::RangeBoundsExt;
 use futures::future::{join_all, try_join_all};
 use futures::{Future, FutureExt};
 use itertools::Itertools;
-use parking_lot::{RwLock, RwLockReadGuard};
+use parking_lot::{RwLock, RwLockReadGuard, RwLockWriteGuard};
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
     Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
@@ -260,24 +260,17 @@ pub(crate) type SpawnRefillTask = Arc<
         + 'static,
 >;
 
-#[derive(Debug)]
-struct TableCacheRefillContext {
-    streaming: HashMap<TableId, Bitmap>,
-    serving: HashMap<TableId, Bitmap>,
-    policies: HashMap<TableId, CacheRefillPolicy>,
-    default_policy: CacheRefillPolicy,
+pub struct TableCacheRefillContext {
+    pub streaming: HashMap<TableId, Bitmap>,
+    pub serving: HashMap<TableId, Bitmap>,
+    pub policies: HashMap<TableId, CacheRefillPolicy>,
+    pub default_policy: CacheRefillPolicy,
+
+    pub read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
+    pub serving_table_vnode_mapping: Arc<RwLock<HashMap<TableId, Bitmap>>>,
 }
 
 impl TableCacheRefillContext {
-    pub fn new(default_policy: CacheRefillPolicy) -> Self {
-        Self {
-            streaming: HashMap::new(),
-            serving: HashMap::new(),
-            policies: HashMap::new(),
-            default_policy,
-        }
-    }
-
     /// Check whether the given sstable block should be refilled according to the vnode mapping.
     fn check_table_refill_vnodes(&self, sstable: &Sstable, block_index: usize) -> bool {
         let block_smallest_key =
@@ -338,8 +331,6 @@ pub(crate) struct CacheRefiller {
 
     role: Role,
     table_cache_refill_context: Arc<RwLock<TableCacheRefillContext>>,
-    read_version_mapping: Arc<RwLock<ReadVersionMappingType>>,
-    serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
 }
 
 impl CacheRefiller {
@@ -352,9 +343,15 @@ impl CacheRefiller {
     ) -> Self {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
-        let table_cache_refill_context = Arc::new(RwLock::new(TableCacheRefillContext::new(
-            config.table_cache_refill_default_policy,
-        )));
+        let serving_table_vnode_mapping = Arc::new(RwLock::new(HashMap::new()));
+        let table_cache_refill_context = Arc::new(RwLock::new(TableCacheRefillContext {
+            streaming: HashMap::new(),
+            serving: HashMap::new(),
+            policies: HashMap::new(),
+            default_policy: config.table_cache_refill_default_policy,
+            read_version_mapping,
+            serving_table_vnode_mapping,
+        }));
         Self {
             queue: VecDeque::new(),
             context: CacheRefillContext {
@@ -366,8 +363,6 @@ impl CacheRefiller {
             spawn_refill_task,
             role,
             table_cache_refill_context,
-            read_version_mapping,
-            serving_table_vnode_mapping: HashMap::new(),
         }
     }
 
@@ -414,7 +409,7 @@ impl CacheRefiller {
             } else {
                 table_cache_refill_context.policies.remove(&table_id);
             }
-            self.update_table_cache_refill_vnodes(table_id);
+            self.update_table_cache_refill_vnodes_inner(&mut table_cache_refill_context, table_id);
         }
     }
 
@@ -423,31 +418,52 @@ impl CacheRefiller {
         op: Operation,
         mapping: HashMap<TableId, Bitmap>,
     ) {
+        let mut table_cache_refill_context = self.table_cache_refill_context.write();
         match op {
             Operation::Snapshot => {
-                self.serving_table_vnode_mapping = mapping.clone();
+                *table_cache_refill_context
+                    .serving_table_vnode_mapping
+                    .write() = mapping.clone();
                 for table_id in mapping.keys() {
-                    self.update_table_cache_refill_vnodes(*table_id);
+                    self.update_table_cache_refill_vnodes_inner(
+                        &mut table_cache_refill_context,
+                        *table_id,
+                    );
                 }
             }
             Operation::Update => {
                 for (table_id, bitmap) in mapping {
-                    self.serving_table_vnode_mapping.insert(table_id, bitmap);
-                    self.update_table_cache_refill_vnodes(table_id);
+                    table_cache_refill_context
+                        .serving_table_vnode_mapping
+                        .write()
+                        .insert(table_id, bitmap);
+                    self.update_table_cache_refill_vnodes_inner(
+                        &mut table_cache_refill_context,
+                        table_id,
+                    );
                 }
             }
             Operation::Delete => {
                 for table_id in mapping.keys() {
-                    self.serving_table_vnode_mapping.remove(table_id);
-                    self.update_table_cache_refill_vnodes(*table_id);
+                    table_cache_refill_context
+                        .serving_table_vnode_mapping
+                        .write()
+                        .remove(table_id);
+                    self.update_table_cache_refill_vnodes_inner(
+                        &mut table_cache_refill_context,
+                        *table_id,
+                    );
                 }
             }
             _ => unreachable!(),
         }
     }
 
-    pub(crate) fn update_table_cache_refill_vnodes(&self, table_id: TableId) {
-        let mut table_cache_refill_context = self.table_cache_refill_context.write();
+    fn update_table_cache_refill_vnodes_inner(
+        &self,
+        table_cache_refill_context: &mut RwLockWriteGuard<'_, TableCacheRefillContext>,
+        table_id: TableId,
+    ) {
         let policy = table_cache_refill_context
             .policies
             .get(&table_id)
@@ -457,28 +473,39 @@ impl CacheRefiller {
         table_cache_refill_context.streaming.remove(&table_id);
         table_cache_refill_context.serving.remove(&table_id);
 
-        if self.role.for_streaming()
-            && policy.for_streaming()
-            && let Some(mapping) = self.read_version_mapping.read().get(&table_id)
-        {
-            for read_version in mapping.values() {
-                let vnodes = read_version.read().vnodes();
-                table_cache_refill_context
-                    .streaming
-                    .entry(table_id)
-                    .and_modify(|bitmap| *bitmap |= vnodes.as_ref())
-                    .or_insert_with(|| vnodes.as_ref().clone());
+        if self.role.for_streaming() && policy.for_streaming() {
+            let read_version_mapping = table_cache_refill_context.read_version_mapping.clone();
+            if let Some(mapping) = read_version_mapping.read().get(&table_id) {
+                for read_version in mapping.values() {
+                    let vnodes = read_version.read().vnodes();
+                    table_cache_refill_context
+                        .streaming
+                        .entry(table_id)
+                        .and_modify(|bitmap| *bitmap |= vnodes.as_ref())
+                        .or_insert_with(|| vnodes.as_ref().clone());
+                }
             }
         }
 
-        if self.role.for_serving()
-            && policy.for_serving()
-            && let Some(vnodes) = self.serving_table_vnode_mapping.get(&table_id)
-        {
-            table_cache_refill_context
-                .serving
-                .insert(table_id, vnodes.clone());
+        if self.role.for_serving() && policy.for_serving() {
+            let serving_table_vnode_mapping = table_cache_refill_context
+                .serving_table_vnode_mapping
+                .clone();
+            if let Some(vnodes) = serving_table_vnode_mapping.read().get(&table_id) {
+                table_cache_refill_context
+                    .serving
+                    .insert(table_id, vnodes.clone());
+            }
         }
+    }
+
+    pub(crate) fn update_table_cache_refill_vnodes(&self, table_id: TableId) {
+        let mut table_cache_refill_context = self.table_cache_refill_context.write();
+        self.update_table_cache_refill_vnodes_inner(&mut table_cache_refill_context, table_id);
+    }
+
+    pub(crate) fn table_cache_refill_context(&self) -> &Arc<RwLock<TableCacheRefillContext>> {
+        &self.context.table_cache_refill_context
     }
 }
 

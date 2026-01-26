@@ -16,10 +16,12 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::CString;
 use std::fs;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::Duration;
 
 use foyer::{HybridCache, TracingOptions};
 use itertools::Itertools;
+use parking_lot::RwLock;
 use prometheus::core::Collector;
 use prometheus::proto::Metric;
 use risingwave_common::config::{MetricLevel, ServerConfig};
@@ -31,12 +33,14 @@ use risingwave_pb::monitor_service::stack_trace_request::ActorTracesFormat;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, ChannelStats, FragmentStats, GetProfileStatsRequest,
     GetProfileStatsResponse, GetStreamingStatsRequest, GetStreamingStatsResponse,
-    HeapProfilingRequest, HeapProfilingResponse, ListHeapProfilingRequest,
-    ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse, RelationStats,
-    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
+    GetTableCacheRefillStatsRequest, GetTableCacheRefillStatsResponse, HeapProfilingRequest,
+    HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest,
+    ProfilingResponse, RelationStats, StackTraceRequest, StackTraceResponse,
+    TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_rpc_client::error::ToTonicStatus;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
+use risingwave_storage::hummock::event_handler::refiller::TableCacheRefillContext;
 use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::LocalStreamManager;
@@ -53,6 +57,7 @@ pub struct MonitorServiceImpl {
     server_config: ServerConfig,
     meta_cache: Option<MetaCache>,
     block_cache: Option<BlockCache>,
+    table_cache_refill_context: Option<Arc<RwLock<TableCacheRefillContext>>>,
 }
 
 impl MonitorServiceImpl {
@@ -61,12 +66,14 @@ impl MonitorServiceImpl {
         server_config: ServerConfig,
         meta_cache: Option<MetaCache>,
         block_cache: Option<BlockCache>,
+        table_cache_refill_context: Option<Arc<RwLock<TableCacheRefillContext>>>,
     ) -> Self {
         Self {
             stream_mgr,
             server_config,
             meta_cache,
             block_cache,
+            table_cache_refill_context,
         }
     }
 }
@@ -536,6 +543,33 @@ impl MonitorService for MonitorServiceImpl {
         }
 
         Ok(Response::new(TieredCacheTracingResponse::default()))
+    }
+
+    async fn get_table_cache_refill_stats(
+        &self,
+        _request: Request<GetTableCacheRefillStatsRequest>,
+    ) -> Result<Response<GetTableCacheRefillStatsResponse>, Status> {
+        todo!()
+    }
+}
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TableCacheRefillStats {
+    streaming: HashMap<u32, Vec<u16>>,
+    serving: HashMap<u32, Vec<u16>>,
+    policies: HashMap<u32, String>,
+    default_policy: String,
+    internal: TableCacheRefillInternalStats,
+}
+
+#[derive(Debug, serde::Serialize, serde::Deserialize)]
+struct TableCacheRefillInternalStats {
+    streaming: HashMap<u32, Vec<Vec<u16>>>,
+    serving: HashMap<u32, Vec<u16>>,
+}
+
+impl From<&TableCacheRefillContext> for TableCacheRefillStats {
+    fn from(context: &TableCacheRefillContext) -> Self {
+        Self {}
     }
 }
 

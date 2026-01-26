@@ -20,6 +20,7 @@ use std::sync::Arc;
 use arc_swap::ArcSwap;
 use bytes::Bytes;
 use itertools::Itertools;
+use parking_lot::RwLock;
 use risingwave_common::array::VectorRef;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::Role;
@@ -49,6 +50,7 @@ use crate::hummock::compactor::{
     CompactionAwaitTreeRegRef, CompactorContext, new_compaction_await_tree_reg_ref,
 };
 use crate::hummock::event_handler::hummock_event_handler::{BufferTracker, HummockEventSender};
+use crate::hummock::event_handler::refiller::TableCacheRefillContext;
 use crate::hummock::event_handler::{
     HummockEvent, HummockEventHandler, HummockVersionUpdate, ReadOnlyReadVersionMapping,
 };
@@ -120,6 +122,8 @@ pub struct HummockStorage {
     hummock_meta_client: Arc<dyn HummockMetaClient>,
 
     simple_time_travel_version_cache: Arc<SimpleTimeTravelVersionCache>,
+
+    table_cache_refill_context: Arc<RwLock<TableCacheRefillContext>>,
 }
 
 pub type ReadVersionTuple = (Vec<ImmutableMemtable>, Vec<SstableInfo>, CommittedVersion);
@@ -254,6 +258,7 @@ impl HummockStorage {
             simple_time_travel_version_cache: Arc::new(SimpleTimeTravelVersionCache::new(
                 options.time_travel_version_cache_capacity,
             )),
+            table_cache_refill_context: hummock_event_handler.table_cache_refill_context().clone(),
         };
 
         tokio::spawn(hummock_event_handler.start_hummock_event_handler_worker());
@@ -586,6 +591,10 @@ impl HummockStorage {
 
     pub fn sstable_store(&self) -> SstableStoreRef {
         self.context.sstable_store.clone()
+    }
+
+    pub fn table_cache_refill_context(&self) -> &Arc<RwLock<TableCacheRefillContext>> {
+        &self.table_cache_refill_context
     }
 
     pub fn object_id_manager(&self) -> &ObjectIdManagerRef {

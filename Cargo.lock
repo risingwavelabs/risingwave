@@ -11468,6 +11468,7 @@ dependencies = [
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
+ "parking_lot 0.12.5",
  "pprof",
  "prometheus",
  "prost 0.13.4",
