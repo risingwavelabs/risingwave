@@ -146,6 +146,7 @@ impl MonitorService for MonitorServiceImpl {
                 None => BTreeMap::new(),
             },
             meta_traces: Default::default(),
+            node_errors: Default::default(),
         }))
     }
 

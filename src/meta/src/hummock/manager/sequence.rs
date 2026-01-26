@@ -25,7 +25,7 @@ use risingwave_meta_model::hummock_sequence::{
     COMPACTION_GROUP_ID, COMPACTION_TASK_ID, META_BACKUP_ID, SSTABLE_OBJECT_ID,
 };
 use risingwave_meta_model::prelude::HummockSequence;
-use sea_orm::{ActiveModelTrait, ActiveValue, DatabaseConnection, EntityTrait, TransactionTrait};
+use sea_orm::{ActiveValue, DatabaseConnection, EntityTrait, TransactionTrait};
 use tokio::sync::Mutex;
 
 use crate::hummock::error::Result;
@@ -83,7 +83,7 @@ impl SequenceGenerator {
                     active_model.seq = ActiveValue::set(
                         start_seq.checked_add(num as _).unwrap().try_into().unwrap(),
                     );
-                    active_model.update(&txn).await?;
+                    HummockSequence::update(active_model).exec(&txn).await?;
                 }
                 start_seq
             }
