@@ -119,6 +119,112 @@ CREATE TABLE {table_name}(
     except OSError:
         pass
 
+
+def _test_parquet_struct_missing_field_in_file(minio_client: Minio):
+    """Generate a Parquet file whose struct is missing some fields declared in RW schema.
+
+    Upstream Parquet schema:
+      - id: int32
+      - s: struct<foo:int32>
+
+    RisingWave table schema (superset):
+      - id: int
+      - s: struct<foo:int, bar:varchar>
+
+    Expectation:
+      - Rows are still ingested (count(*) == 2).
+      - The mismatched struct field(s) are returned as NULL. Depending on the current
+        behavior, the whole struct may become NULL.
+    """
+
+    # 1) Generate Parquet locally.
+    run_id = str(random.randint(1000, 9999))
+    local_path = f"parquet_struct_missing_field_{run_id}.parquet"
+    s3_key = f"test_parquet_struct_missing_field/{run_id}.parquet"
+
+    id_arr = pa.array([1, 2], type=pa.int32())
+    foo = pa.array([10, 20], type=pa.int32())
+    s_arr = pa.StructArray.from_arrays([foo], names=["foo"])
+
+    schema = pa.schema(
+        [
+            pa.field("id", pa.int32(), nullable=False),
+            pa.field(
+                "s",
+                pa.struct([pa.field("foo", pa.int32(), nullable=True)]),
+                nullable=True,
+            ),
+        ]
+    )
+    table = pa.Table.from_arrays([id_arr, s_arr], schema=schema)
+    pq.write_table(table, local_path, compression="snappy", version="2.6")
+
+    # 2) Upload to MinIO.
+    minio_client.fput_object(
+        bucket_name="hummock001",
+        object_name=s3_key,
+        file_path=local_path,
+    )
+
+    # 3) Create RW table whose struct has an extra field (bar) not present in Parquet.
+    conn = psycopg2.connect(host="localhost", port="4566", user="root", database="dev")
+    cur = conn.cursor()
+
+    table_name = "s3_test_parquet_struct_missing_field"
+    cur.execute(f"drop table if exists {table_name};")
+    cur.execute(
+        f"""
+CREATE TABLE {table_name}(
+  id int,
+  s STRUCT<foo INT, bar VARCHAR>
+) WITH (
+  connector = 's3',
+  match_pattern = '{s3_key}',
+  s3.region_name = 'custom',
+  s3.bucket_name = 'hummock001',
+  s3.credentials.access = 'hummockadmin',
+  s3.credentials.secret = 'hummockadmin',
+  s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+  refresh.interval.sec = 1
+) FORMAT PLAIN ENCODE PARQUET;
+"""
+    )
+
+    # Ingestion is asynchronous. We retry to avoid flakiness where the first query races
+    # with file discovery.
+    MAX_RETRIES = 40
+    for retry_no in range(MAX_RETRIES):
+        cur.execute(f"select count(*) from {table_name}")
+        if cur.fetchone()[0] == 2:
+            break
+        print(f"[retry {retry_no}] Now got < 2 rows, wait 5s")
+        sleep(5)
+    else:
+        assert False, "timeout waiting for parquet file ingestion (2 rows expected)"
+
+    cur.execute(f"select id, (s).foo, (s).bar from {table_name} order by id")
+    rows = cur.fetchall()
+    # The system may either:
+    # - keep foo and set missing bar to NULL, or
+    # - set the whole struct to NULL when schema doesn't match.
+    assert [r[0] for r in rows] == [1, 2], f"unexpected rows: {rows}"
+    assert [r[2] for r in rows] == [None, None], f"unexpected rows: {rows}"
+    foo_values = [r[1] for r in rows]
+    assert foo_values in ([10, 20], [None, None]), f"unexpected rows: {rows}"
+    print("Test parquet struct missing field read pass")
+
+    # Cleanup RW & MinIO & local.
+    cur.execute(f"drop table {table_name};")
+    cur.close()
+    conn.close()
+
+    minio_client.remove_object(bucket_name="hummock001", object_name=s3_key)
+    try:
+        os.remove(local_path)
+    except OSError:
+        pass
+
+
 def gen_data(file_num, item_num_per_file):
     assert item_num_per_file % 2 == 0, \
         f'item_num_per_file should be even to ensure sum(mark) == 0: {item_num_per_file}'
@@ -491,3 +597,7 @@ if __name__ == "__main__":
     # Parquet struct subset read test.
     print("Test parquet struct subset read...\n")
     _test_parquet_struct_field_subset(client)
+
+    # Parquet struct missing-field read test.
+    print("Test parquet struct missing field read...\n")
+    _test_parquet_struct_missing_field_in_file(client)
