@@ -1003,7 +1003,10 @@ impl Dispatcher for HashDataDispatcher {
 
         let ops = new_ops;
         // Apply output mapping after calculating the vnode and new visibility maps.
+        // The output mapping may project columns and eliminate noop updates.
         let chunk = self.output_mapping.apply(chunk);
+        // Get the visibility after noop update elimination to incorporate into the final visibility.
+        let chunk_vis = chunk.visibility();
 
         // individually output StreamChunk integrated with vis_map
         futures::future::try_join_all(
@@ -1012,9 +1015,16 @@ impl Dispatcher for HashDataDispatcher {
                 .zip_eq_fast(self.outputs.iter_mut())
                 .map(|(vis_map, output)| async {
                     let vis_map = vis_map.finish();
-                    // columns is not changed in this function
-                    let new_stream_chunk =
-                        StreamChunk::with_visibility(ops.clone(), chunk.columns().into(), vis_map);
+                    // Combine hash routing visibility with noop update elimination visibility.
+                    // A row is visible only if it passes BOTH:
+                    // 1. Hash routing (the row should go to this output)
+                    // 2. Noop update elimination (the row was not eliminated as a noop)
+                    let combined_vis = &vis_map & chunk_vis;
+                    let new_stream_chunk = StreamChunk::with_visibility(
+                        ops.clone(),
+                        chunk.columns().into(),
+                        combined_vis,
+                    );
                     if new_stream_chunk.cardinality() > 0 {
                         event!(
                             tracing::Level::TRACE,
