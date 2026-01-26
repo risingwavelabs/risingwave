@@ -75,7 +75,7 @@ struct CompactionTrack {
     task_type: TaskType,
     trigger_interval_sec: u64,
     /// Minimum snapshot count threshold to trigger compaction (early trigger).
-    /// Compaction triggers when snapshot_count >= this threshold, even before interval expires.
+    /// Compaction triggers when `pending_snapshot_count` >= this threshold, even before interval expires.
     trigger_snapshot_count: usize,
     state: CompactionTrackState,
 }
