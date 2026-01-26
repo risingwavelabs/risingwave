@@ -168,8 +168,9 @@
     StreamSink { type: upsert, columns: [v2, v1, count], downstream_pk: [t1.v2, t1.v1] }
     └─StreamProject { exprs: [t1.v2, t1.v1, count] }
       └─StreamHashAgg { group_key: [t1.v1, t1.v2], aggs: [count] }
-        └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
-          └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4] }
+        └─StreamLocalityProvider { locality_columns: [t1.v1, t1.v2] }
+          └─StreamExchange { dist: HashShard(t1.v1, t1.v2) }
+            └─StreamTableScan { table: t1, columns: [v1, v2, v3, v4] }
 - id: create_emit_on_close_sink
   sql: |
     create table t2 (a int, b int, watermark for b as b - 4) append only;
@@ -308,10 +309,11 @@
   explain_output: |
     StreamProject { exprs: [t.v1, count, null:Serial] }
     └─StreamSink { type: append-only, columns: [v1, count] }
-      └─StreamExchange [no_shuffle] { dist: HashShard(t.v1) }
+      └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.v1) }
         └─StreamHashAgg { group_key: [t.v1], aggs: [count] }
-          └─StreamExchange { dist: HashShard(t.v1) }
-            └─StreamTableScan { table: t, columns: [v1, _row_id] }
+          └─StreamLocalityProvider { locality_columns: [t.v1] }
+            └─StreamExchange { dist: HashShard(t.v1) }
+              └─StreamTableScan { table: t, columns: [v1, _row_id] }
 - id: separate_join_and_sink
   sql: |
     set streaming_separate_sink to true;
@@ -325,6 +327,10 @@
       └─StreamExchange [no_shuffle] { dist: HashShard(t.v1) }
         └─StreamHashJoin { type: Inner, predicate: t.v1 = t.v1 }
           ├─StreamExchange { dist: HashShard(t.v1) }
-          │ └─StreamTableScan { table: t, columns: [v1, _row_id] }
+          │ └─StreamLocalityProvider { locality_columns: [t.v1] }
+          │   └─StreamExchange { dist: HashShard(t.v1) }
+          │     └─StreamTableScan { table: t, columns: [v1, _row_id] }
           └─StreamExchange { dist: HashShard(t.v1) }
-            └─StreamTableScan { table: t, columns: [v1, v2, _row_id] }
+            └─StreamLocalityProvider { locality_columns: [t.v1] }
+              └─StreamExchange { dist: HashShard(t.v1) }
+                └─StreamTableScan { table: t, columns: [v1, v2, _row_id] }

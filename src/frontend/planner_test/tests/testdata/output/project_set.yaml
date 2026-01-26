@@ -120,9 +120,10 @@
     StreamMaterialize { columns: [unnest], stream_key: [unnest], pk_columns: [unnest], pk_conflict: NoCheck }
     └─StreamProject { exprs: [Unnest($0)], noop_update_hint: true }
       └─StreamHashAgg { group_key: [Unnest($0)], aggs: [count] }
-        └─StreamExchange { dist: HashShard(Unnest($0)) }
-          └─StreamProjectSet { select_list: [Unnest($0), $1] }
-            └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [Unnest($0)] }
+          └─StreamExchange { dist: HashShard(Unnest($0)) }
+            └─StreamProjectSet { select_list: [Unnest($0), $1] }
+              └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t(x int[]);
     select * from (select unnest(x) as unnest from t) where unnest > 1;
@@ -154,19 +155,23 @@
         └─BatchProjectSet { select_list: [Unnest($0)] }
           └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [unnest, t._row_id(hidden), projected_row_id(hidden), t._row_id#1(hidden), projected_row_id#1(hidden)], stream_key: [t._row_id, projected_row_id, t._row_id#1, projected_row_id#1, unnest], pk_columns: [t._row_id, projected_row_id, t._row_id#1, projected_row_id#1, unnest], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [unnest, t._row_id(hidden), projected_row_id(hidden), t._row_id#1(hidden), projected_row_id#1(hidden)], stream_key: [unnest, t._row_id, projected_row_id, t._row_id#1, projected_row_id#1], pk_columns: [unnest, t._row_id, projected_row_id, t._row_id#1, projected_row_id#1], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(Unnest($0), t._row_id, projected_row_id, t._row_id, projected_row_id) }
       └─StreamHashJoin { type: Inner, predicate: Unnest($0) = Unnest($0), output: [Unnest($0), t._row_id, projected_row_id, t._row_id, projected_row_id] }
         ├─StreamExchange { dist: HashShard(Unnest($0)) }
-        │ └─StreamShare { id: 3 }
-        │   └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
-        │     └─StreamProjectSet { select_list: [Unnest($0), $1] }
-        │       └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamLocalityProvider { locality_columns: [Unnest($0)] }
+        │   └─StreamExchange { dist: HashShard(Unnest($0)) }
+        │     └─StreamShare { id: 3 }
+        │       └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
+        │         └─StreamProjectSet { select_list: [Unnest($0), $1] }
+        │           └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: HashShard(Unnest($0)) }
-          └─StreamShare { id: 3 }
-            └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
-              └─StreamProjectSet { select_list: [Unnest($0), $1] }
-                └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamLocalityProvider { locality_columns: [Unnest($0)] }
+            └─StreamExchange { dist: HashShard(Unnest($0)) }
+              └─StreamShare { id: 3 }
+                └─StreamProject { exprs: [Unnest($0), t._row_id, projected_row_id] }
+                  └─StreamProjectSet { select_list: [Unnest($0), $1] }
+                    └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: issue-10080
   sql: |
     with cte as (SELECT 1 as v1, unnest(array[1,2,3,4,5]) AS v2) select v1 from cte;

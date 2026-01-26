@@ -23,14 +23,22 @@
     StreamMaterialize { columns: [max_v1, max_v2, t1.id(hidden), t2.id(hidden)], stream_key: [t1.id], pk_columns: [t1.id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t1.id) }
       └─StreamHashJoin { type: Inner, predicate: t1.id = t2.id, output: [max(t1.v1), max(t2.v2), t1.id, t2.id] }
-        ├─StreamProject { exprs: [t1.id, max(t1.v1)] }
-        │ └─StreamHashAgg { group_key: [t1.id], aggs: [max(t1.v1), count] }
-        │   └─StreamExchange { dist: HashShard(t1.id) }
-        │     └─StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
-        └─StreamProject { exprs: [t2.id, max(t2.v2)] }
-          └─StreamHashAgg { group_key: [t2.id], aggs: [max(t2.v2), count] }
-            └─StreamExchange { dist: HashShard(t2.id) }
-              └─StreamTableScan { table: t2, columns: [t2.id, t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+        ├─StreamExchange { dist: HashShard(t1.id) }
+        │ └─StreamLocalityProvider { locality_columns: [t1.id] }
+        │   └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t1.id) }
+        │     └─StreamProject { exprs: [t1.id, max(t1.v1)] }
+        │       └─StreamHashAgg { group_key: [t1.id], aggs: [max(t1.v1), count] }
+        │         └─StreamLocalityProvider { locality_columns: [t1.id] }
+        │           └─StreamExchange { dist: HashShard(t1.id) }
+        │             └─StreamTableScan { table: t1, columns: [t1.id, t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        └─StreamExchange { dist: HashShard(t2.id) }
+          └─StreamLocalityProvider { locality_columns: [t2.id] }
+            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t2.id) }
+              └─StreamProject { exprs: [t2.id, max(t2.v2)] }
+                └─StreamHashAgg { group_key: [t2.id], aggs: [max(t2.v2), count] }
+                  └─StreamLocalityProvider { locality_columns: [t2.id] }
+                    └─StreamExchange { dist: HashShard(t2.id) }
+                      └─StreamTableScan { table: t2, columns: [t2.id, t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - sql: |
     create table t (id int, v int);
     SELECT Tone.max_v, Ttwo.min_v
@@ -54,14 +62,22 @@
     StreamMaterialize { columns: [max_v, min_v, t.id(hidden), t.id#1(hidden)], stream_key: [t.id], pk_columns: [t.id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t.id) }
       └─StreamHashJoin { type: Inner, predicate: t.id = t.id, output: [max(t.v), min(t.v), t.id, t.id] }
-        ├─StreamProject { exprs: [t.id, max(t.v)] }
-        │ └─StreamHashAgg { group_key: [t.id], aggs: [max(t.v), count] }
-        │   └─StreamExchange { dist: HashShard(t.id) }
-        │     └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamProject { exprs: [t.id, min(t.v)] }
-          └─StreamHashAgg { group_key: [t.id], aggs: [min(t.v), count] }
-            └─StreamExchange { dist: HashShard(t.id) }
-              └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        ├─StreamExchange { dist: HashShard(t.id) }
+        │ └─StreamLocalityProvider { locality_columns: [t.id] }
+        │   └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.id) }
+        │     └─StreamProject { exprs: [t.id, max(t.v)] }
+        │       └─StreamHashAgg { group_key: [t.id], aggs: [max(t.v), count] }
+        │         └─StreamLocalityProvider { locality_columns: [t.id] }
+        │           └─StreamExchange { dist: HashShard(t.id) }
+        │             └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamLocalityProvider { locality_columns: [t.id] }
+            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.id) }
+              └─StreamProject { exprs: [t.id, min(t.v)] }
+                └─StreamHashAgg { group_key: [t.id], aggs: [min(t.v), count] }
+                  └─StreamLocalityProvider { locality_columns: [t.id] }
+                    └─StreamExchange { dist: HashShard(t.id) }
+                      └─StreamTableScan { table: t, columns: [t.id, t.v, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
     select
@@ -79,8 +95,9 @@
     StreamMaterialize { columns: [v1, v2, v3], stream_key: [v1, v2, v3], pk_columns: [v1, v2, v3], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.v1, t.v2, t.v3], noop_update_hint: true }
       └─StreamHashAgg { group_key: [t.v1, t.v2, t.v3], aggs: [count] }
-        └─StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
-          └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [t.v1, t.v2, t.v3] }
+          └─StreamExchange { dist: HashShard(t.v1, t.v2, t.v3) }
+            └─StreamTableScan { table: t, columns: [t.v1, t.v2, t.v3, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (v1 varchar, v2 varchar, v3 varchar);
     create materialized view mv as

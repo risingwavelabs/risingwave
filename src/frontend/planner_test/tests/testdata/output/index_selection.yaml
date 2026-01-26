@@ -980,15 +980,19 @@
     INNER JOIN t2 ON t2.id=t1.t2_id
     INNER JOIN t3 ON t3.id=t2.t3_id;
   stream_plan: |-
-    StreamMaterialize { columns: [toto, tata, titi, t1.t2_id(hidden), t2.t3_id(hidden)], stream_key: [toto, t1.t2_id, t2.t3_id], pk_columns: [toto, t1.t2_id, t2.t3_id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [toto, tata, titi, t1.t2_id(hidden), t2.t3_id(hidden)], stream_key: [t2.t3_id, t1.t2_id, toto], pk_columns: [t2.t3_id, t1.t2_id, toto], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t1.id, t1.t2_id, t2.t3_id) }
       └─StreamHashJoin { type: Inner, predicate: t2.t3_id = t3.id, output: [t1.id, t2.id, t3.id, t1.t2_id, t2.t3_id] }
         ├─StreamExchange { dist: HashShard(t2.t3_id) }
-        │ └─StreamHashJoin { type: Inner, predicate: t1.t2_id = t2.id, output: [t1.id, t2.id, t2.t3_id, t1.t2_id] }
-        │   ├─StreamExchange { dist: HashShard(t1.t2_id) }
-        │   │ └─StreamTableScan { table: t1, columns: [t1.id, t1.t2_id], stream_scan_type: ArrangementBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
-        │   └─StreamExchange { dist: HashShard(t2.id) }
-        │     └─StreamTableScan { table: t2, columns: [t2.id, t2.t3_id], stream_scan_type: ArrangementBackfill, stream_key: [t2.id], pk: [id], dist: UpstreamHashShard(t2.id) }
+        │ └─StreamLocalityProvider { locality_columns: [t2.t3_id] }
+        │   └─StreamExchange { dist: HashShard(t2.t3_id) }
+        │     └─StreamHashJoin { type: Inner, predicate: t1.t2_id = t2.id, output: [t1.id, t2.id, t2.t3_id, t1.t2_id] }
+        │       ├─StreamExchange { dist: HashShard(t1.t2_id) }
+        │       │ └─StreamLocalityProvider { locality_columns: [t1.t2_id] }
+        │       │   └─StreamExchange { dist: HashShard(t1.t2_id) }
+        │       │     └─StreamTableScan { table: t1, columns: [t1.id, t1.t2_id], stream_scan_type: ArrangementBackfill, stream_key: [t1.id], pk: [id], dist: UpstreamHashShard(t1.id) }
+        │       └─StreamExchange { dist: HashShard(t2.id) }
+        │         └─StreamTableScan { table: t2, columns: [t2.id, t2.t3_id], stream_scan_type: ArrangementBackfill, stream_key: [t2.id], pk: [id], dist: UpstreamHashShard(t2.id) }
         └─StreamExchange { dist: HashShard(t3.id) }
           └─StreamTableScan { table: t3, columns: [t3.id], stream_scan_type: ArrangementBackfill, stream_key: [t3.id], pk: [id], dist: UpstreamHashShard(t3.id) }
 - name: topn index selection for scan with output column idx

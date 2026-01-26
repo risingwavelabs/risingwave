@@ -267,23 +267,31 @@
                   └─BatchFilter { predicate: IsNotNull(auction.date_time) }
                     └─BatchScan { table: auction, columns: [auction.date_time], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [date_time, window_start, window_end, auction._row_id(hidden)], stream_key: [auction._row_id, window_start, window_end, date_time], pk_columns: [auction._row_id, window_start, window_end, date_time], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [date_time, window_start, window_end, auction._row_id(hidden)], stream_key: [date_time, auction._row_id, window_start, window_end], pk_columns: [date_time, auction._row_id, window_start, window_end], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(auction.date_time, window_start, window_end, auction._row_id) }
       └─StreamHashJoin { type: LeftSemi, predicate: auction.date_time IS NOT DISTINCT FROM auction.date_time, output: all }
         ├─StreamExchange { dist: HashShard(auction.date_time) }
-        │ └─StreamShare { id: 3 }
-        │   └─StreamHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time, window_start, window_end, auction._row_id] }
-        │     └─StreamFilter { predicate: IsNotNull(auction.date_time) }
-        │       └─StreamTableScan { table: auction, columns: [auction.date_time, auction._row_id], stream_scan_type: ArrangementBackfill, stream_key: [auction._row_id], pk: [_row_id], dist: UpstreamHashShard(auction._row_id) }
-        └─StreamProject { exprs: [auction.date_time], noop_update_hint: true }
-          └─StreamHashAgg { group_key: [auction.date_time], aggs: [count] }
-            └─StreamProject { exprs: [auction.date_time], noop_update_hint: true }
-              └─StreamHashAgg { group_key: [auction.date_time], aggs: [count] }
-                └─StreamExchange { dist: HashShard(auction.date_time) }
-                  └─StreamShare { id: 3 }
-                    └─StreamHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time, window_start, window_end, auction._row_id] }
-                      └─StreamFilter { predicate: IsNotNull(auction.date_time) }
-                        └─StreamTableScan { table: auction, columns: [auction.date_time, auction._row_id], stream_scan_type: ArrangementBackfill, stream_key: [auction._row_id], pk: [_row_id], dist: UpstreamHashShard(auction._row_id) }
+        │ └─StreamLocalityProvider { locality_columns: [auction.date_time] }
+        │   └─StreamExchange { dist: HashShard(auction.date_time) }
+        │     └─StreamShare { id: 3 }
+        │       └─StreamHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time, window_start, window_end, auction._row_id] }
+        │         └─StreamFilter { predicate: IsNotNull(auction.date_time) }
+        │           └─StreamTableScan { table: auction, columns: [auction.date_time, auction._row_id], stream_scan_type: ArrangementBackfill, stream_key: [auction._row_id], pk: [_row_id], dist: UpstreamHashShard(auction._row_id) }
+        └─StreamExchange { dist: HashShard(auction.date_time) }
+          └─StreamLocalityProvider { locality_columns: [auction.date_time] }
+            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(auction.date_time) }
+              └─StreamProject { exprs: [auction.date_time], noop_update_hint: true }
+                └─StreamHashAgg { group_key: [auction.date_time], aggs: [count] }
+                  └─StreamLocalityProvider { locality_columns: [auction.date_time] }
+                    └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(auction.date_time) }
+                      └─StreamProject { exprs: [auction.date_time], noop_update_hint: true }
+                        └─StreamHashAgg { group_key: [auction.date_time], aggs: [count] }
+                          └─StreamLocalityProvider { locality_columns: [auction.date_time] }
+                            └─StreamExchange { dist: HashShard(auction.date_time) }
+                              └─StreamShare { id: 3 }
+                                └─StreamHopWindow { time_col: auction.date_time, slide: 00:00:01, size: 01:00:00, output: [auction.date_time, window_start, window_end, auction._row_id] }
+                                  └─StreamFilter { predicate: IsNotNull(auction.date_time) }
+                                    └─StreamTableScan { table: auction, columns: [auction.date_time, auction._row_id], stream_scan_type: ArrangementBackfill, stream_key: [auction._row_id], pk: [_row_id], dist: UpstreamHashShard(auction._row_id) }
 - sql: |
     CREATE TABLE t (v int);
     SELECT 1 FROM t AS t_inner WHERE EXISTS ( SELECT 1 HAVING t_inner.v > 1);
@@ -461,24 +469,39 @@
                 └─BatchExchange { order: [], dist: HashShard(t.x) }
                   └─BatchScan { table: t, columns: [t.x], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, k, sum_x, t.x(hidden)], stream_key: [k, x], pk_columns: [k, x], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, k, sum_x, t.x(hidden)], stream_key: [x, k], pk_columns: [x, k], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t.x, t.k) }
       └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, t.y, t.k, sum(Unnest($0)), t.x] }
         ├─StreamExchange { dist: HashShard(t.x) }
-        │ └─StreamTableScan { table: t, columns: [t.x, t.y, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
-        └─StreamProject { exprs: [t.x, sum(Unnest($0))] }
-          └─StreamHashAgg { group_key: [t.x], aggs: [sum(Unnest($0)), count] }
-            └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, Unnest($0), t.x, projected_row_id] }
-              ├─StreamProject { exprs: [t.x], noop_update_hint: true }
-              │ └─StreamHashAgg { group_key: [t.x], aggs: [count] }
-              │   └─StreamExchange { dist: HashShard(t.x) }
-              │     └─StreamTableScan { table: t, columns: [t.x, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
-              └─StreamProject { exprs: [t.x, Unnest($0), projected_row_id] }
-                └─StreamProjectSet { select_list: [$0, Unnest($0)] }
-                  └─StreamProject { exprs: [t.x], noop_update_hint: true }
-                    └─StreamHashAgg { group_key: [t.x], aggs: [count] }
-                      └─StreamExchange { dist: HashShard(t.x) }
-                        └─StreamTableScan { table: t, columns: [t.x, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
+        │ └─StreamLocalityProvider { locality_columns: [t.x] }
+        │   └─StreamExchange { dist: HashShard(t.x) }
+        │     └─StreamTableScan { table: t, columns: [t.x, t.y, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
+        └─StreamExchange { dist: HashShard(t.x) }
+          └─StreamLocalityProvider { locality_columns: [t.x] }
+            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.x) }
+              └─StreamProject { exprs: [t.x, sum(Unnest($0))] }
+                └─StreamHashAgg { group_key: [t.x], aggs: [sum(Unnest($0)), count] }
+                  └─StreamLocalityProvider { locality_columns: [t.x] }
+                    └─StreamExchange [no_shuffle] { dist: HashShard(t.x) }
+                      └─StreamHashJoin { type: LeftOuter, predicate: t.x IS NOT DISTINCT FROM t.x, output: [t.x, Unnest($0), t.x, projected_row_id] }
+                        ├─StreamExchange { dist: HashShard(t.x) }
+                        │ └─StreamLocalityProvider { locality_columns: [t.x] }
+                        │   └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.x) }
+                        │     └─StreamProject { exprs: [t.x], noop_update_hint: true }
+                        │       └─StreamHashAgg { group_key: [t.x], aggs: [count] }
+                        │         └─StreamLocalityProvider { locality_columns: [t.x] }
+                        │           └─StreamExchange { dist: HashShard(t.x) }
+                        │             └─StreamTableScan { table: t, columns: [t.x, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
+                        └─StreamExchange { dist: HashShard(t.x) }
+                          └─StreamLocalityProvider { locality_columns: [t.x] }
+                            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.x) }
+                              └─StreamProject { exprs: [t.x, Unnest($0), projected_row_id] }
+                                └─StreamProjectSet { select_list: [$0, Unnest($0)] }
+                                  └─StreamProject { exprs: [t.x], noop_update_hint: true }
+                                    └─StreamHashAgg { group_key: [t.x], aggs: [count] }
+                                      └─StreamLocalityProvider { locality_columns: [t.x] }
+                                        └─StreamExchange { dist: HashShard(t.x) }
+                                          └─StreamTableScan { table: t, columns: [t.x, t.k], stream_scan_type: ArrangementBackfill, stream_key: [t.k], pk: [k], dist: UpstreamHashShard(t.k) }
 - name: CorrelatedInputRef in ProjectSet and apply on condition is true.
   sql: |
     create table t(x int[], y int[], k int primary key);
@@ -559,19 +582,27 @@
                     └─BatchFilter { predicate: IsNotNull(integers.i) }
                       └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [integers._row_id, i], pk_columns: [i, integers._row_id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [i, integers._row_id], pk_columns: [i, integers._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(integers.i, integers._row_id) }
       └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, row_number, integers._row_id, integers.i] }
         ├─StreamExchange { dist: HashShard(integers.i) }
-        │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
-        └─StreamProject { exprs: [integers.i, row_number] }
-          └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-            └─StreamProject { exprs: [integers.i, row_number, integers._row_id] }
-              └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-                └─StreamExchange { dist: HashShard(integers.i) }
-                  └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
-                    └─StreamFilter { predicate: IsNotNull(integers.i) }
-                      └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+        │ └─StreamLocalityProvider { locality_columns: [integers.i] }
+        │   └─StreamExchange { dist: HashShard(integers.i) }
+        │     └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+        └─StreamExchange { dist: HashShard(integers.i) }
+          └─StreamLocalityProvider { locality_columns: [integers.i] }
+            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(integers.i) }
+              └─StreamProject { exprs: [integers.i, row_number] }
+                └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+                  └─StreamLocalityProvider { locality_columns: [integers.i] }
+                    └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(integers.i) }
+                      └─StreamProject { exprs: [integers.i, row_number, integers._row_id] }
+                        └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+                          └─StreamLocalityProvider { locality_columns: [integers.i] }
+                            └─StreamExchange { dist: HashShard(integers.i) }
+                              └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
+                                └─StreamFilter { predicate: IsNotNull(integers.i) }
+                                  └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
 - name: test over window subquery 2 (with nested loop join so cannot be transformed into a stream plan)
   sql: |
     CREATE TABLE integers(i INTEGER);
@@ -617,19 +648,27 @@
                     └─BatchFilter { predicate: IsNotNull(integers.i) }
                       └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [integers._row_id, i], pk_columns: [i, integers._row_id], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [i, col, integers._row_id(hidden), integers.i(hidden)], stream_key: [i, integers._row_id], pk_columns: [i, integers._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(integers.i, integers._row_id) }
       └─StreamHashJoin { type: LeftOuter, predicate: integers.i IS NOT DISTINCT FROM integers.i, output: [integers.i, sum, integers._row_id, integers.i] }
         ├─StreamExchange { dist: HashShard(integers.i) }
-        │ └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
-        └─StreamProject { exprs: [integers.i, sum] }
-          └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
-            └─StreamProject { exprs: [integers.i, sum, integers._row_id] }
-              └─StreamOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-                └─StreamExchange { dist: HashShard(integers.i) }
-                  └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
-                    └─StreamFilter { predicate: IsNotNull(integers.i) }
-                      └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+        │ └─StreamLocalityProvider { locality_columns: [integers.i] }
+        │   └─StreamExchange { dist: HashShard(integers.i) }
+        │     └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+        └─StreamExchange { dist: HashShard(integers.i) }
+          └─StreamLocalityProvider { locality_columns: [integers.i] }
+            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(integers.i) }
+              └─StreamProject { exprs: [integers.i, sum] }
+                └─StreamGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
+                  └─StreamLocalityProvider { locality_columns: [integers.i] }
+                    └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(integers.i) }
+                      └─StreamProject { exprs: [integers.i, sum, integers._row_id] }
+                        └─StreamOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+                          └─StreamLocalityProvider { locality_columns: [integers.i] }
+                            └─StreamExchange { dist: HashShard(integers.i) }
+                              └─StreamProject { exprs: [integers.i, integers.i, integers._row_id] }
+                                └─StreamFilter { predicate: IsNotNull(integers.i) }
+                                  └─StreamTableScan { table: integers, columns: [integers.i, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
 - name: test over window subquery 4  (with nested loop join so cannot be transformed into a stream plan)
   sql: |
     CREATE TABLE integers(i INTEGER);
@@ -676,19 +715,24 @@
                   └─BatchFilter { predicate: IsNotNull(rows.correlated_col) }
                     └─BatchScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [i, integers._row_id(hidden), $expr1(hidden), integers.correlated_col(hidden)], stream_key: [integers._row_id, $expr1, integers.correlated_col], pk_columns: [integers._row_id, $expr1, integers.correlated_col], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [i, integers._row_id(hidden), $expr1(hidden), integers.correlated_col(hidden)], stream_key: [$expr1, integers.correlated_col, integers._row_id], pk_columns: [$expr1, integers.correlated_col, integers._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(integers._row_id, $expr1, integers.correlated_col) }
       └─StreamHashJoin { type: LeftSemi, predicate: $expr1 = sum AND integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.i, integers._row_id, $expr1, integers.correlated_col] }
-        ├─StreamExchange { dist: HashShard(integers.correlated_col, $expr1) }
-        │ └─StreamProject { exprs: [integers.i, integers.correlated_col, integers.i::Int64 as $expr1, integers._row_id] }
-        │   └─StreamTableScan { table: integers, columns: [integers.i, integers.correlated_col, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
-        └─StreamExchange { dist: HashShard(rows.correlated_col, sum) }
-          └─StreamProject { exprs: [rows.correlated_col, sum, rows._row_id, rows.k] }
-            └─StreamOverWindow { window_functions: [sum(rows.v) OVER(PARTITION BY rows.correlated_col, rows.k ORDER BY rows.v ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─StreamExchange { dist: HashShard(rows.correlated_col, rows.k) }
-                └─StreamProject { exprs: [rows.correlated_col, rows.k, rows.v, rows._row_id] }
-                  └─StreamFilter { predicate: IsNotNull(rows.correlated_col) }
-                    └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], stream_scan_type: ArrangementBackfill, stream_key: [rows._row_id], pk: [_row_id], dist: UpstreamHashShard(rows._row_id) }
+        ├─StreamExchange { dist: HashShard($expr1, integers.correlated_col) }
+        │ └─StreamLocalityProvider { locality_columns: [$expr1, integers.correlated_col] }
+        │   └─StreamExchange { dist: HashShard(integers.correlated_col, $expr1) }
+        │     └─StreamProject { exprs: [integers.i, integers.correlated_col, integers.i::Int64 as $expr1, integers._row_id] }
+        │       └─StreamTableScan { table: integers, columns: [integers.i, integers.correlated_col, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+        └─StreamExchange { dist: HashShard(sum, rows.correlated_col) }
+          └─StreamLocalityProvider { locality_columns: [sum, rows.correlated_col] }
+            └─StreamExchange { dist: HashShard(rows.correlated_col, sum) }
+              └─StreamProject { exprs: [rows.correlated_col, sum, rows._row_id, rows.k] }
+                └─StreamOverWindow { window_functions: [sum(rows.v) OVER(PARTITION BY rows.correlated_col, rows.k ORDER BY rows.v ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+                  └─StreamLocalityProvider { locality_columns: [rows.correlated_col, rows.k] }
+                    └─StreamExchange { dist: HashShard(rows.correlated_col, rows.k) }
+                      └─StreamProject { exprs: [rows.correlated_col, rows.k, rows.v, rows._row_id] }
+                        └─StreamFilter { predicate: IsNotNull(rows.correlated_col) }
+                          └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], stream_scan_type: ArrangementBackfill, stream_key: [rows._row_id], pk: [_row_id], dist: UpstreamHashShard(rows._row_id) }
 - name: test cardinality visitor with correlated filter
   sql: |
     CREATE TABLE t1(i INT);
@@ -748,23 +792,36 @@
                         └─BatchFilter { predicate: IsNotNull(rows.correlated_col) }
                           └─BatchScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [i, correlated_col, integers._row_id(hidden), 2:Int64(hidden)], stream_key: [integers._row_id, correlated_col, 2:Int64], pk_columns: [integers._row_id, correlated_col, 2:Int64], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [i, correlated_col, integers._row_id(hidden), 2:Int64(hidden)], stream_key: [correlated_col, 2:Int64, integers._row_id], pk_columns: [correlated_col, 2:Int64, integers._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(integers.correlated_col, integers._row_id, 2:Int64) }
       └─StreamHashJoin { type: LeftSemi, predicate: integers.correlated_col IS NOT DISTINCT FROM integers.correlated_col AND 2:Int64 = $expr1, output: [integers.i, integers.correlated_col, integers._row_id, 2:Int64] }
-        ├─StreamExchange { dist: HashShard(integers.correlated_col) }
-        │ └─StreamProject { exprs: [integers.i, integers.correlated_col, 2:Int64, integers._row_id] }
-        │   └─StreamTableScan { table: integers, columns: [integers.i, integers.correlated_col, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
-        └─StreamProject { exprs: [integers.correlated_col, (count(distinct rows.k) + count(distinct rows.v)) as $expr1] }
-          └─StreamHashAgg { group_key: [integers.correlated_col], aggs: [count(distinct rows.k), count(distinct rows.v), count] }
-            └─StreamHashJoin { type: LeftOuter, predicate: integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.correlated_col, rows.k, rows.v, rows._row_id] }
-              ├─StreamProject { exprs: [integers.correlated_col], noop_update_hint: true }
-              │ └─StreamHashAgg { group_key: [integers.correlated_col], aggs: [count] }
-              │   └─StreamExchange { dist: HashShard(integers.correlated_col) }
-              │     └─StreamTableScan { table: integers, columns: [integers.correlated_col, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
-              └─StreamExchange { dist: HashShard(rows.correlated_col) }
-                └─StreamProject { exprs: [rows.correlated_col, rows.k, rows.v, rows._row_id] }
-                  └─StreamFilter { predicate: IsNotNull(rows.correlated_col) }
-                    └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], stream_scan_type: ArrangementBackfill, stream_key: [rows._row_id], pk: [_row_id], dist: UpstreamHashShard(rows._row_id) }
+        ├─StreamExchange { dist: HashShard(integers.correlated_col, 2:Int64) }
+        │ └─StreamLocalityProvider { locality_columns: [integers.correlated_col, 2:Int64] }
+        │   └─StreamExchange { dist: HashShard(integers.correlated_col, 2:Int64) }
+        │     └─StreamProject { exprs: [integers.i, integers.correlated_col, 2:Int64, integers._row_id] }
+        │       └─StreamTableScan { table: integers, columns: [integers.i, integers.correlated_col, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+        └─StreamExchange { dist: HashShard(integers.correlated_col, $expr1) }
+          └─StreamLocalityProvider { locality_columns: [integers.correlated_col, $expr1] }
+            └─StreamExchange { dist: HashShard(integers.correlated_col, $expr1) }
+              └─StreamProject { exprs: [integers.correlated_col, (count(distinct rows.k) + count(distinct rows.v)) as $expr1] }
+                └─StreamHashAgg { group_key: [integers.correlated_col], aggs: [count(distinct rows.k), count(distinct rows.v), count] }
+                  └─StreamLocalityProvider { locality_columns: [integers.correlated_col] }
+                    └─StreamExchange [no_shuffle] { dist: HashShard(integers.correlated_col) }
+                      └─StreamHashJoin { type: LeftOuter, predicate: integers.correlated_col IS NOT DISTINCT FROM rows.correlated_col, output: [integers.correlated_col, rows.k, rows.v, rows._row_id] }
+                        ├─StreamExchange { dist: HashShard(integers.correlated_col) }
+                        │ └─StreamLocalityProvider { locality_columns: [integers.correlated_col] }
+                        │   └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(integers.correlated_col) }
+                        │     └─StreamProject { exprs: [integers.correlated_col], noop_update_hint: true }
+                        │       └─StreamHashAgg { group_key: [integers.correlated_col], aggs: [count] }
+                        │         └─StreamLocalityProvider { locality_columns: [integers.correlated_col] }
+                        │           └─StreamExchange { dist: HashShard(integers.correlated_col) }
+                        │             └─StreamTableScan { table: integers, columns: [integers.correlated_col, integers._row_id], stream_scan_type: ArrangementBackfill, stream_key: [integers._row_id], pk: [_row_id], dist: UpstreamHashShard(integers._row_id) }
+                        └─StreamExchange { dist: HashShard(rows.correlated_col) }
+                          └─StreamLocalityProvider { locality_columns: [rows.correlated_col] }
+                            └─StreamExchange { dist: HashShard(rows.correlated_col) }
+                              └─StreamProject { exprs: [rows.correlated_col, rows.k, rows.v, rows._row_id] }
+                                └─StreamFilter { predicate: IsNotNull(rows.correlated_col) }
+                                  └─StreamTableScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col, rows._row_id], stream_scan_type: ArrangementBackfill, stream_key: [rows._row_id], pk: [_row_id], dist: UpstreamHashShard(rows._row_id) }
 - name: test hop window subquery 1
   sql: |
     create table t1 (k int primary key, ts timestamp);
@@ -782,10 +839,17 @@
     StreamMaterialize { columns: [col, k, ts, window_start, window_end], stream_key: [col, window_start, window_end], pk_columns: [col, window_start, window_end], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(1:Int32, window_start, window_end) }
       └─StreamHashJoin { type: Inner, predicate: 1:Int32 = t1.k, output: all }
-        ├─StreamProject { exprs: [1:Int32] }
-        │ └─StreamAppendOnlyDedup { dedup_cols: [1:Int32] }
-        │   └─StreamExchange { dist: HashShard(1:Int32) }
-        │     └─StreamValues { rows: [[1:Int32, 0:Int64], [2:Int32, 1:Int64]] }
+        ├─StreamExchange { dist: HashShard(1:Int32) }
+        │ └─StreamLocalityProvider { locality_columns: [1:Int32] }
+        │   └─StreamExchange [no_shuffle] { dist: HashShard(1:Int32) }
+        │     └─StreamProject { exprs: [1:Int32] }
+        │       └─StreamAppendOnlyDedup { dedup_cols: [1:Int32] }
+        │         └─StreamExchange { dist: HashShard(1:Int32) }
+        │           └─StreamLocalityProvider { locality_columns: [1:Int32] }
+        │             └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(1:Int32) }
+        │               └─StreamLocalityProvider { locality_columns: [1:Int32] }
+        │                 └─StreamExchange { dist: HashShard(1:Int32) }
+        │                   └─StreamValues { rows: [[1:Int32, 0:Int64], [2:Int32, 1:Int64]] }
         └─StreamExchange { dist: HashShard(t1.k) }
           └─StreamHopWindow { time_col: t1.ts, slide: 00:10:00, size: 00:30:00, output: all }
             └─StreamFilter { predicate: IsNotNull(t1.ts) }

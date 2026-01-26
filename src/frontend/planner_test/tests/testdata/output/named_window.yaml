@@ -17,17 +17,23 @@
         └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, sum, t._row_id(hidden), t.y(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, sum, t._row_id(hidden), t.y(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t.y, t._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y, sum(t.x), t._row_id, t.y] }
         ├─StreamExchange { dist: HashShard(t.y) }
-        │ └─StreamShare { id: 1 }
-        │   └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamProject { exprs: [t.y, sum(t.x)] }
-          └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), count] }
-            └─StreamExchange { dist: HashShard(t.y) }
-              └─StreamShare { id: 1 }
-                └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamLocalityProvider { locality_columns: [t.y] }
+        │   └─StreamExchange { dist: HashShard(t.y) }
+        │     └─StreamShare { id: 1 }
+        │       └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamLocalityProvider { locality_columns: [t.y] }
+            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.y) }
+              └─StreamProject { exprs: [t.y, sum(t.x)] }
+                └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), count] }
+                  └─StreamLocalityProvider { locality_columns: [t.y] }
+                    └─StreamExchange { dist: HashShard(t.y) }
+                      └─StreamShare { id: 1 }
+                        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: named window with order by
   sql: |
     create table t(x int, y int);
@@ -44,10 +50,11 @@
         └─BatchSort { order: [t.y ASC, t.x ASC] }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), row_number], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), row_number], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamLocalityProvider { locality_columns: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: named window with frame specification
   sql: |
     create table t(x int, y int);
@@ -64,10 +71,11 @@
         └─BatchSort { order: [t.y ASC, t.x ASC] }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), sum], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), sum], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
-      └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamLocalityProvider { locality_columns: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: multiple named windows
   sql: |
     create table t(x int, y int, z int);
@@ -91,13 +99,15 @@
                 └─BatchSort { order: [t.y ASC, t.x ASC] }
                   └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, z, sum, avg, t._row_id(hidden)], stream_key: [t._row_id, y, z], pk_columns: [t._row_id, y, z], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, z, sum, avg, t._row_id(hidden)], stream_key: [z, y, t._row_id], pk_columns: [z, y, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1, t._row_id] }
       └─StreamOverWindow { window_functions: [sum(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─StreamExchange { dist: HashShard(t.z) }
-          └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-            └─StreamExchange { dist: HashShard(t.y) }
-              └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [t.z] }
+          └─StreamExchange { dist: HashShard(t.z) }
+            └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─StreamLocalityProvider { locality_columns: [t.y] }
+                └─StreamExchange { dist: HashShard(t.y) }
+                  └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: same window different names
   sql: |
     create table t(x int, y int);
@@ -117,10 +127,11 @@
         └─BatchSort { order: [t.y ASC, t.x ASC] }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), sum, count], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), sum, count], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamLocalityProvider { locality_columns: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: named window with range frame
   sql: |
     create table t(x int, y int);
@@ -139,10 +150,11 @@
         └─BatchSort { order: [t.y ASC, t.x ASC] }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), max], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), max], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND CURRENT ROW)] }
-      └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamLocalityProvider { locality_columns: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: named window with unbounded frame
   sql: |
     create table t(x int, y int);
@@ -161,10 +173,11 @@
         └─BatchSort { order: [t.y ASC, t.x ASC] }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), first_value, last_value], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), first_value, last_value], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), last_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-      └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamLocalityProvider { locality_columns: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: aggregate functions with named window
   sql: |
     create table t(x int, y int, z int);
@@ -189,11 +202,12 @@
           └─BatchSort { order: [t.y ASC, t.z ASC] }
             └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, z, sum, avg, min, max, count, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, z, sum, avg, min, max, count, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1, min, max, count, t._row_id] }
       └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), min(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), max(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─StreamExchange { dist: HashShard(t.y) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [t.y] }
+          └─StreamExchange { dist: HashShard(t.y) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: ranking functions with named window
   sql: |
     create table t(x int, y int);
@@ -215,10 +229,11 @@
         └─BatchSort { order: [t.y ASC, t.x ASC] }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), row_number, rank, dense_rank], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), row_number, rank, dense_rank], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), dense_rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamLocalityProvider { locality_columns: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: value functions with named window
   sql: |
     create table t(x int, y int);
@@ -241,10 +256,11 @@
         └─BatchSort { order: [t.y ASC, t.x ASC] }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), lag, lead, first_value, last_value], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), lag, lead, first_value, last_value], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING), first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING), first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), last_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamLocalityProvider { locality_columns: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: undefined named window
   sql: |
     create table t(x int, y int);
@@ -284,13 +300,15 @@
                 └─BatchSort { order: [t.y ASC, t.x ASC] }
                   └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, z, sum, avg, count, t._row_id(hidden)], stream_key: [t._row_id, y, z], pk_columns: [t._row_id, y, z], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, z, sum, avg, count, t._row_id(hidden)], stream_key: [z, y, t._row_id], pk_columns: [z, y, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1, count, t._row_id] }
       └─StreamOverWindow { window_functions: [sum(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─StreamExchange { dist: HashShard(t.z) }
-          └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-            └─StreamExchange { dist: HashShard(t.y) }
-              └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [t.z] }
+          └─StreamExchange { dist: HashShard(t.z) }
+            └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+              └─StreamLocalityProvider { locality_columns: [t.y] }
+                └─StreamExchange { dist: HashShard(t.y) }
+                  └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: empty named window
   sql: |
     create table t(x int);
@@ -327,12 +345,13 @@
             └─BatchProject { exprs: [t.x, t.y, t.z, (t.x * 2:Int32) as $expr1, (t.y + 1:Int32) as $expr2, Abs(t.z) as $expr3] }
               └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, z, sum, t._row_id(hidden), $expr2(hidden)], stream_key: [t._row_id, $expr2], pk_columns: [t._row_id, $expr2], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, z, sum, t._row_id(hidden), $expr2(hidden)], stream_key: [$expr2, t._row_id], pk_columns: [$expr2, t._row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.y, t.z, sum, t._row_id, $expr2] }
       └─StreamOverWindow { window_functions: [sum($expr1) OVER(PARTITION BY $expr2 ORDER BY $expr3 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─StreamExchange { dist: HashShard($expr2) }
-          └─StreamProject { exprs: [t.x, t.y, t.z, (t.x * 2:Int32) as $expr1, (t.y + 1:Int32) as $expr2, Abs(t.z) as $expr3, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [$expr2] }
+          └─StreamExchange { dist: HashShard($expr2) }
+            └─StreamProject { exprs: [t.x, t.y, t.z, (t.x * 2:Int32) as $expr1, (t.y + 1:Int32) as $expr2, Abs(t.z) as $expr3, t._row_id] }
+              └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: topn with named window
   sql: |
     create table t(x int, y int);
@@ -359,8 +378,9 @@
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamGroupTopN { order: [t.x ASC], limit: 3, offset: 0, group_key: [t.y] }
-      └─StreamExchange { dist: HashShard(t.y) }
-        └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+      └─StreamLocalityProvider { locality_columns: [t.y] }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: named window in subquery
   sql: |
     create table t(x int, y int);
@@ -386,18 +406,24 @@
           └─BatchExchange { order: [], dist: HashShard(t.y) }
             └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
-    StreamMaterialize { columns: [x, y, t._row_id(hidden), t.y(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [x, y, t._row_id(hidden), t.y(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t.y, t._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t.y IS NOT DISTINCT FROM t.y, output: [t.x, t.y, t._row_id, t.y] }
         ├─StreamExchange { dist: HashShard(t.y) }
-        │ └─StreamShare { id: 1 }
-        │   └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-        └─StreamFilter { predicate: (sum(t.x) > 10:Int32) }
-          └─StreamProject { exprs: [t.y, sum(t.x)] }
-            └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), count] }
-              └─StreamExchange { dist: HashShard(t.y) }
-                └─StreamShare { id: 1 }
-                  └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamLocalityProvider { locality_columns: [t.y] }
+        │   └─StreamExchange { dist: HashShard(t.y) }
+        │     └─StreamShare { id: 1 }
+        │       └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamExchange { dist: HashShard(t.y) }
+          └─StreamLocalityProvider { locality_columns: [t.y] }
+            └─StreamExchange [no_shuffle] { dist: UpstreamHashShard(t.y) }
+              └─StreamFilter { predicate: (sum(t.x) > 10:Int32) }
+                └─StreamProject { exprs: [t.y, sum(t.x)] }
+                  └─StreamHashAgg { group_key: [t.y], aggs: [sum(t.x), count] }
+                    └─StreamLocalityProvider { locality_columns: [t.y] }
+                      └─StreamExchange { dist: HashShard(t.y) }
+                        └─StreamShare { id: 1 }
+                          └─StreamTableScan { table: t, columns: [t.x, t.y, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - id: named window with cte
   sql: |
     create table t(x int, y int, z int);
@@ -427,5 +453,6 @@
     StreamMaterialize { columns: [x, z, t.y(hidden)], stream_key: [t.y], pk_columns: [t.y], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x, t.z, t.y] }
       └─StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.y] }
-        └─StreamExchange { dist: HashShard(t.y) }
-          └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [t.y] }
+          └─StreamExchange { dist: HashShard(t.y) }
+            └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

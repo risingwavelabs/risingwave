@@ -14,8 +14,10 @@
     └─StreamProject { exprs: [$expr1, t1.k] }
       └─StreamAppendOnlyDedup { dedup_cols: [t1.k] }
         └─StreamExchange { dist: HashShard(t1.k) }
-          └─StreamProject { exprs: [(t1.k + t1.v) as $expr1, t1.k, t1._row_id] }
-            └─StreamTableScan { table: t1, columns: [t1.k, t1.v, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+          └─StreamLocalityProvider { locality_columns: [t1.k] }
+            └─StreamExchange { dist: HashShard(t1.k) }
+              └─StreamProject { exprs: [(t1.k + t1.v) as $expr1, t1.k, t1._row_id] }
+                └─StreamTableScan { table: t1, columns: [t1.k, t1.v, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
 - sql: |
     create table t2 (k int, v int);
     select distinct on (k) k + v as sum from t2;
@@ -31,8 +33,10 @@
     └─StreamProject { exprs: [$expr1, t2.k] }
       └─StreamGroupTopN { order: [], limit: 1, offset: 0, group_key: [t2.k] }
         └─StreamExchange { dist: HashShard(t2.k) }
-          └─StreamProject { exprs: [(t2.k + t2.v) as $expr1, t2.k, t2._row_id] }
-            └─StreamTableScan { table: t2, columns: [t2.k, t2.v, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+          └─StreamLocalityProvider { locality_columns: [t2.k] }
+            └─StreamExchange { dist: HashShard(t2.k) }
+              └─StreamProject { exprs: [(t2.k + t2.v) as $expr1, t2.k, t2._row_id] }
+                └─StreamTableScan { table: t2, columns: [t2.k, t2.v, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: distinct on order by uses original column name
   sql: |
     create table t (a int, b int);
@@ -47,8 +51,9 @@
     StreamMaterialize { columns: [x, b], stream_key: [x], pk_columns: [x, b], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.a, t.b] }
       └─StreamGroupTopN { order: [t.a ASC, t.b ASC], limit: 1, offset: 0, group_key: [t.a] }
-        └─StreamExchange { dist: HashShard(t.a) }
-          └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [t.a] }
+          └─StreamExchange { dist: HashShard(t.a) }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int, b int, c int);
     select distinct on (foo, b) a as foo, b from t;
@@ -61,7 +66,9 @@
     StreamMaterialize { columns: [foo, b, t._row_id(hidden)], stream_key: [foo, b], pk_columns: [foo, b], pk_conflict: NoCheck }
     └─StreamGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.a, t.b] }
       └─StreamExchange { dist: HashShard(t.a, t.b) }
-        └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [t.a, t.b] }
+          └─StreamExchange { dist: HashShard(t.a, t.b) }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t (a int, b int, c int);
     select distinct on (2) a as foo, b from t;
@@ -74,7 +81,9 @@
     StreamMaterialize { columns: [foo, b, t._row_id(hidden)], stream_key: [b], pk_columns: [b], pk_conflict: NoCheck }
     └─StreamGroupTopN { order: [], limit: 1, offset: 0, group_key: [t.b] }
       └─StreamExchange { dist: HashShard(t.b) }
-        └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [t.b] }
+          └─StreamExchange { dist: HashShard(t.b) }
+            └─StreamTableScan { table: t, columns: [t.a, t.b, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - sql: |
     create table t1(a int, b int, c int, k int);
     create table t2(k int);

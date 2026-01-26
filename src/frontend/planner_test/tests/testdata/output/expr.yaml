@@ -521,8 +521,9 @@
       └─StreamDynamicFilter { predicate: (max(t.v1) >= now), output_watermarks: [[max(t.v1)]], output: [t.v2, max(t.v1)], cleaned_by_watermark: true }
         ├─StreamProject { exprs: [t.v2, max(t.v1)] }
         │ └─StreamHashAgg { group_key: [t.v2], aggs: [max(t.v1), count] }
-        │   └─StreamExchange { dist: HashShard(t.v2) }
-        │     └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │   └─StreamLocalityProvider { locality_columns: [t.v2] }
+        │     └─StreamExchange { dist: HashShard(t.v2) }
+        │       └─StreamTableScan { table: t, columns: [t.v1, t.v2, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: Broadcast }
           └─StreamNow { output: [now] }
 - name: forbid now in group by for stream
