@@ -90,21 +90,24 @@ SELECT count(*) FROM mv_log;
 statement ok
 UPDATE t1 SET b = 11 WHERE a = 1;
 
-# Changelog should now have 12 entries: 6 original inserts + 3 deletes + 3 inserts
+# Changelog should now have 18 entries:
+# 6 original inserts
+# + 3 deletes & 3 inserts for DML UpdateDelete (-old, +null)
+# + 3 deletes & 3 inserts for DML UpdateInsert (-null, +new)
 query I
 SELECT count(*) FROM mv_log;
 ----
-12
+18
 
 # Multiple noop updates across multiple keys
 statement ok
 UPDATE t1 SET c3 = 111 WHERE a IN (1, 2, 3);
 
-# Changelog should still be 12 - noop updates should be eliminated
+# Changelog should still be 18 - noop updates should be eliminated
 query I
 SELECT count(*) FROM mv_log;
 ----
-12
+18
 
 # Cleanup
 statement ok
