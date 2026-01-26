@@ -654,6 +654,20 @@ impl IcebergCommon {
                         java_catalog_configs.insert("glue.id".to_owned(), glue_id.to_owned());
                     }
                 }
+                "jdbc" => {
+                    if let Some(iam_role_arn) = &self.s3_iam_role_arn {
+                        java_catalog_configs
+                            .insert("client.assume-role.arn".to_owned(), iam_role_arn.clone());
+                        java_catalog_configs.insert(
+                            "client.factory".to_owned(),
+                            "org.apache.iceberg.aws.AssumeRoleAwsClientFactory".to_owned(),
+                        );
+                        if let Some(region) = &self.s3_region {
+                            java_catalog_configs
+                                .insert("client.assume-role.region".to_owned(), region.clone());
+                        }
+                    }
+                }
                 _ => {}
             }
         }
