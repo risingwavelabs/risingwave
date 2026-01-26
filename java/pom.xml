@@ -332,6 +332,11 @@
                 <version>${aws.version}</version>
             </dependency>
             <dependency>
+                <groupId>software.amazon.awssdk</groupId>
+                <artifactId>kms</artifactId>
+                <version>${aws.version}</version>
+            </dependency>
+            <dependency>
                 <groupId>org.apache.hive</groupId>
                 <artifactId>hive-metastore</artifactId>
                 <version>4.1.0</version>
