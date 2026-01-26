@@ -5816,6 +5816,32 @@ dependencies = [
 ]
 
 [[package]]
+name = "gcp_auth"
+version = "0.12.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c2b3d0b409a042a380111af38136310839af8ac1a0917fb6e84515ed1e4bf3ee"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bytes",
+ "chrono",
+ "http 1.4.0",
+ "http-body-util",
+ "hyper 1.6.0",
+ "hyper-rustls 0.27.5",
+ "hyper-util",
+ "ring",
+ "rustls-pki-types",
+ "serde",
+ "serde_json",
+ "thiserror 2.0.17",
+ "tokio",
+ "tracing",
+ "tracing-futures",
+ "url",
+]
+
+[[package]]
 name = "genawaiter2"
 version = "0.100.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6530,7 +6556,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a#da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=b68266f5cefa66a4b9fa2a605c691c2172122ca7#b68266f5cefa66a4b9fa2a605c691c2172122ca7"
 dependencies = [
  "anyhow",
  "apache-avro 0.20.0",
@@ -6588,7 +6614,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a#da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=b68266f5cefa66a4b9fa2a605c691c2172122ca7#b68266f5cefa66a4b9fa2a605c691c2172122ca7"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6603,10 +6629,12 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a#da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=b68266f5cefa66a4b9fa2a605c691c2172122ca7#b68266f5cefa66a4b9fa2a605c691c2172122ca7"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "chrono",
+ "gcp_auth",
  "http 1.4.0",
  "iceberg",
  "itertools 0.13.0",
@@ -6623,7 +6651,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=084c897cda8f259640a331a5896c4c9b561bf7c9#084c897cda8f259640a331a5896c4c9b561bf7c9"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=a10f2d647f48da29caabebe5cc8ea9714adccf50#a10f2d647f48da29caabebe5cc8ea9714adccf50"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6653,7 +6681,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.7.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a#da0a554ac6de294e2a04d96fdf6dd4c535aa8d2a"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=b68266f5cefa66a4b9fa2a605c691c2172122ca7#b68266f5cefa66a4b9fa2a605c691c2172122ca7"
 dependencies = [
  "anyhow",
  "async-trait",
