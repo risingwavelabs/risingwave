@@ -22,7 +22,9 @@ use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
-use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::version::{
+    GroupDelta, HummockVersion, HummockVersionDelta, IntraLevelDelta,
+};
 use risingwave_hummock_sdk::{CompactionGroupId, FrontendHummockVersionDelta, HummockVersionId};
 use risingwave_pb::hummock::{
     CompatibilityVersion, GroupConstruct, HummockVersionDeltas, HummockVersionStats,
@@ -60,6 +62,11 @@ pub(super) struct HummockVersionTransaction<'a> {
 
     pre_applied_version: Option<(HummockVersion, Vec<HummockVersionDelta>)>,
     disable_apply_to_txn: bool,
+}
+
+pub(super) struct CommitSubLevel {
+    pub ssts: Vec<SstableInfo>,
+    pub vnode_partition_count: u32,
 }
 
 impl<'a> HummockVersionTransaction<'a> {
@@ -118,7 +125,7 @@ impl<'a> HummockVersionTransaction<'a> {
         &mut self,
         tables_to_commit: &HashMap<TableId, u64>,
         new_compaction_groups: Vec<CompactionGroup>,
-        group_id_to_sub_levels: BTreeMap<CompactionGroupId, Vec<Vec<SstableInfo>>>,
+        group_id_to_sub_levels: BTreeMap<CompactionGroupId, Vec<CommitSubLevel>>,
         new_table_ids: &HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
         change_log_delta: HashMap<TableId, ChangeLogDelta>,
@@ -151,6 +158,19 @@ impl<'a> HummockVersionTransaction<'a> {
 
         // Append SSTs to a new version.
         for (compaction_group_id, sub_levels) in group_id_to_sub_levels {
+            let mut next_l0_sub_level_id = new_version_delta
+                .latest_version()
+                .levels
+                .get(&compaction_group_id)
+                .and_then(|levels| {
+                    levels
+                        .l0
+                        .sub_levels
+                        .last()
+                        .map(|level| level.sub_level_id + 1)
+                })
+                .unwrap_or(1);
+
             let group_deltas = &mut new_version_delta
                 .group_deltas
                 .entry(compaction_group_id)
@@ -158,7 +178,15 @@ impl<'a> HummockVersionTransaction<'a> {
                 .group_deltas;
 
             for sub_level in sub_levels {
-                group_deltas.push(GroupDelta::NewL0SubLevel(sub_level));
+                group_deltas.push(GroupDelta::IntraLevel(IntraLevelDelta::new(
+                    0,
+                    next_l0_sub_level_id,
+                    HashSet::new(),
+                    sub_level.ssts,
+                    sub_level.vnode_partition_count,
+                    0,
+                )));
+                next_l0_sub_level_id += 1;
             }
         }
 
