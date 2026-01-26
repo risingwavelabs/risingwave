@@ -549,7 +549,20 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<GetTableCacheRefillStatsRequest>,
     ) -> Result<Response<GetTableCacheRefillStatsResponse>, Status> {
-        todo!()
+        let Some(context) = &self.table_cache_refill_context else {
+            return Ok(Response::new(GetTableCacheRefillStatsResponse {
+                stats: "{}".to_owned(),
+            }));
+        };
+
+        let stats = TableCacheRefillStats::from(&*context.read());
+        let json_value = serde_json::to_value(stats)
+            .map_err(|err| Status::internal(format!("failed to serialize stats: {err}")))?;
+        let json_string_pretty = serde_json::to_string_pretty(&json_value)
+            .map_err(|err| Status::internal(format!("failed to serialize stats: {err}")))?;
+        Ok(Response::new(GetTableCacheRefillStatsResponse {
+            stats: json_string_pretty,
+        }))
     }
 }
 #[derive(Debug, serde::Serialize, serde::Deserialize)]
@@ -569,7 +582,60 @@ struct TableCacheRefillInternalStats {
 
 impl From<&TableCacheRefillContext> for TableCacheRefillStats {
     fn from(context: &TableCacheRefillContext) -> Self {
-        Self {}
+        fn bitmap_to_vnodes(bitmap: &risingwave_common::bitmap::Bitmap) -> Vec<u16> {
+            bitmap.iter_ones().map(|idx| idx as u16).collect()
+        }
+
+        let streaming = context
+            .streaming
+            .iter()
+            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
+            .collect();
+
+        let serving = context
+            .serving
+            .iter()
+            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
+            .collect();
+
+        let policies = context
+            .policies
+            .iter()
+            .map(|(table_id, policy)| (table_id.as_raw_id(), policy.to_string()))
+            .collect();
+
+        let read_version_mapping = context.read_version_mapping.read();
+        let internal_streaming = read_version_mapping
+            .iter()
+            .map(|(table_id, mappings)| {
+                let vnodes = mappings
+                    .iter()
+                    .sorted_by_key(|(version, _)| **version)
+                    .map(|(_, read_version)| {
+                        let vnodes = read_version.read().vnodes();
+                        bitmap_to_vnodes(vnodes.as_ref())
+                    })
+                    .collect();
+                (table_id.as_raw_id(), vnodes)
+            })
+            .collect();
+
+        let serving_table_vnode_mapping = context.serving_table_vnode_mapping.read();
+        let internal_serving = serving_table_vnode_mapping
+            .iter()
+            .map(|(table_id, bitmap)| (table_id.as_raw_id(), bitmap_to_vnodes(bitmap)))
+            .collect();
+
+        Self {
+            streaming,
+            serving,
+            policies,
+            default_policy: context.default_policy.to_string(),
+            internal: TableCacheRefillInternalStats {
+                streaming: internal_streaming,
+                serving: internal_serving,
+            },
+        }
     }
 }
 

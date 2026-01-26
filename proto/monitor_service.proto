@@ -2,8 +2,6 @@ syntax = "proto3";
 
 package monitor_service;
 
-import "common.proto";
-
 option java_package = "com.risingwave.proto";
 option optimize_for = SPEED;
 
@@ -135,13 +133,11 @@ message GetProfileStatsResponse {
   map<uint32, uint64> dispatch_fragment_output_blocking_duration_ns = 4;
 }
 
-message GetTableCacheRefillStatsRequest {
-
-}
+message GetTableCacheRefillStatsRequest {}
 
 message GetTableCacheRefillStatsResponse {
-  // jsonb staistics
-  common.Buffer stats = 1;
+  // json statistics
+  string stats = 1;
 }
 
 service MonitorService {
