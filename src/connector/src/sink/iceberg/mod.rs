@@ -2925,7 +2925,6 @@ mod test {
                 adlsgen2_endpoint: None,
                 vended_credentials: None,
                 catalog_security: None,
-                gcp_credentials_path: None,
                 gcp_auth_scopes: None,
                 catalog_io_impl: None,
             },
@@ -3146,7 +3145,6 @@ mod test {
                 "x-goog-user-project=my-gcp-project",
             ),
             ("catalog.security", "google"),
-            ("gcp.credentials.path", "/path/to/service-account.json"),
             ("gcp.auth.scopes", "https://www.googleapis.com/auth/cloud-platform,https://www.googleapis.com/auth/bigquery"),
             ("database.name", "my_dataset"),
             ("table.name", "my_table"),
@@ -3164,10 +3162,6 @@ mod test {
         assert_eq!(
             iceberg_config.common.catalog_security.as_deref(),
             Some("google")
-        );
-        assert_eq!(
-            iceberg_config.common.gcp_credentials_path.as_deref(),
-            Some("/path/to/service-account.json")
         );
         assert_eq!(
             iceberg_config.common.gcp_auth_scopes.as_deref(),
@@ -3288,7 +3282,6 @@ mod test {
             ("warehouse.path", "gs://my-bucket/warehouse"),
             ("catalog.security", "google"),
             ("catalog.io_impl", "org.apache.iceberg.gcp.gcs.GCSFileIO"),
-            ("gcp.credentials.path", "/path/to/service-account.json"),
             ("database.name", "test_db"),
             ("table.name", "test_table"),
         ]

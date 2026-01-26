@@ -178,11 +178,6 @@ pub struct IcebergCommon {
     #[serde(rename = "catalog.security")]
     pub catalog_security: Option<String>,
 
-    /// Path to GCP credentials file for Google authentication.
-    /// Only applicable when `catalog.security` is set to `google`.
-    #[serde(rename = "gcp.credentials.path")]
-    pub gcp_credentials_path: Option<String>,
-
     /// OAuth-based scopes for Google authentication.
     /// Comma-separated list of OAuth-based scopes to request.
     /// Only applicable when `catalog.security` is set to `google`.
@@ -215,7 +210,6 @@ impl EnforceSecret for IcebergCommon {
         "catalog.credential",
         "catalog.token",
         "catalog.oauth2_server_uri",
-        "gcp.credentials.path",
         "adlsgen2.account_key",
         "adlsgen2.client_secret",
         "glue.access.key",
@@ -515,18 +509,11 @@ impl IcebergCommon {
                     if let Some(security) = &self.catalog_security {
                         match security.to_lowercase().as_str() {
                             "google" => {
-                                // Google AuthManager (Iceberg 1.10+) - uses Google ADC or service account
+                                // Google AuthManager (Iceberg 1.10+) - uses Google ADC
                                 java_catalog_configs.insert(
                                     "rest.auth.type".to_owned(),
                                     "org.apache.iceberg.gcp.auth.GoogleAuthManager".to_owned(),
                                 );
-                                // Set GCP credentials path if provided
-                                if let Some(gcp_credentials_path) = &self.gcp_credentials_path {
-                                    java_catalog_configs.insert(
-                                        "gcp.auth.credentials-path".to_owned(),
-                                        gcp_credentials_path.clone(),
-                                    );
-                                }
                                 // Set GCP auth scopes if provided
                                 if let Some(gcp_auth_scopes) = &self.gcp_auth_scopes {
                                     java_catalog_configs.insert(
