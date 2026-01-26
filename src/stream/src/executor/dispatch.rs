@@ -1024,8 +1024,11 @@ impl Dispatcher for HashDataDispatcher {
                     // 1. Hash routing (the row should go to this output)
                     // 2. Noop update elimination (the row was not eliminated as a noop)
                     let combined_vis = &vis_map & chunk_vis;
-                    let new_stream_chunk =
-                        StreamChunk::with_visibility(ops.clone(), chunk.columns().into(), combined_vis);
+                    let new_stream_chunk = StreamChunk::with_visibility(
+                        ops.clone(),
+                        chunk.columns().into(),
+                        combined_vis,
+                    );
                     if new_stream_chunk.cardinality() > 0 {
                         event!(
                             tracing::Level::TRACE,
