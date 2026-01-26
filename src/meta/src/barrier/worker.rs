@@ -962,14 +962,20 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         let mut recover_txs = vec![];
         let mut update_barrier_requests = vec![];
         pin_mut!(recovery_future);
+        let mut request_rx_closed = false;
         let new_state = loop {
             select! {
                 biased;
                 new_state = &mut recovery_future => {
                     break new_state.expect("Retry until recovery success.");
                 }
-                request = pin!(self.request_rx.recv()) => {
-                    match request.expect("end of request stream. meta node may be shutting down. trigger panic anyway") {
+                request = pin!(self.request_rx.recv()), if !request_rx_closed => {
+                    let Some(request) = request else {
+                        warn!("request rx channel closed during recovery");
+                        request_rx_closed = true;
+                        continue;
+                    };
+                    match request {
                         BarrierManagerRequest::GetBackfillProgress(tx) => {
                             let _ = tx.send(Err(anyhow!("cluster under recovery[{}]", recovery_reason).into()));
                         }
