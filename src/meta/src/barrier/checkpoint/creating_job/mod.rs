@@ -46,12 +46,14 @@ use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::Notifier;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
-use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
+use crate::barrier::rpc::{
+    ControlStreamManager, build_locality_fragment_state_table_mapping, to_partial_graph_id,
+};
 use crate::barrier::{BackfillOrderState, BackfillProgress, BarrierKind, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
-use crate::stream::build_actor_connector_splits;
+use crate::stream::{FragmentBackfillOrder, build_actor_connector_splits};
 
 #[derive(Debug)]
 pub(crate) struct CreatingJobInfo {
@@ -300,6 +302,7 @@ impl CreatingStreamingJobControl {
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         info: CreatingJobInfo,
+        backfill_order_state: BackfillOrderState,
         version_stat: &HummockVersionStats,
     ) -> MetaResult<(CreatingStreamingJobStatus, BarrierInfo)> {
         let mut prev_epoch_fake_physical_time = Epoch(committed_epoch).physical_time();
@@ -307,7 +310,7 @@ impl CreatingStreamingJobControl {
         let create_mview_tracker = CreateMviewProgressTracker::recover(
             job_id,
             &info.fragment_infos,
-            Default::default(),
+            backfill_order_state,
             version_stat,
         );
         let barrier_info = CreatingStreamingJobStatus::new_fake_barrier(
@@ -383,15 +386,16 @@ impl CreatingStreamingJobControl {
         committed_epoch: u64,
         upstream_barrier_info: &BarrierInfo,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+        backfill_order: FragmentBackfillOrder,
         fragment_relations: &FragmentDownstreamRelation,
         version_stat: &HummockVersionStats,
         new_actors: StreamJobActorsToCreate,
         initial_mutation: Mutation,
         control_stream_manager: &mut ControlStreamManager,
     ) -> MetaResult<Self> {
-        debug!(
+        info!(
             %job_id,
-            "recovered creating job"
+            "recovered creating snapshot backfill job"
         );
         let mut barrier_control =
             CreatingStreamingJobBarrierControl::new(job_id, snapshot_epoch, Some(committed_epoch));
@@ -441,6 +445,13 @@ impl CreatingStreamingJobControl {
         };
 
         let (status, first_barrier_info) = if committed_epoch < snapshot_epoch {
+            let locality_fragment_state_table_mapping =
+                build_locality_fragment_state_table_mapping(&info.fragment_infos);
+            let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
+                &backfill_order,
+                &info.fragment_infos,
+                locality_fragment_state_table_mapping,
+            );
             Self::recover_consuming_snapshot(
                 job_id,
                 upstream_table_log_epochs,
@@ -448,6 +459,7 @@ impl CreatingStreamingJobControl {
                 committed_epoch,
                 upstream_barrier_info,
                 info,
+                backfill_order_state,
                 version_stat,
             )?
         } else {
