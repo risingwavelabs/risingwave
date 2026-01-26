@@ -309,6 +309,15 @@ enum HummockCommands {
         #[clap(long)]
         data_cache_capacity_mb: Option<u64>,
     },
+    /// Table cache refill tools.
+    #[clap(subcommand)]
+    Refill(RefillCommands),
+}
+
+#[derive(Subcommand)]
+enum RefillCommands {
+    /// Collect table cache refill stats from compute nodes.
+    Stats,
 }
 
 #[derive(Subcommand)]
@@ -834,6 +843,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
                 data_cache_capacity_mb.map(|v| v * MIB),
             )
             .await?
+        }
+        Commands::Hummock(HummockCommands::Refill(RefillCommands::Stats)) => {
+            cmd_impl::hummock::refill_stats(context).await?
         }
         Commands::Table(TableCommands::Scan {
             mv_name,
