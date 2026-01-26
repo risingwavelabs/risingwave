@@ -11,6 +11,9 @@
 statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
+statement ok
+SET streaming_parallelism TO 1;
+
 # Create table t1 with an extra column (c3) that will be projected out
 statement ok
 CREATE TABLE t1 (
