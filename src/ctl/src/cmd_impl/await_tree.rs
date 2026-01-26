@@ -82,7 +82,7 @@ async fn bottleneck_detect_real_time(context: &CtlContext) -> anyhow::Result<Ana
             }
         };
 
-        let response = match client.await_tree(req.clone()).await {
+        let response = match client.await_tree(req).await {
             Ok(resp) => resp,
             Err(e) => {
                 errors.push((

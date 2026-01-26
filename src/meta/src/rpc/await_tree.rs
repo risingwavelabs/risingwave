@@ -90,7 +90,7 @@ pub async fn dump_worker_node_await_tree(
             }
         };
 
-        match client.await_tree(req.clone()).await {
+        match client.await_tree(req).await {
             Ok(result) => {
                 all.merge_other(result);
             }
