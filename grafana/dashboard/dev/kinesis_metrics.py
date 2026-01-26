@@ -7,7 +7,7 @@ def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
     return [
         outer_panels.row_collapsed(
-            "[Source] Kinesis Metrics",
+            "Kinesis Metrics",
             [
                 panels.timeseries_count(
                     "Kinesis Throughput Exceeded Error count",

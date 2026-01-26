@@ -66,7 +66,7 @@ use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, JoinType,
-    ModelTrait, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
+    NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
@@ -754,7 +754,7 @@ impl CatalogController {
                 .all(&txn)
                 .await?
                 .into_iter()
-                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap())));
+                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
             inner
                 .dropped_tables
                 .extend(dropped_tables.map(|t| (t.id, t)));
@@ -1124,7 +1124,7 @@ impl CatalogController {
             job_status: Set(JobStatus::Created),
             ..Default::default()
         };
-        job.update(txn).await?;
+        let streaming_job = Some(job.update(txn).await?);
 
         // notify frontend: job, internal tables.
         let internal_table_objs = Table::find()
@@ -1136,7 +1136,7 @@ impl CatalogController {
             .iter()
             .map(|(table, obj)| PbObject {
                 object_info: Some(PbObjectInfo::Table(
-                    ObjectModel(table.clone(), obj.clone().unwrap()).into(),
+                    ObjectModel(table.clone(), obj.clone().unwrap(), streaming_job.clone()).into(),
                 )),
             })
             .collect_vec();
@@ -1167,12 +1167,14 @@ impl CatalogController {
                         .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Source(
-                            ObjectModel(src, obj.unwrap()).into(),
+                            ObjectModel(src, obj.unwrap(), None).into(),
                         )),
                     });
                 }
                 objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
+                    object_info: Some(PbObjectInfo::Table(
+                        ObjectModel(table, obj.unwrap(), streaming_job.clone()).into(),
+                    )),
                 });
             }
             ObjectType::Sink => {
@@ -1188,7 +1190,9 @@ impl CatalogController {
                 // to avoid duplicate Add notifications (align with MV behavior).
                 notification_op = NotificationOperation::Update;
                 objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+                    object_info: Some(PbObjectInfo::Sink(
+                        ObjectModel(sink, obj.unwrap(), streaming_job.clone()).into(),
+                    )),
                 });
             }
             ObjectType::Index => {
@@ -1208,7 +1212,7 @@ impl CatalogController {
                         })?;
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
-                            ObjectModel(table, obj.unwrap()).into(),
+                            ObjectModel(table, obj.unwrap(), streaming_job.clone()).into(),
                         )),
                     });
                 }
@@ -1259,7 +1263,9 @@ impl CatalogController {
                 }
 
                 objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, obj.unwrap()).into())),
+                    object_info: Some(PbObjectInfo::Index(
+                        ObjectModel(index, obj.unwrap(), streaming_job.clone()).into(),
+                    )),
                 });
             }
             ObjectType::Source => {
@@ -1270,7 +1276,7 @@ impl CatalogController {
                     .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Source(
-                        ObjectModel(source, obj.unwrap()).into(),
+                        ObjectModel(source, obj.unwrap(), None).into(),
                     )),
                 });
             }
@@ -1499,9 +1505,12 @@ impl CatalogController {
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("object", original_job_id))?;
+                let streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+                    .one(txn)
+                    .await?;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Table(
-                        ObjectModel(table, table_obj.unwrap()).into(),
+                        ObjectModel(table, table_obj.unwrap(), streaming_job).into(),
                     )),
                 })
             }
@@ -1516,7 +1525,7 @@ impl CatalogController {
                         })?;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Source(
-                        ObjectModel(source, source_obj.unwrap()).into(),
+                        ObjectModel(source, source_obj.unwrap(), None).into(),
                     )),
                 })
             }
@@ -1543,13 +1552,15 @@ impl CatalogController {
                 }
                 .update(txn)
                 .await?;
-                let index_obj = index
-                    .find_related(Object)
+                let (index_obj, streaming_job) = Object::find_by_id(index.index_id)
+                    .find_also_related(streaming_job::Entity)
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("object", index.index_id))?;
                 objects.push(PbObject {
-                    object_info: Some(PbObjectInfo::Index(ObjectModel(index, index_obj).into())),
+                    object_info: Some(PbObjectInfo::Index(
+                        ObjectModel(index, index_obj, streaming_job).into(),
+                    )),
                 });
             }
         }
@@ -1568,6 +1579,10 @@ impl CatalogController {
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("sink", original_job_id))?;
+                let sink_streaming_job =
+                    streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+                        .one(txn)
+                        .await?;
                 let columns = ColumnCatalogArray::from(finish_sink_context.columns);
                 Sink::update(sink::ActiveModel {
                     sink_id: Set(finish_sink_context.original_sink_id),
@@ -1579,7 +1594,7 @@ impl CatalogController {
                 sink.columns = columns;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Sink(
-                        ObjectModel(sink, sink_obj.unwrap()).into(),
+                        ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job.clone()).into(),
                     )),
                 });
                 if let Some((log_store_table_id, new_log_store_table_columns)) =
@@ -1602,7 +1617,8 @@ impl CatalogController {
                     table.columns = new_log_store_table_columns;
                     objects.push(PbObject {
                         object_info: Some(PbObjectInfo::Table(
-                            ObjectModel(table, table_obj.unwrap()).into(),
+                            ObjectModel(table, table_obj.unwrap(), sink_streaming_job.clone())
+                                .into(),
                         )),
                     });
                 }
@@ -1765,7 +1781,7 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap()).into());
+        let relation_info = PbObjectInfo::Source(ObjectModel(source, obj.unwrap(), None).into());
         let _version = self
             .notify_frontend(
                 NotificationOperation::Update,
@@ -1911,10 +1927,6 @@ impl CatalogController {
                             found = true;
                         }
                         PbNodeBody::SourceBackfill(node) => {
-                            node.rate_limit = rate_limit;
-                            found = true;
-                        }
-                        PbNodeBody::Sink(node) => {
                             node.rate_limit = rate_limit;
                             found = true;
                         }
@@ -2205,7 +2217,7 @@ impl CatalogController {
             })?;
         to_update_objs.push(PbObject {
             object_info: Some(PbObjectInfo::Source(
-                ObjectModel(source, obj.unwrap()).into(),
+                ObjectModel(source, obj.unwrap(), None).into(),
             )),
         });
 
@@ -2215,8 +2227,13 @@ impl CatalogController {
                 .one(&txn)
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("table", associate_table_id))?;
+            let streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+                .one(&txn)
+                .await?;
             to_update_objs.push(PbObject {
-                object_info: Some(PbObjectInfo::Table(ObjectModel(table, obj.unwrap()).into())),
+                object_info: Some(PbObjectInfo::Table(
+                    ObjectModel(table, obj.unwrap(), streaming_job).into(),
+                )),
             });
         }
 
@@ -2275,9 +2292,14 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+        let streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+            .one(&txn)
+            .await?;
         txn.commit().await?;
         let relation_infos = vec![PbObject {
-            object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+            object_info: Some(PbObjectInfo::Sink(
+                ObjectModel(sink, obj.unwrap(), streaming_job).into(),
+            )),
         }];
 
         let _version = self
@@ -2364,6 +2386,9 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
+        let sink_streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+            .one(&txn)
+            .await?;
         let (source, source_obj) = Source::find_by_id(source_id)
             .find_also_related(Object)
             .one(&txn)
@@ -2376,21 +2401,24 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Table.as_str(), table_id))?;
+        let table_streaming_job = streaming_job::Entity::find_by_id(table.job_id())
+            .one(&txn)
+            .await?;
         txn.commit().await?;
         let relation_infos = vec![
             PbObject {
                 object_info: Some(PbObjectInfo::Sink(
-                    ObjectModel(sink, sink_obj.unwrap()).into(),
+                    ObjectModel(sink, sink_obj.unwrap(), sink_streaming_job).into(),
                 )),
             },
             PbObject {
                 object_info: Some(PbObjectInfo::Source(
-                    ObjectModel(source, source_obj.unwrap()).into(),
+                    ObjectModel(source, source_obj.unwrap(), None).into(),
                 )),
             },
             PbObject {
                 object_info: Some(PbObjectInfo::Table(
-                    ObjectModel(table, table_obj.unwrap()).into(),
+                    ObjectModel(table, table_obj.unwrap(), table_streaming_job).into(),
                 )),
             },
         ];
@@ -2780,7 +2808,7 @@ impl CatalogController {
             })?;
         updated_objects.push(PbObject {
             object_info: Some(PbObjectInfo::Connection(
-                ObjectModel(connection, obj.unwrap()).into(),
+                ObjectModel(connection, obj.unwrap(), None).into(),
             )),
         });
 
@@ -2795,7 +2823,7 @@ impl CatalogController {
                 })?;
             updated_objects.push(PbObject {
                 object_info: Some(PbObjectInfo::Source(
-                    ObjectModel(source, obj.unwrap()).into(),
+                    ObjectModel(source, obj.unwrap(), None).into(),
                 )),
             });
         }
@@ -2809,8 +2837,13 @@ impl CatalogController {
                 .ok_or_else(|| {
                     MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), *sink_id)
                 })?;
+            let streaming_job = streaming_job::Entity::find_by_id(sink.sink_id.as_job_id())
+                .one(&txn)
+                .await?;
             updated_objects.push(PbObject {
-                object_info: Some(PbObjectInfo::Sink(ObjectModel(sink, obj.unwrap()).into())),
+                object_info: Some(PbObjectInfo::Sink(
+                    ObjectModel(sink, obj.unwrap(), streaming_job).into(),
+                )),
             });
         }
 

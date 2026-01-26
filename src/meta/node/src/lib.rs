@@ -361,6 +361,7 @@ pub fn start(
             backend,
             max_heartbeat_interval,
             config.meta.meta_leader_lease_secs,
+            config.server.clone(),
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
                 disable_automatic_parallelism_control: config

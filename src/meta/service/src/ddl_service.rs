@@ -48,6 +48,7 @@ use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::event_log;
 use risingwave_pb::meta::table_parallelism::{FixedParallelism, Parallelism};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
@@ -1666,6 +1667,10 @@ impl DdlService for DdlServiceImpl {
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(SourceId::new(source_id), source_rate_limit)
                 .await?;
+            let throttle_config = ThrottleConfig {
+                throttle_type: risingwave_pb::common::ThrottleType::Source.into(),
+                rate_limit: source_rate_limit,
+            };
             let _ = self
                 .barrier_scheduler
                 .run_command(
@@ -1674,7 +1679,7 @@ impl DdlService for DdlServiceImpl {
                         jobs,
                         config: fragments
                             .into_iter()
-                            .map(|fragment_id| (fragment_id, source_rate_limit))
+                            .map(|fragment_id| (fragment_id, throttle_config))
                             .collect(),
                     },
                 )

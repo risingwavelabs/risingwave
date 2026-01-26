@@ -111,11 +111,12 @@ message PauseMutation {}
 message ResumeMutation {}
 
 message ThrottleMutation {
-  message RateLimit {
+  message ThrottleConfig {
     optional uint32 rate_limit = 1;
+    common.ThrottleType throttle_type = 2;
   }
 
-  map<uint32, RateLimit> fragment_throttle = 1;
+  map<uint32, ThrottleConfig> fragment_throttle = 1;
 }
 
 message SubscriptionUpstreamInfo {
@@ -174,7 +175,7 @@ message BarrierMutation {
     PauseMutation pause = 7;
     // Resume the dataflow of the whole streaming graph, only used for scaling.
     ResumeMutation resume = 8;
-    // Throttle specific source exec or backfill exec.
+    // Alter the RateLimit of some specific executors
     ThrottleMutation throttle = 10;
     // Drop subscription on mv
     DropSubscriptionsMutation drop_subscriptions = 12;

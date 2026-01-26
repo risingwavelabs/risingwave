@@ -14,7 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
-use std::fmt::Formatter;
+use std::fmt::{Display, Formatter};
 
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
@@ -24,13 +24,11 @@ use risingwave_common::id::{JobId, SourceId};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::catalog::CreateType;
-use risingwave_pb::catalog::table::PbTableType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
 use risingwave_pb::plan_common::PbField;
@@ -42,8 +40,7 @@ use risingwave_pb::stream_plan::barrier::BarrierKind as PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::throttle_mutation::RateLimit;
+use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::*;
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
@@ -60,7 +57,7 @@ use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
-use crate::barrier::utils::collect_resp_info;
+use crate::barrier::utils::{collect_new_vector_index_info, collect_resp_info};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
 use crate::manager::{StreamingJob, StreamingJobType};
@@ -286,7 +283,7 @@ pub enum CreateStreamingJobType {
 
 /// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
 /// it will [build different barriers to send](Self::to_mutation),
-/// and may [do different stuffs after the barrier is collected](CommandContext::post_collect).
+/// and may [do different stuffs after the barrier is collected](PostCollectCommand::post_collect).
 // FIXME: this enum is significantly large on stack, box it
 #[derive(Debug)]
 pub enum Command {
@@ -358,10 +355,10 @@ pub enum Command {
     SourceChangeSplit(SplitState),
 
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
-    /// the `rate_limit` of `FlowControl` Executor after `StreamScan` or Source.
+    /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
     Throttle {
         jobs: HashSet<JobId>,
-        config: HashMap<FragmentId, Option<u32>>,
+        config: HashMap<FragmentId, ThrottleConfig>,
     },
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
@@ -656,6 +653,110 @@ impl Command {
     }
 }
 
+#[derive(Debug)]
+pub enum PostCollectCommand {
+    Command(String),
+    DropStreamingJobs {
+        streaming_job_ids: HashSet<JobId>,
+        unregistered_state_table_ids: HashSet<TableId>,
+    },
+    CreateStreamingJob {
+        info: CreateStreamingJobCommandInfo,
+        job_type: CreateStreamingJobType,
+        cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
+    },
+    RescheduleFragment {
+        reschedules: HashMap<FragmentId, Reschedule>,
+    },
+    ReplaceStreamJob(ReplaceStreamJobPlan),
+    SourceChangeSplit {
+        split_assignment: SplitAssignment,
+    },
+    CreateSubscription {
+        subscription_id: SubscriptionId,
+    },
+    ConnectorPropsChange(ConnectorPropsChange),
+}
+
+impl PostCollectCommand {
+    pub fn barrier() -> Self {
+        PostCollectCommand::Command("barrier".to_owned())
+    }
+
+    pub fn command_name(&self) -> &str {
+        match self {
+            PostCollectCommand::Command(name) => name.as_str(),
+            PostCollectCommand::DropStreamingJobs { .. } => "DropStreamingJobs",
+            PostCollectCommand::CreateStreamingJob { .. } => "CreateStreamingJob",
+            PostCollectCommand::RescheduleFragment { .. } => "RescheduleFragment",
+            PostCollectCommand::ReplaceStreamJob(_) => "ReplaceStreamJob",
+            PostCollectCommand::SourceChangeSplit { .. } => "SourceChangeSplit",
+            PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
+            PostCollectCommand::ConnectorPropsChange(_) => "ConnectorPropsChange",
+        }
+    }
+}
+
+impl Display for PostCollectCommand {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.command_name())
+    }
+}
+
+impl Command {
+    pub(super) fn into_post_collect(self) -> PostCollectCommand {
+        match self {
+            Command::DropStreamingJobs {
+                streaming_job_ids,
+                unregistered_state_table_ids,
+                ..
+            } => PostCollectCommand::DropStreamingJobs {
+                streaming_job_ids,
+                unregistered_state_table_ids,
+            },
+            Command::CreateStreamingJob {
+                info,
+                job_type,
+                cross_db_snapshot_backfill_info,
+            } => match job_type {
+                CreateStreamingJobType::SnapshotBackfill(_) => PostCollectCommand::barrier(),
+                job_type => PostCollectCommand::CreateStreamingJob {
+                    info,
+                    job_type,
+                    cross_db_snapshot_backfill_info,
+                },
+            },
+            Command::RescheduleFragment { reschedules, .. } => {
+                PostCollectCommand::RescheduleFragment { reschedules }
+            }
+            Command::ReplaceStreamJob(plan) => PostCollectCommand::ReplaceStreamJob(plan),
+            Command::SourceChangeSplit(SplitState { split_assignment }) => {
+                PostCollectCommand::SourceChangeSplit { split_assignment }
+            }
+            Command::CreateSubscription {
+                subscription_id, ..
+            } => PostCollectCommand::CreateSubscription { subscription_id },
+            Command::ConnectorPropsChange(connector_props_change) => {
+                PostCollectCommand::ConnectorPropsChange(connector_props_change)
+            }
+            Command::Flush => PostCollectCommand::Command("Flush".to_owned()),
+            Command::Pause => PostCollectCommand::Command("Pause".to_owned()),
+            Command::Resume => PostCollectCommand::Command("Resume".to_owned()),
+            Command::Throttle { .. } => PostCollectCommand::Command("Throttle".to_owned()),
+            Command::DropSubscription { .. } => {
+                PostCollectCommand::Command("DropSubscription".to_owned())
+            }
+            Command::Refresh { .. } => PostCollectCommand::Command("Refresh".to_owned()),
+            Command::ListFinish { .. } => PostCollectCommand::Command("ListFinish".to_owned()),
+            Command::LoadFinish { .. } => PostCollectCommand::Command("LoadFinish".to_owned()),
+            Command::ResetSource { .. } => PostCollectCommand::Command("ResetSource".to_owned()),
+            Command::ResumeBackfill { .. } => {
+                PostCollectCommand::Command("ResumeBackfill".to_owned())
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum BarrierKind {
     Initial,
@@ -699,7 +800,7 @@ pub(super) struct CommandContext {
 
     pub(super) table_ids_to_commit: HashSet<TableId>,
 
-    pub(super) command: Option<Command>,
+    pub(super) command: PostCollectCommand,
 
     /// The tracing span of this command.
     ///
@@ -713,24 +814,8 @@ impl std::fmt::Debug for CommandContext {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("CommandContext")
             .field("barrier_info", &self.barrier_info)
-            .field("command", &self.command)
+            .field("command", &self.command.command_name())
             .finish()
-    }
-}
-
-impl std::fmt::Display for CommandContext {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "prev_epoch={}, curr_epoch={}, kind={}",
-            self.barrier_info.prev_epoch(),
-            self.barrier_info.curr_epoch(),
-            self.barrier_info.kind.as_str_name()
-        )?;
-        if let Some(command) = &self.command {
-            write!(f, ", command={}", command)?;
-        }
-        Ok(())
     }
 }
 
@@ -739,7 +824,7 @@ impl CommandContext {
         barrier_info: BarrierInfo,
         mv_subscription_max_retention: HashMap<TableId, u64>,
         table_ids_to_commit: HashSet<TableId>,
-        command: Option<Command>,
+        command: PostCollectCommand,
         span: tracing::Span,
     ) -> Self {
         Self {
@@ -782,9 +867,11 @@ impl CommandContext {
         ) = collect_resp_info(resps);
 
         let new_table_fragment_infos =
-            if let Some(Command::CreateStreamingJob { info, job_type, .. }) = &self.command
-                && !matches!(job_type, CreateStreamingJobType::SnapshotBackfill(_))
-            {
+            if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } = &self.command {
+                assert!(!matches!(
+                    job_type,
+                    CreateStreamingJobType::SnapshotBackfill(_)
+                ));
                 let table_fragments = &info.stream_job_fragments;
                 let mut table_ids: HashSet<_> =
                     table_fragments.internal_table_ids().into_iter().collect();
@@ -846,27 +933,17 @@ impl CommandContext {
                 .try_insert(table_id, VectorIndexDelta::Adds(vector_index_adds))
                 .expect("non-duplicate");
         }
-        if let Some(Command::CreateStreamingJob { info: job_info, .. }) = &self.command {
-            for fragment in job_info.stream_job_fragments.fragments.values() {
-                visit_stream_node_cont(&fragment.nodes, |node| {
-                    match node.node_body.as_ref().unwrap() {
-                        NodeBody::VectorIndexWrite(vector_index_write) => {
-                            let index_table = vector_index_write.table.as_ref().unwrap();
-                            assert_eq!(index_table.table_type, PbTableType::VectorIndex as i32);
-                            info.vector_index_delta
-                                .try_insert(
-                                    index_table.id,
-                                    VectorIndexDelta::Init(PbVectorIndexInit {
-                                        info: Some(index_table.vector_index_info.unwrap()),
-                                    }),
-                                )
-                                .expect("non-duplicate");
-                            false
-                        }
-                        _ => true,
-                    }
-                })
-            }
+        if let PostCollectCommand::CreateStreamingJob { info: job_info, .. } = &self.command
+            && let Some(index_table) = collect_new_vector_index_info(job_info)
+        {
+            info.vector_index_delta
+                .try_insert(
+                    index_table.id,
+                    VectorIndexDelta::Init(PbVectorIndexInit {
+                        info: Some(index_table.vector_index_info.unwrap()),
+                    }),
+                )
+                .expect("non-duplicate");
         }
         info.truncate_tables.extend(truncate_tables);
     }
@@ -921,13 +998,9 @@ impl Command {
             }
 
             Command::Throttle { config, .. } => {
-                let mut fragment_to_apply = HashMap::new();
-                for (fragment_id, limit) in config {
-                    fragment_to_apply.insert(*fragment_id, RateLimit { rate_limit: *limit });
-                }
-
+                let config = config.clone();
                 Some(Mutation::Throttle(ThrottleMutation {
-                    fragment_throttle: fragment_to_apply,
+                    fragment_throttle: config,
                 }))
             }
 
@@ -1550,18 +1623,6 @@ impl Command {
                 .collect(),
             ..Default::default()
         }))
-    }
-
-    /// For `CancelStreamingJob`, returns the table id of the target table.
-    pub fn jobs_to_drop(&self) -> impl Iterator<Item = JobId> + '_ {
-        match self {
-            Command::DropStreamingJobs {
-                streaming_job_ids, ..
-            } => Some(streaming_job_ids.iter().cloned()),
-            _ => None,
-        }
-        .into_iter()
-        .flatten()
     }
 }
 
