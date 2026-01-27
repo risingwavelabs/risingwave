@@ -121,6 +121,7 @@ pub(crate) enum BarrierManagerRequest {
     GetCdcProgress(Sender<MetaResult<HashMap<JobId, CdcProgress>>>),
     AdhocRecovery(Sender<()>),
     UpdateDatabaseBarrier(UpdateDatabaseBarrierRequest),
+    MayHaveSnapshotBackfillingJob(Sender<bool>),
 }
 
 #[derive(Debug)]

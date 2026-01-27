@@ -1045,7 +1045,7 @@ impl UploaderData {
                         .expect("should exist");
                     let (unflushed_payload, table_watermarks, task_ids, table_unsync_epochs) =
                         table_data.sync(epoch);
-                    assert_eq!(table_unsync_epochs, epochs);
+                    assert_eq!(table_unsync_epochs, epochs, "invalid table_id {table_id}");
                     for (instance_id, payload) in unflushed_payload {
                         if !payload.is_empty() {
                             flush_payload.insert(instance_id, payload);
