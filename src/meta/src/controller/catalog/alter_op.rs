@@ -1070,6 +1070,13 @@ impl CatalogController {
             .all(&inner.db)
             .await?;
 
+        tracing::debug!(
+            ?cache_refill_policy,
+            ?job_id,
+            ?internal_tables,
+            "notify cache refill policy for tables"
+        );
+
         let table_refill_policies = PbTableCacheRefillPolicies {
             policies: internal_tables
                 .into_iter()

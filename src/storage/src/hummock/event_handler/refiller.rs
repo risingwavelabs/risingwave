@@ -464,6 +464,8 @@ impl CacheRefiller {
         table_cache_refill_context: &mut RwLockWriteGuard<'_, TableCacheRefillContext>,
         table_id: TableId,
     ) {
+        tracing::debug!(?table_id, "update table cache refill vnodes for table");
+
         let policy = table_cache_refill_context
             .policies
             .get(&table_id)
