@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 use std::sync::atomic::Ordering::SeqCst;
 
-use await_tree::SpanExt;
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
@@ -171,13 +171,18 @@ where
             if let Some(progress) = &self.task_progress {
                 progress.inc_num_pending_write_io()
             }
-            let builder = self.builder_factory.open_builder().await?;
+            let builder = self
+                .builder_factory
+                .open_builder()
+                .instrument_await("open_builder".verbose())
+                .await?;
             self.current_builder = Some(builder);
         }
 
         let builder = self.current_builder.as_mut().unwrap();
         builder
             .add_raw_block(buf, filter_data, smallest_key, largest_key, block_meta)
+            .instrument_await("add_raw_block".verbose())
             .await
     }
 
@@ -212,19 +217,28 @@ where
         }
 
         if need_seal_current {
-            self.seal_current().await?;
+            self.seal_current()
+                .instrument_await("seal_current".verbose())
+                .await?;
         }
 
         if self.current_builder.is_none() {
             if let Some(progress) = &self.task_progress {
                 progress.inc_num_pending_write_io();
             }
-            let builder = self.builder_factory.open_builder().await?;
+            let builder = self
+                .builder_factory
+                .open_builder()
+                .instrument_await("open_builder".verbose())
+                .await?;
             self.current_builder = Some(builder);
         }
 
         let builder = self.current_builder.as_mut().unwrap();
-        builder.add(full_key, value).await
+        builder
+            .add(full_key, value)
+            .instrument_await("builder_add".verbose())
+            .await
     }
 
     pub fn check_switch_builder(&mut self, user_key: &UserKey<&[u8]>) -> bool {
