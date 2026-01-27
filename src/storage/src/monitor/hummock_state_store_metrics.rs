@@ -84,6 +84,8 @@ pub struct HummockStateStoreMetrics {
     // memory
     pub per_table_imm_size: RelabeledGuardedIntGaugeVec,
     pub per_table_imm_count: RelabeledGuardedIntGaugeVec,
+    pub per_fragment_imm_size: RelabeledGuardedIntGaugeVec,
+    pub per_fragment_imm_count: RelabeledGuardedIntGaugeVec,
     pub mem_table_spill_counts: RelabeledGuardedIntCounterVec,
     pub old_value_size: RelabeledGuardedIntGaugeVec,
 
@@ -465,6 +467,34 @@ impl HummockStateStoreMetrics {
             metric_level,
         );
 
+        let per_fragment_imm_size = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_per_fragment_imm_size",
+            "Total imm size per fragment",
+            &["fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let per_fragment_imm_size = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Info,
+            per_fragment_imm_size,
+            metric_level,
+        );
+
+        let per_fragment_imm_count = register_guarded_int_gauge_vec_with_registry!(
+            "state_store_per_fragment_imm_count",
+            "Total imm count per fragment",
+            &["fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let per_fragment_imm_count = RelabeledGuardedIntGaugeVec::with_metric_level(
+            MetricLevel::Info,
+            per_fragment_imm_count,
+            metric_level,
+        );
+
         let read_req_bloom_filter_positive_counts = register_guarded_int_counter_vec_with_registry!(
             "state_store_read_req_bloom_filter_positive_counts",
             "Total number of read request with at least one SST bloom filter check returns positive",
@@ -612,6 +642,8 @@ impl HummockStateStoreMetrics {
             uploader_per_table_imm_count,
             per_table_imm_size,
             per_table_imm_count,
+            per_fragment_imm_size,
+            per_fragment_imm_count,
             mem_table_spill_counts,
             old_value_size,
 
