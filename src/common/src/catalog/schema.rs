@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::ops::Index;
-
+use educe::Educe;
 use risingwave_pb::plan_common::{PbColumnDesc, PbField};
 
 use super::ColumnDesc;
@@ -21,10 +21,13 @@ use crate::array::ArrayBuilderImpl;
 use crate::types::{DataType, StructType};
 use crate::util::iter_util::ZipEqFast;
 
-/// The field in the schema of the executor's return data
-#[derive(Clone, PartialEq, Eq, Hash)]
+
+#[derive(Clone, Educe)]
+#[educe(PartialEq, Eq, Hash)]
 pub struct Field {
     pub data_type: DataType,
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
     pub name: String,
 }
 
