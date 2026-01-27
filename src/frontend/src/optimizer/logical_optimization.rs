@@ -837,7 +837,9 @@ impl LogicalOptimizer {
             ctx.trace(plan.explain_to_string());
         }
 
-        plan = plan.optimize_by_rules(&BATCH_MV_SELECTION)?;
+        if ctx.session_ctx().config().enable_mv_selection() {
+            plan = plan.optimize_by_rules(&BATCH_MV_SELECTION)?;
+        }
 
         // Inline `NOW()` and `PROCTIME()`, only for batch queries.
         plan = Self::inline_now_proc_time(plan, &ctx);

@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::ops::Index;
+
 use educe::Educe;
 use risingwave_pb::plan_common::{PbColumnDesc, PbField};
 
@@ -20,7 +21,6 @@ use super::ColumnDesc;
 use crate::array::ArrayBuilderImpl;
 use crate::types::{DataType, StructType};
 use crate::util::iter_util::ZipEqFast;
-
 
 #[derive(Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]

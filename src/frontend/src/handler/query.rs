@@ -325,7 +325,9 @@ fn gen_batch_query_plan(
     };
 
     let logical = planner.plan(bound)?;
-    register_batch_mview_candidates(session, &context);
+    if context.session_ctx().config().enable_mv_selection() {
+        register_batch_mview_candidates(session, &context);
+    }
     let schema = logical.schema();
     let optimized_logical = logical.gen_optimized_logical_plan_for_batch()?;
 

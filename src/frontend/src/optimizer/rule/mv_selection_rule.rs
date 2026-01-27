@@ -12,9 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use crate::optimizer::PlanRef;
 use crate::optimizer::plan_node::{Logical, LogicalPlanRef, LogicalScan};
 use crate::optimizer::rule::{BoxedRule, Rule};
-use crate::optimizer::PlanRef;
 
 pub struct MvSelectionRule;
 

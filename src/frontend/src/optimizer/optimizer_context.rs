@@ -22,14 +22,13 @@ use std::sync::Arc;
 use risingwave_sqlparser::ast::{ExplainFormat, ExplainOptions, ExplainType};
 
 use super::property::WatermarkGroupId;
-use crate::Explain;
 use crate::expr::{CorrelatedId, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::optimizer::LogicalPlanRef;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
-use crate::TableCatalog;
+use crate::{Explain, TableCatalog};
 
 const RESERVED_ID_NUM: u16 = 10000;
 
@@ -273,9 +272,7 @@ impl OptimizerContext {
             .push(MaterializedViewCandidate { plan, table });
     }
 
-    pub fn batch_mview_candidates(
-        &self,
-    ) -> std::cell::Ref<'_, Vec<MaterializedViewCandidate>> {
+    pub fn batch_mview_candidates(&self) -> std::cell::Ref<'_, Vec<MaterializedViewCandidate>> {
         self.batch_mview_candidates.borrow()
     }
 
