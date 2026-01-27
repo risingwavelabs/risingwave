@@ -724,6 +724,30 @@ IcebergConfig:
     required: false
     default: Default::default
     allow_alter_on_fly: true
+  - name: target_file_size_mb
+    field_type: u64
+    comments: |-
+      Target file size in MB for sink writes.
+      Controls the target size of Parquet data files written by the sink.
+      Default is 512 MB (Iceberg default).
+    required: false
+    default: Default::default
+  - name: write_parquet_compression
+    field_type: String
+    comments: |-
+      Parquet compression codec to use for data files.
+      Supported values: uncompressed, snappy, gzip, lzo, brotli, lz4, zstd.
+      Default is snappy.
+    required: false
+    default: Default::default
+  - name: write_parquet_max_row_group_rows
+    field_type: usize
+    comments: |-
+      Maximum number of rows in a Parquet row group.
+      Controls the row group size in Parquet files.
+      Default is 122880.
+    required: false
+    default: Default::default
 KafkaConfig:
   fields:
   - name: topic
