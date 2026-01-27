@@ -17,6 +17,7 @@ use foyer::Hint;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::cache::CachePriority;
 use risingwave_common::catalog::{TableId, TableOption};
+use risingwave_common::id::FragmentId;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_hummock_sdk::{HummockReadEpoch, HummockVersionId};
 use risingwave_pb::common::PbBuffer;
@@ -98,6 +99,21 @@ impl From<TracedTableId> for TableId {
 }
 
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
+pub struct TracedFragmentId {
+    pub fragment_id: u32,
+}
+impl From<FragmentId> for TracedFragmentId {
+    fn from(value: FragmentId) -> Self {
+        Self { fragment_id: value.as_raw_id() }
+    }
+}
+impl From<TracedFragmentId> for FragmentId {
+    fn from(value: TracedFragmentId) -> Self {
+        FragmentId::new(value.fragment_id)
+    }
+}
+
+#[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedReadOptions {
     pub prefix_hint: Option<TracedBytes>,
     pub prefetch_options: TracedPrefetchOptions,
@@ -156,6 +172,7 @@ pub enum TracedOpConsistencyLevel {
 #[derive(Encode, Decode, PartialEq, Eq, Debug, Clone)]
 pub struct TracedNewLocalOptions {
     pub table_id: TracedTableId,
+    pub fragment_id: TracedFragmentId,
     pub op_consistency_level: TracedOpConsistencyLevel,
     pub table_option: TracedTableOption,
     pub is_replicated: bool,
@@ -170,11 +187,12 @@ pub struct TracedTryWaitEpochOptions {
 
 #[cfg(test)]
 impl TracedNewLocalOptions {
-    pub(crate) fn for_test(table_id: u32) -> Self {
+    pub(crate) fn for_test(table_id: u32, fragment_id: u32) -> Self {
         use risingwave_common::hash::VirtualNode;
 
         Self {
             table_id: TracedTableId { table_id },
+            fragment_id: TracedFragmentId { fragment_id },
             op_consistency_level: TracedOpConsistencyLevel::Inconsistent,
             table_option: TracedTableOption {
                 retention_seconds: None,
