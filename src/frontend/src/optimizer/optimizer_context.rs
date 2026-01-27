@@ -29,6 +29,7 @@ use crate::optimizer::LogicalPlanRef;
 use crate::optimizer::plan_node::PlanNodeId;
 use crate::session::SessionImpl;
 use crate::utils::{OverwriteOptions, WithOptions};
+use crate::TableCatalog;
 
 const RESERVED_ID_NUM: u16 = 10000;
 
@@ -58,6 +59,8 @@ pub struct OptimizerContext {
     /// Mapping from iceberg table identifier to current snapshot id.
     /// Used to keep same snapshot id when multiple scans from the same iceberg table exist in a query.
     iceberg_snapshot_id_map: RefCell<HashMap<String, Option<i64>>>,
+    /// Batch materialized view candidates for exact-match rewriting.
+    batch_mview_candidates: RefCell<Vec<MaterializedViewCandidate>>,
 
     /// Last assigned plan node ID.
     last_plan_node_id: Cell<i32>,
@@ -69,6 +72,12 @@ pub struct OptimizerContext {
     last_watermark_group_id: Cell<u32>,
 
     _phantom: PhantomUnsend,
+}
+
+#[derive(Clone, Debug)]
+pub struct MaterializedViewCandidate {
+    pub plan: LogicalPlanRef,
+    pub table: Arc<TableCatalog>,
 }
 
 pub(in crate::optimizer) struct LastAssignedIds {
@@ -105,6 +114,7 @@ impl OptimizerContext {
             total_rule_applied: RefCell::new(0),
             overwrite_options,
             iceberg_snapshot_id_map: RefCell::new(HashMap::new()),
+            batch_mview_candidates: RefCell::new(Vec::new()),
 
             last_plan_node_id: Cell::new(RESERVED_ID_NUM.into()),
             last_correlated_id: Cell::new(0),
@@ -131,6 +141,7 @@ impl OptimizerContext {
             total_rule_applied: RefCell::new(0),
             overwrite_options: OverwriteOptions::default(),
             iceberg_snapshot_id_map: RefCell::new(HashMap::new()),
+            batch_mview_candidates: RefCell::new(Vec::new()),
 
             last_plan_node_id: Cell::new(0),
             last_correlated_id: Cell::new(0),
@@ -254,6 +265,18 @@ impl OptimizerContext {
 
     pub fn overwrite_options(&self) -> &OverwriteOptions {
         &self.overwrite_options
+    }
+
+    pub fn add_batch_mview_candidate(&self, table: Arc<TableCatalog>, plan: LogicalPlanRef) {
+        self.batch_mview_candidates
+            .borrow_mut()
+            .push(MaterializedViewCandidate { plan, table });
+    }
+
+    pub fn batch_mview_candidates(
+        &self,
+    ) -> std::cell::Ref<'_, Vec<MaterializedViewCandidate>> {
+        self.batch_mview_candidates.borrow()
     }
 
     pub fn session_ctx(&self) -> &Arc<SessionImpl> {
