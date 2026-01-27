@@ -407,7 +407,7 @@ pub enum Command {
     },
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Copy)]
 pub enum ResumeBackfillTarget {
     Job(JobId),
     Fragment(FragmentId),
@@ -676,6 +676,9 @@ pub enum PostCollectCommand {
         subscription_id: SubscriptionId,
     },
     ConnectorPropsChange(ConnectorPropsChange),
+    ResumeBackfill {
+        target: ResumeBackfillTarget,
+    },
 }
 
 impl PostCollectCommand {
@@ -693,6 +696,7 @@ impl PostCollectCommand {
             PostCollectCommand::SourceChangeSplit { .. } => "SourceChangeSplit",
             PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
             PostCollectCommand::ConnectorPropsChange(_) => "ConnectorPropsChange",
+            PostCollectCommand::ResumeBackfill { .. } => "ResumeBackfill",
         }
     }
 }
@@ -750,9 +754,7 @@ impl Command {
             Command::ListFinish { .. } => PostCollectCommand::Command("ListFinish".to_owned()),
             Command::LoadFinish { .. } => PostCollectCommand::Command("LoadFinish".to_owned()),
             Command::ResetSource { .. } => PostCollectCommand::Command("ResetSource".to_owned()),
-            Command::ResumeBackfill { .. } => {
-                PostCollectCommand::Command("ResumeBackfill".to_owned())
-            }
+            Command::ResumeBackfill { target } => PostCollectCommand::ResumeBackfill { target },
         }
     }
 }
