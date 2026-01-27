@@ -232,13 +232,7 @@ impl MonitorService for MonitorServiceImpl {
         let metrics = global_streaming_metrics(MetricLevel::Info);
 
         fn collect<T: Collector>(m: &T) -> Vec<Metric> {
-            // `Collector::collect` is not guaranteed to return a non-empty list.
-            // Stats RPC should never panic even if metrics are momentarily inconsistent.
-            m.collect()
-                .into_iter()
-                .next()
-                .map(|mut mf| mf.take_metric())
-                .unwrap_or_default()
+            m.collect().into_iter().next().unwrap().take_metric()
         }
 
         let actor_output_buffer_blocking_duration_ns =
