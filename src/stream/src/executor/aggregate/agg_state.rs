@@ -19,7 +19,9 @@ use risingwave_common::must_match;
 use risingwave_common::types::Datum;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common_estimate_size::EstimateSize;
-use risingwave_expr::aggregate::{AggCall, AggType, AggregateState, BoxedAggregateFunction, PbAggKind};
+use risingwave_expr::aggregate::{
+    AggCall, AggType, AggregateState, BoxedAggregateFunction, PbAggKind,
+};
 use risingwave_pb::stream_plan::PbAggNodeVersion;
 use risingwave_storage::StateStore;
 

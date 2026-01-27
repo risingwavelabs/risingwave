@@ -17,8 +17,8 @@ use std::collections::HashMap;
 use risingwave_common::array::ArrayImpl::Bool;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
 use risingwave_common::bitmap::Bitmap;
+use risingwave_common::catalog::Schema;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_expr::aggregate::{AggCall, AggType, PbAggKind};
 use risingwave_expr::expr::{LogReport, NonStrictExpression};
@@ -39,10 +39,9 @@ mod stateless_simple_agg;
 
 pub use agg_state::AggStateStorage;
 pub use hash_agg::HashAggExecutor;
+use risingwave_expr::aggregate::{BoxedAggregateFunction, build_retractable};
 pub use simple_agg::SimpleAggExecutor;
 pub use stateless_simple_agg::StatelessSimpleAggExecutor;
-
-use risingwave_expr::aggregate::{BoxedAggregateFunction, build_retractable};
 
 use self::append_only_first_last_value::build_append_only_first_last_value_agg;
 

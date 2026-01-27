@@ -17,10 +17,10 @@ use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, Datum, ScalarImpl};
-use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common::util::row_serde::OrderedRowSerde;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding;
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_expr::aggregate::{
     AggCall, AggStateDyn, AggregateFunction, AggregateState, BoxedAggregateFunction, PbAggKind,
 };
@@ -82,7 +82,10 @@ impl AppendOnlyFirstLastValueAgg {
         }
 
         let mut key_order_types = order_types;
-        key_order_types.extend(itertools::repeat_n(OrderType::ascending(), stream_key.len()));
+        key_order_types.extend(itertools::repeat_n(
+            OrderType::ascending(),
+            stream_key.len(),
+        ));
 
         let key_serializer = OrderedRowSerde::new(key_data_types, key_order_types);
 
@@ -96,8 +99,10 @@ impl AppendOnlyFirstLastValueAgg {
 
     fn serialize_key(&self, row: impl Row) -> Vec<u8> {
         let mut key = Vec::new();
-        self.key_serializer
-            .serialize_datums(self.key_col_indices.iter().map(|&i| row.datum_at(i)), &mut key);
+        self.key_serializer.serialize_datums(
+            self.key_col_indices.iter().map(|&i| row.datum_at(i)),
+            &mut key,
+        );
         key
     }
 }
@@ -208,13 +213,10 @@ impl AggregateFunction for AppendOnlyFirstLastValueAgg {
 
         let version = buf.get_u8();
         if version != 1 {
-            return Err(ExprError::InvalidState(
-                format!(
-                    "unknown append-only first/last value state version: {}",
-                    version
-                )
-                .into(),
-            ));
+            return Err(ExprError::InvalidState(format!(
+                "unknown append-only first/last value state version: {}",
+                version
+            )));
         }
 
         let key_len = buf.get_u32() as usize;
@@ -227,7 +229,7 @@ impl AggregateFunction for AppendOnlyFirstLastValueAgg {
         st.best_key = Some(key.to_vec());
 
         st.best_value = value_encoding::deserialize_datum(&mut buf, &self.return_type)
-            .map_err(|e| ExprError::InvalidState(e.to_string().into()))?;
+            .map_err(|e| ExprError::InvalidState(e.to_string()))?;
         Ok(AggregateState::Any(Box::new(st)))
     }
 }
@@ -242,7 +244,7 @@ pub fn build_append_only_first_last_value_agg(
         _ => {
             return Err(ExprError::InvalidState(
                 "expected builtin first_value/last_value".into(),
-            ))
+            ));
         }
     };
 
