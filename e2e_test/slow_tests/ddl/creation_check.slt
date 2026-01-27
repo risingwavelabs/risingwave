@@ -2,6 +2,9 @@ statement ok
 SET RW_IMPLICIT_FLUSH TO true;
 
 statement ok
+set enable_locality_backfill = false;
+
+statement ok
 create table t(v1 int);
 
 statement ok
@@ -9,13 +12,13 @@ insert into t select 1 from generate_series(1, 10000);
 
 # trigger high barrier latency
 system ok
-./risedev psql -c 'create materialized view m1 as select x.v1 from t x join t y using(v1);' &
+./risedev psql -c 'set enable_locality_backfill = false;create materialized view m1 as select x.v1 from t x join t y using(v1);' &
 
 sleep 1s
 
 # first create table
 system ok
-./risedev psql -c 'create table t2(v1 int);' &
+./risedev psql -c 'set enable_locality_backfill = false;create table t2(v1 int);' &
 
 sleep 1s
 

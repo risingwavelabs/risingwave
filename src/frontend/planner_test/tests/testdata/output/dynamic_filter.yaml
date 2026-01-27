@@ -149,18 +149,22 @@
     └─LogicalAgg { aggs: [max(t2.v2)] }
       └─LogicalScan { table: t2, columns: [t2.v2] }
   stream_plan: |-
-    StreamMaterialize { columns: [v1, max, t1._row_id(hidden)], stream_key: [t1._row_id, v1], pk_columns: [t1._row_id, v1], pk_conflict: NoCheck }
+    StreamMaterialize { columns: [v1, max, t1._row_id(hidden)], stream_key: [v1, t1._row_id], pk_columns: [v1, t1._row_id], pk_conflict: NoCheck }
     └─StreamExchange { dist: HashShard(t1.v1, t1._row_id) }
       └─StreamHashJoin { type: Inner, predicate: t1.v1 = max(max(t2.v2)), output: [t1.v1, max(max(t2.v2)), t1._row_id] }
         ├─StreamExchange { dist: HashShard(t1.v1) }
-        │ └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
+        │ └─StreamLocalityProvider { locality_columns: [t1.v1] }
+        │   └─StreamExchange { dist: HashShard(t1.v1) }
+        │     └─StreamTableScan { table: t1, columns: [t1.v1, t1._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t1._row_id], pk: [_row_id], dist: UpstreamHashShard(t1._row_id) }
         └─StreamExchange { dist: HashShard(max(max(t2.v2))) }
-          └─StreamProject { exprs: [max(max(t2.v2))] }
-            └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
-              └─StreamExchange { dist: Single }
-                └─StreamHashAgg { group_key: [_vnode], aggs: [max(t2.v2), count] }
-                  └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
-                    └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
+          └─StreamLocalityProvider { locality_columns: [max(max(t2.v2))] }
+            └─StreamExchange { dist: HashShard(max(max(t2.v2))) }
+              └─StreamProject { exprs: [max(max(t2.v2))] }
+                └─StreamSimpleAgg { aggs: [max(max(t2.v2)), count] }
+                  └─StreamExchange { dist: Single }
+                    └─StreamHashAgg { group_key: [_vnode], aggs: [max(t2.v2), count] }
+                      └─StreamProject { exprs: [t2.v2, t2._row_id, Vnode(t2._row_id) as _vnode] }
+                        └─StreamTableScan { table: t2, columns: [t2.v2, t2._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t2._row_id], pk: [_row_id], dist: UpstreamHashShard(t2._row_id) }
 - name: Dynamic filter join on unequal types
   sql: |
     create table t1 (v1 int);

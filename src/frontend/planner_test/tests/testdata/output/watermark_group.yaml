@@ -75,26 +75,34 @@
     )
     on win1 = win2;
   stream_plan: |-
-    StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, win1], pk_columns: [t._row_id, t._row_id#1, win1], pk_conflict: NoCheck, watermark_columns: [win1, win2] }
+    StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [win1, t._row_id, t._row_id#1], pk_columns: [win1, t._row_id, t._row_id#1], pk_conflict: NoCheck, watermark_columns: [win1, win2] }
     └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1], [$expr3]] }
       └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, output_watermarks: [[$expr1], [$expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
         ├─StreamExchange { dist: HashShard($expr1) }
-        │ └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
-        │   └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamLocalityProvider { locality_columns: [$expr1] }
+        │   └─StreamExchange { dist: HashShard($expr1) }
+        │     └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
+        │       └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: HashShard($expr3) }
-          └─StreamProject { exprs: [(t.foo + 1:Int32) as $expr2, TumbleStart(t.ts, '00:10:00':Interval) as $expr3, t._row_id], output_watermarks: [[$expr3]] }
-            └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamLocalityProvider { locality_columns: [$expr3] }
+            └─StreamExchange { dist: HashShard($expr3) }
+              └─StreamProject { exprs: [(t.foo + 1:Int32) as $expr2, TumbleStart(t.ts, '00:10:00':Interval) as $expr3, t._row_id], output_watermarks: [[$expr3]] }
+                └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   eowc_stream_plan: |-
-    StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, win1], pk_columns: [t._row_id, t._row_id#1, win1], pk_conflict: NoCheck, watermark_columns: [win1] }
+    StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [win1, t._row_id, t._row_id#1], pk_columns: [win1, t._row_id, t._row_id#1], pk_conflict: NoCheck, watermark_columns: [win1] }
     └─StreamEowcSort { sort_column: $expr1 }
       └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1], [$expr3]] }
         └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, output_watermarks: [[$expr1], [$expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
           ├─StreamExchange { dist: HashShard($expr1) }
-          │ └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
-          │   └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          │ └─StreamLocalityProvider { locality_columns: [$expr1] }
+          │   └─StreamExchange { dist: HashShard($expr1) }
+          │     └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
+          │       └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
           └─StreamExchange { dist: HashShard($expr3) }
-            └─StreamProject { exprs: [(t.foo + 1:Int32) as $expr2, TumbleStart(t.ts, '00:10:00':Interval) as $expr3, t._row_id], output_watermarks: [[$expr3]] }
-              └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamLocalityProvider { locality_columns: [$expr3] }
+              └─StreamExchange { dist: HashShard($expr3) }
+                └─StreamProject { exprs: [(t.foo + 1:Int32) as $expr2, TumbleStart(t.ts, '00:10:00':Interval) as $expr3, t._row_id], output_watermarks: [[$expr3]] }
+                  └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: join window_start = window_start, shared node
   sql: |
     create table t (
@@ -116,30 +124,38 @@
     )
     on win1 = win2;
   stream_plan: |-
-    StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, win1], pk_columns: [t._row_id, t._row_id#1, win1], pk_conflict: NoCheck, watermark_columns: [win1, win2] }
+    StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [win1, t._row_id, t._row_id#1], pk_columns: [win1, t._row_id, t._row_id#1], pk_conflict: NoCheck, watermark_columns: [win1, win2] }
     └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1, $expr3]] }
       └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, output_watermarks: [[$expr1, $expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
         ├─StreamExchange { dist: HashShard($expr1) }
-        │ └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
-        │   └─StreamShare { id: 1 }
-        │     └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        │ └─StreamLocalityProvider { locality_columns: [$expr1] }
+        │   └─StreamExchange { dist: HashShard($expr1) }
+        │     └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
+        │       └─StreamShare { id: 1 }
+        │         └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
         └─StreamExchange { dist: HashShard($expr3) }
-          └─StreamProject { exprs: [(t.foo + 1:Int32) as $expr2, TumbleStart(t.ts, '00:10:00':Interval) as $expr3, t._row_id], output_watermarks: [[$expr3]] }
-            └─StreamShare { id: 1 }
-              └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamLocalityProvider { locality_columns: [$expr3] }
+            └─StreamExchange { dist: HashShard($expr3) }
+              └─StreamProject { exprs: [(t.foo + 1:Int32) as $expr2, TumbleStart(t.ts, '00:10:00':Interval) as $expr3, t._row_id], output_watermarks: [[$expr3]] }
+                └─StreamShare { id: 1 }
+                  └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   eowc_stream_plan: |-
-    StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [t._row_id, t._row_id#1, win1], pk_columns: [t._row_id, t._row_id#1, win1], pk_conflict: NoCheck, watermark_columns: [win1] }
+    StreamMaterialize { columns: [foo, win1, win2, t._row_id(hidden), t._row_id#1(hidden)], stream_key: [win1, t._row_id, t._row_id#1], pk_columns: [win1, t._row_id, t._row_id#1], pk_conflict: NoCheck, watermark_columns: [win1] }
     └─StreamEowcSort { sort_column: $expr1 }
       └─StreamProject { exprs: [(t.foo + $expr2) as $expr4, $expr1, $expr3, t._row_id, t._row_id], output_watermarks: [[$expr1, $expr3]] }
         └─StreamHashJoin [window, append_only] { type: Inner, predicate: $expr1 = $expr3, output_watermarks: [[$expr1, $expr3]], output: [t.foo, $expr1, $expr2, $expr3, t._row_id, t._row_id] }
           ├─StreamExchange { dist: HashShard($expr1) }
-          │ └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
-          │   └─StreamShare { id: 1 }
-          │     └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          │ └─StreamLocalityProvider { locality_columns: [$expr1] }
+          │   └─StreamExchange { dist: HashShard($expr1) }
+          │     └─StreamProject { exprs: [t.foo, TumbleStart(t.ts, '00:05:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
+          │       └─StreamShare { id: 1 }
+          │         └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
           └─StreamExchange { dist: HashShard($expr3) }
-            └─StreamProject { exprs: [(t.foo + 1:Int32) as $expr2, TumbleStart(t.ts, '00:10:00':Interval) as $expr3, t._row_id], output_watermarks: [[$expr3]] }
-              └─StreamShare { id: 1 }
-                └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+            └─StreamLocalityProvider { locality_columns: [$expr3] }
+              └─StreamExchange { dist: HashShard($expr3) }
+                └─StreamProject { exprs: [(t.foo + 1:Int32) as $expr2, TumbleStart(t.ts, '00:10:00':Interval) as $expr3, t._row_id], output_watermarks: [[$expr3]] }
+                  └─StreamShare { id: 1 }
+                    └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: group by tumble window_start + window_end
   sql: |
     create table t (
@@ -155,15 +171,17 @@
     StreamMaterialize { columns: [window_start, window_end, count], stream_key: [window_start, window_end], pk_columns: [window_start, window_end], pk_conflict: NoCheck, watermark_columns: [window_start, window_end] }
     └─StreamProject { exprs: [$expr1, $expr2, count(t.foo)], output_watermarks: [[$expr1, $expr2]] }
       └─StreamHashAgg [append_only] { group_key: [$expr1, $expr2], aggs: [count(t.foo), count], output_watermarks: [[$expr1, $expr2]] }
-        └─StreamExchange { dist: HashShard($expr1, $expr2) }
-          └─StreamProject { exprs: [$expr1, ($expr1 + '01:00:00':Interval) as $expr2, t.foo, t._row_id], output_watermarks: [[$expr1, $expr2]] }
-            └─StreamProject { exprs: [t.foo, t.ts, TumbleStart(t.ts, '01:00:00':Interval) as $expr1, t._row_id], output_watermarks: [[t.ts, $expr1]] }
-              └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [$expr1, $expr2] }
+          └─StreamExchange { dist: HashShard($expr1, $expr2) }
+            └─StreamProject { exprs: [$expr1, ($expr1 + '01:00:00':Interval) as $expr2, t.foo, t._row_id], output_watermarks: [[$expr1, $expr2]] }
+              └─StreamProject { exprs: [t.foo, t.ts, TumbleStart(t.ts, '01:00:00':Interval) as $expr1, t._row_id], output_watermarks: [[t.ts, $expr1]] }
+                └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   eowc_stream_plan: |-
     StreamMaterialize { columns: [window_start, window_end, count], stream_key: [window_start, window_end], pk_columns: [window_start, window_end], pk_conflict: NoCheck, watermark_columns: [window_start] }
     └─StreamProject { exprs: [$expr1, $expr2, count(t.foo)], output_watermarks: [[$expr1]] }
       └─StreamHashAgg [append_only, eowc] { group_key: [$expr1, $expr2], aggs: [count(t.foo), count], output_watermarks: [[$expr1]] }
-        └─StreamExchange { dist: HashShard($expr1, $expr2) }
-          └─StreamProject { exprs: [$expr1, ($expr1 + '01:00:00':Interval) as $expr2, t.foo, t._row_id], output_watermarks: [[$expr1, $expr2]] }
-            └─StreamProject { exprs: [t.foo, t.ts, TumbleStart(t.ts, '01:00:00':Interval) as $expr1, t._row_id], output_watermarks: [[t.ts, $expr1]] }
-              └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [$expr1, $expr2] }
+          └─StreamExchange { dist: HashShard($expr1, $expr2) }
+            └─StreamProject { exprs: [$expr1, ($expr1 + '01:00:00':Interval) as $expr2, t.foo, t._row_id], output_watermarks: [[$expr1, $expr2]] }
+              └─StreamProject { exprs: [t.foo, t.ts, TumbleStart(t.ts, '01:00:00':Interval) as $expr1, t._row_id], output_watermarks: [[t.ts, $expr1]] }
+                └─StreamTableScan { table: t, columns: [t.foo, t.ts, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

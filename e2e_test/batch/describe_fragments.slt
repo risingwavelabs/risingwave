@@ -1,5 +1,8 @@
 control substitution on
 
+statement ok
+set enable_locality_backfill = false;
+
 # Setup test schema
 statement ok
 CREATE SCHEMA describe_plan_test;

@@ -1094,6 +1094,7 @@
     - stream_plan
 - name: test approx_percentile hash_agg forced should use single phase agg
   sql: |
+    SET enable_locality_backfill = false;
     SET RW_FORCE_TWO_PHASE_AGG=true;
     create table t (v1 int, grp_col int);
     select approx_percentile(0.5, 0.01) WITHIN GROUP (order by v1) from t group by grp_col;

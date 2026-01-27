@@ -193,8 +193,9 @@
     StreamMaterialize { columns: [y], stream_key: [y], pk_columns: [y], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.x] }
       └─StreamGroupTopN { order: [t.x ASC], limit: 1, offset: 0, group_key: [t.x] }
-        └─StreamExchange { dist: HashShard(t.x) }
-          └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [t.x] }
+          └─StreamExchange { dist: HashShard(t.x) }
+            └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: select distinct order by expression reuse
   sql: |
     create table t (x int);
@@ -210,9 +211,10 @@
     StreamMaterialize { columns: [y], stream_key: [y], pk_columns: [y], pk_conflict: NoCheck }
     └─StreamProject { exprs: [$expr1], noop_update_hint: true }
       └─StreamHashAgg { group_key: [$expr1], aggs: [count] }
-        └─StreamExchange { dist: HashShard($expr1) }
-          └─StreamProject { exprs: [(t.x + 1:Int32) as $expr1, t._row_id] }
-            └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+        └─StreamLocalityProvider { locality_columns: [$expr1] }
+          └─StreamExchange { dist: HashShard($expr1) }
+            └─StreamProject { exprs: [(t.x + 1:Int32) as $expr1, t._row_id] }
+              └─StreamTableScan { table: t, columns: [t.x, t._row_id], stream_scan_type: ArrangementBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
 - name: No BatchSort needed, when input is already sorted
   sql: |
     create table t(v int);
